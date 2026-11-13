@@ -116,8 +116,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 continue;
             }
             let mut fetch = crate::state::fetch::Fetch::default();
-            fetch.begin();
-            fetch.sent(extra);
+            fetch.begin_with(extra);
             self.session.bots.bot_users.insert(user_id, fetch);
             sent = true;
         }
@@ -227,8 +226,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .similar_bots
             .entry(bot_user_id)
             .or_default();
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
         Ok(Some(extra))
     }
 
@@ -384,8 +382,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .game_scores
             .entry((chat_id.0, message_id.0))
             .or_default();
-        scores.begin();
-        scores.sent(extra);
+        scores.begin_with(extra);
         let sent = self.send_json_request(extra, &json);
         if sent.is_err()
             && let Some(scores) = self
@@ -570,8 +567,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetRecentInlineBots, None);
         let recent = &mut self.session.bots.reply_keyboards.recent_inline_bots;
-        recent.begin();
-        recent.sent(extra);
+        recent.begin_with(extra);
         let sent = self.send_json_request(extra, &get_recent_inline_bots(extra));
         if sent.is_err() {
             self.session.bots.reply_keyboards.recent_inline_bots.failed(
@@ -865,7 +861,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|draft| {
                 matches!(
                     draft.stop,
-                    crate::state::BotStopStage::Running { .. } | crate::state::BotStopStage::Failed
+                    crate::state::BotStopStage::Streaming { .. }
+                        | crate::state::BotStopStage::Failed
                 )
             })
         {

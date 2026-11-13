@@ -473,10 +473,9 @@ fn b1_force_reply_arms_pending_target() {
 fn delete_account_ok_clears_mutating_without_local_teardown() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_delete.fail("stale");
+    session.settings.account_write = crate::state::AccountWrite::Refused("stale".into());
     let extra = session.request(RequestPurpose::DeleteAccount, None);
-    session.settings.account_delete.begin();
-    session.settings.account_delete.sent(extra);
+    session.settings.account_write = crate::state::AccountWrite::Delete { request: extra };
     apply_json(
         &mut session,
         &seq,
@@ -492,8 +491,7 @@ fn delete_account_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::DeleteAccount, None);
-    session.settings.account_delete.begin();
-    session.settings.account_delete.sent(extra);
+    session.settings.account_write = crate::state::AccountWrite::Delete { request: extra };
     apply_json(
         &mut session,
         &seq,
@@ -1027,8 +1025,7 @@ fn an_older_delete_accounts_answer_does_not_settle_the_newer_one() {
     let seq = AtomicU64::new(0);
     let older = session.request(RequestPurpose::DeleteAccount, None);
     let newer = session.request(RequestPurpose::DeleteAccount, None);
-    session.settings.account_delete.begin();
-    session.settings.account_delete.sent(newer);
+    session.settings.account_write = crate::state::AccountWrite::Delete { request: newer };
     apply_json(
         &mut session,
         &seq,

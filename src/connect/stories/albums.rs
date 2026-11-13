@@ -287,9 +287,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The stories page does not ask again while its own page is out (the
         // gallery's tab keeps track of its own requests).
         if gallery.is_none()
-            && self.session.requests.pending.values().any(|p| {
-                p.purpose == purpose && p.chat_id == Some(chat_id) && !p.is_gallery_tab_page()
-            })
+            && self
+                .session
+                .stories
+                .page_asks
+                .any(|chat| *chat == chat_id.0)
         {
             return Ok(None);
         }
@@ -309,6 +311,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_chat_posted_to_chat_page_stories(extra, chat_id, from_story_id, limit);
         let sent = self.send_story_page(purpose, extra, &json).map(Some);
+        // The stories page's own ask is held until it settles, so the page
+        // does not ask again meanwhile (the gallery's tab keeps its own).
+        if sent.is_ok() && gallery.is_none() {
+            self.session.stories.page_asks.begin(extra, chat_id.0);
+        }
         // The list waits for this page: its answer lands only while it is
         // the page asked last, and a first page restarts the list then (the
         // server only sends `pinned_story_ids` on the first page, schema

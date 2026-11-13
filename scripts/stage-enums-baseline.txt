@@ -1,21 +1,3 @@
 # In-flight stages that hold nothing to match or cancel (scripts/check-stage-enums.py).
 # <rule>:<Enum>::<Variant> <count>. Only remove lines.
-bare:CarrierStage::Closing 1
-bare:CarrierStage::Starting 1
-bare:ConferenceStage::Running 1
-bare:DownloadStatus::Downloading 1
 bare:PaneMode::Connecting 1
-bare:Phase::Requested 1
-bare:PinTarget::Loading 1
-bare:RichHtmlStage::Running 1
-bare:SaveAnswer::Waiting 1
-bare:TypeSave::Sent 1
-bare:WebRowState::Connecting 1
-optional:Fetch::Loading 1
-unkeyed:Beats::Running 1
-unkeyed:ConferenceStage::Upgrading 1
-unkeyed:ListEdit::InFlight 1
-unkeyed:RowDownload::Running 1
-unkeyed:RowState::Downloading 1
-unkeyed:StoryFetch::Asked 1
-unkeyed:Writer::Running 1

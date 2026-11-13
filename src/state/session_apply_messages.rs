@@ -288,9 +288,14 @@ impl Session {
                 self.remember_files(&message.files);
             }
             let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-            self.search
-                .chat_search
-                .append_hits(hits, total_count, next_from_message_id);
+            if let Some(pending) = pending {
+                self.search.chat_search.append_hits(
+                    pending.id,
+                    hits,
+                    total_count,
+                    next_from_message_id,
+                );
+            }
         }
         if self.search.chat_search.waits_for_search(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
@@ -474,7 +479,7 @@ impl Session {
         // same moment (parity slice: notification sounds).
         let decision = self.notification_decision(&message);
         if decision.is_some() && self.settings.badge_prefs.flash_bounce {
-            self.settings.pending_attention = true;
+            self.settings.queue_alert(OsAlert::Attention);
         }
         let notification = decision.filter(|_| self.settings.desktop_notifications);
         let sound = notification.as_ref().and_then(|_| {

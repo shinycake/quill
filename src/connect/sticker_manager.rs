@@ -9,9 +9,10 @@ use crate::telegram::requests::{reorder_installed_mask_sets, reorder_installed_s
 impl<S: JsonSender> ConnectDriver<S> {
     /// The manager box opened or closed.
     pub fn set_sticker_manager_open(&mut self, open: bool) {
-        self.session.stickers.manager.open = open;
-        if !open {
-            self.session.stickers.manager.covers_requested.clear();
+        if open {
+            self.session.stickers.manager.covers.show();
+        } else {
+            self.session.stickers.manager.covers.hide();
         }
     }
 
@@ -29,7 +30,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chain(stickers.masks.installed.items())
             .chain(stickers.masks.archived_sets())
         {
-            if stickers.manager.covers_requested.contains(&set.id) || asked.contains(&set.id) {
+            if stickers.manager.covers.requested(set.id) || asked.contains(&set.id) {
                 continue;
             }
             asked.push(set.id);
@@ -44,11 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // is tried again after the next answer.
         for (set_id, files) in wanted {
             self.ensure_media_files(&files)?;
-            self.session
-                .stickers
-                .manager
-                .covers_requested
-                .insert(set_id);
+            self.session.stickers.manager.covers.note_requested(set_id);
         }
         Ok(())
     }
@@ -196,7 +193,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn pump_sticker_manager(&mut self) {
         // A send that fails has noted its failure in `advance_manager_commit`.
         let _ = self.advance_manager_commit();
-        if self.session.stickers.manager.open {
+        if self.session.stickers.manager.covers.shown() {
             let _ = self.ensure_manager_covers();
         }
     }

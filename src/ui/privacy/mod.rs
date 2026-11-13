@@ -87,6 +87,15 @@ impl QuillApp {
         self.privacy.layer.close_all();
     }
 
+    /// The Privacy page is left: its layers close, and the refusal line of
+    /// a block goes with the page.
+    pub(crate) fn leave_privacy(&mut self) {
+        self.close_privacy_layers();
+        if let Some(session) = self.session_mut() {
+            session.settings.leave_blocked_list();
+        }
+    }
+
     /// Live: all privacy rules, the read-date setting, the first blocked
     /// page, new-chat and archive settings, unguarded (always fresh). Demo:
     /// the `ReadyPrivacy` fixture seeds state directly.
@@ -324,6 +333,16 @@ impl QuillApp {
                 cx,
             ),
         );
+        if let Some(line) = session.and_then(|s| s.settings.block_note.line()) {
+            section = section.child(
+                div()
+                    .id("privacy-block-error")
+                    .text_xs()
+                    .text_color(super::danger())
+                    .px_2()
+                    .child(line.to_string()),
+            );
+        }
         if error && list.is_empty() {
             section = section.child(
                 div()
@@ -508,7 +527,10 @@ impl QuillApp {
     fn block_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
         self.privacy.layer.close_block_picker();
         if let Some(live) = self.live.as_mut() {
-            let result = { live.driver.block_sender(user_id) };
+            let result = {
+                live.driver
+                    .block_sender(user_id, quill::state::BlockOrigin::PrivacyPage)
+            };
             if let Err(err) = result {
                 self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_BLOCK,
@@ -822,10 +844,8 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
             keep_chats_from_folders_archived: true,
         },
     ));
-    session.settings.blocked_senders = Fetch::Ready(quill::state::BlockedList {
-        ids: vec![63],
-        total: 1,
-    });
+    session.settings.blocked_senders = Fetch::Ready(vec![63]);
+    session.settings.blocked_total = 1;
     session.users_state.contacts = quill::state::fetch::Fetch::Ready(vec![61, 62, 63]);
 }
 /// Slice S3: the Privacy-screen row value for one rule key: the base

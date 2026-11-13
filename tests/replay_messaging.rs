@@ -149,7 +149,7 @@ fn replay_unread_then_mark_read_and_outbox_receipt() {
         .unwrap();
     assert_eq!(
         chat.outbox_receipt(outgoing),
-        quill::state::OutboxReceipt::Read
+        quill::state::OutboxReceiptView::Read
     );
     assert!(!sink.rendered().contains("CANARY_UNREAD"));
 }

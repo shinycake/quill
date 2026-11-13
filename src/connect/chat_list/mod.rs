@@ -181,7 +181,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .chats
             .get(&chat_id.0)
-            .map(|chat| (chat.in_archive, chat.supported()))
+            .map(|chat| (chat.in_archive(), chat.supported()))
             .unwrap_or((false, false));
         if !supported {
             return Err(ConnectSendError::InvalidRequest);
@@ -198,17 +198,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             let rollback = RequestRollback::ChatPin {
                 chat_id: chat_id.0,
                 previous: if archived {
-                    chat.archive_is_pinned
+                    chat.archive_is_pinned()
                 } else {
-                    chat.is_pinned
+                    chat.is_pinned()
                 },
                 shown: pin,
                 archived,
             };
-            if archived {
-                chat.archive_is_pinned = pin;
-            } else {
-                chat.is_pinned = pin;
+            if let Some(position) = chat.position_mut(archived) {
+                position.is_pinned = pin;
             }
             if let Some(pending) = self.session.requests.pending_mut(extra) {
                 pending.rollback = Some(rollback);
@@ -310,9 +308,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some((
                     *id,
                     if archived {
-                        chat.archive_order
+                        chat.archive_order()
                     } else {
-                        chat.order
+                        chat.order()
                     },
                 ))
             })
@@ -345,9 +343,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let any_unread = self.session.chats.values().any(|c| {
             let in_list = if archived {
-                c.in_archive
+                c.in_archive()
             } else {
-                c.in_main_list
+                c.in_main_list()
             };
             in_list && c.is_unread()
         });
@@ -437,8 +435,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         // A cached copy stays on screen while it reloads.
-        self.session.chat_list.archive_settings.begin();
-        self.session.chat_list.archive_settings.sent(extra);
+        self.session.chat_list.archive_settings.begin_with(extra);
         Ok(Some(extra))
     }
 

@@ -19,7 +19,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_badge::TitleBadge;
 use quill::row_fx::RowFx;
-use quill::state::{ChatSummary, RowStatus, Session, SidebarLine};
+use quill::state::{ChatSummary, RowStatusIcon, Session, SidebarLine};
 use quill::story_ring::StoryRing;
 use quill::telegram::envelope::{
     ChatKind, EphemeralMessageContent, MessageContent, effective_content,
@@ -358,7 +358,7 @@ pub(super) fn session_chat_row(
         muted_fg
     };
     let stamp = match promotion.as_ref() {
-        Some(badge) => Some((RowStatus::None, badge.label.clone())),
+        Some(badge) => Some((RowStatusIcon::None, badge.label.clone())),
         None => row_stamp(chat),
     };
     let title: String = if saved {
@@ -682,7 +682,7 @@ pub(super) fn session_chat_row(
                                             .gap_0p5()
                                             .text_xs()
                                             .text_color(muted_fg)
-                                            .when(status != RowStatus::None, |this| {
+                                            .when(status != RowStatusIcon::None, |this| {
                                                 this.child(row_status_mark(status, cx))
                                             })
                                             .child(stamp),

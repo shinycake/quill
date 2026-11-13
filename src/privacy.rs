@@ -685,8 +685,8 @@ mod tests {
     use super::*;
     use crate::diagnostics::{DiagnosticSink, MemorySink};
     use crate::ids::AccountKey;
+    use crate::state::SettingsPurpose;
     use crate::state::fetch::Fetch;
-    use crate::state::{BlockedList, SettingsPurpose};
     use crate::state::{ReadDate, RequestPurpose, Session};
     use crate::telegram::client::copy_and_parse;
     use crate::telegram::requests_privacy::PrivacySettingKey;
@@ -1113,9 +1113,55 @@ mod tests {
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset }),
             None,
         );
-        session.settings.blocked_senders.begin();
-        session.settings.blocked_senders.sent(extra);
+        session.settings.blocked_senders.begin_with(extra);
         extra
+    }
+
+    /// A page of a list that restarted since (or whose data was dropped)
+    /// never extends the new one (05-132).
+    #[test]
+    fn a_late_blocked_page_is_matched_to_its_list() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let old = session.request(
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
+            None,
+        );
+        session.settings.blocked_senders.begin_with(old);
+        // The list restarted: its first page is in, and the fetch moved on.
+        session.settings.blocked_senders = crate::state::fetch::Fetch::Idle;
+        session.settings.blocked_senders.succeed(vec![61, 62]);
+        session.settings.blocked_total = 2;
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messageSenders","@extra":"{}","total_count":9,"senders":[{{"@type":"messageSenderUser","user_id":62}},{{"@type":"messageSenderUser","user_id":70}}]}}"#,
+                old.0,
+            ),
+        );
+        assert_eq!(session.settings.blocked_senders.data(), Some(&vec![61, 62]));
+        assert_eq!(session.settings.blocked_total, 2);
+        // A page of the live list appends without repeating an id.
+        let live = session.request(
+            RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
+            None,
+        );
+        session.settings.blocked_senders.begin_with(live);
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messageSenders","@extra":"{}","total_count":3,"senders":[{{"@type":"messageSenderUser","user_id":62}},{{"@type":"messageSenderUser","user_id":63}}]}}"#,
+                live.0,
+            ),
+        );
+        assert_eq!(
+            session.settings.blocked_senders.data(),
+            Some(&vec![61, 62, 63])
+        );
     }
 
     /// A page that no longer waits (a newer ask replaced it) never lands on
@@ -1150,10 +1196,8 @@ mod tests {
     fn an_unblock_during_the_refresh_is_not_undone_by_it() {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(0);
-        session.settings.blocked_senders = Fetch::Ready(BlockedList {
-            ids: vec![61, 62],
-            total: 2,
-        });
+        session.settings.blocked_senders = Fetch::Ready(vec![61, 62]);
+        session.settings.blocked_total = 2;
         let page = ask_page(&mut session, 0);
         let unblock = session.request(
             RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
@@ -1185,18 +1229,16 @@ mod tests {
     #[test]
     fn a_refused_block_change_does_not_end_a_page_in_flight() {
         let (mut session, _sink) = session();
-        session.settings.blocked_senders = Fetch::Ready(BlockedList {
-            ids: vec![61],
-            total: 1,
-        });
+        session.settings.blocked_senders = Fetch::Ready(vec![61]);
+        session.settings.blocked_total = 1;
         let page = ask_page(&mut session, 1);
         session
             .settings
-            .block_change_failed(None, "never sent".into(), false);
+            .block_change_refused(None, 70, true, "never sent".into());
         assert!(session.settings.blocked_senders.waits_for(page));
         session
             .settings
-            .block_change_failed(Some(RequestId(999)), "refused".into(), true);
+            .block_change_refused(Some(RequestId(999)), 70, true, "refused".into());
         assert!(session.settings.blocked_senders.is_outdated());
         assert_eq!(session.settings.blocked_ids(), &[61]);
     }

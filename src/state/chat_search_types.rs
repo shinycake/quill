@@ -2,10 +2,10 @@
 use super::*;
 
 /// In-chat search (tdesktop `searchInChat` / ComposeSearch): `searchChatMessages`.
-/// What survives closing the bar (the jump a hit starts, the quiet window
-/// of a typed query) lives here; everything the open bar owns, requests in
-/// flight included, is replaced whole with its surface, so a late answer
-/// matches nothing.
+/// What survives closing the bar (the jump a hit starts, the quiet window of
+/// a typed query) lives here; the requests the bar waits for live in its
+/// stages, so closing it drops its late answers;
+/// everything the open bar owns is replaced whole with its surface.
 #[derive(Debug, Clone)]
 pub struct ChatSearchState {
     pub surface: ChatSearchSurface,
@@ -13,8 +13,8 @@ pub struct ChatSearchState {
     /// Bumped by every jump request, so the UI can restart its highlight
     /// fade when the same message is jumped to again.
     pub jump_serial: u64,
-    /// The typed query waiting out its quiet window; a new query, a clear
-    /// and a close drop it.
+    /// The typed query waiting out its quiet window; a new query, a close or
+    /// another chat drops it.
     pub(crate) typed: super::debounce::Debounce<String>,
 }
 
@@ -318,9 +318,11 @@ impl ChatSearchState {
             .is_some_and(|open| matches!(open.paging, ChatSearchPaging::Failed { .. }))
     }
 
-    /// Append an older page (deduped; `selected` stays on its message).
+    /// Append the older page `request` brought (deduped; `selected` stays on
+    /// its message). Another request's page changes nothing.
     pub(crate) fn append_hits(
         &mut self,
+        request: RequestId,
         hits: Vec<SearchMessageHit>,
         total_count: i32,
         next_from_message_id: MessageId,
@@ -328,6 +330,15 @@ impl ChatSearchState {
         let Some(open) = self.open_mut() else {
             return;
         };
+        let ChatSearchPaging::Loading {
+            request: waiting, ..
+        } = open.paging
+        else {
+            return;
+        };
+        if waiting != request {
+            return;
+        }
         for hit in hits {
             if !open.hits.iter().any(|h| h.message_id == hit.message_id) {
                 open.hits.push(hit);
@@ -368,7 +379,10 @@ impl ChatSearchState {
     /// The query of [`Self::begin_query`] went out as `request`.
     pub fn searching(&mut self, request: RequestId) {
         if let Some(open) = self.open_mut()
-            && open.phase == ChatSearchPhase::Typing
+            && matches!(
+                open.phase,
+                ChatSearchPhase::Typing | ChatSearchPhase::Searching { .. }
+            )
         {
             open.phase = ChatSearchPhase::Searching { request };
         }

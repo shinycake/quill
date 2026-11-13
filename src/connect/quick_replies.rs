@@ -27,20 +27,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         // answer (or error) ends it.
         let is_change = purpose == RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies);
         let subject = if is_change { Some(build("")) } else { subject };
-        // The write's own record says whether it is on its way: its request
-        // is looked up by the id the record holds, and one that was answered
-        // is spent. The caller gets that request back, so its screen waits
-        // for the one answer instead of entering no stage at all.
-        let key = subject
-            .clone()
-            .map(|subject| (chat_id.map(|c| c.0), subject));
-        if let Some(key) = &key {
-            let requests = &self.session.requests;
-            let writes = &mut self.session.settings.quick_replies.writes;
-            writes.retain(|_, request| requests.get(*request).is_some());
-            if let Some(flying) = writes.get(key) {
-                return Ok(Some(*flying));
-            }
+        // The stage holds each request it sent: it leaves with its answer,
+        // its error or its loss. A second press gets the request already on
+        // its way back, so its screen waits for that one answer.
+        if let Some(subject) = &subject
+            && let Some((flying, _)) =
+                self.session
+                    .settings
+                    .quick_replies
+                    .sent
+                    .iter()
+                    .find(|(_, sent)| {
+                        sent.purpose == purpose
+                            && sent.chat_id == chat_id
+                            && sent.subject == *subject
+                    })
+        {
+            return Ok(Some(flying));
         }
         let extra = match &subject {
             Some(subject) => self
@@ -50,8 +53,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let json = build(&extra.as_extra());
         let sent = self.send_json_request(extra, &json)?;
-        if let Some(key) = key {
-            self.session.settings.quick_replies.writes.insert(key, sent);
+        if let Some(subject) = subject {
+            self.session.settings.quick_replies.sent.begin(
+                sent,
+                crate::state::QuickReplySend {
+                    purpose,
+                    chat_id,
+                    subject,
+                },
+            );
         }
         Ok(Some(sent))
     }
@@ -70,8 +80,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A send that did not leave stays unasked: the next look asks again.
         if let Ok(Some(request)) = sent {
             let load = &mut self.session.settings.quick_replies.shortcuts_load;
-            load.begin();
-            load.sent(request);
+            load.begin_with(request);
         }
         sent.map(|_| ())
     }
@@ -99,8 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         if let Some(request) = sent {
             let mut load = Fetch::Idle;
-            load.begin();
-            load.sent(request);
+            load.begin_with(request);
             self.session
                 .settings
                 .quick_replies

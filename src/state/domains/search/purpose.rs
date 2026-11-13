@@ -21,7 +21,8 @@ pub enum SearchPurpose {
     SearchPublicMessagesByTag,
     /// The next page of the open global search (`searchMessages` or
     /// `searchPublicMessagesByTag` with the saved `next_offset`; appended to
-    /// the hits, carries the search generation).
+    /// the hits; matched by its request id to the page the search waits
+    /// for).
     SearchMessagesMore,
     /// The next page of `searchPublicPosts`.
     SearchPublicPostsMore,
@@ -41,7 +42,7 @@ pub enum SearchPurpose {
     SetTopChatsDisabled,
     SearchChatMessages,
     /// The next older page of the open in-chat search (appended to the
-    /// hits; carries the search generation).
+    /// hits; matched by its request id to the page the search waits for).
     SearchChatMessagesMore,
     /// `searchChatMembers` behind the in-chat "From:" picker.
     SearchFromMembers,

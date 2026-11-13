@@ -64,7 +64,7 @@ pub(in crate::ui) fn row_header(
 /// message's effect badge and its forward drag.
 pub(super) fn row_footer_meta(
     message: &HistoryMessage,
-    receipt: OutboxReceipt,
+    receipt: OutboxReceiptView,
     session: Option<&Session>,
     files: &quill::state::FileMap,
     media_roots: &[PathBuf],

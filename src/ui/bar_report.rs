@@ -132,7 +132,8 @@ impl BarWork {
         chat_id: ChatId,
         plan: BlockPlan,
     ) -> Started {
-        let Ok(blocked) = driver.block_sender(plan.user_id) else {
+        let Ok(blocked) = driver.block_sender(plan.user_id, quill::state::BlockOrigin::ChatBar)
+        else {
             return Started::Refused;
         };
         let mut waiting = vec![blocked];

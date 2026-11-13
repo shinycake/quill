@@ -792,3 +792,54 @@ fn an_older_creates_answer_finds_no_picture_waiting() {
     );
     assert_eq!(create, crate::state::CommunityCreate::Idle);
 }
+
+/// 08-005: a request handled with no page in flight leaves no mark, so the
+/// chat asking again shows up in the next page.
+#[test]
+fn a_chat_that_asks_again_after_being_handled_is_listed() {
+    let mut rig = Rig::new();
+    let first = rig
+        .driver
+        .fetch_community_add_chat_requests(OWNED, true)
+        .unwrap()
+        .unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"communityAddChatRequests","@extra":"{}","total_count":1,"requests":[{{"@type":"communityAddChatRequest","chat_id":7,"is_hidden":false,"sender_user_id":5,"date":10}}],"next_offset":""}}"#,
+        first.0
+    ));
+    let reject = rig
+        .driver
+        .process_community_add_chat_request(OWNED, 7, false)
+        .unwrap()
+        .unwrap();
+    rig.ok(reject);
+    assert!(
+        rig.driver
+            .session
+            .communities
+            .add_chat_requests(OWNED)
+            .data()
+            .is_none_or(|list| list.handled.is_empty())
+    );
+    let again = rig
+        .driver
+        .fetch_community_add_chat_requests(OWNED, true)
+        .unwrap()
+        .unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"communityAddChatRequests","@extra":"{}","total_count":1,"requests":[{{"@type":"communityAddChatRequest","chat_id":7,"is_hidden":false,"sender_user_id":5,"date":20}}],"next_offset":""}}"#,
+        again.0
+    ));
+    let ids: Vec<i64> = rig
+        .driver
+        .session
+        .communities
+        .add_chat_requests(OWNED)
+        .data()
+        .unwrap()
+        .requests
+        .iter()
+        .map(|r| r.chat_id)
+        .collect();
+    assert_eq!(ids, vec![7]);
+}

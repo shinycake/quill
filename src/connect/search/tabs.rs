@@ -203,9 +203,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail("could not send");
             return Err(err);
         }
-        let recommended = &mut self.session.search.search.tabs.recommended;
-        recommended.begin();
-        recommended.sent(extra);
+        self.session
+            .search
+            .search
+            .tabs
+            .recommended
+            .begin_with(extra);
         Ok(Some(extra))
     }
 
@@ -229,8 +232,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         let limits = &mut self.session.search.search.tabs.limits;
-        limits.begin();
-        limits.sent(extra);
+        limits.begin_with(extra);
         Ok(Some(extra))
     }
 }

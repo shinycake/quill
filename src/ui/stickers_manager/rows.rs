@@ -50,7 +50,7 @@ impl QuillApp {
     /// A request that changes this set is in flight.
     pub(super) fn manager_set_pending(&self, kind: Kind, set_id: i64) -> bool {
         self.session().is_some_and(|session| match kind {
-            Kind::Masks => session.mask_set_change_pending(set_id),
+            Kind::Masks => session.stickers.masks.set_change_pending(set_id),
             Kind::Stickers => session.sticker_set_change_pending(set_id),
         })
     }

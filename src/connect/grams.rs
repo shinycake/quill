@@ -45,10 +45,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_ton_transactions(extra, TxFilter::All, "", 1)
         });
         let probe = &mut self.session.payments.hub.grams.probe;
-        probe.begin();
         match sent {
             Ok(request) => {
-                probe.sent(request);
+                probe.begin_with(request);
                 Ok(Some(request))
             }
             Err(err) => {
@@ -146,9 +145,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_gram_revenue_statistics(extra, is_dark)
         });
         let revenue = &mut self.session.payments.hub.grams.revenue;
-        revenue.begin();
         match sent {
-            Ok(request) => revenue.sent(request),
+            Ok(request) => revenue.begin_with(request),
             Err(_) => revenue.fail(crate::lang::tr(
                 crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE,
             )),

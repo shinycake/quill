@@ -33,7 +33,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, Vec<i6
         let mut ids: Vec<i64> = session
             .chats
             .values()
-            .filter(|chat| chat.in_main_list)
+            .filter(|chat| chat.in_main_list())
             .map(|chat| chat.id.0)
             .collect();
         ids.sort_unstable();

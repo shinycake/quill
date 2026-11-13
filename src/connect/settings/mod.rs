@@ -8,6 +8,7 @@ use crate::settings::{
     load_preferences, save_badge_prefs, save_call_prefs, save_device_prefs, save_language_prefs,
     save_preferences,
 };
+use crate::state::BlockOrigin;
 use crate::state::RequestPurpose;
 use crate::state::SettingsPurpose;
 use crate::telegram::envelope::{
@@ -31,7 +32,9 @@ use crate::telegram::requests_privacy::{
     PrivacySettingKey, get_blocked_message_senders, get_privacy_rules,
     get_read_date_privacy_settings, set_privacy_rules, set_read_date_privacy_settings,
 };
+pub(super) use note_send::NoteSlot;
 
+mod note_send;
 mod notifications;
 mod sessions;
 mod storage;
@@ -194,9 +197,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         // Only a page that went out is waited for, under its own request.
-        let blocked = &mut self.session.settings.blocked_senders;
-        blocked.begin();
-        blocked.sent(extra);
+        self.session.settings.blocked_senders.begin_with(extra);
         Ok(())
     }
 
@@ -211,22 +212,29 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Slice S3: unblock a user (`setMessageSenderBlockList` with a null
     /// block list, schema 1.8.67, :14492 — TGX `Tdlib.unblockSender`).
-    /// Applied optimistically: the user leaves the list at send time.
+    /// Applied optimistically: the user leaves the list at send time. Only
+    /// the Privacy page unblocks, so its note waits for the answer.
     pub fn unblock_sender(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
-        self.change_block_list(user_id, false)
+        self.change_block_list(user_id, false, BlockOrigin::PrivacyPage)
     }
 
     /// Slice S3: block a user (`setMessageSenderBlockList` with
     /// `blockListMain`, schema 1.8.67, :14492). Applied optimistically:
-    /// the user joins the list at send time.
-    pub fn block_sender(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
-        self.change_block_list(user_id, true)
+    /// the user joins the list at send time. `origin` says who asked: only
+    /// the Privacy page's own block starts the block-list note's wait.
+    pub fn block_sender(
+        &mut self,
+        user_id: i64,
+        origin: BlockOrigin,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.change_block_list(user_id, true, origin)
     }
 
     fn change_block_list(
         &mut self,
         user_id: i64,
         block: bool,
+        origin: BlockOrigin,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -235,19 +243,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { user_id, block }),
             None,
         );
-        if let Err(err) = self
-            .sender
-            .send_json(&set_message_sender_block_list(extra, user_id, block))
-        {
-            self.session.requests.take(extra);
-            let line = if block {
+        let json = set_message_sender_block_list(extra, user_id, block);
+        if origin == BlockOrigin::PrivacyPage {
+            let refusal = if block {
                 "The block request was not sent."
             } else {
                 "The unblock request was not sent."
             };
-            self.session
-                .settings
-                .block_change_failed(None, line.to_string(), false);
+            self.send_noted(NoteSlot::Block, extra, refusal, &json)?;
+        } else if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
             return Err(err);
         }
         self.session

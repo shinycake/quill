@@ -627,17 +627,28 @@ impl Session {
                         // Slice G1: the bulk `addChatMembers` answer is a
                         // single response — it replaces the count.
                         Some(RequestPurpose::AddChatMembers) => {
-                            self.groups
-                                .add_members_failed
-                                .insert(chat_id.0, failed_count);
+                            if let Some(pending) = pending {
+                                self.groups.add_members_failed_by(
+                                    chat_id.0,
+                                    pending.id,
+                                    failed_count,
+                                    true,
+                                );
+                            }
                         }
                         // Slice G1 fix-up: basic groups send one
                         // `addChatMember` per user and each answers
                         // `failedToAddMembers` — accumulate, or the last
                         // response would overwrite the earlier ones.
                         Some(RequestPurpose::AddChatMember) => {
-                            *self.groups.add_members_failed.entry(chat_id.0).or_insert(0) +=
-                                failed_count;
+                            if let Some(pending) = pending {
+                                self.groups.add_members_failed_by(
+                                    chat_id.0,
+                                    pending.id,
+                                    failed_count,
+                                    false,
+                                );
+                            }
                         }
                         _ => {}
                     }

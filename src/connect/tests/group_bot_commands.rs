@@ -144,7 +144,7 @@ fn a_refused_bot_lookup_is_asked_again_when_the_commands_arrive_again() {
         .bot_users
         .get(&77)
         .and_then(|fetch| match fetch {
-            crate::state::fetch::Fetch::Loading { request, .. } => *request,
+            crate::state::fetch::Fetch::Loading { request, .. } => Some(*request),
             _ => None,
         })
         .unwrap();

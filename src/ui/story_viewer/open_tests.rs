@@ -212,7 +212,7 @@ fn open_then_fail(
         if let Some(session) = app.demo_session.as_mut() {
             session
                 .stories
-                .story_fetch_failed((POSTER, story), std::time::Instant::now());
+                .story_fetch_failed((POSTER, story), None, std::time::Instant::now());
         }
         cx.notify();
     });

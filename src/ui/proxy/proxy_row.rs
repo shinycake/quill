@@ -1,7 +1,7 @@
 //! The proxy list's rows (`parity:proxy-settings`, `parity:data-proxy-web`).
 
 use super::*;
-use quill::proxy_web::WebRowState;
+use quill::proxy_web::WebRowView;
 
 /// What the list row shows under the title: `SOCKS5 · available (ping:
 /// 42 ms)`; untested proxies show only their type. A web proxy is never
@@ -10,16 +10,16 @@ use quill::proxy_web::WebRowState;
 pub(crate) fn row_subtitle(
     entry: &ProxyEntry,
     ping: Option<PingStatus>,
-    web: Option<WebRowState>,
+    web: Option<WebRowView>,
 ) -> String {
     let kind = kind_label(entry.proxy.kind);
     let status = match web {
-        Some(WebRowState::NotTested) | None if entry.proxy.kind == ProxyKind::Web => {
+        Some(WebRowView::NotTested) | None if entry.proxy.kind == ProxyKind::Web => {
             return tr_with(keys::Q_PREFS_NOT_TESTED, &[("kind", kind)]);
         }
-        Some(WebRowState::Connecting) => tr(keys::PROXY_CONNECTING).to_string(),
-        Some(WebRowState::Online) => tr(keys::PROXY_ONLINE).to_string(),
-        Some(WebRowState::Unavailable) => tr(keys::PROXY_UNAVAILABLE).to_string(),
+        Some(WebRowView::Connecting) => tr(keys::PROXY_CONNECTING).to_string(),
+        Some(WebRowView::Online) => tr(keys::PROXY_ONLINE).to_string(),
+        Some(WebRowView::Unavailable) => tr(keys::PROXY_UNAVAILABLE).to_string(),
         _ => match ping {
             Some(status) => status.label(),
             None => return tr_with(keys::Q_PREFS_NOT_TESTED, &[("kind", kind)]),
@@ -41,7 +41,7 @@ impl QuillApp {
         &self,
         entry: &ProxyEntry,
         ping: Option<PingStatus>,
-        web: Option<WebRowState>,
+        web: Option<WebRowView>,
         cx: &mut Context<Self>,
     ) -> Div {
         let id = entry.id;
@@ -52,8 +52,8 @@ impl QuillApp {
             .session()
             .is_none_or(|s| s.settings.proxy.can_enable(entry.proxy.kind));
         let status_color = match (web, ping) {
-            (Some(WebRowState::Online), _) | (None, Some(PingStatus::Available(_))) => success(),
-            (Some(WebRowState::Unavailable), _) | (None, Some(PingStatus::Unavailable)) => danger(),
+            (Some(WebRowView::Online), _) | (None, Some(PingStatus::Available(_))) => success(),
+            (Some(WebRowView::Unavailable), _) | (None, Some(PingStatus::Unavailable)) => danger(),
             _ => text_muted(),
         };
         let shareable = entry.proxy.share_link(false).is_some();

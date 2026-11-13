@@ -116,8 +116,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match sent {
             Ok(Some(request)) => {
                 let greeting = &mut self.session.stickers.stickers.greeting;
-                greeting.begin();
-                greeting.sent(request);
+                greeting.begin_with(request);
             }
             _ => self
                 .session
@@ -169,8 +168,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(&get_installed_sticker_sets(extra)) {
             Ok(()) => {
                 let installed = &mut self.session.stickers.stickers.lists.installed;
-                installed.begin();
-                installed.sent(extra);
+                installed.begin_with(extra);
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -241,8 +239,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(list) = self.session.stickers.stickers.lists.for_purpose(purpose) {
-            list.begin();
-            list.sent(extra);
+            list.begin_with(extra);
         }
         let changes = &mut self.session.stickers.stickers.changes;
         match purpose {

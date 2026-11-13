@@ -25,7 +25,7 @@ impl ServiceNames for Names {
         (id == DANA).then(|| "Dana Cole".to_string())
     }
     fn pinned(&self, _: i64) -> PinTarget {
-        PinTarget::Loading
+        PinTarget::NotLoaded
     }
     fn game_title(&self, _: i64) -> Option<String> {
         None

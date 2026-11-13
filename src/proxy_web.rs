@@ -170,9 +170,10 @@ pub fn decode_link_secret(value: &str, has_base_path: bool) -> Option<String> {
 
 /// The state the row of a web proxy shows (tdesktop
 /// `ProxiesBoxController::updateView` maps the transport state the same
-/// way). Web proxies are never pinged.
+/// way). Web proxies are never pinged. Computed on every draw from the
+/// entry and the carrier report; never stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WebRowState {
+pub enum WebRowView {
     NotTested,
     Connecting,
     Online,
@@ -180,7 +181,7 @@ pub enum WebRowState {
     Unavailable,
 }
 
-impl WebRowState {
+impl WebRowView {
     pub fn for_entry(enabled: bool, connected: bool, carrier_failed: bool) -> Self {
         if !enabled {
             Self::NotTested
@@ -290,20 +291,17 @@ mod tests {
     #[test]
     fn row_state_follows_the_enabled_proxy() {
         assert_eq!(
-            WebRowState::for_entry(false, true, true),
-            WebRowState::NotTested
+            WebRowView::for_entry(false, true, true),
+            WebRowView::NotTested
+        );
+        assert_eq!(WebRowView::for_entry(true, true, false), WebRowView::Online);
+        assert_eq!(
+            WebRowView::for_entry(true, false, false),
+            WebRowView::Connecting
         );
         assert_eq!(
-            WebRowState::for_entry(true, true, false),
-            WebRowState::Online
-        );
-        assert_eq!(
-            WebRowState::for_entry(true, false, false),
-            WebRowState::Connecting
-        );
-        assert_eq!(
-            WebRowState::for_entry(true, true, true),
-            WebRowState::Unavailable
+            WebRowView::for_entry(true, true, true),
+            WebRowView::Unavailable
         );
     }
 

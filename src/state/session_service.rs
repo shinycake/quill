@@ -63,7 +63,7 @@ impl ServiceNames for SessionNames<'_> {
             .and_then(|history| history.messages.get(&message_id))
             .or(fetched)
         else {
-            return PinTarget::Loading;
+            return PinTarget::NotLoaded;
         };
         let content = effective_content(&message.content, message.ephemeral.as_ref());
         match (pinned_media_phrase(content), content) {

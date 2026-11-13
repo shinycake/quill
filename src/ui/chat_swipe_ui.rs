@@ -90,13 +90,13 @@ impl QuillApp {
     pub(super) fn chat_swipe_facts(&self, chat: &ChatSummary) -> ChatSwipeFacts {
         ChatSwipeFacts {
             muted: chat.is_muted(),
-            pinned: if chat.in_archive {
-                chat.archive_is_pinned
+            pinned: if chat.in_archive() {
+                chat.archive_is_pinned()
             } else {
-                chat.is_pinned
+                chat.is_pinned()
             },
             unread: chat.is_unread(),
-            archived: chat.in_archive,
+            archived: chat.in_archive(),
             is_saved: self.session().is_some_and(|s| s.is_saved_messages(chat.id)),
             can_archive: true,
             // The same gate as the context menu's "Delete chat".

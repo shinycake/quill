@@ -147,6 +147,9 @@ impl Session {
         extra: Option<RequestId>,
         seq: u64,
     ) {
+        if let Some(pending) = pending {
+            self.settle_held(pending.id);
+        }
         let Some(asked_in) = pending
             .filter(|pending| lands_in_view(pending.purpose))
             .map(|pending| pending.asked_in)

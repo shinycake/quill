@@ -196,6 +196,7 @@ fn seed_communities_session(sink: Arc<MemorySink>) -> Session {
             ],
             total_count: 2,
             next_offset: None,
+            handled: Default::default(),
         }),
     );
     session.users_state.profile_chat_lists.insert(

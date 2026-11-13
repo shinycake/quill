@@ -77,7 +77,7 @@ impl Promotion {
 /// is a channel the account is not in, or a bot with an empty history.
 pub fn top_promotion<'a>(session: &'a Session, chat: &ChatSummary) -> Option<&'a Promotion> {
     let promotion = session.chat_list.promoted_chats.get(&chat.id.0)?;
-    if chat.is_pinned {
+    if chat.is_pinned() {
         return None;
     }
     let applies = match chat.kind {
@@ -450,7 +450,7 @@ mod tests {
         assert!(!applies(&s, 1), "a joined channel");
         if let Some(chat) = s.chats.get_mut(&1) {
             chat.assume_member_status(Some(ChannelMemberStatus::Left));
-            chat.is_pinned = true;
+            chat.main.get_or_insert_with(Default::default).is_pinned = true;
         }
         assert!(!applies(&s, 1), "a pinned chat");
         put(&mut s, 2, ChatKind::BasicGroup { basic_group_id: 2 });

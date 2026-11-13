@@ -58,8 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             crate::telegram::requests::get_application_config,
         )?;
         let app_config = &mut self.session.payments.earn.limits.app_config;
-        app_config.begin();
-        app_config.sent(request);
+        app_config.begin_with(request);
         Ok(())
     }
 
@@ -85,15 +84,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         let peer = EarnPeer::User(me);
-        if !self.session.payments.earn.self_stats.is_idle() {
+        if !self.session.payments.earn.self_stats.can_ask() {
             return Ok(());
         }
         let request = self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
             get_star_revenue_statistics(extra, peer, false)
         })?;
         let stats = &mut self.session.payments.earn.self_stats;
-        stats.begin();
-        stats.sent(request);
+        stats.begin_with(request);
         Ok(())
     }
 

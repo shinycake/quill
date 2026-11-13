@@ -229,8 +229,8 @@ impl Pointer {
 /// restarted widget starts with none of it.
 pub(super) struct Live<R = Runtime> {
     pub runtime: R,
-    /// Queries with TDLib: the request each went out as, to the token this
-    /// runtime gave it. Request ids never repeat in a run. A new runtime starts empty, so a late answer to the
+    /// Queries with TDLib: the request of each, to the token this runtime
+    /// gave it. A new runtime starts empty, so a late answer to the
     /// runtime before never reaches it.
     pub queries: HashMap<quill::ids::RequestId, u64>,
     /// The theme and bubble color the runtime has, to send only changes.

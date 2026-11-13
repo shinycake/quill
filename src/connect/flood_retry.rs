@@ -106,7 +106,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Stream-mode calls: answer what the engine queued since the last poll.
         let mut changed = self.pump_group_call_streams(now);
         // 1:1 calls: what the engine reported between Telegram updates.
-        changed |= self.pump_call_engine_reports();
+        changed |= self.pump_call_engine_reports(now);
+        changed |= self.expire_call_reconnect(now);
         changed |= self.pump_call_media(now);
         // Group calls: your own level and speaking state, and the
         // connected transports' camera and mute.
@@ -204,6 +205,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let level = self.call_audio_deadline(now);
         let microphone = self.call_capture.until_reopen(now);
         let tap_retry = self.call_audio_reopen_deadline(now);
+        // A call's silent reconnect counts as failed at its deadline.
+        let reconnect = self
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .and_then(|call| call.transport.reconnect_deadline())
+            .map(|deadline| deadline.saturating_duration_since(now));
         let screen_wait = self.call_screen.wait_deadline(now);
         let paid = self
             .session
@@ -234,6 +243,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             level,
             microphone,
             tap_retry,
+            reconnect,
             screen_wait,
             paid,
             live_stars,

@@ -46,7 +46,7 @@ fn feed(
 }
 
 #[test]
-fn a_query_goes_out_as_plain_data_and_its_answer_comes_back_for_its_token() {
+fn a_query_goes_out_as_plain_data_and_its_answer_comes_back_for_its_request() {
     let (mut driver, recorder, sink, seq) = driver_parts();
     let asked = driver.send_widget_query(KEY, b"vote:1").unwrap();
     let sent = sent_request(&recorder, "getWidgetQueryAnswer");

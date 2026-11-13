@@ -926,6 +926,11 @@ fn an_account_ttl_write_goes_out_while_the_read_is_in_flight_but_not_beside_anot
     // The read does not block the write.
     let sent = recorder.snapshot().len();
     driver.set_account_ttl(180).expect("the write is sent");
+    assert!(
+        driver.session.settings.account_ttl.is_loading(),
+        "the read keeps its place beside the write"
+    );
+    assert!(driver.session.settings.account_write.is_out());
     let snapshot = recorder.snapshot();
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"setAccountTtl\""));

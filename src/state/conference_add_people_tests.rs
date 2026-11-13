@@ -290,7 +290,10 @@ fn the_contacts_state_shows_under_the_peer_row() {
         "a search is not the contacts' business"
     );
     // Retry: the ask leaves Failed.
-    session.users_state.contacts.begin();
+    session
+        .users_state
+        .contacts
+        .begin_with(crate::ids::RequestId(9_999));
     assert_eq!(view(&session, "").contacts, ContactsView::Loading);
     session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![PEER]);
     assert_eq!(view(&session, "").contacts, ContactsView::Ready);

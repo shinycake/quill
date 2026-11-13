@@ -186,8 +186,7 @@ fn sessions_answer_replaces_cache_for_matching_request() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetActiveSessions, None);
     session.settings.sessions.fail("stale");
-    session.settings.sessions.begin();
-    session.settings.sessions.sent(extra);
+    session.settings.sessions.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -249,6 +248,7 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -272,6 +272,7 @@ fn terminate_session_error_surfaces_honestly() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -283,7 +284,7 @@ fn terminate_session_error_surfaces_honestly() {
     );
     assert!(!session.settings.sessions_op.is_mutating());
     assert_eq!(
-        session.settings.sessions.error(),
+        session.settings.sessions_note.line(),
         Some("Could not terminate the session: Telegram refused the request")
     );
 }
@@ -301,8 +302,7 @@ fn a_refused_terminate_does_not_end_the_refetch_out() {
     );
     session.settings.sessions_op.begin(terminate);
     let refetch = session.request(RequestPurpose::GetActiveSessions, None);
-    session.settings.sessions.begin();
-    session.settings.sessions.sent(refetch);
+    session.settings.sessions.begin_with(refetch);
     apply_json(
         &mut session,
         &seq,
@@ -335,6 +335,7 @@ fn a_failed_write_keeps_the_refetch_that_went_stale_meanwhile() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     // Another device logs in while the write is out.
     session.settings.sessions_op.mark_stale();
     assert!(session.settings.sessions_op.is_mutating());
@@ -353,30 +354,33 @@ fn a_failed_write_keeps_the_refetch_that_went_stale_meanwhile() {
 
 #[test]
 fn a_failed_website_write_keeps_the_refetch_that_went_stale_meanwhile() {
-    let mut edit = crate::state::ListEdit::Idle;
-    edit.begin_write();
+    use crate::ids::RequestId;
+    let mut edit = crate::state::fetch::ListOp::Idle;
+    edit.begin(RequestId(1));
     edit.mark_stale();
-    edit.write_failed();
-    assert!(edit.needs_refetch());
+    edit.failed(Some(RequestId(1)));
+    assert!(edit.is_stale());
     // With nothing stale, a failed write goes back to idle.
     edit.refetched();
-    edit.begin_write();
-    edit.write_failed();
-    assert_eq!(edit, crate::state::ListEdit::Idle);
+    edit.begin(RequestId(2));
+    edit.failed(Some(RequestId(2)));
+    assert_eq!(edit, crate::state::fetch::ListOp::Idle);
 }
 
 #[test]
 fn sessions_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions.begin();
+    session
+        .settings
+        .sessions
+        .begin_with(crate::ids::RequestId(7014));
     // A failed stale-refetch (e.g. after a terminate-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
     session.settings.sessions_op.mark_stale();
     let extra = session.request(RequestPurpose::GetActiveSessions, None);
-    session.settings.sessions.begin();
-    session.settings.sessions.sent(extra);
+    session.settings.sessions.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -402,8 +406,7 @@ fn account_ttl_answer_writes_cache_for_matching_request() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
     session.settings.account_ttl.fail("stale");
-    session.settings.account_ttl.begin();
-    session.settings.account_ttl.sent(extra);
+    session.settings.account_ttl.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -422,9 +425,8 @@ fn account_ttl_answer_writes_cache_for_matching_request() {
 fn account_ttl_fetch_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_ttl.begin();
     let extra = session.request(RequestPurpose::GetAccountTtl, None);
-    session.settings.account_ttl.sent(extra);
+    session.settings.account_ttl.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -548,8 +550,7 @@ fn websites_answer_replaces_cache_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
-    session.settings.connected_websites.begin();
-    session.settings.connected_websites.sent(extra);
+    session.settings.connected_websites.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -609,6 +610,7 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
         None,
     );
     session.settings.websites_op.begin(extra);
+    session.settings.websites_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -629,6 +631,7 @@ fn disconnect_all_websites_error_surfaces_honestly() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::DisconnectAllWebsites, None);
     session.settings.websites_op.begin(extra);
+    session.settings.websites_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -640,7 +643,7 @@ fn disconnect_all_websites_error_surfaces_honestly() {
     );
     assert!(!session.settings.websites_op.is_mutating());
     assert_eq!(
-        session.settings.connected_websites.error(),
+        session.settings.websites_note.line(),
         Some("Could not disconnect the website: Telegram refused the request")
     );
 }
@@ -649,14 +652,16 @@ fn disconnect_all_websites_error_surfaces_honestly() {
 fn websites_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.connected_websites.begin();
+    session
+        .settings
+        .connected_websites
+        .begin_with(crate::ids::RequestId(7015));
     // A failed stale-refetch (e.g. after a disconnect-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
     session.settings.websites_op.mark_stale();
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
-    session.settings.connected_websites.begin();
-    session.settings.connected_websites.sent(extra);
+    session.settings.connected_websites.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -701,6 +706,7 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -725,6 +731,7 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -736,7 +743,7 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
     );
     assert!(!session.settings.sessions_op.is_mutating());
     assert_eq!(
-        session.settings.sessions.error(),
+        session.settings.sessions_note.line(),
         Some("Could not change the session setting: Telegram refused the request")
     );
 }
@@ -790,6 +797,7 @@ fn a_failed_terminate_keeps_the_list_and_shows_the_error() {
     let seq = AtomicU64::new(0);
     session.settings.sessions = crate::state::fetch::Fetch::Ready(Vec::new());
     let extra = session.request(RequestPurpose::TerminateAllOtherSessions, None);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -799,7 +807,7 @@ fn a_failed_terminate_keeps_the_list_and_shows_the_error() {
             extra.0
         ),
     );
-    assert!(session.settings.sessions.error().is_some());
+    assert!(session.settings.sessions_note.line().is_some());
     assert!(session.settings.sessions.data().is_some());
     assert!(!session.settings.sessions.is_loading());
 }

@@ -1,10 +1,10 @@
 //! Chat state types: summaries, video-chat info, message helpers.
 use super::*;
 
-/// Outgoing read-receipt state from `last_read_outbox_message_id`.
+/// Outgoing read-receipt mark, derived on every draw from `last_read_outbox_message_id`.
 /// Schema supports this; `0` means nothing outgoing has been read yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutboxReceipt {
+pub enum OutboxReceiptView {
     /// Not an outgoing server message (incoming or still pending).
     None,
     /// Reached the server; peer has not read past this id.
@@ -28,9 +28,10 @@ pub enum SidebarLine {
     Draft(DraftPreview),
 }
 
-/// The mark beside a chat row's date.
+/// The icon beside a chat row's date, derived on every draw from the last
+/// outgoing message; never stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RowStatus {
+pub enum RowStatusIcon {
     None,
     /// Last outgoing message is still sending: a clock.
     Sending,
@@ -72,13 +73,13 @@ pub fn parse_bot_start_link(link: &str) -> Option<(String, String)> {
     Some((path.to_string(), parameter))
 }
 
-pub fn outgoing_status_label(pending: bool, receipt: OutboxReceipt) -> &'static str {
+pub fn outgoing_status_label(pending: bool, receipt: OutboxReceiptView) -> &'static str {
     if pending {
         "You (sending)"
     } else {
         match receipt {
-            OutboxReceipt::Read => "You · read",
-            OutboxReceipt::Sent | OutboxReceipt::None => "You · sent",
+            OutboxReceiptView::Read => "You · read",
+            OutboxReceiptView::Sent | OutboxReceiptView::None => "You · sent",
         }
     }
 }
@@ -140,6 +141,15 @@ pub struct LastPreview {
     pub message: ChatLastMessage,
 }
 
+/// A chat's place in the main or archive list: TDLib's order and whether it
+/// is pinned there. A chat that is not in a list holds none, so a removal
+/// leaves no stale order or pin behind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ListPosition {
+    pub order: i64,
+    pub is_pinned: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatSummary {
     pub id: ChatId,
@@ -148,14 +158,12 @@ pub struct ChatSummary {
     pub unread_count: i32,
     pub last_read_inbox_message_id: MessageId,
     pub last_read_outbox_message_id: MessageId,
-    pub order: i64,
-    pub is_pinned: bool,
-    pub in_main_list: bool,
+    /// Where the chat stands in the main list (a non-zero `chatPosition`),
+    /// `None` when it is not in it.
+    pub main: Option<ListPosition>,
     /// `chatListArchive` placement (a non-zero `chatPosition`; the
     /// add/remove-from-list updates track `chat.chat_lists`, not rows).
-    pub in_archive: bool,
-    pub archive_order: i64,
-    pub archive_is_pinned: bool,
+    pub archive: Option<ListPosition>,
     /// `chatListFolder` membership: folder id → TDLib order
     /// (`updateNewChat` / `updateChatPosition` / `updateChatLastMessage` /
     /// `updateChatDraftMessage` positions; order 0 removes the entry).
@@ -321,6 +329,41 @@ impl OwnMember {
 }
 
 impl ChatSummary {
+    /// The chat's place in the archive (`archived`) or the main list.
+    pub fn position_mut(&mut self, archived: bool) -> Option<&mut ListPosition> {
+        if archived {
+            self.archive.as_mut()
+        } else {
+            self.main.as_mut()
+        }
+    }
+
+    pub fn in_main_list(&self) -> bool {
+        self.main.is_some()
+    }
+
+    pub fn in_archive(&self) -> bool {
+        self.archive.is_some()
+    }
+
+    /// The main list's order, 0 when the chat is not in it.
+    pub fn order(&self) -> i64 {
+        self.main.map_or(0, |position| position.order)
+    }
+
+    pub fn is_pinned(&self) -> bool {
+        self.main.is_some_and(|position| position.is_pinned)
+    }
+
+    /// The archive's order, 0 when the chat is not in it.
+    pub fn archive_order(&self) -> i64 {
+        self.archive.map_or(0, |position| position.order)
+    }
+
+    pub fn archive_is_pinned(&self) -> bool {
+        self.archive.is_some_and(|position| position.is_pinned)
+    }
+
     /// Parity slice 4: `chat.permissions.can_send_basic_messages`
     /// (`chatPermissions`, schema 1.8.67 line 1070), read from the one
     /// permissions block `updateChatPermissions` (line 10500) keeps fresh;
@@ -368,16 +411,16 @@ impl ChatSummary {
 
     /// Delivery state of the last message when it is outgoing: read once
     /// the peer's read cursor reaches it.
-    pub fn last_message_receipt(&self) -> OutboxReceipt {
+    pub fn last_message_receipt(&self) -> OutboxReceiptView {
         match self.last_message().copied() {
             Some(last) if last.is_outgoing => {
                 if last.id.0 <= self.last_read_outbox_message_id.0 {
-                    OutboxReceipt::Read
+                    OutboxReceiptView::Read
                 } else {
-                    OutboxReceipt::Sent
+                    OutboxReceiptView::Sent
                 }
             }
-            _ => OutboxReceipt::None,
+            _ => OutboxReceiptView::None,
         }
     }
 
@@ -788,35 +831,35 @@ impl ChatSummary {
 
     /// The status mark beside the row's date. Telegram Desktop shows one
     /// only for an outgoing last message and never beside a draft.
-    pub fn row_status(&self) -> RowStatus {
+    pub fn row_status(&self) -> RowStatusIcon {
         use crate::telegram::envelope::MessageSendState;
         let Some(last) = self.last_message().copied().filter(|last| last.is_outgoing) else {
-            return RowStatus::None;
+            return RowStatusIcon::None;
         };
         if self.draft_preview().is_some() {
-            return RowStatus::None;
+            return RowStatusIcon::None;
         }
         match last.send_state {
-            MessageSendState::Pending => RowStatus::Sending,
-            MessageSendState::Failed { .. } => RowStatus::Failed,
+            MessageSendState::Pending => RowStatusIcon::Sending,
+            MessageSendState::Failed { .. } => RowStatusIcon::Failed,
             MessageSendState::Sent => match self.last_message_receipt() {
-                OutboxReceipt::Read => RowStatus::Read,
-                OutboxReceipt::Sent => RowStatus::Sent,
-                OutboxReceipt::None => RowStatus::None,
+                OutboxReceiptView::Read => RowStatusIcon::Read,
+                OutboxReceiptView::Sent => RowStatusIcon::Sent,
+                OutboxReceiptView::None => RowStatusIcon::None,
             },
         }
     }
 
-    pub fn outbox_receipt(&self, message: &HistoryMessage) -> OutboxReceipt {
+    pub fn outbox_receipt(&self, message: &HistoryMessage) -> OutboxReceiptView {
         if !message.is_outgoing || message.pending() {
-            return OutboxReceipt::None;
+            return OutboxReceiptView::None;
         }
         if self.last_read_outbox_message_id.0 > 0
             && message.id.0 <= self.last_read_outbox_message_id.0
         {
-            OutboxReceipt::Read
+            OutboxReceiptView::Read
         } else {
-            OutboxReceipt::Sent
+            OutboxReceiptView::Sent
         }
     }
 }

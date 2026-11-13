@@ -172,7 +172,7 @@ impl QuillApp {
             Page::Account => self
                 .settings
                 .set_box(crate::ui::settings_state::SettingsBox::LogOut, false),
-            Page::Privacy => self.close_privacy_layers(),
+            Page::Privacy => self.leave_privacy(),
             Page::Notifications => self.leave_notification_settings(),
             Page::Language => self.leave_language_settings(),
             Page::Devices => self.leave_devices(),
@@ -458,9 +458,10 @@ impl QuillApp {
             }
             ids.push(id);
         }
+        session.settings.blocked_total = 120;
         session.settings.blocked_senders = Fetch::Loading {
-            stale: Some(quill::state::BlockedList { ids, total: 120 }),
-            request: None,
+            stale: Some(ids),
+            request: quill::ids::RequestId(1),
         };
         self.demo_ui.seq.store(
             seq.load(std::sync::atomic::Ordering::SeqCst),

@@ -83,13 +83,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !icons.can_ask() {
             return Ok(None);
         }
-        icons.begin();
         let sent = self.send_purpose(RequestPurpose::GetForumTopicDefaultIcons, None, |extra| {
             get_forum_topic_default_icons(extra)
         });
         let icons = &mut self.session.threads.forum_topic_icons;
         match &sent {
-            Ok(Some(extra)) => icons.sent(*extra),
+            Ok(Some(extra)) => icons.begin_with(*extra),
             Ok(None) => icons.fail(ConnectSendError::InvalidRequest.stage_line()),
             Err(err) => icons.fail(err.stage_line()),
         }
@@ -304,14 +303,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             if tags.is_loading() {
                 return Ok(None);
             }
-            tags.begin();
             let sent = self.send_purpose(purpose, None, |extra| {
                 get_saved_messages_tags(extra, topic_id)
             });
             if let Some(tags) = self.session.threads.saved.topic_tags.get_mut(&topic_id) {
-                match &sent {
-                    Ok(Some(extra)) => tags.sent(*extra),
-                    _ => tags.cancel(),
+                if let Ok(Some(extra)) = &sent {
+                    tags.begin_with(*extra);
                 }
             }
             return sent;
@@ -323,13 +320,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !saved.tags.is_idle() {
             return Ok(None);
         }
-        saved.tags.begin();
         let sent = self.send_purpose(purpose, None, |extra| {
             get_saved_messages_tags(extra, topic_id)
         });
         let tags = &mut self.session.threads.saved.tags;
         match &sent {
-            Ok(Some(extra)) => tags.sent(*extra),
+            Ok(Some(extra)) => tags.begin_with(*extra),
             Ok(None) => tags.fail_dropping_data(ConnectSendError::InvalidRequest.stage_line()),
             Err(err) => tags.fail_dropping_data(err.stage_line()),
         }

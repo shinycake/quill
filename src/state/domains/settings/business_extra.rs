@@ -195,6 +195,8 @@ impl Session {
             ChatKind::Private { user_id } => Some(user_id.0),
             _ => None,
         };
+        // Only the request the lookup waits for lands; an older lookup's
+        // answer finds another request in the fetch.
         lookup.exact.answered(pending.map(|p| p.id), found);
         true
     }

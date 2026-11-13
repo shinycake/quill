@@ -567,7 +567,7 @@ impl QuillApp {
         }
         if !self
             .session()
-            .is_some_and(|session| session.chats.values().any(|chat| chat.in_archive))
+            .is_some_and(|session| session.chats.values().any(|chat| chat.in_archive()))
         {
             return false;
         }

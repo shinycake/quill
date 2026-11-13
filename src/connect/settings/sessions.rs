@@ -1,6 +1,7 @@
 //! Connect driver: device login, active sessions, account TTL, auto-delete and connected websites.
+use super::NoteSlot;
 use super::*;
-use crate::state::DeviceLogin;
+use crate::state::{AccountWrite, DeviceLogin};
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Authorize only a validated scan after explicit user confirmation.
@@ -23,8 +24,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let request = zeroize::Zeroizing::new(
             crate::telegram::requests::confirm_qr_code_authentication(id, scanned_link),
         );
-        if let Err(error) = self.sender.send_json(&request) {
-            self.session.requests.take(id);
+        if let Err(error) = self.send_noted(
+            NoteSlot::Sessions,
+            id,
+            "The device login request was not sent.",
+            &request,
+        ) {
             self.session.settings.sessions_op.failed(Some(id));
             self.session.settings.device_login.discard();
             return Err(error);
@@ -64,8 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the refetch marks the list again); a send that fails gives it back.
         let was_stale = self.session.settings.sessions_op.is_stale();
         self.session.settings.sessions_op.refetched();
-        self.session.settings.sessions.begin();
-        self.session.settings.sessions.sent(extra);
+        self.session.settings.sessions.begin_with(extra);
         match self.sender.send_json(&get_active_sessions(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
@@ -121,10 +125,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.settings.sessions_op.begin(extra);
-        match self.sender.send_json(&terminate_session(extra, session_id)) {
-            Ok(()) => Ok(extra),
+        match self.send_noted(
+            NoteSlot::Sessions,
+            extra,
+            "The terminate request was not sent.",
+            &terminate_session(extra, session_id),
+        ) {
+            Ok(extra) => Ok(extra),
             Err(err) => {
-                self.session.requests.take(extra);
                 self.session.settings.sessions_op.failed(Some(extra));
                 Err(err)
             }
@@ -143,10 +151,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::TerminateAllOtherSessions, None);
         self.session.settings.sessions_op.begin(extra);
-        match self.sender.send_json(&terminate_all_other_sessions(extra)) {
-            Ok(()) => Ok(extra),
+        match self.send_noted(
+            NoteSlot::Sessions,
+            extra,
+            "The terminate request was not sent.",
+            &terminate_all_other_sessions(extra),
+        ) {
+            Ok(extra) => Ok(extra),
             Err(err) => {
-                self.session.requests.take(extra);
                 self.session.settings.sessions_op.failed(Some(extra));
                 Err(err)
             }
@@ -162,21 +174,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         reason: &str,
         password: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.account_ttl_write_pending() {
+        if !self.chats_path_active() || self.session.settings.account_write.is_out() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.account_ttl.clear_error();
+        self.session.settings.account_write.clear_error();
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
-        self.session.settings.account_delete.clear_error();
         match self
             .sender
             .send_json(&delete_account(extra, reason, password))
         {
             Ok(()) => {
                 // Only a request that went out is waited for.
-                let delete = &mut self.session.settings.account_delete;
-                delete.begin();
-                delete.sent(extra);
+                self.session.settings.account_write = AccountWrite::Delete { request: extra };
                 Ok(extra)
             }
             Err(err) => {
@@ -204,9 +214,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(&json) {
             Ok(()) => {
                 // Only a request that went out is waited for.
-                let auto_delete = &mut self.session.settings.default_auto_delete;
-                auto_delete.begin();
-                auto_delete.sent(extra);
+                self.session.settings.default_auto_delete.begin_with(extra);
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -233,9 +241,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = crate::telegram::requests::set_default_message_auto_delete_time(extra, seconds);
         match self.sender.send_json(&json) {
             Ok(()) => {
-                let auto_delete = &mut self.session.settings.default_auto_delete;
-                auto_delete.begin();
-                auto_delete.sent(extra);
+                self.session.settings.default_auto_delete.begin_with(extra);
                 Ok(extra)
             }
             Err(err) => {
@@ -260,9 +266,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(RequestPurpose::GetAccountTtl, None);
         match self.sender.send_json(&get_account_ttl(extra)) {
             Ok(()) => {
-                let ttl = &mut self.session.settings.account_ttl;
-                ttl.begin();
-                ttl.sent(extra);
+                self.session.settings.account_ttl.begin_with(extra);
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -276,19 +280,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// mutation at a time; the confirmed days land from the
     /// authoritative `ok` (never an optimistic write).
     pub fn set_account_ttl(&mut self, days: i32) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.account_ttl_write_pending() {
+        if !self.chats_path_active() || self.session.settings.account_write.is_out() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.account_delete.clear_error();
+        self.session.settings.account_write.clear_error();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days }),
             None,
         );
         match self.sender.send_json(&set_account_ttl(extra, days)) {
             Ok(()) => {
-                let ttl = &mut self.session.settings.account_ttl;
-                ttl.begin();
-                ttl.sent(extra);
+                self.session.settings.account_write = AccountWrite::SetTtl { request: extra };
                 Ok(extra)
             }
             Err(err) => {
@@ -367,10 +369,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         self.session.settings.sessions.clear_error();
         self.session.settings.sessions_op.begin(extra);
-        match self.sender.send_json(&json) {
-            Ok(()) => Ok(extra),
+        match self.send_noted(
+            NoteSlot::Sessions,
+            extra,
+            "The setting was not sent.",
+            &json,
+        ) {
+            Ok(extra) => Ok(extra),
             Err(err) => {
-                self.session.requests.take(extra);
                 self.session.settings.sessions_op.failed(Some(extra));
                 Err(err)
             }
@@ -410,8 +416,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the refetch marks the list again); a send that fails gives it back.
         let was_stale = self.session.settings.websites_op.is_stale();
         self.session.settings.websites_op.refetched();
-        self.session.settings.connected_websites.begin();
-        self.session.settings.connected_websites.sent(extra);
+        self.session.settings.connected_websites.begin_with(extra);
         match self.sender.send_json(&get_connected_websites(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
@@ -462,13 +467,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.settings.websites_op.begin(extra);
-        match self
-            .sender
-            .send_json(&disconnect_website(extra, website_id))
-        {
-            Ok(()) => Ok(extra),
+        match self.send_noted(
+            NoteSlot::Websites,
+            extra,
+            "The disconnect request was not sent.",
+            &disconnect_website(extra, website_id),
+        ) {
+            Ok(extra) => Ok(extra),
             Err(err) => {
-                self.session.requests.take(extra);
                 self.session.settings.websites_op.failed(Some(extra));
                 Err(err)
             }
@@ -496,10 +502,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::DisconnectAllWebsites, None);
         self.session.settings.websites_op.begin(extra);
-        match self.sender.send_json(&disconnect_all_websites(extra)) {
-            Ok(()) => Ok(extra),
+        match self.send_noted(
+            NoteSlot::Websites,
+            extra,
+            "The disconnect request was not sent.",
+            &disconnect_all_websites(extra),
+        ) {
+            Ok(extra) => Ok(extra),
             Err(err) => {
-                self.session.requests.take(extra);
                 self.session.settings.websites_op.failed(Some(extra));
                 Err(err)
             }

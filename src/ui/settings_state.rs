@@ -84,6 +84,8 @@ pub(crate) enum SettingsBox {
     LogOut,
     /// Chats > "Manage sticker sets".
     Stickers,
+    /// The archive auto-settings box (chat list menu).
+    ArchiveSettings,
 }
 
 impl SettingsBox {
@@ -164,15 +166,16 @@ impl super::on_screen::Farewell for SettingsUi {
         // so is the editor's wait for its save: it ends with the account.
         app.close_proxy_link(cx);
         app.close_proxy_editor(cx);
-        // These boxes keep their open flags in the session, which goes to
-        // the background with the account.
-        let (masks, emoji, archive) = app.session().map_or((false, false, false), |session| {
+        // The masks and emoji boxes keep their open flags in the session,
+        // which goes to the background with the account (the archive box
+        // is this screen's own, closed with it).
+        let (masks, emoji) = app.session().map_or((false, false), |session| {
             (
                 session.stickers.masks.dialog_open(),
                 session.stickers.emoji.open,
-                session.chat_list.archive_settings_open,
             )
         });
+        let archive = app.settings.box_open(SettingsBox::ArchiveSettings);
         if masks {
             app.close_mask_sets(cx);
         }
@@ -190,7 +193,7 @@ impl super::on_screen::Farewell for SettingsUi {
             live.driver.set_sticker_manager_open(false);
         } else if let Some(session) = app.demo_session.as_mut() {
             session.stickers.stickers.close();
-            session.stickers.manager.open = false;
+            session.stickers.manager.covers.hide();
         }
         if let Some(page) = app.settings.page() {
             app.leave_settings_page(page);

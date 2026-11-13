@@ -233,7 +233,7 @@ impl QuillApp {
         let forced = quill::battery_saving::forcing_for(
             saver,
             quill::battery_saving::thermal_hot(),
-            self.appearance.ignore_battery_saving,
+            self.appearance.battery_saver.ignores(),
         );
         let mut groups = div().flex().flex_col().gap_2();
         for group in &GROUPS {
@@ -294,8 +294,8 @@ impl QuillApp {
                         "power-auto",
                         tr(keys::SETTINGS_POWER_AUTO),
                         "",
-                        !self.appearance.ignore_battery_saving,
-                        |prefs, on| prefs.ignore_battery_saving = !on,
+                        !self.appearance.battery_saver.ignores(),
+                        |prefs, on| prefs.battery_saver = quill::settings::BatterySaver::from(!on),
                     ),
                     cx,
                 )))

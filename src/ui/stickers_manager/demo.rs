@@ -147,7 +147,7 @@ impl QuillApp {
         stickers.archived.sets = archived;
         stickers.open = true;
         stickers.tab = StickerTab::Installed;
-        session.stickers.manager.open = true;
+        session.stickers.manager.covers.show();
         self.settings
             .set_box(crate::ui::settings_state::SettingsBox::Stickers, true);
         self.set_note(StatusNote::silent("screenshot demo — stickers manager"));

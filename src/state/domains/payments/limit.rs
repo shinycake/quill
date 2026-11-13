@@ -22,7 +22,7 @@ impl Session {
             let archived = pending
                 .and_then(|p| p.chat_id)
                 .and_then(|id| self.chats.get(&id.0))
-                .is_some_and(|chat| chat.in_archive);
+                .is_some_and(|chat| chat.in_archive());
             if archived {
                 kind = PremiumLimitKind::PinsArchive;
             }

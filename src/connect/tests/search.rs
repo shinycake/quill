@@ -585,3 +585,37 @@ fn reopening_search_inside_the_debounce_still_sends_the_query() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Leaving the account closes the bar through the driver: the typed query
+/// still waiting out its quiet window is cancelled with it, so the bar does
+/// not come back reading "Searching…" for a commit that never lands.
+#[test]
+fn closing_the_chat_search_cancels_a_query_in_its_quiet_window() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    assert!(driver.open_chat_search().unwrap());
+    let token = match driver.set_chat_search_query("hello").unwrap() {
+        ChatSearchQueryOutcome::Debounced { token } => token,
+        other => panic!("{other:?}"),
+    };
+    driver.close_chat_search();
+    assert!(!driver.session.search.chat_search.is_open());
+    assert!(
+        driver
+            .commit_debounced_chat_search(token)
+            .unwrap()
+            .is_none()
+    );
+    assert!(driver.open_chat_search().unwrap());
+    assert!(matches!(
+        driver.session.search.chat_search.status(),
+        SearchStateView::Idle
+    ));
+}

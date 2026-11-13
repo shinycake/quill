@@ -5,31 +5,11 @@ use crate::tone_upload::{ToneProblem, ToneUpload, problem_for_server_type};
 
 impl Session {
     /// The saved-sound list changed on the server. A list request already
-    /// out was sent before that, so its answer is dropped (it would clear
-    /// the mark with older data); the refetch asks again (02-209).
+    /// out was sent before that, so its answer is dropped (`outdate` forgets
+    /// the request the fetch waits for; the answer would clear the mark with
+    /// older data); the refetch asks again (02-209).
     pub(crate) fn mark_saved_sounds_stale(&mut self) {
-        self.requests
-            .take_purpose(RequestPurpose::GetSavedNotificationSounds);
         self.settings.saved_sounds.outdate();
-    }
-
-    /// A `setAccountTtl` or `deleteAccount` is out: one write at a time. A
-    /// `getAccountTtl` in flight does not block a write.
-    pub fn account_ttl_write_pending(&self) -> bool {
-        // The stages hold their requests: a delete is out, or the TTL stage
-        // waits for a write (a `getAccountTtl` it may wait for is no write).
-        self.settings.account_delete.is_loading()
-            || self
-                .settings
-                .account_ttl
-                .request()
-                .and_then(|request| self.requests.purpose(request))
-                .is_some_and(|purpose| {
-                    matches!(
-                        purpose,
-                        RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })
-                    )
-                })
     }
 
     /// The saved-sound list is owed a fetch: it changed, and no request

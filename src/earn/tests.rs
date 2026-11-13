@@ -377,7 +377,9 @@ fn requests_carry_the_right_fields() {
 #[test]
 fn a_failed_app_config_waits_for_the_next_profile_open() {
     let mut earn = EarnState::default();
-    earn.limits.app_config.begin();
+    earn.limits
+        .app_config
+        .begin_with(crate::ids::RequestId(7001));
     earn.limits.app_config.fail("offline");
     assert!(
         !earn.limits.app_config.is_idle(),
@@ -385,7 +387,9 @@ fn a_failed_app_config_waits_for_the_next_profile_open() {
     );
     earn.forget_failed_app_config();
     assert!(earn.limits.app_config.is_idle());
-    earn.limits.app_config.begin();
+    earn.limits
+        .app_config
+        .begin_with(crate::ids::RequestId(7002));
     earn.forget_failed_app_config();
     assert!(
         earn.limits.app_config.is_loading(),

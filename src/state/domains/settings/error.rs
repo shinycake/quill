@@ -2,18 +2,6 @@
 use crate::state::*;
 
 impl Session {
-    /// A terminate or a session setting was refused. With the list shown
-    /// the refusal is its error line; with a refetch out (a change before
-    /// it landed) the answer of that refetch is the list's, so the refusal
-    /// is a toast and never ends it.
-    fn refuse_sessions_change(&mut self, line: String) {
-        if self.settings.sessions.is_loading() {
-            self.chats_state.chat_action_error.push(line);
-        } else {
-            self.settings.sessions.fail(line);
-        }
-    }
-
     /// Reacts to a failed settings request; called by
     /// [`Session::apply_error`] after the shared handling.
     pub(crate) fn apply_settings_error(
@@ -130,12 +118,15 @@ impl Session {
                     false,
                 );
             }
-            Some(RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { .. })) => {
-                // Drop the optimistic list; the next fetch restores the truth.
-                self.settings.block_change_failed(
+            Some(RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
+                user_id,
+                block,
+            })) => {
+                self.settings.block_change_refused(
                     pending.map(|p| p.id),
+                    user_id,
+                    block,
                     sessions_error_line("change the block list", err),
-                    true,
                 );
             }
             // Phase S2: a failed `getStorageStatistics` clears the
@@ -163,9 +154,10 @@ impl Session {
                         .settle(asked.id, crate::auth::DeviceLoginResult::Failed);
                 }
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .sessions
-                    .fail(sessions_error_line("link the device", err));
+                self.settings.sessions_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("link the device", err),
+                );
             }
             Some(
                 purpose @ (RequestPurpose::GetProxies
@@ -208,8 +200,10 @@ impl Session {
                 | RequestPurpose::TerminateAllOtherSessions,
             ) => {
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                let line = sessions_error_line("terminate the session", err);
-                self.refuse_sessions_change(line);
+                self.settings.sessions_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("terminate the session", err),
+                );
             }
             // Slice A4: a refused session toggle surfaces an honest
             // classified error and leaves the list untouched (the
@@ -219,8 +213,10 @@ impl Session {
                 | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. }),
             ) => {
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                let line = sessions_error_line("change the session setting", err);
-                self.refuse_sessions_change(line);
+                self.settings.sessions_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("change the session setting", err),
+                );
             }
             // Slice A7: a refused account-lifecycle op (TTL fetch
             // or set, account deletion) clears the in-flight
@@ -250,11 +246,9 @@ impl Session {
                 );
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })) => {
-                self.settings.account_ttl.failed(
-                    extra,
-                    sessions_error_line("update the account", err),
-                    false,
-                );
+                self.settings
+                    .account_write
+                    .refused(extra, sessions_error_line("update the account", err));
             }
             Some(RequestPurpose::GetSupportUser) => {
                 self.settings.support_user.failed(
@@ -264,11 +258,9 @@ impl Session {
                 );
             }
             Some(RequestPurpose::DeleteAccount) => {
-                self.settings.account_delete.failed(
-                    extra,
-                    sessions_error_line("update the account", err),
-                    false,
-                );
+                self.settings
+                    .account_write
+                    .refused(extra, sessions_error_line("update the account", err));
             }
             // A refused saved-sound list is not asked for again by itself;
             // the next change of the list does.
@@ -300,14 +292,10 @@ impl Session {
                 | RequestPurpose::DisconnectAllWebsites,
             ) => {
                 self.settings.websites_op.failed(pending.map(|p| p.id));
-                let line = sessions_error_line("disconnect the website", err);
-                if self.settings.connected_websites.is_loading() {
-                    // A refetch is out: its answer is the list's, and the
-                    // refusal is told as a toast instead of ending it.
-                    self.chats_state.chat_action_error.push(line);
-                } else {
-                    self.settings.connected_websites.fail(line);
-                }
+                self.settings.websites_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("disconnect the website", err),
+                );
             }
             _ => {}
         }

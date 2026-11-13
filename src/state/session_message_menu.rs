@@ -564,8 +564,7 @@ impl Session {
         request: RequestId,
     ) {
         let mut properties = crate::state::fetch::Fetch::default();
-        properties.begin();
-        properties.sent(request);
+        properties.begin_with(request);
         self.messages.poll_option_menu = Some(PollOptionMenu {
             chat_id,
             message_id,

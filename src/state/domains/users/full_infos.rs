@@ -122,6 +122,11 @@ impl UserFullInfos {
     }
 
     /// Whether the last ask failed (and no answer has come since).
+    /// The request the entry of `user_id` waits for, if one is out.
+    pub fn request(&self, user_id: &i64) -> Option<crate::ids::RequestId> {
+        self.by_user.get(user_id)?.request()
+    }
+
     pub fn failed(&self, user_id: &i64) -> bool {
         matches!(self.by_user.get(user_id), Some(Fetch::Failed { .. }))
     }
@@ -131,8 +136,7 @@ impl UserFullInfos {
     /// spinner nothing ends).
     pub fn begin(&mut self, user_id: i64, request: crate::ids::RequestId) {
         let entry = self.by_user.entry(user_id).or_default();
-        entry.begin();
-        entry.sent(request);
+        entry.begin_with(request);
     }
 
     /// An ask is out or due and nothing was answered: a spinner shows. An

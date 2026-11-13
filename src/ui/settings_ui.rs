@@ -3,6 +3,7 @@
 
 use super::app::QuillApp;
 use super::privacy::PrivacyEditorTarget;
+use super::settings_state::SettingsBox;
 use super::settings_window::rows::{link_row, switch_row};
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::{status_note::StatusNote, user_error::user_error_for};
@@ -75,17 +76,15 @@ impl QuillApp {
     /// `SettingsArchiveChatListController` fetches
     /// `getArchiveChatListSettings` on open).
     pub(super) fn open_archive_settings(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.chat_list.archive_settings_open = true;
-            if let Err(err) = live.driver.fetch_archive_chat_list_settings() {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
-                    &err,
-                )));
-            }
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.chat_list.archive_settings_open = true;
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_archive_chat_list_settings()
+        {
+            self.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
+                &err,
+            )));
         }
+        self.settings.set_box(SettingsBox::ArchiveSettings, true);
         self.open_box(DialogKind::ArchiveSettings);
         cx.notify();
     }
@@ -247,13 +246,7 @@ impl QuillApp {
     /// Slice CL2: show/hide the archive settings dialog on the active
     /// session.
     pub(super) fn set_archive_settings_open(&mut self, open: bool) {
-        if let Some(live) = self.live.as_mut() {
-            // box-host: only closes; every caller passes false
-            live.driver.session.chat_list.archive_settings_open = open;
-        } else if let Some(session) = self.demo_session.as_mut() {
-            // box-host: only closes; every caller passes false
-            session.chat_list.archive_settings_open = open;
-        }
+        self.settings.set_box(SettingsBox::ArchiveSettings, open);
     }
 
     /// Phase C2i: call settings — confirm-before-calling (real +
@@ -831,7 +824,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     ArchiveSettings => DialogSpec::new(
         500,
-        |app| app.session().is_some_and(|s| s.chat_list.archive_settings_open),
+        |app| app.settings.box_open(SettingsBox::ArchiveSettings),
         QuillApp::build_archive_settings_dialog,
     )
     .close(|app, _, _| app.set_archive_settings_open(false)),

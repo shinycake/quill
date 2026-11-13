@@ -130,9 +130,13 @@ impl QuillApp {
             let loading = session.is_some_and(|s| s.settings.sessions.is_loading());
             let mutating = session.is_some_and(|s| s.settings.sessions_op.is_mutating());
             let stale = session.is_some_and(|s| s.settings.sessions_op.is_stale());
-            let error = session
-                .as_ref()
-                .and_then(|s| s.settings.sessions.error().map(str::to_string));
+            let error = session.as_ref().and_then(|s| {
+                s.settings
+                    .sessions
+                    .error()
+                    .or(s.settings.sessions_note.line())
+                    .map(str::to_string)
+            });
             let current = sessions.iter().find(|s| s.is_current());
             let mut incomplete: Vec<&ParsedSession> = sessions
                 .iter()
@@ -559,6 +563,9 @@ impl QuillApp {
     pub(crate) fn leave_devices(&mut self) {
         self.leave_device_link();
         self.privacy.devices.close_all();
+        if let Some(session) = self.session_mut() {
+            session.settings.leave_sessions();
+        }
     }
 
     /// Something over the Devices list that Esc peels first.

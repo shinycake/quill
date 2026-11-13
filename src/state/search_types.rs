@@ -267,8 +267,7 @@ impl SearchState {
             | RequestPurpose::SearchPublicMessagesByTag => &mut self.messages_leg,
             RequestPurpose::SearchPublicChats => &mut self.public,
             RequestPurpose::SearchChatsOnServer => {
-                self.server_chats.begin();
-                self.server_chats.sent(request);
+                self.server_chats.begin_with(request);
                 return;
             }
             _ => return,

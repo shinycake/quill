@@ -5,7 +5,6 @@ use crate::business_bots::{self as bots, ConnectedBot};
 use crate::business_chat_links as links;
 use crate::business_settings::BusinessSettingKind;
 use crate::ids::RequestId;
-use crate::state::fetch::Fetch;
 use crate::state::{
     BotLookup, BotLookupPart, ChatLinkOp, RequestPurpose, RequestRollback, SettingsPurpose,
 };
@@ -72,11 +71,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_chat_links(&mut self) -> Result<(), ConnectSendError> {
-        self.session.settings.business_extra.chat_links.begin();
         let sent =
             self.send_business_extra(SettingsPurpose::GetChatLinks, links::get_links_request);
         if let Ok(extra) = sent {
-            self.session.settings.business_extra.chat_links.sent(extra);
+            self.session
+                .settings
+                .business_extra
+                .chat_links
+                .begin_with(extra);
         }
         // A send that never left lands in `Failed` (drawn with Retry), not
         // back in `Idle`, which a page draws as a spinner and asks again.
@@ -183,7 +185,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_connected_bot(&mut self) -> Result<(), ConnectSendError> {
-        self.session.settings.business_extra.connected_bot.begin();
         let sent = self.send_business_extra(
             SettingsPurpose::GetConnectedBot,
             bots::get_connected_bot_request,
@@ -193,7 +194,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .settings
                 .business_extra
                 .connected_bot
-                .sent(extra);
+                .begin_with(extra);
         }
         if let Err(err) = &sent {
             self.session
@@ -243,20 +244,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if lookup.query == query && lookup.error().is_none() {
             return Ok(());
         }
+        // A new lookup replaces the three fetches: the old lookup's answers
+        // find other requests there and drop.
         self.session.settings.business_extra.lookup = BotLookup {
             query: query.clone(),
-            exact: Fetch::Loading {
-                stale: None,
-                request: None,
-            },
-            mine: Fetch::Loading {
-                stale: None,
-                request: None,
-            },
-            global: Fetch::Loading {
-                stale: None,
-                request: None,
-            },
+            ..BotLookup::default()
         };
         let part = |part| SettingsPurpose::LookupBusinessBot { part };
         let sent = self
@@ -264,18 +256,23 @@ impl<S: JsonSender> ConnectDriver<S> {
                 bots::search_public_chat_request(extra, &query)
             })
             .and_then(|id| {
-                self.session.settings.business_extra.lookup.exact.sent(id);
+                let exact = &mut self.session.settings.business_extra.lookup.exact;
+                exact.begin_with(id);
                 self.send_business_extra(part(BotLookupPart::Mine), |extra| {
                     bots::search_bots_on_server_request(extra, &query)
                 })
             })
             .and_then(|id| {
-                self.session.settings.business_extra.lookup.mine.sent(id);
+                let mine = &mut self.session.settings.business_extra.lookup.mine;
+                mine.begin_with(id);
                 self.send_business_extra(part(BotLookupPart::Global), |extra| {
                     bots::search_public_bots_request(extra, &query)
                 })
             })
-            .map(|id| self.session.settings.business_extra.lookup.global.sent(id));
+            .map(|id| {
+                let global = &mut self.session.settings.business_extra.lookup.global;
+                global.begin_with(id);
+            });
         if let Err(err) = &sent {
             // The field shows the error with a Retry (typing again asks
             // again). Searches already out land on a failed part and are

@@ -1,8 +1,2 @@
 # Answers not matched by RequestId (scripts/check-request-match.py).
 # <rule>:<Type::function> <count>. Only remove lines or lower counts.
-purpose:Session::finish_mask_mutation 1
-purpose:Session::mark_saved_sounds_stale 1
-purpose:Session::sharing_request_answering 1
-purpose:Session::suggested_post_busy 1
-unmatched:ForumTopicsMap::insert 1
-unsent:GiveawayOptions::begin 2

@@ -50,8 +50,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats_state
             .installed_backgrounds
             .theme_mut(for_dark_theme);
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_installed_backgrounds(extra, for_dark_theme))

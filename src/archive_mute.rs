@@ -134,8 +134,7 @@ mod tests {
         let actions: BTreeSet<String> = [ACTION.to_string()].into();
         let state = ArchiveMute::default();
         let mut settings = fetch(Some(false));
-        settings.begin();
-        settings.sent(crate::ids::RequestId(7));
+        settings.begin_with(crate::ids::RequestId(7));
         assert!(!state.suggestion_due(&actions, &settings), "loading");
         settings.failed(Some(crate::ids::RequestId(7)), String::from("error"), false);
         assert!(

@@ -184,9 +184,14 @@ fn a_basic_group_add_that_stops_midway_counts_the_unsent_users_as_failed() {
     let first = driver.add_chat_members(ChatId(5), &[1, 2, 3]).unwrap();
     assert!(first.is_some(), "the first user went out");
     assert_eq!(
-        driver.session.groups.add_members_failed.get(&5),
-        Some(&2),
+        driver.session.groups.add_members_failed(5),
+        2,
         "users 2 and 3 were never sent"
+    );
+    assert_eq!(
+        driver.session.groups.member_actions_out(5),
+        1,
+        "only the add that went out waits for an answer"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

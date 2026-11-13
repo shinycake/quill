@@ -99,8 +99,7 @@ impl EmojiLists {
     /// `purpose` went out as `request`: its list waits for that answer.
     pub fn sent(&mut self, purpose: crate::state::RequestPurpose, request: crate::ids::RequestId) {
         on_list!(self, purpose, |list| {
-            list.begin();
-            list.sent(request);
+            list.begin_with(request);
         });
     }
 

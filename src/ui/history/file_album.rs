@@ -12,7 +12,7 @@ pub(in crate::ui) struct FileAlbum<'a> {
     pub(in crate::ui) seek_bars: Vec<Option<crate::ui::playback::SeekBarView>>,
     pub(in crate::ui) sender: Option<SenderLabel>,
     pub(in crate::ui) sender_status: Option<AnyElement>,
-    pub(in crate::ui) receipt: OutboxReceipt,
+    pub(in crate::ui) receipt: OutboxReceiptView,
     pub(in crate::ui) sender_avatar: Option<SenderAvatar>,
     /// "via @bot", "Forwarded from" and the reply quote (`row_header`).
     pub(in crate::ui) header: Option<AnyElement>,

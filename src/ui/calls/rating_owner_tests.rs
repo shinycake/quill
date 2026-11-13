@@ -51,7 +51,7 @@ fn show(app: &mut QuillApp, call_id: i32) {
 
 fn rating_sent(app: &QuillApp) -> Option<bool> {
     let session = app.demo_session.as_deref()?;
-    Some(session.calls.summary.as_ref()?.rating == quill::state::CallRating::Sent)
+    Some(session.calls.summary.as_ref()?.rating == quill::state::CallRating::Rated)
 }
 
 fn draft_of(app: &QuillApp) -> Option<quill::state::RatingDraft> {

@@ -402,6 +402,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(_) => self.session.conference_follow_failed(upgrade.ended),
             }
         }
+        if let Some(result) = self.leave_failed_handover() {
+            return result;
+        }
         let ready = self
             .session
             .calls
@@ -455,6 +458,53 @@ impl<S: JsonSender> ConnectDriver<S> {
             result = Err(err);
         }
         result
+    }
+}
+
+impl<S: JsonSender> ConnectDriver<S> {
+    /// A conference made from a 1:1 call whose `getGroupCall` failed, was
+    /// lost or answered with no link (`ConferenceStage::HandoverFailed`)
+    /// never gets its link: it leaves the handover (the invites
+    /// count as failed), and the 1:1 call ends instead of staying up for a
+    /// link that will not come. `None` when no handover failed.
+    fn leave_failed_handover(&mut self) -> Option<Result<(), ConnectSendError>> {
+        let (group_call_id, upgrade) =
+            self.session
+                .calls
+                .active_group_call
+                .as_ref()
+                .and_then(|call| {
+                    Some((call.id, call.conference.as_ref()?.failed_upgrade()?.clone()))
+                })?;
+        if let Some(conference) = self
+            .session
+            .calls
+            .active_group_call
+            .as_mut()
+            .and_then(|call| call.conference.as_mut())
+        {
+            conference.stage = crate::state::ConferenceStage::Upgraded {
+                from: upgrade.call_id,
+            };
+        }
+        if !upgrade.invite.is_empty()
+            && let Some(call) = self.session.calls.active_group_call.as_mut()
+        {
+            call.invite_results = Some(ConferenceInviteResults::all_failed(
+                group_call_id,
+                upgrade.invite.clone(),
+            ));
+        }
+        let still_in_call = self
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .is_some_and(|call| call.id == upgrade.call_id);
+        if still_in_call {
+            return Some(self.discard_call_with_link("").map(|_| ()));
+        }
+        Some(Ok(()))
     }
 }
 

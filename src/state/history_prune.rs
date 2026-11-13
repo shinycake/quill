@@ -298,8 +298,8 @@ impl Session {
     fn chat_is_gone(&self, chat_id: ChatId) -> bool {
         self.chats.get(&chat_id.0).is_some_and(|chat| {
             chat.member_status() == Some(ChannelMemberStatus::Left)
-                && !chat.in_main_list
-                && !chat.in_archive
+                && !chat.in_main_list()
+                && !chat.in_archive()
         })
     }
 

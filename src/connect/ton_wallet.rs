@@ -34,12 +34,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetTonExplorerUrl, None);
         let json = crate::telegram::requests::get_application_config(extra);
-        self.session.ton_wallet.explorer.begin();
-        if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.ton_wallet.explorer.cancel();
-            return Err(err);
-        }
-        self.session.ton_wallet.explorer.sent(extra);
+        self.send_json_request(extra, &json)?;
+        self.session.ton_wallet.explorer.begin_with(extra);
         Ok(true)
     }
 
@@ -85,25 +81,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         // asked again, and never keeps the history from being requested.
         let mut first_error = None;
         if self.session.ton_wallet.own.can_ask() {
-            self.session.ton_wallet.own.begin();
             match self.send_wallet(TonWalletPurpose::LoadState, None, load_ton_wallet_state) {
-                Ok(request) => self.session.ton_wallet.own.sent(request),
+                Ok(request) => self.session.ton_wallet.own.begin_with(request),
                 Err(err) => {
-                    self.session.ton_wallet.own.cancel();
                     first_error.get_or_insert(err);
                 }
             }
         }
         if self.session.ton_wallet.rates.can_ask() {
-            self.session.ton_wallet.rates.begin();
             match self.send_wallet(
                 TonWalletPurpose::ExchangeRates,
                 None,
                 get_currency_exchange_rates,
             ) {
-                Ok(request) => self.session.ton_wallet.rates.sent(request),
+                Ok(request) => self.session.ton_wallet.rates.begin_with(request),
                 Err(err) => {
-                    self.session.ton_wallet.rates.cancel();
                     first_error.get_or_insert(err);
                 }
             }

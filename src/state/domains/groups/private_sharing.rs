@@ -19,13 +19,51 @@ pub enum EnableSharing {
     AskToRequest(ChatId),
 }
 
+/// An Accept or Reject under an incoming sharing request, out as `request`:
+/// the only record of it, so its answer, its error or its loss frees the
+/// buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SharingAnswer {
+    chat_id: ChatId,
+    message_id: MessageId,
+    request: RequestId,
+}
+
 #[derive(Debug, Default)]
 pub struct PrivateSharingState {
     pub enable: EnableSharing,
     disabled_at_unix: HashMap<i64, i64>,
+    answering: Vec<SharingAnswer>,
 }
 
 impl PrivateSharingState {
+    /// An answer to the sharing request `message_id` of `chat_id` went out
+    /// as `request`.
+    pub(crate) fn answer_sent(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        request: RequestId,
+    ) {
+        self.answering.push(SharingAnswer {
+            chat_id,
+            message_id,
+            request,
+        });
+    }
+
+    /// `request` was answered, refused or lost: its buttons are free.
+    pub(crate) fn answer_settled(&mut self, request: RequestId) {
+        self.answering.retain(|answer| answer.request != request);
+    }
+
+    /// An answer to this sharing request is on its way.
+    pub fn is_answering(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.answering
+            .iter()
+            .any(|answer| answer.chat_id == chat_id && answer.message_id == message_id)
+    }
+
     pub(crate) fn record_disabled(&mut self, chat_id: ChatId, now: i64) {
         self.disabled_at_unix.insert(chat_id.0, now);
     }
@@ -135,12 +173,9 @@ impl Session {
     }
 
     pub fn sharing_request_answering(&self, chat_id: ChatId, message_id: MessageId) -> bool {
-        self.requests.has_purpose(RequestPurpose::Groups(
-            GroupsPurpose::AnswerSharingRequest {
-                chat_id,
-                message_id,
-            },
-        ))
+        self.groups
+            .private_sharing
+            .is_answering(chat_id, message_id)
     }
 }
 

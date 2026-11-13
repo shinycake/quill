@@ -134,12 +134,12 @@ impl HistoryCalendar {
     }
 
     /// Merge the page `request` answered; any other request's page (an
-    /// older one, or one asked for a calendar since closed) is dropped.
-    /// `days` come newest first; an empty page (or the same cursor again)
-    /// ends the list.
-    pub fn accept(&mut self, request: Option<RequestId>, days: Vec<CalendarDay>) {
+    /// older one, or one asked for a calendar since closed) is dropped:
+    /// `false`. `days` come newest first; an empty page (or the same cursor
+    /// again) ends the list.
+    pub fn accept(&mut self, request: Option<RequestId>, days: Vec<CalendarDay>) -> bool {
         if !self.waits_for(request) {
-            return;
+            return false;
         }
         self.paging = CalendarPaging::Idle;
         let before = self.oldest_loaded;
@@ -162,14 +162,17 @@ impl HistoryCalendar {
         if oldest == before {
             self.paging = CalendarPaging::Exhausted;
         }
+        true
     }
 
     /// The page `request` failed: the list stays as it is and a later ask
-    /// retries. Another request's error changes nothing.
-    pub fn fail(&mut self, request: Option<RequestId>) {
-        if self.waits_for(request) {
-            self.paging = CalendarPaging::Failed;
+    /// retries. Another request's error changes nothing: `false`.
+    pub fn fail(&mut self, request: Option<RequestId>) -> bool {
+        if !self.waits_for(request) {
+            return false;
         }
+        self.paging = CalendarPaging::Failed;
+        true
     }
 
     /// The page could not be sent: a later ask retries.
@@ -213,13 +216,13 @@ mod tests {
     fn pages_until_the_month_is_covered() {
         let mut c = calendar();
         assert!(c.needs_older_page());
-        c.begin_page(R);
+        c.begin_page(RequestId(31));
         // Early October: the loaded days do not reach back before the 1st.
-        c.accept(Some(R), vec![day(500 << 20, 1_791_000_000, 3)]);
+        c.accept(Some(RequestId(31)), vec![day(500 << 20, 1_791_000_000, 3)]);
         assert!(c.needs_older_page());
-        c.begin_page(R);
+        c.begin_page(RequestId(32));
         // A day in August covers the displayed month.
-        c.accept(Some(R), vec![day(100 << 20, 1_788_000_000, 1)]);
+        c.accept(Some(RequestId(32)), vec![day(100 << 20, 1_788_000_000, 1)]);
         assert_eq!(c.oldest_loaded, MessageId(100 << 20));
         assert_eq!(c.paging, CalendarPaging::Idle);
         assert!(!c.needs_older_page());
@@ -228,10 +231,10 @@ mod tests {
     #[test]
     fn an_empty_page_ends_the_list() {
         let mut c = calendar();
-        c.begin_page(R);
-        c.accept(Some(R), vec![day(5 << 20, 1_791_000_000, 1)]);
-        c.begin_page(R);
-        c.accept(Some(R), Vec::new());
+        c.begin_page(RequestId(1));
+        c.accept(Some(RequestId(1)), vec![day(5 << 20, 1_791_000_000, 1)]);
+        c.begin_page(RequestId(2));
+        c.accept(Some(RequestId(2)), Vec::new());
         assert_eq!(c.paging, CalendarPaging::Exhausted);
         assert!(!c.needs_older_page());
     }
@@ -239,23 +242,24 @@ mod tests {
     #[test]
     fn a_failed_page_is_asked_for_again() {
         let mut c = calendar();
-        c.begin_page(R);
+        c.begin_page(RequestId(90));
         assert!(!c.needs_older_page(), "one page at a time");
-        c.fail(Some(R));
+        assert!(!c.fail(Some(RequestId(89))), "another request's error");
+        assert!(c.fail(Some(RequestId(90))));
         assert_eq!(c.paging, CalendarPaging::Failed);
         assert!(c.needs_older_page(), "a failure does not end the paging");
-        c.begin_page(R);
-        c.accept(Some(R), vec![day(5 << 20, 1_788_000_000, 1)]);
+        c.begin_page(RequestId(3));
+        c.accept(Some(RequestId(3)), vec![day(5 << 20, 1_788_000_000, 1)]);
         assert_eq!(c.paging, CalendarPaging::Idle);
     }
 
     #[test]
     fn partial_days_keep_the_earliest_message() {
         let mut c = calendar();
-        c.begin_page(R);
-        c.accept(Some(R), vec![day(50 << 20, 1_791_000_100, 1)]);
-        c.begin_page(R);
-        c.accept(Some(R), vec![day(40 << 20, 1_791_000_000, 2)]);
+        c.begin_page(RequestId(1));
+        c.accept(Some(RequestId(1)), vec![day(50 << 20, 1_791_000_100, 1)]);
+        c.begin_page(RequestId(2));
+        c.accept(Some(RequestId(2)), vec![day(40 << 20, 1_791_000_000, 2)]);
         let key = local_day_number(1_791_000_000);
         assert_eq!(c.day(key).map(|d| d.message_id), Some(MessageId(40 << 20)));
     }

@@ -39,8 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetRecommendedChatFolders, None);
         let list = &mut self.session.chat_list.recommended_folders;
-        list.begin();
-        list.sent(extra);
+        list.begin_with(extra);
         match self.send_folder_request(extra, get_recommended_chat_folders(extra)) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
@@ -104,8 +103,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .folder_shares
                 .entry(folder_id)
                 .or_default();
-            share.links.begin();
-            share.links.sent(extra);
+            share.links.begin_with(extra);
             if let Err(err) =
                 self.send_folder_request(extra, get_chat_folder_invite_links(extra, folder_id))
             {
@@ -132,8 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .folder_shares
                 .entry(folder_id)
                 .or_default();
-            share.chats.begin();
-            share.chats.sent(extra);
+            share.chats.begin_with(extra);
             if let Err(err) = self.send_folder_request(
                 extra,
                 get_chats_for_chat_folder_invite_link(extra, folder_id),

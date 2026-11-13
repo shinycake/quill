@@ -290,8 +290,7 @@ fn tag_updates_and_sublist_tag_names() {
     session.open_saved_sublist(77);
     let extra = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 77 }, None);
     let fetch = session.threads.saved.topic_tags.entry(77).or_default();
-    fetch.begin();
-    fetch.sent(extra);
+    fetch.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -321,8 +320,7 @@ fn a_sublist_takes_only_the_tags_it_asked_for() {
     let ask = |session: &mut Session| {
         let extra = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 77 }, None);
         let fetch = session.threads.saved.topic_tags.entry(77).or_default();
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
         extra
     };
     let older = ask(&mut session);
@@ -446,8 +444,7 @@ fn a_failed_first_page_is_asked_again_once_back_online() {
     assert!(!session.threads.saved.waiting_to_retry());
 
     let tags = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }, None);
-    session.threads.saved.tags.begin();
-    session.threads.saved.tags.sent(tags);
+    session.threads.saved.tags.begin_with(tags);
     apply_json(&mut session, &seq, &sink, &error(tags));
     assert!(session.threads.saved.waiting_to_retry());
     assert!(session.threads.saved.tags.error().is_some());
@@ -598,8 +595,7 @@ fn default_icons_keep_only_custom_emoji_stickers() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetForumTopicDefaultIcons, None);
-    session.threads.forum_topic_icons.begin();
-    session.threads.forum_topic_icons.sent(extra);
+    session.threads.forum_topic_icons.begin_with(extra);
     let sticker = |id: i64, emoji_id: i64| {
         format!(
             r#"{{"@type":"sticker","id":"{id}","set_id":"1","width":100,"height":100,"emoji":"A","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeCustomEmoji","custom_emoji_id":"{emoji_id}","needs_repainting":false}},"thumbnail":null,"sticker":{{"@type":"file","id":{id},"size":1,"expected_size":1,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":1}}}}}}"#

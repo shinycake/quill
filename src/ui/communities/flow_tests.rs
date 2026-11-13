@@ -370,6 +370,17 @@ fn ungroup_closes_at_once_on_confirm(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     frames(&mut vcx);
     app.update(&mut vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let purpose = quill::state::CommunitiesPurpose::ToggleCollapsed { collapsed: true };
+            let request = session.request_for_community(
+                quill::state::RequestPurpose::Communities(purpose),
+                RUSTACEANS,
+            );
+            session
+                .communities
+                .sent
+                .begin(request, (RUSTACEANS, purpose));
+        }
         app.show_community_box(
             CommunityBox::Ungroup {
                 community_id: RUSTACEANS,
@@ -498,7 +509,7 @@ fn push_ban(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, member: i64, re
                 (RUSTACEANS, member),
                 Fetch::Loading {
                     stale: None,
-                    request: Some(quill::ids::RequestId(request)),
+                    request: quill::ids::RequestId(request),
                 },
             );
         }
@@ -558,7 +569,7 @@ fn a_ban_follows_a_newer_ask_for_its_member(cx: &mut TestAppContext) {
                 (RUSTACEANS, quill::state::CommunityMember::User(5)),
                 quill::state::fetch::Fetch::Loading {
                     stale: None,
-                    request: Some(quill::ids::RequestId(30)),
+                    request: quill::ids::RequestId(30),
                 },
             );
         }
@@ -613,7 +624,10 @@ fn the_chooser_reads_loading_while_the_owned_bots_load(cx: &mut TestAppContext) 
                 (quill::state::ProfileChatsKind::SuitableCommunityChats, 0),
                 quill::state::ProfileChatsFetch::complete(Vec::new()),
             );
-            session.communities.owned_bots.begin();
+            session
+                .communities
+                .owned_bots
+                .begin_with(quill::ids::RequestId(9_999));
         }
     });
     let status = app.read_with(&vcx, |app, _| app.community_candidates("").1);
@@ -792,9 +806,8 @@ fn a_failed_community_info_ask_shows_a_retry(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().expect("demo session");
         let infos = &mut session.groups.community_full_infos;
         infos.remove(&RUSTACEANS);
-        infos.begin(RUSTACEANS);
         let request = quill::ids::RequestId(7_001);
-        infos.sent(RUSTACEANS, request);
+        infos.begin_with(RUSTACEANS, request);
         infos.failed(RUSTACEANS, Some(request), "boom");
         session.users_state.open_info_panel = Some(InfoPanelTarget::Community(RUSTACEANS));
         cx.notify();

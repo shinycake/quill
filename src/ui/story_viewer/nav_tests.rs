@@ -292,7 +292,7 @@ fn a_poster_waiting_out_a_failed_fetch_is_passed_over(cx: &mut TestAppContext) {
             session.stories.stories.remove(&(NEWS, 1));
             session
                 .stories
-                .story_fetch_failed((NEWS, 1), std::time::Instant::now());
+                .story_fetch_failed((NEWS, 1), None, std::time::Instant::now());
         }
         cx.notify();
     });

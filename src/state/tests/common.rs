@@ -12,6 +12,18 @@ pub(crate) fn session() -> (Session, Arc<MemorySink>) {
     (Session::new(AccountKey::primary(), dyn_sink), sink)
 }
 
+/// A member action (a status or tag change, an add) the way the driver
+/// registers it: the request, then the send that went out.
+pub(crate) fn member_request(
+    session: &mut Session,
+    purpose: RequestPurpose,
+    chat: ChatId,
+) -> RequestId {
+    let id = session.request(purpose, Some(chat));
+    session.groups.member_action_sent(chat.0, id);
+    id
+}
+
 pub(crate) fn apply_json(
     session: &mut Session,
     seq: &AtomicU64,

@@ -86,8 +86,7 @@ fn get_contacts_accepts_matching_response() {
     let seq = AtomicU64::new(0);
     assert!(!session.contacts_settled());
     let extra = session.request(RequestPurpose::GetContacts, None);
-    session.users_state.contacts.begin();
-    session.users_state.contacts.sent(extra);
+    session.users_state.contacts.begin_with(extra);
     // A stray `users` payload without our `@extra` is ignored.
     apply_json(
         &mut session,
@@ -139,8 +138,7 @@ fn get_contacts_error_surfaces_retry() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetContacts, None);
-    session.users_state.contacts.begin();
-    session.users_state.contacts.sent(extra);
+    session.users_state.contacts.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -241,8 +239,7 @@ fn add_contact_ok_invalidates_contacts() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let list_extra = session.request(RequestPurpose::GetContacts, None);
-    session.users_state.contacts.begin();
-    session.users_state.contacts.sent(list_extra);
+    session.users_state.contacts.begin_with(list_extra);
     apply_json(
         &mut session,
         &seq,
@@ -429,8 +426,7 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
     );
 
     let extra = session.request(RequestPurpose::GetBackgroundEmojiIcons, None);
-    session.users_state.background_emoji_icons.begin();
-    session.users_state.background_emoji_icons.sent(extra);
+    session.users_state.background_emoji_icons.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -524,8 +520,7 @@ fn an_older_contacts_answer_does_not_bring_back_a_dropped_list() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let old = session.request(RequestPurpose::GetContacts, None);
-    session.users_state.contacts.begin();
-    session.users_state.contacts.sent(old);
+    session.users_state.contacts.begin_with(old);
     // A contact change dropped the list while the fetch was out.
     session.users_state.contacts.outdate();
     apply_json(

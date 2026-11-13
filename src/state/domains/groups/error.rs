@@ -103,6 +103,9 @@ impl Session {
                 self.fail_ownership_transfer(pending.map(|p| p.id), err);
             }
             Some(RequestPurpose::Groups(GroupsPurpose::AnswerSharingRequest { .. })) => {
+                if let Some(pending) = pending {
+                    self.groups.private_sharing.answer_settled(pending.id);
+                }
                 self.chats_state
                     .chat_action_error
                     .push(call_request_error_line(
@@ -549,7 +552,10 @@ impl Session {
                     // page both show it from here; the loaded administrators
                     // list stays as it was (a refused change is not a
                     // failed load).
-                    self.groups.member_action_error.insert(chat_id.0, line);
+                    if let Some(pending) = pending {
+                        self.groups
+                            .member_action_failed(chat_id.0, pending.id, line);
+                    }
                 }
             }
             // Slice G1: failed `setChatMemberTag` (custom title)
@@ -559,7 +565,10 @@ impl Session {
             Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { .. })) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     let line = call_request_error_line(err, "Could not set custom title");
-                    self.groups.member_action_error.insert(chat_id.0, line);
+                    if let Some(pending) = pending {
+                        self.groups
+                            .member_action_failed(chat_id.0, pending.id, line);
+                    }
                 }
             }
             Some(RequestPurpose::GetBasicGroupFullInfo) => {
@@ -583,8 +592,11 @@ impl Session {
             // the dialog already renders so partial adds stay
             // honest.
             Some(RequestPurpose::AddChatMembers | RequestPurpose::AddChatMember) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    *self.groups.add_members_failed.entry(chat_id.0).or_insert(0) += 1;
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.groups
+                        .add_members_failed_by(chat_id.0, pending.id, 1, false);
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembersMore {

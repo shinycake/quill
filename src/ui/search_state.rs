@@ -16,8 +16,8 @@ pub(crate) struct SearchUi {
     pub(super) tabs_scroll: ScrollHandle,
     /// Vertical scroll of the results under the strip (infinite paging).
     pub(super) results_scroll: ScrollHandle,
-    /// The search generation the results scroll was last reset for.
-    pub(super) seen_generation: std::cell::Cell<u64>,
+    /// The search epoch (`search.epoch`) the results scroll was last reset for.
+    pub(super) seen_epoch: std::cell::Cell<u64>,
     /// Sideways scroll of the top-people strip.
     pub(super) top_scroll: ScrollHandle,
     /// When the top-people strip last expanded or collapsed (its
@@ -59,7 +59,7 @@ impl SearchUi {
             channels_expanded: false,
             tabs_scroll: ScrollHandle::new(),
             results_scroll: ScrollHandle::new(),
-            seen_generation: std::cell::Cell::new(0),
+            seen_epoch: std::cell::Cell::new(0),
             top_scroll: ScrollHandle::new(),
             top_toggled_at: std::cell::Cell::new(None),
             top_drag: std::cell::Cell::new(None),
@@ -80,8 +80,12 @@ impl super::on_screen::Farewell for SearchUi {
         _window: &mut Window,
         _cx: &mut Context<super::app::QuillApp>,
     ) {
+        // The in-chat bar closes with the screen, and its typed query
+        // waiting out the quiet window goes with it: back on this account
+        // the bar must not read "Searching…" for a commit that never comes.
         if let Some(session) = app.session_mut() {
             session.clear_date_jump_ui(None);
+            session.close_chat_search();
         }
     }
 }

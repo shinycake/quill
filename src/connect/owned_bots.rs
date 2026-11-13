@@ -176,11 +176,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         share: Option<ManagedBotShare>,
     ) -> Result<RequestId, ConnectSendError> {
         self.owned_bots_ready(manager_bot_user_id)?;
-        let create = &mut self.session.bots.owned.create;
         // One create at a time, owned here and not by the Create button: a
         // second `createBot` would drop the first's stage and its answer,
         // and a second bot could be made unreported.
-        if create.creating() {
+        if self.session.bots.owned.create.creating() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let submission = CreateSubmission {

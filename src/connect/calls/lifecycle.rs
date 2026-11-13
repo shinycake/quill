@@ -19,14 +19,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.has_call_engine() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.calls.active_call.is_some()
-            || self.session.requests.pending.values().any(|pending| {
-                matches!(
-                    pending.purpose,
-                    RequestPurpose::Calls(CallsPurpose::CreateCall { .. })
-                )
-            })
-        {
+        if self.session.calls.active_call.is_some() || !self.session.calls.creates.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let user = self.session.user(user_id);
@@ -46,6 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.creates.begin(extra, ());
         self.decline_ringing_invite(None);
         Ok(extra)
     }

@@ -59,7 +59,7 @@ impl MentionSearch {
     /// The `searchChatMembers` request the search waits for.
     pub fn asking(&self) -> Option<RequestId> {
         match self.members {
-            Fetch::Loading { request, .. } => request,
+            Fetch::Loading { request, .. } => Some(request),
             _ => None,
         }
     }

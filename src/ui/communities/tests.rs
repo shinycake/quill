@@ -26,7 +26,7 @@ fn a_ban_waits_for_the_member_chats_then_warns_only_about_owned_ones() {
     assert_eq!(
         ban_step(&Fetch::Loading {
             stale: None,
-            request: None
+            request: quill::ids::RequestId(1)
         }),
         BanStep::Wait
     );

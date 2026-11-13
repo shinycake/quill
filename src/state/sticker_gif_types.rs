@@ -585,8 +585,11 @@ impl GifPanel {
         matches!(self.list, GifList::Search(_))
     }
 
+    /// The search is wanted or out: it waits for its request to go out
+    /// (a search held with nothing asked yet), or for its answer.
     pub fn search_loading(&self) -> bool {
-        matches!(&self.list, GifList::Search(search) if search.fetch.is_loading())
+        matches!(&self.list, GifList::Search(search)
+            if search.fetch.is_loading() || search.fetch.is_idle())
     }
 
     /// The request (the bot's lookup or a results page) the search waits for.
@@ -610,10 +613,9 @@ impl GifPanel {
         }
     }
 
-    /// `getSavedAnimations` went out as `request`.
-    pub fn saved_asked(&mut self, request: crate::ids::RequestId) {
-        self.saved.begin();
-        self.saved.sent(request);
+    /// `getSavedAnimations` went out.
+    pub fn saved_asked(&mut self, request: RequestId) {
+        self.saved.begin_with(request);
     }
 
     /// `getSavedAnimations` answered. An `updateSavedAnimations` that came
@@ -725,10 +727,8 @@ impl GifPanel {
     pub fn search_begun(&mut self, query: String) {
         self.list = GifList::Search(GifSearch {
             query,
-            fetch: Fetch::Loading {
-                stale: None,
-                request: None,
-            },
+            // Wanted: the request goes out right after (`search_sent`).
+            fetch: Fetch::Idle,
             results: Vec::new(),
             next_offset: String::new(),
             asked_offset: String::new(),
@@ -811,14 +811,14 @@ impl GifPanel {
     /// [`Self::search_sent`].
     pub fn search_asked(&mut self) {
         if let GifList::Search(search) = &mut self.list {
-            search.fetch.begin();
+            search.fetch = Fetch::Idle;
         }
     }
 
     /// The page request `request` went out for the search.
     pub fn search_sent(&mut self, request: crate::ids::RequestId) {
         if let GifList::Search(search) = &mut self.list {
-            search.fetch.sent(request);
+            search.fetch.begin_with(request);
         }
     }
 

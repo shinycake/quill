@@ -208,12 +208,13 @@ fn a_mask_list_asked_before_a_change_does_not_land_after_it() {
         installed: false,
         archived: false,
     });
-    session.finish_mask_mutation(Some(change));
-    assert!(
-        !session
-            .requests
-            .has_purpose(StickersPurpose::GetInstalledMaskSets.into())
-    );
+    session.stickers.masks.installed.begin_with(list);
+    let changed = session.request(change, None);
+    let pending = session.requests.pending.get(&changed.0).cloned();
+    session.finish_mask_mutation(pending.as_ref());
+    // The fetch forgot the request it waited for: the refetch may go out,
+    // and the late answer below finds nothing to land on.
+    assert!(session.stickers.masks.installed.is_idle());
     t.feed(
         json!({"@type":"stickerSets","@extra":list.as_extra(),"sets":[
         {"@type":"stickerSetInfo","id":"3","size":1,"is_installed":true}]}),
@@ -368,33 +369,50 @@ fn the_reply_bar_copy_shows_an_edit_and_the_oldest_copy_is_the_one_dropped() {
 }
 
 #[test]
-fn each_create_waits_for_its_own_request_and_a_reset_drops_the_older_one() {
+fn each_create_waits_for_its_own_request_and_a_reset_never_adopts_an_older_one() {
     use crate::state::CreateStage;
     let mut t = Flaky::new();
-    let waiting = |t: &Flaky| match &t.driver.session.bots.owned.create.stage {
+    let asked = |t: &Flaky| match &t.driver.session.bots.owned.create.stage {
         CreateStage::Creating { request, .. } => Some(*request),
         _ => None,
     };
-    assert_eq!(waiting(&t), None);
+    assert_eq!(asked(&t), None);
     let first = t
         .driver
         .create_managed_bot(900, "A", "a_bot", false, None)
         .unwrap();
-    assert_eq!(waiting(&t), Some(first));
+    assert_eq!(asked(&t), Some(first));
     // One create at a time: a second waits for the first's answer.
     assert!(
         t.driver
             .create_managed_bot(900, "B", "b_bot", false, None)
             .is_err()
     );
-    assert_eq!(waiting(&t), Some(first));
-    // The older create's answer finds another stage and drops.
+    assert_eq!(asked(&t), Some(first));
+    // The older create's answer finds another request in the stage, or none,
+    // and drops.
     t.driver.reset_create_bot();
+    assert_eq!(asked(&t), None);
     assert!(!t.driver.session.bots.owned.create.creating());
+    let older_answer = |extra: crate::ids::RequestId| {
+        json!({"@type":"user","@extra":extra.as_extra(),"id":901,"first_name":"A",
+            "type":{"@type":"userTypeBot","can_be_edited":true}})
+    };
+    // The older create's answer arrives after the reset: nothing adopts it.
+    t.feed(older_answer(first));
+    assert_eq!(asked(&t), None);
+    assert!(t.driver.take_created_bot().is_none());
     let second = t
         .driver
         .create_managed_bot(900, "B", "b_bot", false, None)
         .unwrap();
-    assert_ne!(first, second);
-    assert_eq!(waiting(&t), Some(second));
+    assert_ne!(second, first);
+    assert_eq!(asked(&t), Some(second));
+    // ... nor does the newer create, which still waits for its own.
+    t.feed(older_answer(first));
+    assert_eq!(asked(&t), Some(second));
+    assert!(t.driver.take_created_bot().is_none());
+    t.feed(older_answer(second));
+    assert_eq!(asked(&t), None);
+    assert_eq!(t.driver.take_created_bot().map(|(_, id)| id), Some(901));
 }

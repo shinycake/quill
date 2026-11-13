@@ -156,8 +156,7 @@ fn frequent_contacts_load_and_the_option_hides_them() {
     apply_json(&mut session, &seq, &sink, &chats_json(extra, "[11,12]"));
     assert!(session.search.search.top_chat_ids().is_empty());
     let extra = session.request(RequestPurpose::GetTopChats, None);
-    session.search.search.top_chats.begin();
-    session.search.search.top_chats.sent(extra);
+    session.search.search.top_chats.begin_with(extra);
     apply_json(&mut session, &seq, &sink, &chats_json(extra, "[11,12]"));
     assert!(!session.search.search.top_chats.is_loading());
     assert_eq!(

@@ -215,7 +215,7 @@ fn the_share_link_panel_closes_back_to_upgraded_and_keeps_the_migration() {
     // A conference that took no 1:1 call over has nothing to close.
     let mut plain = ConferenceCall {
         input: None,
-        stage: ConferenceStage::Running,
+        stage: ConferenceStage::Standalone,
     };
     plain.close_link();
     assert_eq!(plain.migrated_from(), None);

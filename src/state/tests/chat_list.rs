@@ -52,9 +52,9 @@ fn new_chat_after_position_keeps_main_list_membership() {
     );
     let chat = session.chats.get(&9).unwrap();
     assert_eq!(chat.title, "after");
-    assert!(chat.in_main_list);
-    assert!(chat.is_pinned);
-    assert_eq!(chat.order, 4);
+    assert!(chat.in_main_list());
+    assert!(chat.is_pinned());
+    assert_eq!(chat.order(), 4);
     assert_eq!(session.ordered_chats().len(), 1);
 }
 
@@ -75,7 +75,7 @@ fn last_message_positions_replace_main_list_membership() {
         r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":{"id":1,"chat_id":3,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"CANARY_PREVIEW_hi","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"8","is_pinned":false}]}"#,
     );
     let chat = session.chats.get(&3).unwrap();
-    assert!(chat.in_main_list);
+    assert!(chat.in_main_list());
     assert_eq!(chat.last_preview(), "CANARY_PREVIEW_hi");
     assert_eq!(session.ordered_chats()[0].id.0, 3);
     apply_json(
@@ -84,7 +84,7 @@ fn last_message_positions_replace_main_list_membership() {
         &sink,
         r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":null,"positions":[]}"#,
     );
-    assert!(!session.chats.get(&3).unwrap().in_main_list);
+    assert!(!session.chats.get(&3).unwrap().in_main_list());
     assert!(session.ordered_chats().is_empty());
     assert!(!sink.rendered().contains("CANARY_PREVIEW"));
 }
@@ -127,7 +127,7 @@ fn edits_refresh_the_preview_only_for_the_chats_last_message() {
     );
     assert_eq!(session.chats[&11].last_preview(), "");
     assert!(session.chats[&11].last_message().is_none());
-    assert!(session.chats[&11].in_main_list);
+    assert!(session.chats[&11].in_main_list());
     // A loaded row being edited does not invent a preview.
     session.open_chat(ChatId(11));
     let extra = session.request(RequestPurpose::GetHistory, Some(ChatId(11)));
@@ -173,10 +173,10 @@ fn archive_position_does_not_clear_main_list() {
         r#"{"@type":"updateChatPosition","chat_id":5,"position":{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"3","is_pinned":false}}"#,
     );
     let chat = session.chats.get(&5).unwrap();
-    assert!(chat.in_main_list);
-    assert!(chat.in_archive);
-    assert_eq!(chat.archive_order, 3);
-    assert_eq!(chat.order, 6);
+    assert!(chat.in_main_list());
+    assert!(chat.in_archive());
+    assert_eq!(chat.archive_order(), 3);
+    assert_eq!(chat.order(), 6);
     assert_eq!(session.ordered_chats().len(), 1);
     assert_eq!(session.ordered_archived_chats().len(), 1);
 }
@@ -199,9 +199,9 @@ fn last_message_positions_are_a_full_set_including_archive() {
         r#"{"@type":"updateChatLastMessage","chat_id":6,"last_message":{"id":2,"chat_id":6,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}},"positions":[{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"9","is_pinned":true},{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"1","is_pinned":false}]}"#,
     );
     let chat = session.chats.get(&6).unwrap();
-    assert!(chat.in_main_list);
-    assert!(chat.is_pinned);
-    assert_eq!(chat.order, 9);
+    assert!(chat.in_main_list());
+    assert!(chat.is_pinned());
+    assert_eq!(chat.order(), 9);
     // Full set without Main removes from the main list.
     apply_json(
         &mut session,
@@ -210,8 +210,8 @@ fn last_message_positions_are_a_full_set_including_archive() {
         r#"{"@type":"updateChatLastMessage","chat_id":6,"last_message":null,"positions":[{"@type":"chatPosition","list":{"@type":"chatListArchive"},"order":"1","is_pinned":false}]}"#,
     );
     let chat = session.chats.get(&6).unwrap();
-    assert!(!chat.in_main_list);
-    assert!(chat.in_archive);
+    assert!(!chat.in_main_list());
+    assert!(chat.in_archive());
     assert!(session.ordered_chats().is_empty());
     assert_eq!(session.ordered_archived_chats()[0].id.0, 6);
 }
@@ -497,8 +497,7 @@ fn folder_chats_to_leave_cached_per_folder() {
         .folder_chats_to_leave
         .entry(3)
         .or_default();
-    to_leave.begin();
-    to_leave.sent(extra);
+    to_leave.begin_with(extra);
     let json = format!(
         r#"{{"@type":"chats","@extra":"{}","total_count":2,"chat_ids":[5,6]}}"#,
         extra.0
@@ -542,7 +541,13 @@ fn cl1_pin_error_rolls_back_and_surfaces() {
         shown: true,
         archived: false,
     });
-    session.chats.get_mut(&11).expect("chat").is_pinned = true;
+    session
+        .chats
+        .get_mut(&11)
+        .expect("chat")
+        .main
+        .get_or_insert_with(Default::default)
+        .is_pinned = true;
     apply_json(
         &mut session,
         &seq,
@@ -552,7 +557,7 @@ fn cl1_pin_error_rolls_back_and_surfaces() {
             extra.0
         ),
     );
-    assert!(!session.chats.get(&11).expect("chat").is_pinned);
+    assert!(!session.chats.get(&11).expect("chat").is_pinned());
     // A pin limit opens the Premium limit box instead of an error line.
     assert!(session.chats_state.chat_action_error.is_empty());
     assert_eq!(

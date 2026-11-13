@@ -5,9 +5,10 @@ use super::PendingBotMessage;
 /// again leaves `Failed`; the request's answer or loss leaves `Stopping`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BotStopStage {
-    /// Not stopped. `can_stop`: TDLib offers Stop for this draft
+    /// The bot is still writing (TDLib's own pending state, no request of
+    /// ours). `can_stop`: TDLib offers Stop for this draft
     /// (`updatePendingMessage.can_stop`).
-    Running { can_stop: bool },
+    Streaming { can_stop: bool },
     /// Stop is in flight as this request.
     Stopping(crate::ids::RequestId),
     /// The last Stop was refused or failed; it may be pressed again.
@@ -21,7 +22,7 @@ impl BotStopStage {
     /// or was refused and may be pressed again.
     pub fn can_stop(self) -> bool {
         match self {
-            Self::Running { can_stop } => can_stop,
+            Self::Streaming { can_stop } => can_stop,
             Self::Stopping(_) | Self::Failed => true,
             Self::Stopped => false,
         }

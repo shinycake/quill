@@ -219,8 +219,12 @@ fn a_status_list_answer_of_another_request_is_dropped() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let waited = session.request(RequestPurpose::GetThemedEmojiStatuses, None);
-    session.stickers.emoji.lists.themed_statuses.begin();
-    session.stickers.emoji.lists.themed_statuses.sent(waited);
+    session
+        .stickers
+        .emoji
+        .lists
+        .themed_statuses
+        .begin_with(waited);
     let other = session.request(RequestPurpose::GetThemedEmojiStatuses, None);
     apply_json(
         &mut session,
@@ -244,13 +248,12 @@ fn a_status_list_answer_of_another_request_is_dropped() {
     assert_eq!(session.stickers.emoji.themed_status_ids(), &[11, 22]);
 
     let waited = session.request(RequestPurpose::GetUpgradedGiftEmojiStatuses, None);
-    session.stickers.emoji.lists.upgraded_gift_statuses.begin();
     session
         .stickers
         .emoji
         .lists
         .upgraded_gift_statuses
-        .sent(waited);
+        .begin_with(waited);
     let other = session.request(RequestPurpose::GetUpgradedGiftEmojiStatuses, None);
     apply_json(
         &mut session,
@@ -275,13 +278,12 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     // Recent statuses land in the emoji panel under
     // GetRecentEmojiStatuses.
     let extra = with_purpose.request(RequestPurpose::GetRecentEmojiStatuses, None);
-    with_purpose.stickers.emoji.lists.recent_statuses.begin();
     with_purpose
         .stickers
         .emoji
         .lists
         .recent_statuses
-        .sent(extra);
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -309,13 +311,12 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
 
     // Themed/default ids land in their own slots.
     let extra = with_purpose.request(RequestPurpose::GetThemedEmojiStatuses, None);
-    with_purpose.stickers.emoji.lists.themed_statuses.begin();
     with_purpose
         .stickers
         .emoji
         .lists
         .themed_statuses
-        .sent(extra);
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -327,13 +328,12 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     );
     assert_eq!(with_purpose.stickers.emoji.themed_status_ids(), &[11, 22]);
     let extra = with_purpose.request(RequestPurpose::GetDefaultEmojiStatuses, None);
-    with_purpose.stickers.emoji.lists.default_statuses.begin();
     with_purpose
         .stickers
         .emoji
         .lists
         .default_statuses
-        .sent(extra);
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -415,8 +415,12 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         )
     };
     let extra = with_purpose.request(RequestPurpose::GetInstalledEmojiSets, None);
-    with_purpose.stickers.emoji.lists.installed.begin();
-    with_purpose.stickers.emoji.lists.installed.sent(extra);
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .installed
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -435,8 +439,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert!(with_purpose.stickers.stickers.sets.is_empty());
 
     let extra = with_purpose.request(RequestPurpose::SearchEmojiSets, None);
-    with_purpose.stickers.emoji.lists.search.begin();
-    with_purpose.stickers.emoji.lists.search.sent(extra);
+    with_purpose.stickers.emoji.lists.search.begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -561,8 +564,7 @@ fn an_empty_installed_list_is_loaded_only_after_its_answer() {
     let (mut session, _) = session();
     assert!(session.stickers.emoji.lists.installed.can_ask());
     let request = session.request(RequestPurpose::GetInstalledEmojiSets, None);
-    session.stickers.emoji.lists.installed.begin();
-    session.stickers.emoji.lists.installed.sent(request);
+    session.stickers.emoji.lists.installed.begin_with(request);
     session.accept_installed_emoji_sets(Some(request), Vec::new());
     assert!(!session.stickers.emoji.lists.installed.can_ask());
     session.invalidate_installed_emoji_sets();

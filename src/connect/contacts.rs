@@ -32,8 +32,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(RequestPurpose::GetContacts, None);
         let contacts = &mut self.session.users_state.contacts;
-        contacts.begin();
-        contacts.sent(extra);
+        contacts.begin_with(extra);
         if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
             self.session.requests.take(extra);
             // Nothing is in flight: the tab shows the error and its Retry,

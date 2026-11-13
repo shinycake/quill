@@ -68,12 +68,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             if emoji {
                 let fetch = &mut self.session.stickers.emoji.lists.installed;
-                fetch.begin();
-                fetch.sent(extra);
+                fetch.begin_with(extra);
             } else {
                 let fetch = &mut self.session.stickers.stickers.lists.installed;
-                fetch.begin();
-                fetch.sent(extra);
+                fetch.begin_with(extra);
             }
         }
         Ok(())
@@ -167,7 +165,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 return Ok(());
             }
             let extra = self.session.request(RequestPurpose::GetMe, None);
-            self.session.users_state.my_id_probe.begin();
             if let Err(err) = self.sender.send_json(&get_me(extra)) {
                 self.session.requests.take(extra);
                 self.session
@@ -176,7 +173,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .fail_dropping_data(err.stage_line());
                 return Err(err);
             }
-            self.session.users_state.my_id_probe.sent(extra);
+            self.session.users_state.my_id_probe.begin_with(extra);
             return Ok(());
         };
         if self.session.chats.get(&chat_id.0).is_some_and(|chat| {
@@ -548,8 +545,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_preview_fetch
             .entry(chat_id)
             .or_default();
-        preview.begin();
-        preview.sent(extra);
+        preview.begin_with(extra);
         if let Err(err) = self.sender.send_json(&get_chat_history(
             extra,
             chat_id,
@@ -609,14 +605,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        if let Err(err) = self
-            .sender
-            .send_json(&set_chat_member_tag(extra, chat_id, user_id, tag))
-        {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
+        self.send_member_action(
+            chat_id,
+            extra,
+            &set_chat_member_tag(extra, chat_id, user_id, tag),
+        )
+        .map(Some)
     }
 
     /// Phase A1: forced `getSupergroupFullInfo` refresh for the slow-mode

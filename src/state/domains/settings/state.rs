@@ -100,70 +100,13 @@ impl ReadDate {
     }
 }
 
-/// A write against a fetched list (sessions, connected websites).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ListEdit {
-    /// No write in flight and the list is current.
-    #[default]
-    Idle,
-    /// A write is in flight: its buttons stay disabled. `refetch` is set
-    /// when the list went stale before or while the write was out, so a
-    /// failed write still leaves the refetch owed.
-    InFlight { refetch: bool },
-    /// A write succeeded: the cache stays visible and is refetched from
-    /// the authoritative answer on the next ingest (never an optimistic
-    /// change). Also set when an update says the list changed elsewhere.
-    Refetch,
-}
-
-impl ListEdit {
-    pub fn in_flight(self) -> bool {
-        matches!(self, Self::InFlight { .. })
-    }
-
-    /// The list is out of date and should be asked for again.
-    pub fn needs_refetch(self) -> bool {
-        self == Self::Refetch
-    }
-
-    /// A write went out. A refetch owed before it stays owed.
-    pub fn begin_write(&mut self) {
-        *self = Self::InFlight {
-            refetch: matches!(self, Self::Refetch | Self::InFlight { refetch: true }),
-        };
-    }
-
-    /// The write succeeded: the list is refetched from the answer.
-    pub fn write_succeeded(&mut self) {
-        *self = Self::Refetch;
-    }
-
-    /// The write failed or never left: back to where the list stood, so a
-    /// refetch owed meanwhile is still asked for.
-    pub fn write_failed(&mut self) {
-        *self = match *self {
-            Self::InFlight { refetch: true } | Self::Refetch => Self::Refetch,
-            _ => Self::Idle,
-        };
-    }
-
-    /// The refetch answered or failed: the list is current again (or the
-    /// user refreshes by hand). A write in flight stays in flight.
-    pub fn refetched(&mut self) {
-        if *self == Self::Refetch {
-            *self = Self::Idle;
-        }
-    }
-
-    /// Something changed elsewhere: ask again. A write that is out keeps
-    /// the need, so its failure does not forget it.
-    pub fn mark_stale(&mut self) {
-        match self {
-            Self::Idle => *self = Self::Refetch,
-            Self::InFlight { refetch } => *refetch = true,
-            Self::Refetch => {}
-        }
-    }
+/// Who asked for a block. Only the Privacy page's own block (and unblock)
+/// starts the wait of its block-list note; a block from a chat bar leaves
+/// the note alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockOrigin {
+    PrivacyPage,
+    ChatBar,
 }
 
 /// The device-link round trip (`confirmQrCodeAuthentication`). The page
@@ -304,12 +247,13 @@ pub struct SettingsState {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
-    /// A notification-worthy message arrived: the UI bounces the Dock icon /
-    /// flashes the taskbar (when the user wants it and the OS is not in
-    /// Do Not Disturb). Set independently of the "Desktop notifications"
-    /// switch, like tdesktop's alert. An event the notifier takes, not a
-    /// stage: nothing is asked and nothing answers it.
-    pub pending_attention: bool,
+    /// OS alerts queued for the notifier, oldest first, each once: a
+    /// notification-worthy message arrived and the UI bounces the Dock icon
+    /// / flashes the taskbar (when the user wants it and the OS is not in
+    /// Do Not Disturb). Queued independently of the "Desktop notifications"
+    /// switch, like tdesktop's alert. Events the notifier takes, not a
+    /// stage: nothing is asked and nothing answers them.
+    pub pending_alerts: Vec<OsAlert>,
     /// TDLib option `disable_contact_registered_notifications`: the inverse
     /// of tdesktop's "Contact joined Telegram" event switch.
     pub disable_contact_registered_notifications: bool,
@@ -368,10 +312,12 @@ pub struct SettingsState {
     /// `data_storage.json` at session setup; seeded once from
     /// `getAutoDownloadSettingsPresets` when unseeded.
     pub data_storage: DataStoragePrefs,
-    /// Slice S4: the presets answer seeded `data_storage` — the driver
-    /// persists it on the next ingest (the reducer cannot touch the
-    /// filesystem).
-    pub data_storage_dirty: bool,
+    /// Slice S4: whether `data_storage` is on disk. The reducer marks it
+    /// `Due` (a presets answer seeded it, a save was confirmed) and the
+    /// driver writes it on the next ingest (the reducer cannot touch the
+    /// filesystem); a write that failed leaves it `Unsaved` until the
+    /// next change marks it due again.
+    pub data_storage_disk: DataStorageDisk,
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
     /// Slice S4: the failure line of each kind of Data & Storage save; it
@@ -401,20 +347,23 @@ pub struct SettingsState {
     /// refetched from the authoritative answer on the next ingest (the
     /// `saved_sounds_stale` pattern); never an optimistic delete.
     pub sessions_op: crate::state::fetch::ListOp,
+    /// The refusal of the last sessions change (terminate, device link, a
+    /// session toggle), beside the list; the list's own fetch is not touched.
+    pub sessions_note: crate::state::fetch::ChangeNote,
     /// The device-link (`confirmQrCodeAuthentication`) round trip and how
     /// it ended until the screen has reacted.
     pub device_login: DeviceLogin,
     /// Slice A7: cached `getAccountTtl` answer, in days — drives the
     /// self-destruct-if-away picker (UI half ships post-Phase-9).
-    /// A `getAccountTtl` or `setAccountTtl` round trip is in flight, the
-    /// days are known, or the last try failed with the honest one-line
-    /// failure (classified from the TDLib error code, never the native
-    /// message); the known days stay. Cleared on the next attempt and on
-    /// success.
+    /// A `getAccountTtl` round trip is in flight, the days are known, or
+    /// the read failed with the honest one-line failure (classified from
+    /// the TDLib error code, never the native message); the known days
+    /// stay. A write never touches it until the server confirms.
     pub account_ttl: Fetch<i32>,
-    /// Slice A7: a `deleteAccount` round trip is in flight — the account
-    /// surfaces stay disabled meanwhile — or its honest one-line failure.
-    pub account_delete: Fetch<()>,
+    /// The account write (`setAccountTtl` or `deleteAccount`) in flight, one
+    /// at a time, or its honest one-line failure: the only record of a
+    /// write, so the account surfaces stay disabled while it is out.
+    pub account_write: super::AccountWrite,
     /// `getSupportUser` behind Settings > Ask a Question: one ask at a time,
     /// settled by its own answer or error.
     pub support_user: Fetch<()>,
@@ -435,6 +384,8 @@ pub struct SettingsState {
     /// refetched from the authoritative answer on the next ingest (the
     /// `saved_sounds_stale` pattern); never an optimistic delete.
     pub websites_op: crate::state::fetch::ListOp,
+    /// The refusal of the last website disconnect, beside the list.
+    pub websites_note: crate::state::fetch::ChangeNote,
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
@@ -456,11 +407,17 @@ pub struct SettingsState {
     /// Slice S3: `readDatePrivacySettings.show_read_date` (schema 1.8.67,
     /// :9026) with the request in flight, or how the last one ended.
     pub read_date: ReadDate,
-    /// Slice S3: blocked user ids and the server total from
-    /// `getBlockedMessageSenders` (schema 1.8.67, :14505); idle while never
-    /// fetched. A page in flight holds its request, and only that
-    /// request's answer or error settles it; the loaded ids stay meanwhile.
-    pub blocked_senders: Fetch<BlockedList>,
+    /// Slice S3: blocked user ids from `getBlockedMessageSenders`
+    /// (schema 1.8.67, :14505); idle while never fetched.
+    /// A blocked-senders page in flight or a failed get/set shows in the
+    /// same value; the loaded ids stay meanwhile.
+    pub blocked_senders: Fetch<Vec<i64>>,
+    /// The refusal of the last block or unblock, beside the list: a page in
+    /// flight keeps its place and the paging does not wait for a scroll.
+    pub block_note: crate::state::fetch::ChangeNote,
+    /// `total_count` from the last `messageSenders` answer; more pages
+    /// exist while `blocked_senders.len() < blocked_total`.
+    pub blocked_total: i32,
     /// MED1: local media preferences (remember-media-grouping),
     /// persisted via `settings::MediaPrefs`. Loaded at startup like
     /// `call_prefs`; the UI saves on toggle.
@@ -509,34 +466,85 @@ pub struct SettingsState {
     pub business_extra: BusinessExtraState,
 }
 
+/// Where the Data & Storage settings stand against `data_storage.json`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DataStorageDisk {
+    /// What the file holds is what the session holds.
+    #[default]
+    Saved,
+    /// The session changed them: the driver writes on its next ingest.
+    Due,
+    /// The last write failed (a read-only folder, a full disk): the page
+    /// said so, and the next change marks them due again.
+    Unsaved,
+}
+
+/// What the notifier does for the OS beside showing notifications.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OsAlert {
+    /// Bounce the Dock icon / flash the taskbar for a new message.
+    Attention,
+}
+
 impl SettingsState {
+    /// Queue `alert` for the notifier, once until it is taken.
+    pub(crate) fn queue_alert(&mut self, alert: OsAlert) {
+        if !self.pending_alerts.contains(&alert) {
+            self.pending_alerts.push(alert);
+        }
+    }
+
+    /// The alerts queued so far, leaving none.
+    pub fn take_alerts(&mut self) -> Vec<OsAlert> {
+        std::mem::take(&mut self.pending_alerts)
+    }
+
     /// The failure line of the last account-lifecycle op.
     pub fn account_error(&self) -> Option<&str> {
-        self.account_ttl.error().or(self.account_delete.error())
+        self.account_ttl.error().or(self.account_write.error())
     }
 
     /// An account-lifecycle round trip is in flight: the surfaces stay
     /// disabled.
     pub fn account_busy(&self) -> bool {
-        self.account_ttl.is_loading() || self.account_delete.is_loading()
+        self.account_ttl.is_loading() || self.account_write.is_out()
     }
 
     /// The blocked ids loaded so far.
     pub fn blocked_ids(&self) -> &[i64] {
-        self.blocked_senders
-            .data()
-            .map_or(&[], |list| list.ids.as_slice())
+        self.blocked_senders.data().map_or(&[], Vec::as_slice)
     }
 
     /// `total_count` of the last page; more pages exist while it is above
     /// the loaded length.
     pub fn blocked_total(&self) -> i32 {
-        self.blocked_senders.data().map_or(0, |list| list.total)
+        self.blocked_total
+    }
+
+    /// A refused block or unblock: the optimistic change of `user_id`
+    /// goes back, and nothing else in the list moves.
+    pub fn undo_block_change(&mut self, user_id: i64, block: bool) {
+        let Some(list) = self.blocked_senders.data_mut() else {
+            return;
+        };
+        if block {
+            let before = list.len();
+            list.retain(|id| *id != user_id);
+            if list.len() < before {
+                self.blocked_total = self.blocked_total.saturating_sub(1);
+            }
+        } else if !list.contains(&user_id) {
+            list.push(user_id);
+            self.blocked_total = self.blocked_total.saturating_add(1);
+        }
     }
 
     /// One blocked-senders page, taken only by the fetch that waits for
-    /// `request`. Page 0 replaces the list; a later page extends it, without
-    /// ids already there.
+    /// `request`: a page asked before the list restarted (the fetch was
+    /// replaced or failed since) is dropped and changes nothing, not even
+    /// the total. Page 0 replaces the list; a later page extends it, without
+    /// ids already there. A later page with no list left to extend ends the
+    /// fetch, so it does not stay loading.
     pub fn apply_blocked_page(
         &mut self,
         request: Option<RequestId>,
@@ -544,78 +552,71 @@ impl SettingsState {
         total_count: i32,
         sender_ids: Vec<i64>,
     ) {
-        let Some(request) = request.filter(|id| self.blocked_senders.waits_for(*id)) else {
+        if !request.is_some_and(|id| self.blocked_senders.waits_for(id)) {
             return;
-        };
+        }
         let held = if offset == 0 {
             Vec::new()
+        } else if let Some(list) = self.blocked_senders.data_mut() {
+            std::mem::take(list)
         } else {
-            match self.blocked_senders.data_mut() {
-                Some(list) => std::mem::take(&mut list.ids),
-                None => return,
-            }
+            self.blocked_senders.cancel();
+            return;
         };
-        self.blocked_senders.answered(
-            Some(request),
-            BlockedList {
-                ids: dedup_ids(held, sender_ids),
-                total: total_count,
-            },
-        );
+        self.blocked_total = total_count;
+        self.blocked_senders
+            .answered(request, dedup_ids(held, sender_ids));
     }
 
-    /// A block or unblock of `user_id` goes out, applied to the list at send
-    /// time. A page asked before it would replace the list without the
-    /// change, so a page in flight gives way to this request: its `ok`
-    /// asks for the first page again ([`Self::block_change_landed`]).
+    /// A block or unblock of `user_id` went out as `request`, applied to the
+    /// list at send time. A page asked before it would replace the list
+    /// without the change, so a page in flight gives way to this request:
+    /// once it comes back the first page is asked again
+    /// ([`Self::block_change_landed`]).
     pub fn block_change_sent(&mut self, request: RequestId, user_id: i64, blocked: bool) {
-        self.blocked_senders
-            .insert_data_if_missing(BlockedList::default);
+        self.blocked_senders.insert_data_if_missing(Vec::new);
         if let Some(list) = self.blocked_senders.data_mut() {
-            let had = list.ids.contains(&user_id);
+            let had = list.contains(&user_id);
             if blocked && !had {
-                list.ids.push(user_id);
-                list.total = list.total.saturating_add(1);
+                list.push(user_id);
+                self.blocked_total = self.blocked_total.saturating_add(1);
             } else if !blocked && had {
-                list.ids.retain(|id| *id != user_id);
-                list.total = list.total.saturating_sub(1);
+                list.retain(|id| *id != user_id);
+                self.blocked_total = self.blocked_total.saturating_sub(1);
             }
         }
         if self.blocked_senders.is_loading() {
-            self.blocked_senders.begin();
-            self.blocked_senders.sent(request);
+            self.blocked_senders.begin_with(request);
         }
     }
 
-    /// `request`, a block or unblock, landed: a page it replaced is fetched
-    /// again (the list turns `Outdated`, and the pump asks).
+    /// `request`, a block or unblock, came back (answered or refused): a
+    /// page it replaced is fetched again (the list turns `Outdated`, and
+    /// the pump asks).
     pub fn block_change_landed(&mut self, request: Option<RequestId>) {
         if request.is_some_and(|id| self.blocked_senders.waits_for(id)) {
             self.blocked_senders.outdate();
         }
     }
 
-    /// A block or unblock was refused, or never left. Its own stand-in
-    /// request ends in `Failed`; a page of the list in flight is not its
-    /// to end, so the list is fetched again instead (when the change was
-    /// applied and is now wrong), and an unsent change leaves it alone.
-    pub fn block_change_failed(
+    /// A block or unblock of `user_id` was refused. A sent one (`request`
+    /// is known) takes its optimistic change back and says why; a page in
+    /// flight, its own stand-in or one asked meanwhile, is asked again so
+    /// the list matches the server. One that never went out changed nothing.
+    pub fn block_change_refused(
         &mut self,
         request: Option<RequestId>,
-        error: String,
-        applied: bool,
+        user_id: i64,
+        block: bool,
+        line: String,
     ) {
-        if self.blocked_senders.failed(request, error.clone(), true) {
+        self.block_note.refused(request, line);
+        if request.is_none() {
             return;
         }
+        self.undo_block_change(user_id, block);
         if self.blocked_senders.is_loading() {
-            if applied {
-                self.blocked_senders.outdate();
-            }
-        } else if applied {
-            self.blocked_senders.fail_dropping_data(error);
-        } else {
-            self.blocked_senders.fail(error);
+            self.blocked_senders.outdate();
         }
     }
 
@@ -659,9 +660,10 @@ impl SettingsState {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
-            pending_attention: false,
+            pending_alerts: Vec::new(),
             disable_contact_registered_notifications: false,
             notified: ShownNotifications::default(),
+            account_write: Default::default(),
             default_auto_delete: Fetch::Idle,
             saved_sounds: Fetch::Idle,
             tone_upload: crate::tone_upload::ToneUpload::Idle,
@@ -673,7 +675,7 @@ impl SettingsState {
             chat_saves: Default::default(),
             storage_stats: Fetch::Idle,
             data_storage: DataStoragePrefs::default(),
-            data_storage_dirty: false,
+            data_storage_disk: DataStorageDisk::default(),
             data_storage_save: StorageSaveFailures::default(),
             storage_clear: StorageClear::Idle,
             storage_limits: Default::default(),
@@ -681,19 +683,22 @@ impl SettingsState {
             notices: AccountNotices::default(),
             sessions: Fetch::Idle,
             sessions_op: Default::default(),
+            sessions_note: Default::default(),
             device_login: DeviceLogin::Idle,
             account_ttl: Fetch::Idle,
-            account_delete: Fetch::Idle,
             support_user: Fetch::Idle,
             connected_websites: Fetch::Idle,
             passkeys: Default::default(),
             websites_op: Default::default(),
+            websites_note: Default::default(),
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),
             privacy: HashMap::new(),
             read_date: ReadDate::Unknown,
             blocked_senders: Fetch::Idle,
+            block_note: Default::default(),
+            blocked_total: 0,
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),
             badge_prefs: BadgePrefs::default(),
@@ -711,13 +716,6 @@ impl SettingsState {
 }
 
 /// `list` followed by the ids of `more` it does not hold yet.
-/// The blocked-senders list and the server's total for it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct BlockedList {
-    pub ids: Vec<i64>,
-    pub total: i32,
-}
-
 fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
     for id in more {
         if !list.contains(&id) {
@@ -728,6 +726,21 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
 }
 
 impl SettingsState {
+    /// The Privacy page was left: a refusal of a block shown there goes.
+    pub fn leave_blocked_list(&mut self) {
+        self.block_note.clear();
+    }
+
+    /// The Devices page was left: a refusal of a sessions change goes.
+    pub fn leave_sessions(&mut self) {
+        self.sessions_note.clear();
+    }
+
+    /// The connected websites box was closed: its refusal goes.
+    pub fn leave_websites(&mut self) {
+        self.websites_note.clear();
+    }
+
     /// A terminate or a device link is out (`sessions_op`): the sessions
     /// buttons stay disabled.
     pub fn sessions_busy(&self) -> bool {

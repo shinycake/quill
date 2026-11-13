@@ -235,7 +235,7 @@ fn the_account_on_screen_hands_out_its_notification_and_keeps_its_force_reply() 
     assert!(drain.attention);
     let settings = &account.driver.session.settings;
     assert!(settings.pending_notifications.is_empty());
-    assert!(!settings.pending_attention);
+    assert!(settings.pending_alerts.is_empty());
     assert!(!account.driver.session.bots.pending_force_replies.is_empty());
 }
 

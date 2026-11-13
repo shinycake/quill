@@ -63,8 +63,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_json_request(extra, &json).map(Some);
         if sent.is_ok() {
             let icons = &mut self.session.users_state.profile_photo_emoji_icons;
-            icons.begin();
-            icons.sent(extra);
+            icons.begin_with(extra);
         }
         sent
     }

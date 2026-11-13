@@ -121,7 +121,7 @@ impl QuillApp {
         // time skips the fetch that would clear it.
         if let Some(session) = self.session_mut() {
             session.settings.account_ttl.clear_error();
-            session.settings.account_delete.clear_error();
+            session.settings.account_write.clear_error();
             session.settings.default_auto_delete.clear_error();
         }
         if let Some(live) = self.live.as_mut() {

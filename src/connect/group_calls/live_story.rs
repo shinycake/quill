@@ -98,8 +98,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     get_live_story_streamer(extra, group_call_id)
                 })?;
             self.live_story_unsent(group_call_id, |live| {
-                live.streamer.begin();
-                live.streamer.sent(sent);
+                live.streamer.begin_with(sent);
             });
         }
         if want.1 {
@@ -108,8 +107,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     get_live_story_top_donors(extra, group_call_id)
                 })?;
             self.live_story_unsent(group_call_id, |live| {
-                live.donors.begin();
-                live.donors.sent(sent);
+                live.donors.begin_with(sent);
             });
         }
         if want.2 {
@@ -118,8 +116,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 |extra| get_live_story_available_message_senders(extra, group_call_id),
             )?;
             self.live_story_unsent(group_call_id, |live| {
-                live.message_senders.begin();
-                live.message_senders.sent(sent);
+                live.message_senders.begin_with(sent);
             });
         }
         Ok(())

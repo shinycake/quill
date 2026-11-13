@@ -232,9 +232,20 @@ fn set_busy(app: &mut QuillApp, busy: bool) {
         },
     ));
     if busy {
-        session.request(purpose, Some(ChatId(CHAT)));
+        let request = session.request(purpose, Some(ChatId(CHAT)));
+        session.decision_sent(CHAT, COUNTER, request);
     } else {
         drop(session.requests.take_purpose(purpose));
+        let out: Vec<_> = session
+            .payments
+            .suggested_posts
+            .deciding
+            .iter()
+            .map(|decision| decision.request)
+            .collect();
+        for request in out {
+            session.decision_settled(request);
+        }
     }
 }
 

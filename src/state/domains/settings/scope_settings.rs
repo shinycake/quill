@@ -46,8 +46,7 @@ impl ScopeSettings {
     /// A `getScopeNotificationSettings` for `scope` goes out as `request`.
     pub fn begin(&mut self, scope: NotificationSettingsScope, request: RequestId) {
         let fetch = self.scopes.entry(scope).or_default();
-        fetch.begin();
-        fetch.sent(request);
+        fetch.begin_with(request);
     }
 
     /// Whether the defaults of `scope` are asked for: never asked and not

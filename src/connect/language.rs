@@ -59,8 +59,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(purpose(LanguagePurpose::TargetInfo), None);
-        self.session.settings.language.packs.begin();
-        self.session.settings.language.packs.sent(extra);
+        self.session.settings.language.packs.begin_with(extra);
         let result = self.send_json_request(extra, &get_localization_target_info(extra, false));
         // A send that failed is a failed list, drawn with Retry: back to
         // Idle would ask again at the next render.

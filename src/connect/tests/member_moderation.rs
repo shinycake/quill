@@ -120,13 +120,7 @@ fn a_failed_ban_reports_the_error() {
         r#"{"@type":"error","code":400,"message":"USER_ADMIN_INVALID"}"#,
     );
     assert_eq!(count_sent(&recorder, "setChatMemberStatus"), 1);
-    assert!(
-        driver
-            .session
-            .groups
-            .member_action_error
-            .contains_key(&-100)
-    );
+    assert!(driver.session.groups.member_action_error(-100).is_some());
 }
 
 #[test]

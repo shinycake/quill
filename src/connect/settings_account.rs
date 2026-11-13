@@ -21,8 +21,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         let ask = &mut self.session.settings.support_user;
-        ask.begin();
-        ask.sent(extra);
+        ask.begin_with(extra);
         Ok(true)
     }
 

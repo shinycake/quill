@@ -41,8 +41,7 @@ fn b2_similar_bots_users_response_lands_by_pending_user() {
     let seq = AtomicU64::new(0);
     let extra = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
     let fetch = session.bots.similar_bots.entry(21).or_default();
-    fetch.begin();
-    fetch.sent(extra);
+    fetch.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -492,7 +491,7 @@ fn bots_games_high_scores_answer_lands_in_panel() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: Some(extra),
+            request: extra,
         },
     );
     apply_json(
@@ -527,7 +526,7 @@ fn a_refused_game_scores_request_leaves_the_panel_failed_to_retry() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: Some(extra),
+            request: extra,
         },
     );
     apply_json(
@@ -560,7 +559,7 @@ fn a_game_scores_answer_of_an_older_request_is_ignored() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: Some(new),
+            request: new,
         },
     );
     apply_json(
@@ -619,8 +618,7 @@ fn r2_similar_bots_older_request_neither_answers_nor_fails_the_newer() {
     let first = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
     let second = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
     let fetch = session.bots.similar_bots.entry(21).or_default();
-    fetch.begin();
-    fetch.sent(second);
+    fetch.begin_with(second);
     apply_json(
         &mut session,
         &seq,
@@ -632,7 +630,7 @@ fn r2_similar_bots_older_request_neither_answers_nor_fails_the_newer() {
     );
     assert!(matches!(
         session.bots.similar_bots.get(&21),
-        Some(Fetch::Loading { request: Some(id), .. }) if *id == second
+        Some(Fetch::Loading { request: id, .. }) if *id == second
     ));
     apply_json(
         &mut session,

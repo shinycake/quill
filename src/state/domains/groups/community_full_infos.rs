@@ -75,16 +75,9 @@ impl CommunityFullInfos {
             .is_none_or(|fetch| fetch.wants_fetch() || matches!(fetch, Fetch::Failed { .. }))
     }
 
-    /// The ask for `community_id` is about to go out.
-    pub fn begin(&mut self, community_id: i64) {
-        self.0.entry(community_id).or_default().begin();
-    }
-
-    /// The ask went out as `request`.
-    pub fn sent(&mut self, community_id: i64, request: RequestId) {
-        if let Some(fetch) = self.0.get_mut(&community_id) {
-            fetch.sent(request);
-        }
+    /// The ask for `community_id` goes out as `request`.
+    pub fn begin_with(&mut self, community_id: i64, request: RequestId) {
+        self.0.entry(community_id).or_default().begin_with(request);
     }
 
     /// The send was refused (the request never left): back to before it.

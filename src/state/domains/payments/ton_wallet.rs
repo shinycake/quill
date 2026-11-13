@@ -26,10 +26,7 @@ impl Session {
                     // settles that load. Without one it only replaces the
                     // held state.
                     match wallet.own {
-                        crate::state::fetch::Fetch::Loading {
-                            request: Some(asked),
-                            ..
-                        } => {
+                        crate::state::fetch::Fetch::Loading { request: asked, .. } => {
                             wallet.own.answered(Some(asked), state);
                         }
                         _ => wallet.own.replace_data(state),

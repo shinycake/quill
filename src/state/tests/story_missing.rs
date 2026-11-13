@@ -5,7 +5,7 @@ use super::*;
 
 fn refuse(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>, chat: i64, story: i32) {
     let extra = session.request_for_story(RequestPurpose::GetStory, ChatId(chat), story);
-    session.stories.story_fetch.asked((chat, story));
+    session.stories.story_fetch.asked((chat, story), extra);
     apply_json(
         session,
         seq,

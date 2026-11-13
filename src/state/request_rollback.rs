@@ -214,15 +214,13 @@ impl Session {
                         .iter()
                         .find(|(id, _)| *id == chat_id)
                         .map(|(_, order)| *order);
-                    if let Some(chat) = self.chats.get_mut(&chat_id) {
-                        let slot = if archived {
-                            &mut chat.archive_order
-                        } else {
-                            &mut chat.order
-                        };
-                        if Some(*slot) == shown_order {
-                            *slot = order;
-                        }
+                    if let Some(position) = self
+                        .chats
+                        .get_mut(&chat_id)
+                        .and_then(|chat| chat.position_mut(archived))
+                        && Some(position.order) == shown_order
+                    {
+                        position.order = order;
                     }
                 }
                 self.rebuild_main_order();
@@ -408,15 +406,13 @@ impl Session {
                 shown,
                 archived,
             } => {
-                if let Some(chat) = self.chats.get_mut(&chat_id) {
-                    let flag = if archived {
-                        &mut chat.archive_is_pinned
-                    } else {
-                        &mut chat.is_pinned
-                    };
-                    if *flag == shown {
-                        *flag = previous;
-                    }
+                if let Some(position) = self
+                    .chats
+                    .get_mut(&chat_id)
+                    .and_then(|chat| chat.position_mut(archived))
+                    && position.is_pinned == shown
+                {
+                    position.is_pinned = previous;
                 }
             }
             RequestRollback::ChatMarkedAsUnread {

@@ -49,13 +49,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !state.time_zones.can_ask() {
             return Ok(());
         }
-        state.time_zones.begin();
         let sent = self.send_business_request(
             RequestPurpose::Settings(SettingsPurpose::GetTimeZones),
             bs::get_time_zones_request,
         );
         match sent {
-            Ok(extra) => self.session.settings.business.time_zones.sent(extra),
+            Ok(extra) => self.session.settings.business.time_zones.begin_with(extra),
             Err(_) => self
                 .session
                 .settings

@@ -28,13 +28,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .full_rich_loads
             .entry(ChatMessage::new(chat_id, message_id))
             .or_default();
-        load.begin();
         if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
             load.cancel();
             return Err(err);
         }
-        load.sent(extra);
+        load.begin_with(extra);
         Ok(extra)
     }
 

@@ -206,8 +206,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request_for_folder(RequestPurpose::GetChatFolder, folder_id);
         let fetch = self.session.chat_list.folder_specs.fetch_mut(folder_id);
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
         if let Err(err) = self.sender.send_json(&get_chat_folder(extra, folder_id)) {
             self.session.requests.take(extra);
             // The box waiting on this spec ends in the error with a Retry.
@@ -254,8 +253,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .folder_chats_to_leave
             .entry(folder_id)
             .or_default();
-        to_leave.begin();
-        to_leave.sent(extra);
+        to_leave.begin_with(extra);
         if let Err(err) = self.sender.send_json(&{
             serde_json::json!({
                 "@type": "getChatFolderChatsToLeave",
@@ -312,8 +310,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_lists_for_add
             .entry(chat_id.0)
             .or_default();
-        lists.begin();
-        lists.sent(extra);
+        lists.begin_with(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_chat_lists_to_add_chat(extra, chat_id))

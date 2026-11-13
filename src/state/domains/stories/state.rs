@@ -371,6 +371,9 @@ pub struct StoriesState {
     /// story ids, `pinned_story_ids` (first page only), and the server
     /// total for the "Load more" gate.
     pub chat_page_stories: HashMap<i64, ChatPageStories>,
+    /// The stories page's own `getChatPostedToChatPageStories` asks out, by
+    /// chat (the gallery's tab keeps its own request in its stage).
+    pub page_asks: crate::state::held::Holds<i64>,
     /// Phase 9.7: `getChatArchivedStories` pages per chat (accumulated;
     /// `next_from_story_id` is the smallest loaded id, `None` until the
     /// first page lands).
@@ -437,6 +440,7 @@ impl StoriesState {
             albums: HashMap::new(),
             album_stories: HashMap::new(),
             chat_page_stories: HashMap::new(),
+            page_asks: Default::default(),
             archived_stories: HashMap::new(),
             page_ops: StoryPageOps::default(),
             close_friends: CloseFriendsList::NotLoaded,
@@ -470,8 +474,13 @@ impl StoriesState {
 
     /// `getStory` for `story` failed with an error that may pass. A card or
     /// reply header showing it asks again once the wait is over.
-    pub fn story_fetch_failed(&mut self, story: (i64, i32), now: Instant) {
-        self.story_fetch.failed(story, now);
+    pub fn story_fetch_failed(
+        &mut self,
+        story: (i64, i32),
+        request: Option<RequestId>,
+        now: Instant,
+    ) {
+        self.story_fetch.failed(story, request, now);
     }
 
     /// `story` arrived (an answer or `updateStory`): whatever said it was

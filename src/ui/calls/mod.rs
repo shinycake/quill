@@ -436,7 +436,7 @@ impl QuillApp {
             if let Some(session) = self.demo_session.as_mut()
                 && let Some(summary) = session.calls.summary.as_mut()
             {
-                summary.rating = quill::state::CallRating::Sent;
+                summary.rating = quill::state::CallRating::Rated;
             }
         }
         cx.notify();
@@ -456,7 +456,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.summary.as_mut())
         {
-            summary.debug_information = quill::state::CallUpload::Sent;
+            summary.debug_information = quill::state::CallUpload::Uploaded;
             self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_DIAGNOSTICS_UPLOAD_NO_LIVE,
             )));
@@ -480,7 +480,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.summary.as_mut())
         {
-            summary.log = quill::state::CallUpload::Sent;
+            summary.log = quill::state::CallUpload::Uploaded;
             self.set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_LOG_UPLOAD_NO)));
         }
         cx.notify();

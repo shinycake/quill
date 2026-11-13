@@ -141,8 +141,7 @@ fn an_older_star_pack_failure_leaves_the_newer_options() {
     let seq = AtomicU64::new(0);
     let old = session.request(RequestPurpose::GetStarPackOptions, None);
     let new = session.request(RequestPurpose::GetStarPackOptions, None);
-    session.payments.star_packs.options.begin();
-    session.payments.star_packs.options.sent(new);
+    session.payments.star_packs.options.begin_with(new);
     apply_json(
         &mut session,
         &seq,
@@ -202,8 +201,7 @@ fn an_older_sticker_list_answer_does_not_replace_the_newer_one() {
     let old = session.request(RequestPurpose::GetFavoriteStickers, None);
     let new = session.request(RequestPurpose::GetFavoriteStickers, None);
     let list = &mut session.stickers.stickers.lists.favorites;
-    list.begin();
-    list.sent(new);
+    list.begin_with(new);
     apply_json(&mut session, &seq, &sink, &answer(old, 1));
     assert!(session.stickers.stickers.favorites.is_empty());
     assert!(session.stickers.stickers.lists.favorites.is_loading());

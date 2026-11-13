@@ -47,9 +47,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// them, once per session.
     pub(super) fn search_disk_paused_elsewhere(&mut self) -> Result<(), ConnectSendError> {
         let keys = self.session.settings.data_storage.disk_paused.clone();
-        if self.session.media.disk_search != DiskSearch::NotAsked || keys.is_empty() {
+        if !self
+            .session
+            .media
+            .disk_search
+            .due(std::time::Instant::now())
+            || keys.is_empty()
+        {
             return Ok(());
         }
+        let wait = self.session.media.disk_search.pause();
         let extra = self.session.request(
             RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads),
             None,
@@ -64,6 +71,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.media.disk_search = DiskSearch::Asked {
             request: extra,
             keys,
+            wait,
         };
         Ok(())
     }

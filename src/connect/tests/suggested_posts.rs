@@ -514,4 +514,16 @@ fn a_second_offer_waits_for_the_first_answer() {
     assert!(!f.driver.session.suggested_offer_busy(CHAT.0, message.0));
     f.driver.add_offer(CHAT, message, stars(950, 0)).unwrap();
     assert_eq!(sent(&f), 2);
+    // The offer's own message answer frees the post too.
+    assert!(f.driver.session.suggested_offer_busy(CHAT.0, message.0));
+    let extra = f.last("addOffer")["@extra"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    f.ingest(&format!(
+        r#"{{"@type":"message","@extra":"{extra}","id":{},"chat_id":{},"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"offer","entities":[]}}}}}}"#,
+        (9 << 20),
+        CHAT.0,
+    ));
+    assert!(!f.driver.session.suggested_offer_busy(CHAT.0, message.0));
 }

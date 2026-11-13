@@ -49,8 +49,7 @@ fn sent(app: &mut QuillApp, purpose: RequestPurpose, folder: Option<i32>) -> Req
 fn spec_waits_for(app: &mut QuillApp, folder_id: i32, request: RequestId) {
     if let Some(session) = app.demo_session.as_mut() {
         let fetch = session.chat_list.folder_specs.fetch_mut(folder_id);
-        fetch.begin();
-        fetch.sent(request);
+        fetch.begin_with(request);
     }
 }
 
@@ -397,8 +396,7 @@ fn shared_delete_box(app: &mut QuillApp) -> RequestId {
             .folder_chats_to_leave
             .entry(5)
             .or_default();
-        to_leave.begin();
-        to_leave.sent(request);
+        to_leave.begin_with(request);
     }
     request
 }

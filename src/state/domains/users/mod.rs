@@ -10,7 +10,7 @@ mod state;
 mod userpic_video;
 
 pub use purpose::*;
-pub use save_watch::{SaveAnswer, SaveOutcome, SaveWatch};
+pub use save_watch::{SaveOutcome, SaveWatch};
 
 pub use full_infos::UserFullInfos;
 pub use state::*;

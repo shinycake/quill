@@ -207,10 +207,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let sent = self.send_get_story(chat_id, story_id);
         if sent.is_err() {
-            self.session
-                .stories
-                .story_fetch
-                .failed((chat_id.0, story_id), std::time::Instant::now());
+            self.session.stories.story_fetch.failed(
+                (chat_id.0, story_id),
+                None,
+                std::time::Instant::now(),
+            );
         }
         sent
     }
@@ -325,8 +326,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStoryAvailableReactions, None);
-        self.session.stories.available_reactions.begin();
-        self.session.stories.available_reactions.sent(extra);
+        self.session.stories.available_reactions.begin_with(extra);
         match self
             .sender
             .send_json(&get_story_available_reactions(extra, 10))

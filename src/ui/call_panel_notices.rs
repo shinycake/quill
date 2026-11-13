@@ -214,12 +214,11 @@ mod tests {
             started_at: std::time::Instant::now(),
             action: quill::state::CallAction::Idle,
             transport: transport.map_or_else(Default::default, |state| {
-                CallTransport::reported(state, Default::default()).unwrap_or(
-                    CallTransport::Failed {
+                CallTransport::reported(state, Default::default(), std::time::Instant::now())
+                    .unwrap_or(CallTransport::Failed {
                         reason: String::new(),
                         link: None,
-                    },
-                )
+                    })
             }),
             signaling_queue: Vec::new(),
             signaling_dropped: 0,

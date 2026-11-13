@@ -450,6 +450,11 @@ impl RequestRegistry {
             .any(|p| p.purpose == purpose && p.secret_chat_id() == Some(secret_chat_id))
     }
 
+    /// The id of the newest request registered so far (0 before any).
+    pub fn newest(&self) -> RequestId {
+        RequestId(self.next)
+    }
+
     /// A request with no correlation, under the next id.
     fn blank(
         &mut self,
@@ -561,6 +566,24 @@ impl RequestRegistry {
         })
     }
 
+    /// A permissions save of `chat_id` was confirmed with `sent`: the saves
+    /// still out for the chat roll back to those values, not to the ones
+    /// from before it. The table owns its entries' rollbacks, so this is
+    /// not an answer matched by purpose.
+    pub(crate) fn rebase_permission_rollbacks(
+        &mut self,
+        chat_id: ChatId,
+        sent: crate::telegram::envelope::ChatPermissions,
+    ) {
+        for later in self.pending.values_mut().filter(|p| {
+            p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
+        }) {
+            if let Some(RequestRollback::ChatPermissions { previous, .. }) = &mut later.rollback {
+                *previous = Some(sent);
+            }
+        }
+    }
+
     pub fn take(&mut self, id: RequestId) -> Option<PendingRequest> {
         self.remove(id.0)
     }
@@ -595,25 +618,6 @@ impl RequestRegistry {
             .pending
             .iter()
             .filter(|(_, req)| req.purpose == purpose)
-            .map(|(key, _)| *key)
-            .collect();
-        for key in keys {
-            self.remove(key);
-        }
-    }
-
-    /// Drop every in-flight request with `purpose` for `community_id`, so
-    /// an answer that no longer fits the state it would change is ignored
-    /// (a page of add-chat requests asked before Add All reset the list).
-    pub(crate) fn take_purpose_for_community(
-        &mut self,
-        purpose: RequestPurpose,
-        community_id: i64,
-    ) {
-        let keys: Vec<u64> = self
-            .pending
-            .iter()
-            .filter(|(_, req)| req.purpose == purpose && req.community_id() == Some(community_id))
             .map(|(key, _)| *key)
             .collect();
         for key in keys {
@@ -696,7 +700,9 @@ impl RequestRegistry {
         self.pending.len()
     }
 
-    /// The ids in flight now, oldest first.
+    /// The ids of the requests still out, oldest first. A stage that holds
+    /// its own request id asks this to see its request was dropped (a
+    /// reconnect, a restart); it never asks which purpose is in flight.
     pub fn pending_ids(&self) -> Vec<RequestId> {
         let mut ids: Vec<RequestId> = self.pending.values().map(|p| p.id).collect();
         ids.sort_by_key(|id| id.0);
@@ -825,6 +831,14 @@ impl RequestRegistry {
 
     /// Phase 6: an in-flight request for a purpose/user pair (user-scoped
     /// `GetUserFullInfo` / `AddContact`).
+    /// The in-flight request of `purpose` for `user_id`, if any.
+    pub fn find_for_user(&self, purpose: RequestPurpose, user_id: i64) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| p.purpose == purpose && p.user_id() == Some(user_id))
+            .map(|p| p.id)
+    }
+
     pub fn has_purpose_for_user(&self, purpose: RequestPurpose, user_id: i64) -> bool {
         self.pending
             .values()

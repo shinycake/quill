@@ -156,14 +156,14 @@ fn each_failure_doubles_the_wait_up_to_the_cap() {
     let mut h = Harness::new();
     let stories = &mut h.driver.session.stories;
     let now = std::time::Instant::now();
-    stories.story_fetch_failed((7, 5), now);
-    stories.story_fetch_failed((7, 5), now);
+    stories.story_fetch_failed((7, 5), None, now);
+    stories.story_fetch_failed((7, 5), None, now);
     assert_eq!(
         stories.story_fetch.retry((7, 5)).map(|(_, wait)| wait),
         Some(STORIES_RETRY_FIRST * 2)
     );
     for _ in 0..20 {
-        stories.story_fetch_failed((7, 5), now);
+        stories.story_fetch_failed((7, 5), None, now);
     }
     assert_eq!(
         stories.story_fetch.retry((7, 5)).map(|(_, wait)| wait),

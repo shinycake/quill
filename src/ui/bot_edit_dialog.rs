@@ -152,7 +152,7 @@ impl QuillApp {
         let Some(edit) = self.session().and_then(|s| s.bots.owned.edit.clone()) else {
             return;
         };
-        if edit.asked != asked || edit.load_failed() {
+        if edit.asked() != Some(asked) || edit.load_failed() {
             return;
         }
         let (Some(name), Some(about)) = (edit.name.text(), edit.about.text()) else {
@@ -334,7 +334,7 @@ impl QuillApp {
                     .is_ok_and(|changes| changes.is_empty()),
                     _ => true,
                 });
-            let saved = edit.as_ref().is_some_and(|e| e.saved > 0) && !unsaved;
+            let saved = edit.as_ref().is_some_and(|e| e.has_saved()) && !unsaved;
 
             let status = if load_failed {
                 Some((tr(keys::Q_MEDIA_COULD_NOT_LOAD_THE_BOTS).to_string(), true))

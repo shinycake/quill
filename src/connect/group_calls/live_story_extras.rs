@@ -124,6 +124,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let member = MessageSenderRef::Chat(sender).to_value();
         let status = chat_member_status_banned_json(0);
         let json = set_chat_member_status(extra, chat_id.0, &member, &status);
-        self.send_json_request(extra, &json).map(Some)
+        self.send_member_action(chat_id, extra, &json).map(Some)
     }
 }

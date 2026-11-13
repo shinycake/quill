@@ -90,8 +90,7 @@ impl LanguageSwitch {
     /// `request`.
     pub fn strings_sent(&mut self, base: bool, request: RequestId) {
         let fetch = if base { &mut self.base } else { &mut self.pack };
-        fetch.begin();
-        fetch.sent(request);
+        fetch.begin_with(request);
     }
 
     /// The strings `request` brought: taken by the fetch that waits for it.

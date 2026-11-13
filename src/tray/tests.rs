@@ -52,12 +52,8 @@ fn chat(id: i64, unread_count: i32) -> ChatSummary {
         unread_count,
         last_read_inbox_message_id: MessageId(0),
         last_read_outbox_message_id: MessageId(0),
-        order: 0,
-        is_pinned: false,
-        in_main_list: false,
-        in_archive: false,
-        archive_order: 0,
-        archive_is_pinned: false,
+        main: None,
+        archive: None,
         folder_positions: BTreeMap::new(),
         notification_settings: ChatNotificationSettings::default(),
         last: None,
@@ -97,7 +93,7 @@ fn muted_chat(id: i64, unread_count: i32) -> ChatSummary {
 
 fn archived_chat(id: i64, unread_count: i32) -> ChatSummary {
     let mut c = chat(id, unread_count);
-    c.in_archive = true;
+    c.archive.get_or_insert_with(Default::default);
     c
 }
 

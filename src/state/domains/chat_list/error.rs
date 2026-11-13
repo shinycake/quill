@@ -70,15 +70,14 @@ impl Session {
                     .failed(pending_id, error_reason(err), false);
             }
             Some((RequestPurpose::DeleteChatFolderInviteLink, Some(folder_id))) => {
-                // The link left the list at send time: what the box holds is
-                // wrong now, so it shows the error with a Retry that asks
-                // the list again.
-                self.chat_list
-                    .folder_shares
-                    .entry(folder_id)
-                    .or_default()
-                    .links
-                    .fail_dropping_data(error_reason(err));
+                // The link left the list at send time, so what the box holds
+                // is wrong now: the list is outdated (a fetch in flight keeps
+                // its place and answers) and is asked again. The refusal
+                // reaches the box as the delete's own answer.
+                let share = self.chat_list.folder_shares.entry(folder_id).or_default();
+                if !share.links.is_loading() {
+                    share.links.outdate();
+                }
             }
             // The tab order or the tags switch snapped back (its rollback):
             // the toast says why.
@@ -88,6 +87,8 @@ impl Session {
             )) => {
                 self.chats_state.chat_action_error.push(error_reason(err));
             }
+            // Only the request the list waits for says why; an older one's
+            // refusal is not a new line.
             Some((RequestPurpose::GetRecommendedChatFolders, _))
                 if self.chat_list.recommended_folders.failed(
                     pending_id,

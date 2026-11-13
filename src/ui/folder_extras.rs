@@ -118,7 +118,7 @@ impl QuillApp {
                 c.is_unread()
                     && match folder_id {
                         Some(id) => c.folder_positions.contains_key(&id),
-                        None => c.in_main_list,
+                        None => c.in_main_list(),
                     }
             })
         })

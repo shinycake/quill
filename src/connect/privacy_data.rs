@@ -267,9 +267,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         // Only an ask that went out is waited for, under its own request.
-        let network = &mut self.session.settings.privacy_data.network;
-        network.begin();
-        network.sent(extra);
+        self.session.settings.privacy_data.network.begin_with(extra);
         Ok(())
     }
 

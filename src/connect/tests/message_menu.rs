@@ -681,3 +681,41 @@ fn a_late_report_answer_does_not_touch_a_newer_report() {
         Some(MessageReportStage::Reported)
     );
 }
+
+/// Sweep 08-017: a failed `getMessageProperties` does not outlast the next
+/// time the menu opens: opening asks again and forgets the fail-closed
+/// answer, so a reconnected client gets its full menu.
+#[test]
+fn a_failed_menu_ask_is_forgotten_when_the_menu_opens_again() {
+    let (mut driver, recorder, sink, seq) = group_driver();
+    feed(&mut driver, &seq, &sink, GROUP_CHAT);
+    feed(&mut driver, &seq, &sink, REACTED_MESSAGE);
+    driver
+        .fetch_message_menu_actions(ChatId(-100), MessageId(50))
+        .unwrap();
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "getMessageProperties",
+        r#"{"@type":"error","code":500,"message":"offline"}"#,
+    );
+    let menu = &driver.session.messages.menu_actions;
+    assert!(menu.is_failed(ChatId(-100), MessageId(50)));
+    driver
+        .fetch_message_menu_actions(ChatId(-100), MessageId(50))
+        .unwrap();
+    let menu = &driver.session.messages.menu_actions;
+    assert!(!menu.is_failed(ChatId(-100), MessageId(50)));
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "getMessageProperties",
+        r#"{"@type":"messageProperties","can_be_deleted_for_all_users":true}"#,
+    );
+    let menu = &driver.session.messages.menu_actions;
+    assert!(menu.allows_revoke(ChatId(-100), MessageId(50), false));
+}

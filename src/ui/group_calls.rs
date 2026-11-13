@@ -576,10 +576,9 @@ impl QuillApp {
             live.driver
                 .session
                 .groups
-                .member_action_error
-                .remove(&chat_id.0);
+                .dismiss_member_action_error(chat_id.0);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.groups.member_action_error.remove(&chat_id.0);
+            session.groups.dismiss_member_action_error(chat_id.0);
         }
         cx.notify();
     }

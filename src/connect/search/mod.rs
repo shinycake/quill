@@ -427,8 +427,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         let top_chats = &mut self.session.search.search.top_chats;
-        top_chats.begin();
-        top_chats.sent(extra);
+        top_chats.begin_with(extra);
         Ok(Some(extra))
     }
 

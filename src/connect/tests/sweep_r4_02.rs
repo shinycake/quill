@@ -130,7 +130,7 @@ fn the_star_stats_probe_waits_for_its_own_request() {
     let request = t.sender.last("getStarRevenueStatistics").unwrap()["@extra"].clone();
     let stats = &t.driver.session.payments.earn.self_stats;
     assert!(
-        matches!(stats, Fetch::Loading { request: Some(held), .. } if held.as_extra() == request.as_str().unwrap_or_default())
+        matches!(stats, Fetch::Loading { request: held, .. } if held.as_extra() == request.as_str().unwrap_or_default())
     );
     // A second probe while it is out sends nothing.
     t.driver.probe_self_star_stats().unwrap();

@@ -46,7 +46,7 @@ impl QuillApp {
             live.driver.set_sticker_manager_open(true);
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.masks.set_dialog_open(true);
-            session.stickers.manager.open = true;
+            session.stickers.manager.covers.show();
         }
         self.open_box(crate::ui::shell::DialogKind::MaskSets);
         cx.notify();

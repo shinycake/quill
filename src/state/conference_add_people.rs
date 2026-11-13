@@ -244,6 +244,15 @@ impl ConferenceInviteResults {
         }
     }
 
+    /// Every invitation failed: none was sent.
+    pub(crate) fn all_failed(group_call_id: i32, users: Vec<i64>) -> Self {
+        Self {
+            group_call_id,
+            failed: users,
+            ..Self::default()
+        }
+    }
+
     /// An invitation went out.
     pub(crate) fn sent(&mut self, request: RequestId, user_id: i64) {
         self.pending.push((request, user_id));

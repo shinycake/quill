@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 /// The line a failed mask list or change leaves under the dialog.
 const MASK_LIST_FAILED: &str = "Could not load mask sets";
+const MASK_CHANGE_FAILED: &str = "Could not change the mask sets";
 
 /// The page size `getArchivedStickerSets` is asked for.
 pub const ARCHIVED_MASK_PAGE: usize = 100;
@@ -63,8 +64,27 @@ pub struct ArchivedMasks {
     pub next_offset: Option<i64>,
 }
 
+/// What a mask change in flight changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaskChangeTarget {
+    /// `changeStickerSet` of this set.
+    Set(i64),
+    /// A reorder, which moves every row.
+    Reorder,
+}
+
+/// A mask change in flight: it ends with its own request's answer, its
+/// error, or the request being lost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MaskChange {
+    pub request: RequestId,
+    pub target: MaskChangeTarget,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MasksPanel {
+    /// Changes sent and not yet answered, one per request.
+    pub changes: Vec<MaskChange>,
     /// Which surfaces want the lists: the manage dialog, the strip.
     pub wanted: MasksWanted,
     pub tab: MasksTab,
@@ -77,6 +97,9 @@ pub struct MasksPanel {
     pub sets: HashMap<i64, Fetch<Vec<StickerItem>>>,
     /// The set whose Remove button was pressed and now asks to confirm.
     pub confirm_remove: Option<i64>,
+    /// The refusal of the last change (install, archive, remove, reorder),
+    /// beside the lists: a list fetch in flight keeps its place and answers.
+    pub change_note: crate::state::fetch::ChangeNote,
 }
 
 impl MasksPanel {
@@ -90,7 +113,12 @@ impl MasksPanel {
         self.wanted.strip_wanted()
     }
 
+    /// The manage dialog opens or closes; closing it drops the line of a
+    /// refused change, so a reopen shows none.
     pub fn set_dialog_open(&mut self, open: bool) {
+        if !open {
+            self.change_note.clear();
+        }
         self.wanted = MasksWanted::with(open, self.strip_wanted());
     }
 
@@ -110,6 +138,39 @@ impl MasksPanel {
         self.archived
             .data()
             .and_then(|archived| archived.next_offset)
+    }
+
+    /// A change goes out as `request`.
+    pub fn begin_change(&mut self, request: RequestId, target: MaskChangeTarget) {
+        self.change_note.begin(request);
+        self.changes.push(MaskChange { request, target });
+    }
+
+    /// `request` answered or failed: its change is no longer in flight.
+    pub fn settle_change(&mut self, request: RequestId) -> bool {
+        self.change_note.settled(request);
+        let before = self.changes.len();
+        self.changes.retain(|change| change.request != request);
+        self.changes.len() < before
+    }
+
+    /// A mask change (`changeStickerSet` or reorder) is in flight.
+    pub fn change_pending(&self) -> bool {
+        !self.changes.is_empty()
+    }
+
+    /// A change of this mask set is in flight: its own `changeStickerSet`,
+    /// or a reorder (which moves every row).
+    pub fn set_change_pending(&self, set_id: i64) -> bool {
+        self.changes.iter().any(|change| {
+            matches!(change.target, MaskChangeTarget::Reorder)
+                || change.target == MaskChangeTarget::Set(set_id)
+        })
+    }
+
+    /// Whether the stickers of a mask set are still to be asked for.
+    pub fn set_wanted(&self, set_id: i64) -> bool {
+        self.sets.get(&set_id).is_none_or(Fetch::is_idle)
     }
 
     /// The loaded stickers of a mask set.
@@ -169,12 +230,11 @@ impl Session {
         set_id: i64,
         stickers: Vec<StickerItem>,
     ) {
-        self.stickers
-            .masks
-            .sets
-            .entry(set_id)
-            .or_default()
-            .answered(request, stickers);
+        // A set the strip no longer asks for (a change cleared them) keeps
+        // no entry: the next pump asks again.
+        if let Some(set) = self.stickers.masks.sets.get_mut(&set_id) {
+            set.answered(request, stickers);
+        }
     }
 
     /// `updateInstalledStickerSets` for masks: apply TDLib's order in place.
@@ -189,54 +249,22 @@ impl Session {
         sets.sort_by_key(|set| rank.get(&set.id).copied().unwrap_or(usize::MAX));
     }
 
-    /// A mask change (`changeStickerSet` or reorder) is in flight.
-    pub fn mask_change_pending(&self) -> bool {
-        self.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Stickers(
-                    StickersPurpose::ChangeMaskSet { .. }
-                        | StickersPurpose::ReorderInstalledMaskSets
-                )
-            )
-        })
-    }
-
-    /// A request that changes this mask set is in flight: its own
-    /// `changeStickerSet`, or a reorder (which moves every row).
-    pub fn mask_set_change_pending(&self, set_id: i64) -> bool {
-        self.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Stickers(StickersPurpose::ChangeMaskSet { set_id: id, .. })
-                    if id == set_id
-            ) || matches!(
-                pending.purpose,
-                RequestPurpose::Stickers(StickersPurpose::ReorderInstalledMaskSets)
-            )
-        })
-    }
-
     /// A mask change (`changeStickerSet` or reorder) succeeded: drop both
     /// lists so the dialog refetches what TDLib now holds.
-    pub(crate) fn finish_mask_mutation(&mut self, purpose: Option<RequestPurpose>) {
+    pub(crate) fn finish_mask_mutation(&mut self, pending: Option<&PendingRequest>) {
+        if let Some(pending) = pending {
+            self.stickers.masks.settle_change(pending.id);
+        }
         if matches!(
-            purpose,
+            pending.map(|p| p.purpose),
             Some(
                 RequestPurpose::Stickers(StickersPurpose::ChangeMaskSet { .. })
                     | RequestPurpose::Stickers(StickersPurpose::ReorderInstalledMaskSets)
             )
         ) {
             // A list asked before the change answers with what the change
-            // replaced: dropped, so it neither lands as the new list nor
-            // keeps the refetch from going out.
-            for purpose in [
-                StickersPurpose::GetInstalledMaskSets,
-                StickersPurpose::GetArchivedMaskSets { first_page: true },
-                StickersPurpose::GetArchivedMaskSets { first_page: false },
-            ] {
-                while self.requests.take_purpose(purpose.into()).is_some() {}
-            }
+            // replaced: its fetch is replaced here, so that answer finds no
+            // request it waits for and is dropped, and the refetch goes out.
             let masks = &mut self.stickers.masks;
             masks.installed = Fetch::Idle;
             masks.archived = Fetch::Idle;
@@ -269,8 +297,15 @@ impl Session {
             Some(RequestPurpose::Stickers(
                 StickersPurpose::ChangeMaskSet { .. } | StickersPurpose::ReorderInstalledMaskSets,
             )) => {
-                masks.installed.fail(MASK_LIST_FAILED);
-                masks.archived.fail(MASK_LIST_FAILED);
+                // A list fetch in flight keeps its place: its answer is the
+                // truth after the change. The refusal is the change's own
+                // line.
+                masks
+                    .change_note
+                    .refused(pending.map(|p| p.id), MASK_CHANGE_FAILED);
+                if let Some(pending) = pending {
+                    masks.settle_change(pending.id);
+                }
             }
             _ => return,
         }

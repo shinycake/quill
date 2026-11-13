@@ -744,7 +744,7 @@ impl QuillApp {
         self.schedule_widget_polls(cx);
     }
 
-    /// The answer to Quill's query `token`, for the runtime that asked:
+    /// The answer to Quill's query `request`, for the runtime that asked:
     /// dropped when that runtime is gone (a restart starts a new list).
     fn answer_widget_query(
         &mut self,

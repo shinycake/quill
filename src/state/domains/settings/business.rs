@@ -94,10 +94,10 @@ impl Session {
         if self.users_state.user_full_infos.contains_key(&me) {
             return Fetch::Ready(());
         }
-        if self.users_state.user_full_infos.is_loading(&me) {
+        if let Some(request) = self.users_state.user_full_infos.request(&me) {
             return Fetch::Loading {
                 stale: None,
-                request: None,
+                request,
             };
         }
         match &self.settings.business.own_info_error {

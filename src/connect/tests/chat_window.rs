@@ -475,6 +475,60 @@ fn a_new_pin_in_a_window_chat_refetches_its_pinned_list() {
     );
 }
 
+/// An unpin that lands while the pinned list is still being fetched takes
+/// the message out of what is held, outdates the request in flight and
+/// asks again; the old answer is dropped and the new one shows no
+/// unpinned message.
+#[test]
+fn an_unpin_during_the_pinned_fetch_asks_again_and_the_message_stays_gone() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(BOB).unwrap();
+    let pinned_fetches = |h: &Harness| {
+        h.sent("searchChatMessages", BOB)
+            .into_iter()
+            .filter(|v| v["filter"]["@type"] == "searchMessagesFilterPinned")
+            .collect::<Vec<_>>()
+    };
+    let first = pinned_fetches(&h);
+    assert_eq!(first.len(), 1, "the window fetched its pins on open");
+    let old = first[0]["@extra"].as_str().expect("id").to_string();
+
+    h.ingest(r#"{"@type":"updateMessageIsPinned","chat_id":8,"message_id":60,"is_pinned":false}"#);
+    let asked = pinned_fetches(&h);
+    assert_eq!(asked.len(), 2, "the unpin asks the list again");
+    let new = asked[1]["@extra"].as_str().expect("id").to_string();
+
+    let answer = |extra: &str, ids: &[i64]| {
+        let messages: Vec<String> = ids
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"@type":"message","id":{id},"chat_id":8,"is_pinned":true,"date":1,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m","entities":[]}}}}}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{extra}","total_count":{},"messages":[{}],"next_from_message_id":0}}"#,
+            ids.len(),
+            messages.join(",")
+        )
+    };
+    h.ingest(&answer(&old, &[60, 61]));
+    let held = |h: &Harness| {
+        h.driver
+            .session
+            .messages
+            .pinned_messages
+            .get(&8)
+            .and_then(|fetch| fetch.data())
+            .map(|rows| rows.iter().map(|row| row.id.0).collect::<Vec<_>>())
+    };
+    assert_eq!(held(&h), None, "the old answer is dropped");
+    h.ingest(&answer(&new, &[61]));
+    assert_eq!(held(&h), Some(vec![61]), "the unpinned message is gone");
+}
+
 /// One debounced draft save waits at a time. Text typed in Bob's window
 /// and then in the main window's Alice within the quiet second both
 /// reach TDLib, and a send in Alice keeps Bob's waiting save.

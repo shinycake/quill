@@ -89,8 +89,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .or_default();
         match sent {
             Ok(()) => {
-                list.begin();
-                list.sent(extra);
+                list.begin_with(extra);
                 Ok(())
             }
             Err(err) => {
@@ -257,17 +256,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // Asked when never asked, or owed again; a failed fetch waits for
-        // the next change of the list.
-        let saved = &self.session.settings.saved_sounds;
-        if !saved.wants_fetch() {
+        // Asked when never asked, or owed again; a fetch in flight or a
+        // failed one waits (a failed fetch for the next change of the list).
+        if !self.session.settings.saved_sounds.wants_fetch() {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetSavedNotificationSounds, None);
-        self.session.settings.saved_sounds.begin();
-        self.session.settings.saved_sounds.sent(extra);
+        self.session.settings.saved_sounds.begin_with(extra);
         match self.sender.send_json(&get_saved_notification_sounds(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {

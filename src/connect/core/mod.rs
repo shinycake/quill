@@ -3,6 +3,7 @@ use super::composer::ai_rich_draft_note;
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
+use crate::state::fetch::Fetch;
 use crate::state::{AiAnswer, AiResult};
 use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
 use crate::state::{InstantViewPage, RequestPurpose, Session};
@@ -465,12 +466,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         // A pin in a chat on screen refetches its pinned list (the pinned
         // message may not be loaded); a confirmed unpin-all empties it.
-        let pins_changed: Option<ChatId> = match &owned.envelope.payload {
+        let pins_changed: Option<(ChatId, bool)> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::UpdateMessageIsPinned {
                 chat_id,
-                is_pinned: true,
+                is_pinned,
                 ..
-            }) => Some(*chat_id),
+            }) => Some((*chat_id, *is_pinned)),
             _ => None,
         };
         let unpinned_all: Option<ChatId> = match &owned.envelope.payload {
@@ -612,7 +613,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = unpinned_all {
             self.session.messages.pins_cleared(chat_id.0);
         }
-        if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
+        // An unpin leaves the list by itself; it asks again only when it
+        // outdated a fetch that was in flight.
+        if let Some((chat_id, _)) = pins_changed.filter(|(chat, is_pinned)| {
+            self.session.chat_is_shown(*chat)
+                && (*is_pinned
+                    || self
+                        .session
+                        .messages
+                        .pinned_messages
+                        .get(&chat.0)
+                        .is_some_and(Fetch::is_outdated))
+        }) {
             let _ = self.fetch_pinned_messages(chat_id);
         }
         // A refused send here is returned at the end: the one-shot work below

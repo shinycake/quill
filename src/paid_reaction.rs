@@ -263,8 +263,7 @@ impl PaidReactions {
     /// The senders of `chat_id` were asked for under `request`.
     pub fn senders_asked(&mut self, chat_id: i64, request: RequestId) {
         let fetch = self.senders.entry(chat_id).or_default();
-        fetch.begin();
-        fetch.sent(request);
+        fetch.begin_with(request);
     }
 
     /// The ask `request` for the senders of `chat_id` failed: it may be

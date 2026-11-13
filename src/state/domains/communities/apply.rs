@@ -98,14 +98,14 @@ impl Session {
         if !asked.is_some_and(|id| fetch.waits_for(id)) {
             return;
         }
-        let mut list = if first_page {
-            AddChatRequestList::default()
-        } else {
-            fetch.take_data().unwrap_or_default()
-        };
-        let handled = self.communities.handled_add_requests.get(&community_id);
+        let mut list = fetch.take_data().unwrap_or_default();
+        // The marks were for the page that just answered.
+        let handled = std::mem::take(&mut list.handled);
+        if first_page {
+            list = AddChatRequestList::default();
+        }
         for request in page.requests {
-            if handled.is_some_and(|handled| handled.contains(&request.chat_id)) {
+            if handled.contains(&request.chat_id) {
                 continue;
             }
             if !list.requests.iter().any(|r| r.chat_id == request.chat_id) {
@@ -188,12 +188,11 @@ impl Session {
     /// `ok` (`CommunityManager::on_change_community_dialogs`), so the new
     /// count has already come with `updateCommunityFullInfo`.
     fn drop_add_chat_request(&mut self, community_id: i64, chat_id: i64) {
-        // A page asked before this request was handled may still list it.
+        // A page asked before this request was handled may still list it:
+        // marked only while such a page is out, and the mark goes with that
+        // page's answer, so a chat that asks again later is not hidden.
         self.communities
-            .handled_add_requests
-            .entry(community_id)
-            .or_default()
-            .insert(chat_id);
+            .mark_add_request_handled(community_id, chat_id);
         let Some(list) = self
             .communities
             .add_chat_requests
@@ -210,17 +209,10 @@ impl Session {
     }
 
     /// Add All or Decline All handled every request. A page asked before
-    /// it would bring handled requests back, so the page in flight is
-    /// dropped (its answer then has no pending request and is ignored) and
-    /// the list is an answered empty one.
+    /// it would bring handled requests back, so the list is replaced by an
+    /// answered empty one: the page in flight finds no fetch waiting for
+    /// it and is dropped.
     fn reset_add_chat_requests(&mut self, community_id: i64) {
-        self.communities.handled_add_requests.remove(&community_id);
-        for first_page in [true, false] {
-            self.requests.take_purpose_for_community(
-                RequestPurpose::Communities(CommunitiesPurpose::GetAddChatRequests { first_page }),
-                community_id,
-            );
-        }
         if let Some(fetch) = self.communities.add_chat_requests.get_mut(&community_id) {
             *fetch = Fetch::Ready(AddChatRequestList::default());
         }
