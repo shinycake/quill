@@ -2,7 +2,7 @@
 //! batches of operations in canvas px (`twlite::to_json(vector<CanvasOp>)`),
 //! run here on one tiny-skia pixmap per canvas.
 use super::effects;
-use super::fonts::Fonts;
+use super::fonts::{Fonts, GlyphBudget};
 use super::geometry::{self as g, at};
 use super::images::Images;
 use serde_json::Value;
@@ -138,7 +138,16 @@ impl Canvases {
         let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
             return;
         };
-        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_PIXELS {
+        // The renderer holds a widget's canvases to MAX_PIXELS together;
+        // the bitmaps here are held to it too, whatever it asks.
+        let others: u64 = self
+            .canvases
+            .iter()
+            .filter(|(other, _)| **other != id)
+            .map(|(_, pixmap)| u64::from(pixmap.width()) * u64::from(pixmap.height()))
+            .sum();
+        let pixels = u64::from(width) * u64::from(height);
+        if width == 0 || height == 0 || pixels > MAX_PIXELS.saturating_sub(others) {
             self.canvases.remove(&id);
             return;
         }
@@ -165,8 +174,9 @@ impl Canvases {
         let Some(canvas) = self.canvases.get_mut(&id) else {
             return;
         };
+        let mut glyphs = GlyphBudget::frame();
         for op in &ops {
-            run_op(canvas, op, fonts, images, &sources);
+            run_op(canvas, op, fonts, images, &sources, &mut glyphs);
         }
     }
 
@@ -213,6 +223,7 @@ fn run_op(
     fonts: &Fonts,
     images: &Images,
     sources: &HashMap<i32, Pixmap>,
+    glyphs: &mut GlyphBudget,
 ) {
     let (width, height) = (canvas.width(), canvas.height());
     match g::int(op, "k") {
@@ -233,7 +244,9 @@ fn run_op(
                 // pixels inside the clip.
                 Some(mask) if mode != BlendMode::SourceOver => {
                     let mut drawn = canvas.clone();
-                    draw_op(&mut drawn, op, kind, mode, fonts, images, sources, None);
+                    draw_op(
+                        &mut drawn, op, kind, mode, fonts, images, sources, glyphs, None,
+                    );
                     effects::take_masked(canvas, &drawn, &mask);
                 }
                 clip => draw_op(
@@ -244,6 +257,7 @@ fn run_op(
                     fonts,
                     images,
                     sources,
+                    glyphs,
                     clip.as_ref(),
                 ),
             }
@@ -261,9 +275,13 @@ fn draw_op(
     fonts: &Fonts,
     images: &Images,
     sources: &HashMap<i32, Pixmap>,
+    glyphs: &mut GlyphBudget,
     clip: Option<&Mask>,
 ) {
-    let matrix = g::matrix(op, "m");
+    // An op under a transform that can't be drawn under draws nothing.
+    let Some(matrix) = g::drawable(g::matrix(op, "m")) else {
+        return;
+    };
     let mut paint = Paint {
         anti_alias: true,
         blend_mode: mode,
@@ -303,7 +321,7 @@ fn draw_op(
                 clip,
             );
         }
-        4 => text(canvas, op, fonts, matrix, alpha, paint, clip),
+        4 => text(canvas, op, fonts, glyphs, matrix, alpha, paint, clip),
         5 => image(
             canvas,
             op,
@@ -359,6 +377,7 @@ fn text(
     canvas: &mut Pixmap,
     op: &Value,
     fonts: &Fonts,
+    glyphs: &mut GlyphBudget,
     matrix: Transform,
     alpha: f32,
     mut paint: Paint<'static>,
@@ -371,7 +390,7 @@ fn text(
         .pre_scale(if at(&tp, 2) > 0.0 { at(&tp, 2) } else { 1.0 }, 1.0)
         .pre_translate(at(&tp, 3), 0.0);
     let device = (place.sx * place.sx + place.ky * place.ky).sqrt().max(0.01);
-    let Some(shaped) = fonts.shape(g::int(op, "f") as i32, text, device) else {
+    let Some(shaped) = fonts.shape(g::int(op, "f") as i32, text, device, glyphs) else {
         return;
     };
     let Some(mut shader) = shader(op) else { return };

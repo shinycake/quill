@@ -111,7 +111,8 @@ and pthread. build.rs compiles it optimized in every profile.
   `licenses/message-widgets.txt`, and `THIRD_PARTY.md` has the row.
 - widget-sandbox publishes no license. At v0.6.1 and on `main` the
   repository has no LICENSE file, its `package.json` is private with no
-  license field, and GitHub reports none (checked 2026-11-09). The owner
+  license field, and GitHub reports none (checked 2026-11-09, and again at
+  the 2026-11-13 bump to `a6cf612`). The owner
   cleared shipping it as is on 2026-11-09. If upstream adds a license
   later, its text goes into `licenses/message-widgets.txt`.
 - Telegram Desktop's `tgw/` (GPLv3) was read for behavior only. No code was
@@ -203,6 +204,51 @@ so a crash prints its native stack.
   a restarted runtime never gets the answer meant for the one before.
 - A logout drops what widgets still had to write, so nothing lands back in
   the deleted folder.
+
+### Hardening round 2026-11-13
+
+Telegram shipped a run of widget security fixes in the week to 2026-11-13.
+Most are in the engine; the rest are in Telegram Desktop's own glue
+(`tgw/`, read for behavior only). What Quill took:
+
+- The engine moved to the commits Telegram Desktop pins
+  (`third_party/widgets/VERSION`): widget-sandbox `a6cf612` (v0.6.5 and the
+  `tdesktop-fixes` branch after it: QuickJS use-after-free, out-of-bounds,
+  closure-limit and parser fixes, interrupt polls inside native loops, a
+  1024-deep DOM cap, host calls refused when an argument is too long or
+  can't be copied, a widget stopped on any error script can't catch) and
+  twidget `866f097` (104 commits of bounded parsers, layout, canvas and
+  selector work, checked casts and clamped lengths).
+- Each layer checks again what the one before it already checked, since
+  Telegram Desktop's fix for storage was exactly a store that trusted the
+  sandbox:
+  - A storage commit names `local` or `session` (`storage::AreaName`) and
+    fits in 4 KB (`storage::commit`), or it is dropped whole and what the
+    widget kept before stays.
+  - A link is opened only when it is an `https://` URL to a plain DNS host,
+    a Telegram host for `openTelegramLink` and any other for `openLink`
+    (`message_widget::link`), so no other scheme or disguised host reaches
+    the confirm box or the OS.
+  - Images decode only as the profile's types (PNG, JPEG, GIF, WebP), each
+    by its own decoder, with the size read from the header and checked
+    before any pixels exist (4096 px a side, 4 M pixels), under the
+    decoder's own allocation limit, and at most 1024 images and 128 MB held
+    by one widget. The SVG path is gone: the renderer never sends SVG to a
+    backend.
+- A widget's canvas bitmaps are held to 4096 × 4096 pixels together, as
+  the renderer holds them, whatever it asks for (`Canvases::run`).
+- A group or canvas op whose transform stretches more than 2^20 times, or
+  isn't finite or invertible, isn't drawn (`geometry::drawable`): stroking
+  under `scale(3.57e23)` walks paths of that size.
+- Color glyphs (emoji) are rasterized at their device size whether clipped
+  or not; one frame, or one canvas batch, gets 64 MB of them
+  (`fonts::GlyphBudget`) and the rest are left out.
+- BasicIntl on Windows gives `gmtime_s` no time before 1970, which the CRT
+  treats as an invalid parameter and ends the app on
+  (`native/patches/twidget-quill.patch`).
+- Not needed in Quill: the damaged-PNG bit-depth check (Quill has no
+  partial-PNG path; the decoder refuses the file) and the Qt-specific
+  stroker costs.
 
 ## Verification
 

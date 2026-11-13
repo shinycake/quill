@@ -169,3 +169,24 @@ fn storage_over_the_quota_or_out_of_bounds_is_not_restored() {
     assert_eq!(storage::load(&dir, key(4)), Stored::default());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_storage_commit_past_the_quota_or_to_an_unknown_area_is_refused() {
+    let mut fits = storage::Area::new();
+    fits.insert("k".into(), "x".repeat(QUOTA_BYTES - 1));
+    assert_eq!(
+        storage::commit("local", fits.clone()),
+        Some((storage::AreaName::Local, fits.clone()))
+    );
+    assert_eq!(
+        storage::commit("session", fits.clone()),
+        Some((storage::AreaName::Session, fits.clone()))
+    );
+    assert_eq!(storage::commit("", fits.clone()), None);
+    assert_eq!(storage::commit("Local", fits.clone()), None);
+    assert_eq!(storage::commit("indexedDB", fits), None);
+    let mut over = storage::Area::new();
+    over.insert("k".into(), "x".repeat(QUOTA_BYTES));
+    assert_eq!(storage::commit("local", over.clone()), None);
+    assert_eq!(storage::commit("session", over), None);
+}

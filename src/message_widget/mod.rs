@@ -5,6 +5,7 @@
 //! the design: docs/decisions/message-widgets.md.
 #![deny(clippy::indexing_slicing)]
 
+pub mod link;
 pub mod storage;
 
 use crate::ids::{ChatId, MessageId};

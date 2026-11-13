@@ -32,6 +32,35 @@ pub fn area_bytes(area: &Area) -> usize {
         .sum()
 }
 
+/// Which of a widget's two storage areas a commit names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AreaName {
+    /// `localStorage`: kept on disk between runs.
+    Local,
+    /// `sessionStorage`: kept while the app runs.
+    Session,
+}
+
+impl AreaName {
+    /// The area the sandbox names; `None` for any other name.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "local" => Some(Self::Local),
+            "session" => Some(Self::Session),
+            _ => None,
+        }
+    }
+}
+
+/// A commit of `values` to one area, checked on its own: the sandbox holds
+/// commits to [`QUOTA_BYTES`], and an area past it is refused whole here
+/// too, so what was kept before stays (Telegram Desktop's store checks the
+/// same since its 2026-11-13 fix).
+pub fn commit(name: &str, values: Area) -> Option<(AreaName, Area)> {
+    let name = AreaName::parse(name)?;
+    (area_bytes(&values) <= QUOTA_BYTES).then_some((name, values))
+}
+
 impl Stored {
     /// The same, held to the bounds a widget may keep: an area over the
     /// quota is dropped whole (the sandbox never commits one, so it is a

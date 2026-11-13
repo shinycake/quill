@@ -6,7 +6,7 @@ namespace twidget::version {
 
 /// The framework release and the versions this glue and its bundles share (VERSION.json). A bundle stamped with
 /// another protocol, profile or sdk is refused (`bundle-mismatch`, bundle_stamp.h).
-inline constexpr const char* VERSION = "0.6.1";
+inline constexpr const char* VERSION = "0.6.5";
 /// The wire between this glue and the bundles (docs/protocol.md).
 inline constexpr int PROTOCOL = 1;
 /// The widget profile this glue enforces (`TelegramWidget.profile`, docs/profile-v1.md).

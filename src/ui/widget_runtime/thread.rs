@@ -6,6 +6,8 @@ use super::backend::Resources;
 use super::ffi::{Native, Shared};
 use super::{Frame, Inbox, Input, Launch, Outbox, RuntimeEvent, WIDGETS, clock_ms, paint};
 use gpui_kit::RenderImage;
+use quill::message_widget::link::{self, LinkKind};
+use quill::message_widget::storage;
 use serde_json::Value;
 use smallvec::SmallVec;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -234,21 +236,21 @@ fn events(json: &str, told: &mut Told) -> Vec<RuntimeEvent> {
                 out.push(RuntimeEvent::Started);
             }
         }
-        "action" => match event.get("kind").and_then(Value::as_str) {
-            Some("openLink") => out.push(RuntimeEvent::Link {
-                telegram: false,
-                url: text("url"),
-            }),
-            Some("openTelegramLink") => out.push(RuntimeEvent::Link {
-                telegram: true,
-                url: text("url"),
-            }),
-            // Haptics do nothing on a desktop; `ready` needs nothing.
-            _ => {}
-        },
-        "storage" => out.push(RuntimeEvent::Storage {
-            area: text("area"),
-            values: event
+        "action" => {
+            let kind = match event.get("kind").and_then(Value::as_str) {
+                Some("openLink") => LinkKind::Web,
+                Some("openTelegramLink") => LinkKind::Telegram,
+                // Haptics do nothing on a desktop; `ready` needs nothing.
+                _ => return out,
+            };
+            let url = text("url");
+            // Checked again here, whatever the sandbox let through.
+            if link::checked(kind, &url).is_some() {
+                out.push(RuntimeEvent::Link { kind, url });
+            }
+        }
+        "storage" => {
+            let values = event
                 .get("values")
                 .and_then(Value::as_object)
                 .map(|values| {
@@ -257,8 +259,13 @@ fn events(json: &str, told: &mut Told) -> Vec<RuntimeEvent> {
                         .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_owned())))
                         .collect()
                 })
-                .unwrap_or_default(),
-        }),
+                .unwrap_or_default();
+            // An unknown area or one past the quota is refused whole: what
+            // the widget kept before stays.
+            if let Some((area, values)) = storage::commit(&text("area"), values) {
+                out.push(RuntimeEvent::Storage { area, values });
+            }
+        }
         "gesture" => out.push(RuntimeEvent::Gesture {
             hold: event.get("hold").and_then(Value::as_bool).unwrap_or(false),
         }),

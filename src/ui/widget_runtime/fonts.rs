@@ -178,6 +178,37 @@ pub struct Shaped {
     pub color: Vec<ColorGlyph>,
 }
 
+/// What the color glyphs of one frame (or one canvas batch) may take,
+/// bytes. A color glyph is rasterized at its device size whether it is
+/// clipped or not, so one emoji under `scale(1000)` would ask for
+/// gigabytes; past the budget the glyphs are left out (Telegram Desktop's
+/// 2026-11-13 bound, 64 MB a frame).
+pub struct GlyphBudget {
+    left: u64,
+}
+
+impl GlyphBudget {
+    pub const FRAME_BYTES: u64 = 64 * 1024 * 1024;
+
+    pub fn frame() -> Self {
+        Self {
+            left: Self::FRAME_BYTES,
+        }
+    }
+
+    /// Takes what a color glyph `side` device px tall needs; false when
+    /// it would not fit what is left.
+    fn take(&mut self, side: f32) -> bool {
+        let side = f64::from(side).ceil();
+        let bytes = side * side * 4.0;
+        if !(bytes.is_finite() && bytes >= 0.0 && bytes <= self.left as f64) {
+            return false;
+        }
+        self.left -= bytes as u64;
+        true
+    }
+}
+
 /// The fonts one widget made; each handle is its own.
 #[derive(Default)]
 pub struct Fonts {
@@ -257,8 +288,14 @@ impl Fonts {
     }
 
     /// `text` in `font`, ready to fill; `scale` is device px per CSS px
-    /// for the glyphs drawn as images.
-    pub fn shape(&self, font: i32, text: &str, scale: f32) -> Option<Shaped> {
+    /// for the glyphs drawn as images, which take from `glyphs`.
+    pub fn shape(
+        &self,
+        font: i32,
+        text: &str,
+        scale: f32,
+        glyphs: &mut GlyphBudget,
+    ) -> Option<Shaped> {
         let face = self.faces.get(&font)?;
         let mut guard = quill::locks::lock_or_recover(system());
         let system = &mut *guard;
@@ -286,6 +323,7 @@ impl Fonts {
                     {
                         append(&mut path, commands, x, y);
                     }
+                    _ if !glyphs.take(glyph.font_size * scale) => {}
                     _ => {
                         let (key, _, _) = CacheKey::new(
                             glyph.font_id,
@@ -436,11 +474,38 @@ mod tests {
         assert!(fonts.width(font, "Quill Quill") > one);
         assert!(
             fonts
-                .shape(font, "Quill", 2.0)
+                .shape(font, "Quill", 2.0, &mut GlyphBudget::frame())
                 .and_then(|shaped| shaped.outline)
                 .is_some()
         );
         fonts.delete(font);
         assert_eq!(fonts.width(font, "Quill"), 0.0);
+    }
+
+    #[test]
+    fn color_glyphs_past_the_frame_budget_are_left_out() {
+        let mut budget = GlyphBudget::frame();
+        assert!(budget.take(224.0));
+        assert!(!budget.take(512.0 * 1000.0));
+        assert!(!budget.take(f32::NAN));
+        assert!(!budget.take(f32::INFINITY));
+        // 64 MB holds 4096 × 4096 px at most, and nothing after it.
+        let mut budget = GlyphBudget::frame();
+        assert!(budget.take(4096.0));
+        assert!(!budget.take(1.0));
+
+        let mut fonts = Fonts::default();
+        let (font, _) = fonts.create("sans-serif", 512.0, 400, false, "");
+        let mut budget = GlyphBudget::frame();
+        let shaped = fonts
+            .shape(
+                font,
+                "\u{1F1FA}\u{1F1F8}\u{1F600} Quill",
+                1000.0,
+                &mut budget,
+            )
+            .unwrap();
+        assert!(shaped.color.is_empty());
+        assert!(shaped.outline.is_some(), "outlined text still draws");
     }
 }
