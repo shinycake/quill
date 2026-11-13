@@ -297,7 +297,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         save_preferences(&self.paths, &prefs)
     }
 
-    /// Persist the desktop-notifications switch (tdesktop `desktopNotify`).
     /// Persist the notification view (tdesktop "Name" / "Text") to
     /// `prefs.json`, keeping the other prefs.
     pub fn save_notify_view(&mut self) {
@@ -311,12 +310,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn save_notify_photo_previews(&mut self) {
         let mut prefs = load_preferences(&self.paths);
         prefs.notify_photo_previews = self.session.settings.notify_photo_previews;
-        save_preferences(&self.paths, &prefs)
-    }
-
-    pub fn save_desktop_notifications(&mut self) {
-        let mut prefs = load_preferences(&self.paths);
-        prefs.desktop_notifications = self.session.settings.desktop_notifications;
         save_preferences(&self.paths, &prefs)
     }
 

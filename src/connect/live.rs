@@ -258,7 +258,11 @@ fn open_prepared_client(
     // sounds") loads the same way.
     let prefs = load_preferences(&prepared.paths);
     session.settings.inapp_sounds_enabled = prefs.inapp_sounds_enabled;
-    session.settings.desktop_notifications = prefs.desktop_notifications;
+    // Desktop notifications are the app's switch, every account's alike.
+    session.settings.desktop_notifications = safe_app_root().map_or(
+        prefs.desktop_notifications,
+        |root| crate::settings::desktop_notifications(&root, &prefs),
+    );
     session.settings.notify_view = prefs.notify_view;
     session.settings.notify_photo_previews = prefs.notify_photo_previews;
     // Slice parity:settings-language: the app language tag load the same

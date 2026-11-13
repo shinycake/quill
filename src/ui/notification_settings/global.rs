@@ -44,17 +44,25 @@ impl QuillApp {
     /// tdesktop "Desktop notifications" (`desktopNotify`), also flipped from
     /// the tray menu's "Disable/Enable notifications".
     ///
-    /// It is the app's setting, as in tdesktop: every connected account's
-    /// session takes it (the ones in the background keep notifying
-    /// otherwise), and each account's prefs file keeps it.
+    /// It is the app's setting, as in tdesktop, kept once in the account
+    /// registry: an account with no client running reads it when it
+    /// connects, and every connected account's session takes it now (the
+    /// ones in the background keep notifying otherwise).
     pub(crate) fn set_desktop_notifications(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.demo_session.is_none()
+            && let Some(root) = quill::settings::safe_app_root()
+            && let Err(err) = quill::settings::set_desktop_notifications(&root, on)
+        {
+            self.set_note(StatusNote::error(tr_with(
+                keys::Q_OPS_COULDN_T_SAVE_THE_NOTIFICATION,
+                &[("err", &err.to_string())],
+            )));
+        }
         for live in self.background.live_clients_mut() {
             live.driver.session.settings.desktop_notifications = on;
-            live.driver.save_desktop_notifications();
         }
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.desktop_notifications = on;
-            live.driver.save_desktop_notifications();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.desktop_notifications = on;
             self.set_note(StatusNote::silent(tr(
