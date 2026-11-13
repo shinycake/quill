@@ -193,8 +193,14 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Leave the editor without sending anything.
+    /// Leave the editor without sending anything. While its create or save
+    /// is out, Cancel waits (as the welcome editor's does): the answer and
+    /// any refusal land in this editor, and a closed one would let New
+    /// Topic send a duplicate.
     fn cancel_topic_editor(&mut self, cx: &mut Context<Self>) {
+        if self.forum_editor_sending() {
+            return;
+        }
         if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
             dialog.editor = None;
         }
@@ -653,6 +659,7 @@ impl QuillApp {
                         Button::new("topic-editor-cancel")
                             .label(tr(keys::CANCEL))
                             .ghost()
+                            .disabled(sending)
                             .on_click(cx.listener(|this, _, _, cx| this.cancel_topic_editor(cx))),
                     )
                     .child(

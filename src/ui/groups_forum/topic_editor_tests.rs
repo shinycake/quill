@@ -67,3 +67,41 @@ fn a_save_in_flight_keeps_its_topic_editor(cx: &mut TestAppContext) {
         );
     });
 }
+
+/// Sweep r5 (17-001): Cancel waits for a create in flight, so its answer
+/// or refusal still lands in the editor; once it is answered Cancel works.
+#[gpui_kit::test]
+fn cancel_waits_for_a_create_in_flight(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let chat = ChatId(-1001);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_forum_manage_dialog(chat, window, cx);
+        app.begin_topic_editor(None, window, cx);
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::CreateForumTopic, Some(chat)))
+            .expect("the demo session");
+        fn editor(app: &mut QuillApp) -> Option<&mut Submit> {
+            app.admin
+                .forum_manage_dialog
+                .as_mut()
+                .and_then(|dialog| dialog.editor.as_mut())
+                .map(|editor| &mut editor.submit)
+        }
+        if let Some(submit) = editor(app) {
+            *submit = Submit::Sending(vec![request]);
+        }
+        app.cancel_topic_editor(cx);
+        assert_eq!(
+            editor(app).cloned(),
+            Some(Submit::Sending(vec![request])),
+            "the editor waits for its answer"
+        );
+        if let Some(submit) = editor(app) {
+            *submit = Submit::Editing;
+        }
+        app.cancel_topic_editor(cx);
+        assert_eq!(editor(app).cloned(), None, "nothing out: Cancel closes it");
+    });
+}
