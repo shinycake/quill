@@ -56,6 +56,9 @@ namespace litehtml
     {
       public:
         bool take_table_cells(int count);
+        bool take_generated(size_t bytes);
+        void release_generated(int boxes, size_t bytes);
+        bool generated_limited() const { return m_generated_limited; }
         std::unordered_set<const element*> skip_paint;
         std::unordered_set<const element*> skip_background_images;
         const element* bare_effects = nullptr;
@@ -72,6 +75,9 @@ namespace litehtml
         uint64_t style_epoch() const { return m_style_epoch; }
         void     note_style_change() { m_style_epoch++; }
         uint64_t m_layout_epoch       = 1;
+        uint64_t m_layout_budget      = 0;
+        uint64_t m_layout_spent       = 0;
+        bool     m_layout_exhausted   = false;
         static std::atomic<uint64_t> s_layout_hits;
         static std::atomic<uint64_t> s_layout_misses;
         static std::atomic<uint64_t> s_layout_mismatches;
@@ -97,6 +103,27 @@ namespace litehtml
         bool     layout_cache_check() const;
         uint64_t layout_epoch() const { return m_layout_epoch; }
         void     invalidate_layout_cache() { m_layout_epoch++; }
+        // Layout budget: how many boxes one render() may lay out afresh (cache hits are free). Nested flex
+        // and grid boxes measure their children several times each, so a few hundred bytes of markup can ask
+        // for 2^depth layouts. Past the budget every box returns at once, the document stays as it was laid
+        // out so far, and it lays out nothing again: layout_exhausted() tells the embedder to stop it.
+        // 0, the default, lays out without a limit.
+        void     set_layout_budget(uint64_t boxes) { m_layout_budget = boxes; }
+        // Levels of elements built, <html> the first: layout and painting recurse per level, 1.7 KB of stack each at most.
+        static constexpr int max_build_depth = 128;
+        bool     layout_exhausted() const { return m_layout_exhausted; }
+        uint64_t layout_spent() const { return m_layout_spent; }
+        bool     spend_layout()
+        {
+            if(m_layout_exhausted)
+                return false;
+            if(++m_layout_spent > m_layout_budget && m_layout_budget)
+            {
+                m_layout_exhausted = true;
+                return false;
+            }
+            return true;
+        }
         void     note_layout_hit() { s_layout_hits.fetch_add(1, std::memory_order_relaxed); }
         void     note_layout_miss() { s_layout_misses.fetch_add(1, std::memory_order_relaxed); }
         void     note_layout_check_mismatch() { s_layout_mismatches.fetch_add(1, std::memory_order_relaxed); }
@@ -149,14 +176,21 @@ namespace litehtml
         std::unordered_set<string_id>           m_left_classes;
         std::unordered_set<string_id>           m_left_ids;
         std::unordered_set<string_id>           m_left_attrs;
-        static constexpr int                    max_build_depth    = 256;
         static constexpr int                    max_build_elements = 20000;
         static constexpr int                    max_table_cells    = 200000;
         int                                     m_table_cells      = 0;
         bool                                    m_table_limited    = false;
+        static constexpr int                    max_generated_boxes = 20000;
+        static constexpr size_t                 max_generated_box   = 32 * 1024;
+        static constexpr size_t                 max_generated_bytes = 1024 * 1024;
+        int                                     m_generated_boxes   = 0;
+        size_t                                  m_generated_bytes   = 0;
+        bool                                    m_generated_limited = false;
         std::unordered_map<const void*, std::vector<std::shared_ptr<element>>> m_node_elements;
         std::string                             m_master_styles;
         mutable uint32_t                        m_paint_generation = 1;
+        uint32_t                                m_svg_use_generation = 0;
+        int                                     m_svg_use_budget     = 0;
         uint64_t                                m_match_epoch      = 1;
         bool                                    m_has_svg          = false;
         bool                                    m_cull_paint       = false;
@@ -212,6 +246,15 @@ namespace litehtml
         pixel_t   render(pixel_t max_width, render_type rt = render_all);
         void      draw(uint_ptr hdc, pixel_t x, pixel_t y, const position* clip, bool cull = false);
         uint32_t  paint_generation() const { return m_paint_generation; }
+        int&      svg_use_budget(int refill)
+        {
+            if(m_svg_use_generation != m_paint_generation)
+            {
+                m_svg_use_generation = m_paint_generation;
+                m_svg_use_budget     = refill;
+            }
+            return m_svg_use_budget;
+        }
         void      note_svg() { m_has_svg = true; }
         bool      has_svg() const { return m_has_svg; }
         void      invalidate_paint() const { m_paint_generation = m_paint_generation + 1 == 0 ? 1 : m_paint_generation + 1; }

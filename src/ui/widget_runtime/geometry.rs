@@ -74,6 +74,37 @@ pub fn matrix(value: &Value, key: &str) -> Transform {
     )
 }
 
+/// The most a widget's transform may stretch: a group or a canvas drawn
+/// under more than this (`scale(3.57e23)`) is not drawn, as in Telegram
+/// Desktop, since stroking or filling its shapes walks paths of that size.
+pub const MAX_STRETCH: f32 = (1 << 20) as f32;
+
+/// How far `t` stretches a unit vector at most (the larger singular value
+/// of its linear part).
+pub fn max_stretch(t: Transform) -> f32 {
+    let (a, b, c, d) = (
+        f64::from(t.sx),
+        f64::from(t.ky),
+        f64::from(t.kx),
+        f64::from(t.sy),
+    );
+    let sum = a * a + b * b + c * c + d * d;
+    let det = a * d - b * c;
+    let root = (sum * sum - 4.0 * det * det).max(0.0).sqrt();
+    ((sum + root) / 2.0).sqrt() as f32
+}
+
+/// `t` when it can be drawn under: finite, invertible and within
+/// [`MAX_STRETCH`].
+pub fn drawable(t: Transform) -> Option<Transform> {
+    let stretch = max_stretch(t);
+    (t.is_finite()
+        && t.invert().is_some_and(|inverse| inverse.is_finite())
+        && stretch.is_finite()
+        && stretch <= MAX_STRETCH)
+        .then_some(t)
+}
+
 /// "s": offset, ARGB pairs.
 pub fn stops(value: &Value, key: &str) -> Vec<GradientStop> {
     let Some(items) = value.get(key).and_then(Value::as_array) else {
@@ -353,6 +384,24 @@ pub fn device_bounds(rect: Rect, transform: Transform) -> Option<tiny_skia::IntR
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn transforms_past_the_stretch_bound_are_not_drawable() {
+        let fine = Transform::from_scale(2.0, 2.0).pre_rotate(30.0);
+        assert!((max_stretch(fine) - 2.0).abs() < 1e-4);
+        assert_eq!(drawable(fine), Some(fine));
+        assert!(drawable(Transform::from_scale(MAX_STRETCH, 1.0)).is_some());
+        for bad in [
+            Transform::from_scale(3.57e23, 3.57e23),
+            Transform::from_scale(MAX_STRETCH * 2.0, 1.0),
+            Transform::from_row(1.0, 0.0, 2.0e6, 1.0, 0.0, 0.0),
+            Transform::from_scale(0.0, 1.0),
+            Transform::from_row(f32::NAN, 0.0, 0.0, 1.0, 0.0, 0.0),
+            Transform::from_row(1.0, 0.0, 0.0, 1.0, f32::INFINITY, 0.0),
+        ] {
+            assert_eq!(drawable(bad), None, "{bad:?}");
+        }
+    }
 
     #[test]
     fn colors_are_argb() {

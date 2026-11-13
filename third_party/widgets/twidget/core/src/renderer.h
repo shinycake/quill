@@ -51,6 +51,7 @@ struct BuildStats {
     int scripted = 0;
     /// Paints that handed out the last list again, only layers having moved.
     int reused = 0;
+    size_t names = 0, name_bytes = 0;
 };
 
 class Renderer : private CanvasHost {
@@ -262,9 +263,12 @@ private:
     void adopt(int64_t id, Node* n, const twidget::Json& attrs);
     void detach(Node* n);
     void forget(Node* n);
+    bool hold(const twidget::Json& op);
+    bool take_text(const std::string& old, const std::string& fresh);
+    size_t tree_bytes_ = 0, text_bytes_ = 0, text_pieces_ = 0, sheet_blocks_ = 0;
     // shadow tree → HTML → litehtml
     std::string serialize() const;
-    void serialize_node(const Node* n, std::string& out) const;
+    void serialize_node(const Node* n, std::string& out, int level) const;
     /// `patch`: an ops batch, which may go into the document in place (patch_document).
     void rebuild(bool patch = false);
     /// Builds a document a coalesced batch left stale.
@@ -282,6 +286,15 @@ private:
         }
     };
     int meter_depth_ = 0;
+    /// Charges the names the outermost call it spans left in litehtml's name table, which never gives one back.
+    struct NameMeter {
+        Renderer& r;
+        size_t names = 0, bytes = 0;
+        explicit NameMeter(Renderer& renderer);
+        ~NameMeter();
+    };
+    int name_meter_depth_ = 0;
+    void stop_names();
     std::deque<std::pair<double, double>> charges_;  // when, and how long, the passes of the last window took
     double first_charge_ = -1;
     double throttled_until_ = 0;
@@ -438,9 +451,10 @@ private:
     float canvas_text_width(int font, const std::string& text) override;
     bool canvas_source(int64_t node, int& image, int& canvas, float& w, float& h) override;
     int64_t canvas_allowance(int id) override;
+    size_t canvas_path_floats(int id) override;
     void freeze(const std::string& reason, bool fatal);
-    /// Frozen, or stopped past the paint limit: nothing animates.
-    bool still() const { return frozen_ || paint_stopped_; }
+    /// Frozen, or stopped past the paint or the layout limit: nothing animates.
+    bool still() const { return frozen_ || paint_stopped_ || layout_stopped_; }
 
     // Heavy boxes (paint_policy.h): counted before a frame is drawn, after a build, a restyle by the pointer, a batch
     // that moved scripted layers, and an animation of one starting or ending. Past a limit, `limit` goes to the host.
@@ -453,6 +467,9 @@ private:
     /// Rule 5: the running animations into the ledger; true when one that was counted ended.
     bool sync_motion(double now);
     void stop_paint(const paint::Verdict& verdict);
+    /// Past the layout budget (Container::layout), whatever the host's policy: a violation for the host's log, and the
+    /// renderer freezes (fatal) with the badge alone, the widget's document laid out no more.
+    void stop_layout(uint64_t boxes);
 
     /// A place in the text: an element (its `data-twid`) and a byte offset into the text of the runs it owns,
     /// those whose nearest element with an id it is. It outlives a patch or a layout that keeps the element.
@@ -584,6 +601,7 @@ private:
     std::pair<int, int> paint_reported_{-1, -1};
     bool paint_scan_ = true;
     bool paint_stopped_ = false;
+    bool layout_stopped_ = false;
     paint::PaintCounter<int64_t> paint_;
     uint64_t motion_hash_ = 0;
     bool motion_stale_ = true;

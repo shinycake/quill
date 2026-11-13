@@ -283,6 +283,10 @@ inline constexpr size_t MAX_WALLET_BOC_TOTAL = 65536;
 inline constexpr size_t MAX_SIGN_DATA_LENGTH = 4096;
 /// UTF-8 bytes of a `cell` payload's TL-B schema.
 inline constexpr size_t MAX_SIGN_DATA_SCHEMA_BYTES = 1024;
+/// The longest valid `bridge` argument is a wallet transaction: every bag of cells, and 256 bytes for the rest of each message.
+inline constexpr size_t MAX_BRIDGE_CALL_BYTES = MAX_WALLET_BOC_TOTAL + 256 * MAX_WALLET_MESSAGES + 1024;
+/// The other arguments the glue parses (`intl`, `timer`, `stat`); a parsed megabyte takes fifty, so a longer one is refused unparsed.
+inline constexpr size_t MAX_HOST_CALL_BYTES = 65536;
 /// After the answer to a call made by a tap (a request or a wallet call) reached the widget, one wallet call may follow without a new tap this long.
 inline constexpr double WALLET_GRANT_MS = 10000;
 /// TON Connect's network ids: the mainnet and the testnet.

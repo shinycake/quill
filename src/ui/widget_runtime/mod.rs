@@ -18,6 +18,8 @@ mod paint;
 mod thread;
 
 use gpui_kit::RenderImage;
+pub use quill::message_widget::link::LinkKind;
+pub use quill::message_widget::storage::AreaName;
 use quill::wake::Signal;
 use std::collections::BTreeMap;
 use std::sync::mpsc::{Sender, channel};
@@ -89,11 +91,12 @@ pub enum RuntimeEvent {
     Stopped(String),
     /// It could not start.
     Failed(String),
-    /// `openLink` (`telegram` false) or `openTelegramLink`, after a press.
-    Link { telegram: bool, url: String },
-    /// Its storage area after a commit.
+    /// `openLink` or `openTelegramLink`, after a press; the URL is one a
+    /// widget may open as that kind ([`quill::message_widget::link`]).
+    Link { kind: LinkKind, url: String },
+    /// Its storage area after a commit, within the quota.
     Storage {
-        area: String,
+        area: AreaName,
         values: BTreeMap<String, String>,
     },
     /// What it claims of the press in progress: `hold` = a long press is its own.

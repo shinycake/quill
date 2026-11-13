@@ -246,6 +246,8 @@ litehtml::rendered_width litehtml::render_item::render(pixel_t x, pixel_t y,
     }
     if(cacheable && doc)
         doc->note_layout_miss();
+    if(doc && !doc->spend_layout())
+        return {};
 
     m_resolved_layout_safe = -1;
     calc_outlines(containing_block_size.width);
@@ -1777,7 +1779,7 @@ void litehtml::render_item::draw_children(uint_ptr hdc, pixel_t x, pixel_t y, co
         }
     }
 
-    if(clips)
+    if(clips && src_el()->css().get_display() != display_inline)
     {
         doc->container()->del_clip();
     }

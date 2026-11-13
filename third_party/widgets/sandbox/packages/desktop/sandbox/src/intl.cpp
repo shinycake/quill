@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -293,16 +294,21 @@ static std::string two(int v) { char b[8]; snprintf(b, sizeof b, "%02d", v); ret
 static Parts dateParts(double epochMs, const Json& rawOpts, const std::string& method) {
     static const char* const months[] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
     static const char* const days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-    if (!std::isfinite(epochMs)) return {{"literal", "Invalid Date"}};
+    // Past ECMAScript's time range (8.64e15 ms) there is no date, and the conversions below need a value they can hold.
+    if (!(std::fabs(epochMs) <= 8.64e15)) return {{"literal", "Invalid Date"}};
     double seconds = std::floor(epochMs / 1000);
+    if (seconds < double(std::numeric_limits<time_t>::min()) || seconds >= std::ldexp(1.0, std::numeric_limits<time_t>::digits)) return {{"literal", "Invalid Date"}};
     int millis = int(epochMs - seconds * 1000);
     time_t t = time_t(seconds);
     struct tm tmv {};
 #ifdef _WIN32
-    gmtime_s(&tmv, &t);
+    // Microsoft documents gmtime_s through the year 3000 only: a later time is not given to it.
+    // QUILL: nor one before 1970, which the CRT also treats as an invalid parameter (it ends the app).
+    bool converted = t >= 0 && t <= 32535215999LL && gmtime_s(&tmv, &t) == 0;
 #else
-    gmtime_r(&t, &tmv);
+    bool converted = gmtime_r(&t, &tmv) != nullptr;
 #endif
+    if (!converted || tmv.tm_mon < 0 || tmv.tm_mon > 11 || tmv.tm_wday < 0 || tmv.tm_wday > 6) return {{"literal", "Invalid Date"}};
     Json opts = rawOpts.isObject() ? rawOpts : Json::object();
     auto str = [&](const char* k) -> std::string { return opts[k].asString(); };
     auto has = [&](const char* k) { return !opts[k].isNull(); };

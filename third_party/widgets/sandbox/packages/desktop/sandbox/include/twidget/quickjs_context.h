@@ -24,7 +24,7 @@ public:
 
 /// Value returned by a host function into the sandbox.
 struct HostReturn {
-    enum class Kind { Undefined, Null, String, Number, ArrayBuffer };
+    enum class Kind { Undefined, Null, String, Number, ArrayBuffer, RangeError };
     Kind kind = Kind::Undefined;
     std::string str;
     double num = 0;
@@ -35,6 +35,7 @@ struct HostReturn {
     static HostReturn string(std::string s) { HostReturn r; r.kind = Kind::String; r.str = std::move(s); return r; }
     static HostReturn number(double d) { HostReturn r; r.kind = Kind::Number; r.num = d; return r; }
     static HostReturn arrayBuffer(std::vector<uint8_t> b) { HostReturn r; r.kind = Kind::ArrayBuffer; r.bytes = std::move(b); return r; }
+    static HostReturn rangeError(std::string message) { HostReturn r; r.kind = Kind::RangeError; r.str = std::move(message); return r; }
 };
 
 /// Result of calling a sandbox function from the host: string, number or nothing.
@@ -58,6 +59,8 @@ public:
     double deadline = std::numeric_limits<double>::infinity();
     /// Set by the interrupt handler when the deadline fired; reset by the caller.
     bool interrupted = false;
+    /// Whether the error the last call threw is one script cannot catch (out of memory, the interrupt, any InternalError).
+    bool uncatchable = false;
 
     /// Interrupt deadline in `threadCpuTime()` seconds of the thread running JS; +inf disables it.
     double cpuDeadline = std::numeric_limits<double>::infinity();
@@ -86,8 +89,8 @@ public:
     bool captureGlobalFunction(const std::string& name);
 
     bool hasPendingJob() const;
-    /// Runs queued promise jobs. Errors thrown by jobs go to `onError` and do not stop the loop.
-    void executePendingJobs(const std::function<void(const JSError&)>& onError);
+    /// Runs one queued promise job, if any (false: the queue was empty). An error thrown by the job goes to `onError`.
+    bool executePendingJob(const std::function<void(const JSError&)>& onError);
 
 private:
     void enter();

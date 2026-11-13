@@ -102,8 +102,9 @@ JSValue qjs_get_global_prop(JSContext *ctx, const char *name) {
 }
 
 static const char *prop_cstr(JSContext *ctx, JSValue obj, const char *name) {
+    if (JS_HasException(ctx)) return NULL;
     JSValue v = JS_GetPropertyStr(ctx, obj, name);
-    const char *s = (JS_IsUndefined(v) || JS_IsNull(v)) ? NULL : JS_ToCString(ctx, v);
+    const char *s = (JS_IsUndefined(v) || JS_IsNull(v) || JS_IsException(v)) ? NULL : JS_ToCString(ctx, v);
     JS_FreeValue(ctx, v);
     return s;
 }

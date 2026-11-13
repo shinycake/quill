@@ -4,6 +4,7 @@
 //! and transforms, box shadows, filters and backdrop filters.
 use super::backend::Resources;
 use super::effects::{self, ColorFilter};
+use super::fonts::GlyphBudget;
 use super::geometry::{self as g, at};
 use serde_json::Value;
 use tiny_skia::{
@@ -33,6 +34,8 @@ struct Painter<'a> {
     filters: Vec<bool>,
     clip: Option<Mask>,
     clips: Vec<Option<Mask>>,
+    /// What this frame's color glyphs may still take.
+    glyphs: GlyphBudget,
 }
 
 /// Paints `list` into `frame` (`scale` device px per CSS px) inside `damage`
@@ -77,6 +80,7 @@ pub fn paint(
         filters: Vec::new(),
         clip,
         clips: Vec::new(),
+        glyphs: GlyphBudget::frame(),
     };
     painter.clear(background);
     for command in list {
@@ -281,13 +285,15 @@ impl Painter<'_> {
             .and_then(Value::as_f64)
             .map_or(1.0, |o| o as f32)
             .clamp(0.0, 1.0);
-        let hides = g::flag(c, "h");
+        let transform = g::drawable(self.transform.pre_concat(g::matrix(c, "m")));
+        // A group whose transform can't be drawn under is hidden, with all it holds.
+        let hides = g::flag(c, "h") || transform.is_none();
         let layered = self.hidden == 0
             && !hides
             && opacity < 1.0
             && self.push_layer(Layer::Group { opacity });
         self.groups.push((self.transform, layered, hides));
-        self.transform = self.transform.pre_concat(g::matrix(c, "m"));
+        self.transform = transform.unwrap_or(self.transform);
         if hides {
             self.hidden += 1;
         }
@@ -373,10 +379,10 @@ impl Painter<'_> {
         }
         let t = self.transform;
         let device = (t.sx * t.sx + t.ky * t.ky).sqrt().max(0.01);
-        let Some(shaped) = self
-            .resources
-            .fonts
-            .shape(g::int(c, "f") as i32, text, device)
+        let Some(shaped) =
+            self.resources
+                .fonts
+                .shape(g::int(c, "f") as i32, text, device, &mut self.glyphs)
         else {
             return;
         };

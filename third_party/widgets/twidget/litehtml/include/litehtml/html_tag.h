@@ -12,6 +12,15 @@
 namespace litehtml
 {
 
+    // Everything matched while one of these lives shares a single budget of selector steps.
+    struct selector_budget
+    {
+        selector_budget();
+        ~selector_budget();
+        selector_budget(const selector_budget&)            = delete;
+        selector_budget& operator=(const selector_budget&) = delete;
+    };
+
     class html_tag : public element
     {
         friend class elements_iterator;
@@ -31,6 +40,7 @@ namespace litehtml
         style                  m_style;
         style                  m_style_base;
         bool                   m_has_style_base = false;
+        int                    m_counter_changes = 0;
         bool m_anonymous_style = false;
         string_map             m_attrs;
         std::vector<string_id> m_pseudo_classes;
@@ -145,7 +155,8 @@ namespace litehtml
         std::string raw_declaration(const std::string& name) const;
         /// What the UA stylesheet alone gives this element for `name` (`revert`); invalid when nothing.
         const property_value& ua_property(string_id name) const;
-        bool        get_custom_property(string_id name, css_token_vector& result) const;
+        // false when the property is not set, or (*invalid then true) set to the guaranteed-invalid value
+        bool        get_custom_property(string_id name, css_token_vector& result, bool* invalid = nullptr) const;
         bool has_own_property(string_id name) const
         {
             const property_value& value = m_style.get_property(name);
@@ -206,7 +217,7 @@ namespace litehtml
         void map_to_dimension_property_ignoring_zero(string_id prop_name, const std::string& attr_value);
 
       private:
-        void handle_counter_properties();
+        void handle_counter_properties(bool increment);
     };
 
     /************************************************************************/

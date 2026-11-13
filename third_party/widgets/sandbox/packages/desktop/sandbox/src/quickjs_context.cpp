@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 extern "C" {
 #include "qjs_shim.h"
@@ -21,33 +22,47 @@ struct QuickJSTrampoline {
     static JSValue call(JSContext* ctx, JSValue /*this*/, int argc, JSValue* argv, int magic) {
         auto* self = static_cast<QuickJSContext*>(JS_GetContextOpaque(ctx));
         if (!self || magic < 0 || size_t(magic) >= self->functions_.size()) return qjs_undefined();
-        std::vector<std::string> args;
-        args.reserve(size_t(argc));
-        for (int i = 0; i < argc; i++) {
-            JSValue v = argv[i];
-            if (qjs_is_string(v)) {
-                const char* c = qjs_to_cstring(ctx, v);
-                args.emplace_back(c ? c : "");
-                if (c) qjs_free_cstring(ctx, c);
-            } else if (qjs_is_number(v)) {
-                double d = qjs_to_float64(ctx, v);
-                char buf[64];
-                if (d == std::floor(d) && std::fabs(d) < 1e15) snprintf(buf, sizeof buf, "%lld", (long long)d);
-                else snprintf(buf, sizeof buf, "%.17g", d);
-                args.emplace_back(buf);
-            } else {
-                args.emplace_back();
+        // The engine's C frames under this one cannot be unwound: nothing thrown here or by a host function may leave it.
+        try {
+            std::vector<std::string> args;
+            args.reserve(size_t(argc));
+            for (int i = 0; i < argc; i++) {
+                JSValue v = argv[i];
+                if (qjs_is_string(v)) {
+                    struct Copied {
+                        JSContext* ctx;
+                        const char* c;
+                        ~Copied() { if (c) qjs_free_cstring(ctx, c); }
+                    } copied{ctx, qjs_to_cstring(ctx, v)};
+                    if (!copied.c) return JS_ThrowOutOfMemory(ctx);
+                    args.emplace_back(copied.c);
+                } else if (qjs_is_number(v)) {
+                    double d = qjs_to_float64(ctx, v);
+                    char buf[64];
+                    if (d == std::floor(d) && std::fabs(d) < 1e15) snprintf(buf, sizeof buf, "%lld", (long long)d);
+                    else snprintf(buf, sizeof buf, "%.17g", d);
+                    args.emplace_back(buf);
+                } else {
+                    args.emplace_back();
+                }
             }
+            HostReturn r = self->functions_[size_t(magic)](args);
+            switch (r.kind) {
+            case HostReturn::Kind::Undefined: return qjs_undefined();
+            case HostReturn::Kind::Null: return qjs_null();
+            case HostReturn::Kind::String: return qjs_new_string_len(ctx, r.str.data(), r.str.size());
+            case HostReturn::Kind::Number: return qjs_new_float64(ctx, r.num);
+            case HostReturn::Kind::ArrayBuffer: return qjs_new_array_buffer_copy(ctx, r.bytes.data(), r.bytes.size());
+            case HostReturn::Kind::RangeError: return JS_ThrowRangeError(ctx, "%s", r.str.c_str());
+            }
+            return qjs_undefined();
+        } catch (const std::bad_alloc&) {
+            return JS_ThrowOutOfMemory(ctx);
+        } catch (const std::exception& e) {
+            return JS_ThrowInternalError(ctx, "host function failed: %s", e.what());
+        } catch (...) {
+            return JS_ThrowInternalError(ctx, "host function failed");
         }
-        HostReturn r = self->functions_[size_t(magic)](args);
-        switch (r.kind) {
-        case HostReturn::Kind::Undefined: return qjs_undefined();
-        case HostReturn::Kind::Null: return qjs_null();
-        case HostReturn::Kind::String: return qjs_new_string_len(ctx, r.str.data(), r.str.size());
-        case HostReturn::Kind::Number: return qjs_new_float64(ctx, r.num);
-        case HostReturn::Kind::ArrayBuffer: return qjs_new_array_buffer_copy(ctx, r.bytes.data(), r.bytes.size());
-        }
-        return qjs_undefined();
     }
 
     static int interrupt(JSContext* /*ctx*/, void* opaque) {
@@ -115,42 +130,66 @@ void QuickJSContext::registerFunction(const std::string& name, HostFunction fn) 
 // QuickJS measures stack depth from the stack pointer it saw when the runtime
 // was created; re-read it on every entry (belt and braces — contexts are pinned
 // to a JSThread anyway).
-void QuickJSContext::enter() { JS_UpdateStackTop(runtime_); }
-
-JSError QuickJSContext::takeException() {
-    char* c = qjs_take_exception_description(context_);
-    if (!c) return JSError("unknown error");
-    std::string text(c);
-    free(c);
-    return JSError(text);
+void QuickJSContext::enter() {
+    JS_UpdateStackTop(runtime_);
+    uncatchable = false;
 }
 
-static JSResult readResult(JSContext* ctx, JSValue v) {
-    JSResult r;
+/// False when a string could not be copied out: the engine's out of memory error is pending. Frees `v` either way.
+static bool readResult(JSContext* ctx, JSValue v, JSResult& r) {
+    bool copied = true;
     if (qjs_is_string(v)) {
         size_t length = 0;
         const char* c = JS_ToCStringLen2(ctx, &length, v, false);
-        r.string = c ? std::string(c, length) : std::string();
+        copied = c != nullptr;
+        if (c) r.string = std::string(c, length);
         if (c) JS_FreeCString(ctx, c);
     } else if (qjs_is_number(v)) {
         r.number = qjs_to_float64(ctx, v);
     }
     qjs_free_value(ctx, v);
-    return r;
+    return copied;
+}
+
+JSError QuickJSContext::takeException() {
+    JSValue e = JS_GetException(context_);
+    uncatchable = JS_IsUncatchableError(e);
+    if (!uncatchable) {
+        JS_Throw(context_, e);
+        char* c = qjs_take_exception_description(context_);
+        std::string text(c ? c : "unknown error");
+        free(c);
+        if (!JS_HasException(context_)) return JSError(text);
+        e = JS_GetException(context_);
+        uncatchable = JS_IsUncatchableError(e);
+        if (!uncatchable) {
+            qjs_free_value(context_, e);
+            return JSError(text);
+        }
+    }
+    // Thrown again it is uncatchable again: reading its message runs no getter of the widget's.
+    JS_Throw(context_, qjs_dup_value(context_, e));
+    JSResult message;
+    readResult(context_, JS_GetPropertyStr(context_, e, "message"), message);
+    qjs_free_value(context_, JS_GetException(context_));
+    qjs_free_value(context_, e);
+    return JSError("InternalError: " + message.string.value_or(""));
 }
 
 JSResult QuickJSContext::evaluate(const std::string& code, const std::string& filename, bool asModule) {
     enter();
     JSValue v = qjs_eval(context_, code.c_str(), code.size(), filename.c_str(), asModule);
-    if (qjs_is_exception(v)) throw takeException();
-    return readResult(context_, v);
+    JSResult r;
+    if (qjs_is_exception(v) || !readResult(context_, v, r)) throw takeException();
+    return r;
 }
 
 JSResult QuickJSContext::evaluateBytecode(const std::vector<uint8_t>& blob, const std::string& source) {
     enter();
     JSValue v = qjs_eval_bytecode(context_, blob.data(), blob.size(), source.data(), source.size());
-    if (qjs_is_exception(v)) throw takeException();
-    return readResult(context_, v);
+    JSResult r;
+    if (qjs_is_exception(v) || !readResult(context_, v, r)) throw takeException();
+    return r;
 }
 
 std::vector<uint8_t> QuickJSContext::compileBytecode(const std::string& code, const std::string& filename) {
@@ -196,20 +235,19 @@ JSResult QuickJSContext::call(const std::string& name, const std::vector<std::st
     JSValue r = qjs_call(context_, fn, int(argv.size()), argv.data());
     for (auto& v : argv) qjs_free_value(context_, v);
     qjs_free_value(context_, fn);
-    if (qjs_is_exception(r)) throw takeException();
-    return readResult(context_, r);
+    JSResult result;
+    if (qjs_is_exception(r) || !readResult(context_, r, result)) throw takeException();
+    return result;
 }
 
 bool QuickJSContext::hasPendingJob() const { return qjs_is_job_pending(runtime_); }
 
-void QuickJSContext::executePendingJobs(const std::function<void(const JSError&)>& onError) {
+bool QuickJSContext::executePendingJob(const std::function<void(const JSError&)>& onError) {
     enter();
-    for (int i = 0; i < 100; i++) {
-        JSContext* ctx = nullptr;
-        int r = qjs_execute_pending_job(runtime_, &ctx);
-        if (r < 0) { onError(takeException()); continue; }
-        if (r == 0) break;
-    }
+    JSContext* ctx = nullptr;
+    int r = qjs_execute_pending_job(runtime_, &ctx);
+    if (r < 0) onError(takeException());
+    return r != 0;
 }
 
 } // namespace twidget

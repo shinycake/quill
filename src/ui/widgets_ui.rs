@@ -9,7 +9,7 @@
 use super::app::QuillApp;
 use super::owned_image::OwnedImage;
 use super::status_note::StatusNote;
-use super::widget_runtime::{Launch, Runtime, RuntimeEvent, WIDGETS};
+use super::widget_runtime::{AreaName, Launch, LinkKind, Runtime, RuntimeEvent, WIDGETS};
 use super::widgets_state::{
     Identity, Lander, Live, Noted, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage,
     prune_hidden, write_pending,
@@ -571,7 +571,7 @@ impl QuillApp {
                 }
             }
             RuntimeEvent::Link {
-                telegram: true,
+                kind: LinkKind::Telegram,
                 url,
             } => {
                 // The window it was pressed in asked: what the link opens shows there.
@@ -583,7 +583,7 @@ impl QuillApp {
                 self.as_asked_by(window, |this| this.open_link(&url, cx));
             }
             RuntimeEvent::Link {
-                telegram: false,
+                kind: LinkKind::Web,
                 url,
             } => {
                 // A widget's link always asks first, as in Telegram Desktop.
@@ -595,10 +595,17 @@ impl QuillApp {
                 });
                 cx.notify();
             }
-            RuntimeEvent::Storage { area, values } => {
-                if area == "session" {
-                    self.widgets.session.insert(key, values);
-                } else if let Some(entry) = self.widgets.entries.get_mut(&key) {
+            RuntimeEvent::Storage {
+                area: AreaName::Session,
+                values,
+            } => {
+                self.widgets.session.insert(key, values);
+            }
+            RuntimeEvent::Storage {
+                area: AreaName::Local,
+                values,
+            } => {
+                if let Some(entry) = self.widgets.entries.get_mut(&key) {
                     entry.stored.local = values;
                     entry.unsaved = true;
                     self.schedule_widget_save(cx);

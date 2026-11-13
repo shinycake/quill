@@ -118,15 +118,16 @@ std::string locale_id(const Json& locale) {
     char id[ULOC_FULLNAME_CAPACITY] = {};
     int32_t parsed = 0;
     UErrorCode e = U_ZERO_ERROR;
-    uloc_forLanguageTag(tag.c_str(), id, int32_t(sizeof id), &parsed, &e);
-    return U_SUCCESS(e) && parsed > 0 ? std::string(id) : std::string();
+    // A result that fills the buffer is a success for ICU (U_STRING_NOT_TERMINATED_WARNING) and has no NUL.
+    int32_t length = uloc_forLanguageTag(tag.c_str(), id, int32_t(sizeof id), &parsed, &e);
+    return U_SUCCESS(e) && parsed > 0 && length > 0 && length < int32_t(sizeof id) ? std::string(id, size_t(length)) : std::string();
 }
 
 std::string language_tag(const std::string& id) {
     char tag[ULOC_FULLNAME_CAPACITY] = {};
     UErrorCode e = U_ZERO_ERROR;
-    uloc_toLanguageTag(id.c_str(), tag, int32_t(sizeof tag), false, &e);
-    return U_SUCCESS(e) ? std::string(tag) : id;
+    int32_t length = uloc_toLanguageTag(id.c_str(), tag, int32_t(sizeof tag), false, &e);
+    return U_SUCCESS(e) && length >= 0 && length < int32_t(sizeof tag) ? std::string(tag, size_t(length)) : id;
 }
 
 std::string upper(std::string s) {

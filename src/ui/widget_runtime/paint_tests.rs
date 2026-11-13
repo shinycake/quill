@@ -164,3 +164,44 @@ fn a_huge_canvas_read_is_refused_without_overflow() {
         "a small read still works"
     );
 }
+
+#[test]
+fn a_group_stretched_past_the_bound_is_hidden_with_what_it_holds() {
+    let frame = painted(
+        json!([
+            {"k": 12, "m": [3.57e23, 0, 0, 3.57e23, 0, 0], "o": 1},
+            {"k": 1, "r": [0, 0, 1, 1], "c": RED, "w": 1},
+            {"k": 12, "m": [1, 0, 0, 1, 0, 0], "o": 1},
+            {"k": 0, "r": [0, 0, 20, 20], "c": RED},
+            {"k": 13},
+            {"k": 13},
+            {"k": 12, "m": [0, 0, 0, 0, 0, 0], "o": 1},
+            {"k": 0, "r": [0, 0, 20, 20], "c": RED},
+            {"k": 13},
+            {"k": 0, "r": [10, 10, 5, 5], "c": RED}
+        ]),
+        None,
+        None,
+    );
+    assert_eq!(rgb(&frame, 4, 4), (255, 255, 255));
+    // The pops matched their pushes: what follows draws.
+    assert_eq!(rgb(&frame, 25, 25), (255, 0, 0));
+}
+
+#[test]
+fn canvases_together_stay_within_the_pixel_bound() {
+    let fonts = crate::ui::widget_runtime::fonts::Fonts::default();
+    let images = crate::ui::widget_runtime::images::Images::default();
+    let mut canvases = crate::ui::widget_runtime::canvas::Canvases::default();
+    canvases.run(1, 4096, 2048, "[]", &fonts, &images);
+    canvases.run(2, 4096, 2048, "[]", &fonts, &images);
+    assert!(canvases.get(1).is_some() && canvases.get(2).is_some());
+    // A third past what the two hold is refused, and the two stay.
+    canvases.run(3, 16, 16, "[]", &fonts, &images);
+    assert!(canvases.get(3).is_none());
+    // A canvas resized within its own share is fine.
+    canvases.run(2, 4096, 1024, "[]", &fonts, &images);
+    assert!(canvases.get(2).is_some_and(|c| c.height() == 1024));
+    canvases.run(3, 16, 16, "[]", &fonts, &images);
+    assert!(canvases.get(3).is_some());
+}

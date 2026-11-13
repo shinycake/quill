@@ -37,6 +37,9 @@ namespace {
 constexpr double MIN_HEIGHT = 50.0;
 /// The tallest a host may let a widget grow: past this a document is a runaway, not content.
 constexpr double HEIGHT_CEILING = 16384.0;
+/// The widest a host's view and the densest its screen can be: past these a number is a mistake, not a size.
+constexpr double WIDTH_CEILING = 1048576.0;
+constexpr double MIN_DPR = 0.25, MAX_DPR = 64.0;
 constexpr int MAX_PASSES = 4;
 /// Sent whether or not the widget listens. The one-off animation events are among them because a page's
 /// first build starts its animations before its script says what it listens for; animationiteration
@@ -83,6 +86,8 @@ q::before{content:open-quote}
 q::after{content:close-quote}
 [hidden]{display:none}
 )css";
+
+double bounded(double v, double lo, double hi) { return std::isnan(v) ? lo : std::clamp(v, lo, hi); }
 
 const char* const VOID_TAGS[] = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"};
 
@@ -460,11 +465,43 @@ bool is_layer_property(const std::string& property) {
     return property == "transform" || property == "opacity" || property == "translate" || property == "rotate" || property == "scale";
 }
 
+/// What ops may hand over, several times what the validator sends (10,000 ops a batch, 48 K of text, 400 rules): more is refused here too.
+constexpr size_t MAX_BATCH_OPS = 200000;
+constexpr size_t MAX_TEXT_BYTES = 4 << 20;
+constexpr size_t MAX_TEXT_PIECES = 100000;
+constexpr size_t MAX_SHEET_BLOCKS = 16384;
+constexpr size_t MAX_NODE_ATTRS = 4096;
+constexpr size_t MAX_TREE_BYTES = 64 << 20;
+
 /// The `style` attribute is the inline style itself, as in the DOM: setting it replaces what the
 /// style ops set, and a style op that removes a property removes it from what the attribute set.
 void set_inline_style(std::vector<std::pair<std::string, std::string>>& styles, const std::string& text) {
     styles.clear();
-    for (auto& d : css::parse_declarations(text)) styles.emplace_back(std::move(d.name), d.important ? d.value + " !important" : std::move(d.value));
+    for (auto& d : css::parse_declarations(text)) {
+        if (styles.size() >= MAX_NODE_ATTRS) break;
+        styles.emplace_back(std::move(d.name), d.important ? d.value + " !important" : std::move(d.value));
+    }
+}
+
+size_t text_pieces(const std::string& text) {
+    size_t pieces = 0;
+    int last = -1;
+    for (unsigned char c : text) {
+        int space = c <= 0x20 ? 1 : 0;
+        pieces += size_t(space != last) + size_t(c >= 0xE0);
+        last = space;
+    }
+    return pieces;
+}
+
+size_t sheet_blocks(const std::string& css) {
+    return size_t(std::count(css.begin(), css.end(), '{'));
+}
+
+/// A node id from an op or a query; 0, which names no node, for a number that is no int.
+int64_t node_id(const Json& v) {
+    double d = v.asNumber();
+    return d > -2147483649.0 && d < 2147483648.0 ? int64_t(d) : 0;
 }
 
 /// Move-type events: only the latest one per type and pointer goes out, once per frame.
@@ -473,6 +510,10 @@ bool coalesced(const std::string& type) {
 }
 
 constexpr int MAX_CANVASES = 64;
+/// The levels of a tree the ops build, attached or not (the validator caps the attached one): every walk recurses over them.
+constexpr size_t MAX_TREE_DEPTH = 1024;
+/// The nodes a renderer holds, attached or not: the validator's own bound (widget-sandbox validator.ts, MAX_NODES).
+constexpr size_t MAX_NODES = 50000;
 /// Layers: at most this many per widget, this many device pixels in all, and no track shorter
 /// than this (a frame or two is cheaper to paint than to hand over).
 constexpr size_t MAX_LAYERS = 256;
@@ -491,6 +532,8 @@ constexpr double INPUT_IMMEDIATE_S = 0.25;
 /// The sandbox hands a long flush over in parts of this many ops (widget-sandbox v0.6.0, capture.ts PARTIAL_BATCH_OPS);
 /// only the last part of a task is shorter.
 constexpr size_t PARTIAL_BATCH_OPS = 1000;
+constexpr size_t MAX_NAMES = 20000;
+constexpr size_t MAX_NAME_BYTES = 1 << 20;
 /// The render throttle (the Swift renderer's): a pass costlier than a frame holds the next one back
 /// for THROTTLE_FACTOR times its cost, 25 % of the thread at most; under sustained load, more than
 /// SUSTAINED_LIMIT of SUSTAINED_WINDOW with two passes over HEAVY_PASS_S, 5 %. Nothing is charged in
@@ -504,9 +547,13 @@ constexpr double HEAVY_PASS_S = 0.05;
 constexpr double LOAD_GRACE_S = 1;
 /// Backend fonts kept for documents to come, beyond those a document holds.
 constexpr size_t MAX_FACES = 256;
+/// A document keeps every font it was ever styled with: one that made this many since its build is built anew.
+constexpr size_t MAX_PATCHED_FONTS = 4096;
 /// The SVG paints the container keeps for draw_cached, and the commands they hold together.
 constexpr size_t MAX_CACHED_PAINTS = 128;
 constexpr size_t MAX_CACHED_COMMANDS = 50000;
+/// A repeated background is recorded tile by tile while the display list is shorter than this; then once per layer.
+constexpr size_t MAX_TILED_COMMANDS = 65536;
 /// Measured widths, keyed by their text: longer text is measured each time, and every face's keys
 /// together stay within the byte bound.
 constexpr size_t MAX_WIDTH_ENTRIES = 4096;
@@ -518,6 +565,9 @@ constexpr size_t MAX_MEASURED_RUN = 4096;
 /// The profile's image types (widget-sandbox's PROFILE_IMAGES). The validator lets no other through, but
 /// a path around it (generated content's url(), once) must not hand a backend anything else.
 constexpr std::string_view IMAGE_TYPES[] = {"image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"};
+/// The image sources a widget names over its life, and their bytes together: past either a new one is refused, and fails as an image does.
+constexpr size_t MAX_IMAGES = 4096;
+constexpr size_t MAX_IMAGE_BYTES = 32 << 20;
 
 /// A data: URL's media type as widget-sandbox's checkUrl reads it: the scheme in any case, around tabs,
 /// newlines and the C0 controls and spaces at its ends; trimmed and lower-cased. Empty when not a data: URL.
@@ -633,6 +683,15 @@ public:
         // At least one character goes on the line, however narrow it is.
         size_t lo = size_t(first - boundaries_.begin()) + 1, hi = boundaries_.size() - 1;
         if (float(width) <= 0 || measure(start, boundaries_[lo]) > float(width)) return boundaries_[lo];
+        // The end of the line is near its start: halving the whole rest of the text measures it for every line.
+        for (size_t step = 1; lo < hi; step *= 2) {
+            size_t probe = std::min(hi, lo + step);
+            if (measure(start, boundaries_[probe]) > float(width)) {
+                hi = probe - 1;
+                break;
+            }
+            lo = probe;
+        }
         while (lo < hi) {
             size_t mid = (lo + hi + 1) / 2;
             if (measure(start, boundaries_[mid]) <= float(width)) lo = mid;
@@ -679,6 +738,37 @@ public:
     /// True when the last build patched the previous document instead of parsing a new one.
     bool patched() const { return patched_; }
 
+    /// Boxes one layout may lay out afresh: nested flex, grid and table boxes measure their children several times
+    /// each, so a few hundred bytes of markup ask for 2^depth layouts. The heaviest widget of widget-sandbox's corpus
+    /// lays out 2,600 boxes in a pass; the base is 40 times that, and a document of many elements gets more.
+    static constexpr uint64_t kLayoutBudgetBase = 100000;
+    static constexpr uint64_t kLayoutBudgetPerElement = 50;
+
+    /// Lays the document out within the layout budget. Past it the document stays as far as it got and lays out
+    /// nothing again, and the renderer stops (Renderer::stop_layout).
+    void layout(float width) {
+        uint64_t elements = 0;
+        std::vector<const litehtml::element*> pending;
+        if (auto root = doc_->root()) pending.push_back(root.get());
+        while (!pending.empty()) {
+            const litehtml::element* el = pending.back();
+            pending.pop_back();
+            elements++;
+            for (const auto& child : el->children()) pending.push_back(child.get());
+        }
+        doc_->set_layout_budget(kLayoutBudgetBase + kLayoutBudgetPerElement * elements);
+        doc_->render(litehtml::pixel_t(width));
+        if (doc_->layout_exhausted()) r_.stop_layout(doc_->layout_spent());
+    }
+
+    /// The last layout ran past the budget: the document is laid out no more.
+    bool exhausted() const { return doc_ && doc_->layout_exhausted(); }
+    /// Drops the document: the next build parses a new one.
+    void drop() {
+        elements_.clear();
+        doc_ = nullptr;
+    }
+
     /// The viewport is now `vp_height` tall, without a layout: the document does not depend on it.
     void viewport_resized(int vp_height) { vp_height_ = vp_height; }
     const std::string& master() const { return master_css_; }
@@ -706,13 +796,13 @@ public:
         // new HTML only changes what it can patch (styles, text, classes, attributes, child lists), and
         // refuses otherwise, leaving the document as it was.
         bool changed = true;
-        if (doc_ && !stale && doc_->update_from_string(html, &changed)) {
+        if (doc_ && !stale && !fonts_grown() && doc_->update_from_string(html, &changed)) {
             patched_ = true;
             if (viewport_changed) doc_->media_changed();
             float width = float(r_.width_);
             if (!changed && !viewport_changed && width == rendered_width_) return false;
             if (!doc_->last_patch_paint_only() || viewport_changed || width != rendered_width_) {
-                doc_->render(litehtml::pixel_t(width));
+                layout(width);
                 rendered_width_ = width;
                 layouts_++;
             }
@@ -734,9 +824,10 @@ public:
 #endif
         if (!doc_) return true;
         rendered_width_ = float(r_.width_);
-        doc_->render(litehtml::pixel_t(rendered_width_));
+        layout(rendered_width_);
         layouts_++;
         index();
+        built_fonts_ = fonts_.size();
         return true;
     }
 
@@ -884,7 +975,8 @@ public:
 #endif
     }
     /// The document was laid out at the current width and viewport: a patch can go straight in.
-    bool can_patch() const { return doc_ && float(r_.width_) == rendered_width_; }
+    bool can_patch() const { return doc_ && float(r_.width_) == rendered_width_ && !fonts_grown(); }
+    bool fonts_grown() const { return fonts_.size() > built_fonts_ + MAX_PATCHED_FONTS; }
     /// Attribute values and sole texts into the document in place (the fork's holes), relaying out
     /// only when a value can move boxes. False, leaving the document as it was, when a change has no hole.
     bool patch(const std::vector<litehtml::document::hole_change>& changes) {
@@ -892,7 +984,7 @@ public:
         if (!doc_->update_holes(changes, &changed)) return false;
         patched_ = true;
         if (changed && !doc_->last_patch_paint_only()) {
-            doc_->render(litehtml::pixel_t(rendered_width_));
+            layout(rendered_width_);
             layouts_++;
         }
         return true;
@@ -900,13 +992,13 @@ public:
     /// Replaces the style attribute of elements in place (the fork's style holes), relaying out
     /// only when a value can move boxes. False when the document cannot patch them.
     bool restyle(const std::vector<std::pair<litehtml::element::ptr, std::string>>& patches) {
-        if (!doc_) return false;
+        if (!doc_ || fonts_grown()) return false;
         bool changed = false;
         if (!doc_->update_styles(patches, &changed)) return false;
         patched_ = true;
         if (changed && !doc_->last_patch_paint_only()) {
             rendered_width_ = float(r_.width_);
-            doc_->render(litehtml::pixel_t(rendered_width_));
+            layout(rendered_width_);
             layouts_++;
         }
         return true;
@@ -989,9 +1081,14 @@ public:
         auto key = std::make_tuple(doc_.get(), doc_->paint_generation(), layouts_);
         if (key == trace_key_) return trace_;
         trace_.clear();
-        litehtml::g_paint_trace = &trace_;
-        draw();
-        litehtml::g_paint_trace = nullptr;
+        {
+            struct Tracing {
+                std::vector<const litehtml::render_item*>* previous = litehtml::g_paint_trace;
+                explicit Tracing(std::vector<const litehtml::render_item*>* trace) { litehtml::g_paint_trace = trace; }
+                ~Tracing() { litehtml::g_paint_trace = previous; }
+            } tracing(&trace_);
+            draw();
+        }
         trace_key_ = key;
         return trace_;
     }
@@ -1392,15 +1489,30 @@ public:
         if (!src) return;
         std::string url = src;
         if (images_.count(url)) return;
+        const bool own = url.rfind("tw-canvas:", 0) == 0;
+        if (!own && (image_sources_ >= MAX_IMAGES || url.size() > MAX_IMAGE_BYTES - image_bytes_)) {
+            if (!images_full_) r_.pending_violations_.push_back("image limit: " + std::to_string(image_sources_) + " sources, " + std::to_string(image_bytes_) + " bytes");
+            images_full_ = true;
+            return;
+        }
         Image img;
-        if (url.rfind("tw-canvas:", 0) == 0) {
+        if (own) {
             // The renderer's own source for a <canvas>: tw-canvas:<node id>/<w>x<h>, drawn from the backend's bitmap.
+            auto held = [&](int id, int w, int h) {
+                for (const auto& [node, canvas] : r_.canvases_)
+                    if (canvas->id() == id && canvas->width() == w && canvas->height() == h) return true;
+                return false;
+            };
             int id = 0, w = 0, h = 0;
-            if (std::sscanf(url.c_str() + 10, "%d/%dx%d", &id, &w, &h) == 3) {
-                img.canvas = id;
-                img.w = float(w);
-                img.h = float(h);
+            if (std::sscanf(url.c_str() + 10, "%d/%dx%d", &id, &w, &h) != 3 || !held(id, w, h)) {
+                r_.pending_violations_.push_back("image refused: " + url.substr(0, 80));
+                return;
             }
+            // A canvas is named by the size it has now: the sources of its sizes before, and of canvases gone, are not kept.
+            std::erase_if(images_, [&](const auto& entry) { return entry.second.canvas && !held(entry.second.canvas, int(entry.second.w), int(entry.second.h)); });
+            img.canvas = id;
+            img.w = float(w);
+            img.h = float(h);
         } else if (std::string mime = data_mime(url); mime == "image/svg+xml") {
             // Profile 1 has no SVG images: the validator puts its 48 px placeholder, an SVG, in place of
             // every image it refuses. No SVG reaches a backend, whatever the spelling.
@@ -1412,6 +1524,10 @@ public:
             if (!backend_.load_image(img.id, url, img.w, img.h)) img.id = 0;
         } else {
             r_.pending_violations_.push_back("image refused: " + url.substr(0, 80));
+        }
+        if (!own) {
+            image_sources_++;
+            image_bytes_ += url.size();
         }
         images_[url] = img;
     }
@@ -1445,15 +1561,18 @@ public:
         const bool across = layer.repeat == litehtml::background_repeat_repeat || layer.repeat == litehtml::background_repeat_repeat_x;
         const bool down = layer.repeat == litehtml::background_repeat_repeat || layer.repeat == litehtml::background_repeat_repeat_y;
         const Rect tile = c.rect;
-        if ((across || down) && tile.w >= 1 && tile.h >= 1 && !c.clip.empty()) {
+        if ((across || down) && tile.w >= 1 && tile.h >= 1 && !c.clip.empty() && list_.size() < MAX_TILED_COMMANDS) {
             float x0 = across ? tile.x - std::ceil((tile.x - c.clip.x) / tile.w) * tile.w : tile.x;
             float y0 = down ? tile.y - std::ceil((tile.y - c.clip.y) / tile.h) * tile.h : tile.y;
             float x1 = across ? c.clip.x + c.clip.w : tile.x + tile.w, y1 = down ? c.clip.y + c.clip.h : tile.y + tile.h;
-            if (std::ceil((x1 - x0) / tile.w) * std::ceil((y1 - y0) / tile.h) <= 4096) {
-                for (float y = y0; y < y1; y += tile.h) {
-                    for (float x = x0; x < x1; x += tile.w) {
+            // Tiles are counted, not stepped to: far from the origin a float no longer moves by a tile's size.
+            const float columns = std::ceil((x1 - x0) / tile.w), rows = std::ceil((y1 - y0) / tile.h);
+            if (columns < 1 || rows < 1) return;
+            if (columns * rows <= 4096) {
+                for (int row = 0; row < int(rows); row++) {
+                    for (int column = 0; column < int(columns); column++) {
                         Command t = c;
-                        t.rect = Rect{x, y, tile.w, tile.h};
+                        t.rect = Rect{x0 + float(column) * tile.w, y0 + float(row) * tile.h, tile.w, tile.h};
                         list_.push_back(std::move(t));
                     }
                 }
@@ -1925,6 +2044,14 @@ public:
             list_.push_back(std::move(pop));
         }
     }
+
+    // ── the keywords the fork knows outside the profile: the validator cannot see one that arrives through var() ──
+    void trusted_styles(bool trusted) override { trusted_styles_ = trusted; }
+    bool sanitize_declaration(const std::string& name, const litehtml::css_token_vector& value) override {
+        if (trusted_styles_ || value.size() != 1 || (name != "position" && name != "display")) return true;
+        const std::string keyword = value[0].ident();
+        return name == "position" ? keyword != "sticky" : keyword != "list-item" && keyword != "inline-text";
+    }
 #endif
 
     // ── chrome the renderer has none of ──
@@ -2326,18 +2453,20 @@ private:
     }
 
     static std::string marker_text(litehtml::list_style_type t, int index) {
+        // Out of a style's range (css-counter-styles: alphabetic from 1, roman 1 to 3999) the marker is decimal, as
+        // browsers draw it; roman past it was one more 'M' per thousand, two million for <ol start=2000000000>.
         auto alpha = [](int n, char base) {
+            if (n < 1) return std::to_string(n);
             std::string s;
-            n = std::max(n, 1);
             while (n > 0) { n--; s.insert(s.begin(), char(base + n % 26)); n /= 26; }
             return s;
         };
         auto roman = [](int n, bool upper) {
+            if (n < 1 || n > 3999) return std::to_string(n);
             static const char* U[] = {"M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"};
             static const char* L[] = {"m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"};
             static const int V[] = {1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1};
             std::string s;
-            n = std::max(n, 1);
             for (int i = 0; i < 13; i++) while (n >= V[i]) { s += upper ? U[i] : L[i]; n -= V[i]; }
             return s;
         };
@@ -2355,6 +2484,7 @@ private:
 
     Renderer& r_;
     Backend& backend_;
+    bool trusted_styles_ = false;
     litehtml::document::ptr doc_;
 #ifdef TW_LITEHTML_TWIDGET
     std::vector<litehtml::transform_matrix> groups_;  // accumulated, during draw()
@@ -2392,9 +2522,12 @@ private:
     std::map<FaceKey, std::unique_ptr<Face>> faces_;
     uint64_t face_clock_ = 0;
     std::unordered_map<litehtml::uint_ptr, Font> fonts_;
+    size_t built_fonts_ = 0;
     litehtml::uint_ptr next_font_ = 0;
     std::unordered_map<std::string, Image> images_;
     int next_image_ = 0;
+    size_t image_sources_ = 0, image_bytes_ = 0;
+    bool images_full_ = false;
     DisplayList list_;
     std::vector<Command> clips_;
     std::vector<std::vector<Command>> suspended_;
@@ -2427,7 +2560,7 @@ public:
 // ───────────────────────── Renderer ─────────────────────────
 
 Renderer::Renderer(double width, double dpr, bool dark, Backend& backend)
-    : container_(std::make_unique<Container>(*this, backend)), backend_(backend), width_(width), dpr_(dpr), dark_(dark), vp_height_(int(MIN_HEIGHT)) {
+    : container_(std::make_unique<Container>(*this, backend)), backend_(backend), width_(bounded(width, 0, WIDTH_CEILING)), dpr_(bounded(dpr, MIN_DPR, MAX_DPR)), dark_(dark), vp_height_(int(MIN_HEIGHT)) {
     auto make = [](const char* tag) {
         auto n = std::make_unique<Node>();
         n->tag = tag;
@@ -2494,12 +2627,17 @@ uint64_t Renderer::layouts() const { return container_->layouts(); }
 uint32_t Renderer::px_height() const { return uint32_t(std::ceil(vp_height_ * dpr_)); }
 
 std::vector<Json> Renderer::receive(const Json& msg) {
+    NameMeter name_meter(*this);
     std::vector<Json> out;
     const std::string& type = msg["type"].asString();
     if (type == "ops") {
         // Past the paint limit the host stops the widget: what its task still sent is not drawn.
-        if (paint_stopped_) return out;
+        if (paint_stopped_ || layout_stopped_) return out;
         const auto& ops = msg["ops"].arr();
+        if (ops.size() > MAX_BATCH_OPS) {
+            out.push_back(Json::object().set("type", "violation").set("detail", "ops limit: " + std::to_string(ops.size()) + " operations in one batch"));
+            return out;
+        }
         std::vector<int64_t> scripted;
         bool fast = scripted_only(ops, scripted);
         // Ticking already (something animates), or held back by the throttle, a batch waits for the
@@ -2643,6 +2781,7 @@ void Renderer::report_resizes(std::vector<Json>& out) {
 }
 
 void Renderer::set_width(double width, std::vector<Json>& out) {
+    width = bounded(width, 0, WIDTH_CEILING);
     if (std::fabs(width - width_) < 0.01) return;
     width_ = width;
     rebuild();
@@ -2650,7 +2789,7 @@ void Renderer::set_width(double width, std::vector<Json>& out) {
 }
 
 void Renderer::set_max_height(double height, std::vector<Json>& out) {
-    height = std::clamp(height, MIN_HEIGHT, HEIGHT_CEILING);
+    height = bounded(height, MIN_HEIGHT, HEIGHT_CEILING);
     if (height == max_height_) return;
     max_height_ = height;
     rebuild();
@@ -2678,53 +2817,59 @@ void Renderer::apply_ops(const std::vector<Json>& ops, std::vector<Json>& out) {
     // The sandbox sends a canvas's commands as one op per canvas, the first canvas used first.
     std::unordered_map<int64_t, size_t> drawn;  // canvas node → its canvas op
     for (size_t i = 0; i < ops.size(); i++)
-        if (ops[i]["op"].asString() == "canvas") drawn.emplace(int64_t(ops[i]["id"].asNumber()), i);
+        if (ops[i]["op"].asString() == "canvas") drawn.emplace(node_id(ops[i]["id"]), i);
     if (drawn.size() < 2) {
         for (const Json& op : ops) apply_op(op, out);
         return;
     }
     std::vector<char> done(ops.size(), 0);
-    std::function<void(size_t)> run = [&](size_t i) {
+    // A chain of sources is no longer than the canvases a renderer holds; past that the ops apply in their own order.
+    std::function<void(size_t, int)> run = [&](size_t i, int depth) {
         if (done[i]) return;
         done[i] = 1;
-        if (ops[i]["op"].asString() == "canvas") {
+        if (depth < MAX_CANVASES && ops[i]["op"].asString() == "canvas") {
             for (const Json& cmd : ops[i]["cmds"].arr()) {
                 if (cmd[size_t(1)].asString() != "drawImage") continue;
                 const Json* source = cmd[size_t(2)].find("n");
                 if (!source) continue;
-                int64_t ref = int64_t(source->asNumber());
+                int64_t ref = node_id(*source);
                 auto it = drawn.find(ref);
                 if (it == drawn.end() || it->second <= i || done[it->second]) continue;
                 // The source's node and its size (a canvas made by script arrives just before its drawing);
                 // where it is inserted stays in its place.
                 for (size_t k = i + 1; k < it->second; k++) {
                     const std::string& kind = ops[k]["op"].asString();
-                    if (!done[k] && int64_t(ops[k]["id"].asNumber()) == ref && (kind == "el" || kind == "attr")) run(k);
+                    if (!done[k] && node_id(ops[k]["id"]) == ref && (kind == "el" || kind == "attr")) run(k, depth + 1);
                 }
-                run(it->second);
+                run(it->second, depth + 1);
             }
         }
         apply_op(ops[i], out);
     };
-    for (size_t i = 0; i < ops.size(); i++) run(i);
+    for (size_t i = 0; i < ops.size(); i++) run(i, 0);
 }
 
 void Renderer::apply_op(const Json& op, std::vector<Json>& out) {
     const std::string& kind = op["op"].asString();
-    int64_t id = int64_t(op["id"].asNumber());
+    int64_t id = node_id(op["id"]);
     auto str = [&](const char* k) -> const std::string& { return op[k].asString(); };
+    auto refuse = [&](const char* what) { out.push_back(Json::object().set("type", "violation").set("detail", what)); };
+    if (!hold(op)) return;
     // What changes the serialised document; `call` marks it itself when it toggles an attribute.
     if (kind != "canvas" && kind != "call" && !(kind == "prop" && (str("name") == "scrollTop" || str("name") == "scrollLeft"))) document_changed_ = true;
+    if (!id && (kind == "el" || kind == "text" || kind == "comment")) return;
     if (kind == "el") {
         const std::string& adopt_name = str("adopt");
         if (!adopt_name.empty()) {
             Node* n = adopt_name == "html" ? html_node_.get() : adopt_name == "head" ? head_node_.get() : adopt_name == "body" ? body_node_.get() : nullptr;
-            if (!n) return;
+            // A live node keeps its id, as below: its parent and its children point at it.
+            if (!n || (node(id) && node(id) != n)) return;
             patch_log_.valid = false;
             adopt(id, n, op["attrs"]);
             return;
         }
-        if (nodes_.count(id)) return;  // the validator never reuses a live id; keep the first
+        if (node(id)) return;  // the validator never reuses a live id; keep the first
+        if (nodes_.size() >= MAX_NODES) return;
         auto n = std::make_unique<Node>();
         n->kind = Node::Element;
         if (!css::is_tag_name(str("tag"))) {
@@ -2738,17 +2883,18 @@ void Renderer::apply_op(const Json& op, std::vector<Json>& out) {
             if (!pair[0].isString() || !pair[1].isString()) continue;
             if (starts_with_on(pair[0].asString())) continue;
             if (pair[0].asString() == "style") set_inline_style(n->styles, pair[1].asString());
-            else n->attrs.emplace_back(pair[0].asString(), pair[1].asString());
+            else if (n->attrs.size() < MAX_NODE_ATTRS) n->attrs.emplace_back(pair[0].asString(), pair[1].asString());
         }
         if (n->tag == "img" && !n->svg) pending_images_.push_back(id);
         nodes_[id] = std::move(n);
         return;
     }
     if (kind == "text" || kind == "comment") {
-        if (nodes_.count(id)) return;
+        if (node(id) || nodes_.size() >= MAX_NODES) return;
         auto n = std::make_unique<Node>();
         n->kind = kind == "text" ? Node::Text : Node::Comment;
         n->id = id;
+        if (kind == "text" && !take_text({}, str("data"))) return refuse("text limit");
         n->data = str("data");
         nodes_[id] = std::move(n);
         return;
@@ -2762,6 +2908,7 @@ void Renderer::apply_op(const Json& op, std::vector<Json>& out) {
             out.push_back(Json::object().set("type", "violation").set("detail", "attribute " + name.substr(0, 64)));
             return;
         }
+        if (name != "style" && n->attrs.size() >= MAX_NODE_ATTRS && std::none_of(n->attrs.begin(), n->attrs.end(), [&](auto& a) { return a.first == name; })) return refuse("attribute count");
         note_attribute(n, lower(name));
         if (name == "style") {
             set_inline_style(n->styles, str("value"));
@@ -2788,11 +2935,12 @@ void Renderer::apply_op(const Json& op, std::vector<Json>& out) {
         n->attrs.erase(std::remove_if(n->attrs.begin(), n->attrs.end(), [&](auto& a) { return a.first == name; }), n->attrs.end());
     } else if (kind == "data") {
         if (n->kind == Node::Element) return;
+        if (n->kind == Node::Text && !take_text(n->data, str("data"))) return refuse("text limit");
         note_children(n->parent, n);
         n->data = str("data");
     } else if (kind == "ins") {
         if (is_root) return;
-        int64_t parent = int64_t(op["parent"].asNumber());
+        int64_t parent = node_id(op["parent"]);
         note_children(n->parent, n);
         detach(n);
         if (parent == 0) return;
@@ -2800,11 +2948,24 @@ void Renderer::apply_op(const Json& op, std::vector<Json>& out) {
         if (!p || p->kind != Node::Element) return;
         note_children(p, n);
         // no cycles: the validator forbids them, but a hostile batch must not hang the renderer
-        for (Node* a = p; a; a = a->parent) if (a == n) return;
+        size_t level = 1;
+        for (Node* a = p; a; a = a->parent, level++) if (a == n) return;
+        size_t height = 0;
+        std::vector<std::pair<const Node*, size_t>> below{{n, size_t(1)}};
+        while (!below.empty()) {
+            auto [at, levels] = below.back();
+            below.pop_back();
+            height = std::max(height, levels);
+            for (const Node* c : at->children) below.emplace_back(c, levels + 1);
+        }
+        if (level + height - 1 > MAX_TREE_DEPTH) {
+            out.push_back(Json::object().set("type", "violation").set("detail", "tree depth"));
+            return;
+        }
         n->parent = p;
         const Json* before = op.find("before");
         if (before && before->isNumber()) {
-            Node* b = node(int64_t(before->asNumber()));
+            Node* b = node(node_id(*before));
             if (b && b->parent == p) {
                 auto it = std::find(p->children.begin(), p->children.end(), b);
                 p->children.insert(it, n);
@@ -2832,10 +2993,16 @@ void Renderer::apply_op(const Json& op, std::vector<Json>& out) {
         if (value.empty()) {
             if (it != n->styles.end()) n->styles.erase(it);
         } else if (it != n->styles.end()) it->second = value;
-        else n->styles.emplace_back(name, value);
+        else if (n->styles.size() < MAX_NODE_ATTRS) n->styles.emplace_back(name, value);
+        else refuse("declaration count");
     } else if (kind == "css") {
         if (attached(n)) patch_log_.valid = false;
-        if (n->tag == "style") n->data = str("text");
+        if (n->tag == "style") {
+            size_t blocks = sheet_blocks_ - sheet_blocks(n->data) + sheet_blocks(str("text"));
+            if (blocks > MAX_SHEET_BLOCKS && blocks > sheet_blocks_) return refuse("stylesheet limit");
+            sheet_blocks_ = blocks;
+            n->data = str("text");
+        }
     } else if (kind == "prop") {
         const std::string& name = str("name");
         const Json& value = op["value"];
@@ -2848,11 +3015,14 @@ void Renderer::apply_op(const Json& op, std::vector<Json>& out) {
         };
         if (name == "value") {
             std::string v = value.isString() ? value.asString() : value.isNull() ? std::string() : value.dump();
+            tree_bytes_ += value.isString() ? 0 : v.size();
+            if (n->tag == "textarea" && !take_text(n->data, v)) return refuse("text limit");
             if (n->tag == "textarea") {
                 // A textarea's value is its text, a hole when it is the only content.
                 if (!n->children.empty()) patch_log_.valid = false;
                 else if (attached(n)) patch_log_.texts.insert(n);
                 n->data = v;
+                for (Node* c : n->children) c->parent = nullptr;
                 n->children.clear();
             } else {
                 note_attribute(n, "value");
@@ -2946,7 +3116,7 @@ void Renderer::adopt(int64_t id, Node* n, const Json& attrs) {
         }
         bool found = false;
         for (auto& a : n->attrs) if (a.first == pair[0].asString()) { a.second = pair[1].asString(); found = true; }
-        if (!found) n->attrs.emplace_back(pair[0].asString(), pair[1].asString());
+        if (!found && n->attrs.size() < MAX_NODE_ATTRS) n->attrs.emplace_back(pair[0].asString(), pair[1].asString());
     }
 }
 
@@ -2957,9 +3127,56 @@ void Renderer::detach(Node* n) {
     n->parent = nullptr;
 }
 
+bool Renderer::take_text(const std::string& old, const std::string& fresh) {
+    size_t bytes = text_bytes_ - old.size() + fresh.size(), pieces = text_pieces_ - text_pieces(old) + text_pieces(fresh);
+    if ((bytes > MAX_TEXT_BYTES && bytes > text_bytes_) || (pieces > MAX_TEXT_PIECES && pieces > text_pieces_)) return false;
+    text_bytes_ = bytes;
+    text_pieces_ = pieces;
+    return true;
+}
+
+bool Renderer::hold(const Json& op) {
+    if (layout_stopped_) return false;
+    size_t bytes = 0;
+    auto count = [&](const Json& value) { bytes += value.isString() ? value.asString().size() : 0; };
+    count(op["data"]);
+    count(op["text"]);
+    count(op["name"]);
+    count(op["value"]);
+    for (const Json& pair : op["attrs"].arr()) {
+        count(pair[0]);
+        count(pair[1]);
+    }
+    if (bytes > MAX_TREE_BYTES - std::min(tree_bytes_, MAX_TREE_BYTES)) {
+        // The count only grows with what ops bring: what the nodes hold now, before the widget is stopped for it.
+        size_t held = 0;
+        auto add = [&](const Node& n) {
+            held += n.data.size();
+            for (const auto& [name, value] : n.attrs) held += name.size() + value.size();
+            for (const auto& [name, value] : n.styles) held += name.size() + value.size();
+        };
+        for (const auto& [id, n] : nodes_) add(*n);
+        add(*html_node_);
+        add(*head_node_);
+        add(*body_node_);
+        tree_bytes_ = held;
+        if (held > MAX_TREE_BYTES / 4 * 3 || bytes > MAX_TREE_BYTES / 4) {
+            layout_stopped_ = true;
+            pending_violations_.push_back("tree limit: " + std::to_string(held) + " bytes of text, attributes and styles, " + std::to_string(bytes) + " more in one op");
+            freeze("Document limit exceeded", true);
+            stale_ = true;
+            return false;
+        }
+    }
+    tree_bytes_ += bytes;
+    return true;
+}
+
 void Renderer::forget(Node* n) {
     forget_canvas(n->id);
     resize_watch_.erase(n->id);
+    if (n->kind == Node::Text || n->tag == "textarea") take_text(n->data, {});
+    if (n->tag == "style") sheet_blocks_ -= sheet_blocks(n->data);
     for (Node* c : n->children) {
         c->parent = nullptr;
         forget(c);
@@ -2970,13 +3187,16 @@ void Renderer::forget(Node* n) {
 
 // ───────────────────────── serialisation ─────────────────────────
 
-void Renderer::serialize_node(const Node* n, std::string& out) const {
+void Renderer::serialize_node(const Node* n, std::string& out, int level) const {
     switch (n->kind) {
     case Node::Comment: return;
     case Node::Text: escape_text(n->data, out); return;
     case Node::Element: break;
     }
     if (n->tag == "script" || n->tag == "template") return;  // never forwarded by the validator; belt and braces
+#ifdef TW_LITEHTML_TWIDGET
+    if (level > litehtml::document::max_build_depth) return;
+#endif
     if (!css::is_tag_name(n->tag)) return;
     out.push_back('<');
     out += n->tag;
@@ -2995,6 +3215,8 @@ void Renderer::serialize_node(const Node* n, std::string& out) const {
     bool styled = !n->styles.empty() || overrides_.count(n->id) || edited;
     for (const auto& [name, value] : n->attrs) {
         if (name == "style") { styled = true; continue; }
+        // The parser folds the case of names and keeps the first of two: the node's id, the fork's key and the style are not the widget's to write.
+        if (css::iequals(name, "data-twid") || css::iequals(name, "data-lh-id") || css::iequals(name, "style")) continue;
         // A canvas's width and height are its natural size, which `src` names: on the fork's image they would be its style.
         if ((canvas && (name == "src" || name == "width" || name == "height")) || !css::is_attribute_name(name)) continue;
         // The platform's editor shows the placeholder of the control being edited.
@@ -3013,17 +3235,33 @@ void Renderer::serialize_node(const Node* n, std::string& out) const {
     out.push_back('>');
     if (!n->svg && is_void(n->tag)) return;
     if (n->tag == "style") {
-        std::string css = css::resolve_light_dark(rewrite_color_scheme(n->data, dark_), dark_);
-        size_t p = 0;
-        while ((p = css.find("</", p)) != std::string::npos) { css.replace(p, 2, "<\\/"); p += 3; }
-        out += css;
+        // A sheet is raw text to the parser in HTML content only (not in svg, nor in a select): no `<` of it may open a tag.
+        const std::string css = css::resolve_light_dark(rewrite_color_scheme(n->data, dark_), dark_);
+        for (size_t i = 0; i < css.size();) {
+            const size_t end = css::skip_opaque(css, i);
+            if (end == i) {
+                if (css.compare(i, 4, "<!--") == 0) {
+                    i += 4;
+                    continue;
+                }
+                out.push_back(css[i++]);
+                if (out.back() == '<' && i < css.size() && css[i] != '=') out.push_back(' ');
+            }
+            for (; i < end; i++) {
+                const bool escaped = css[i] == '\\' && i + 1 < end;
+                if (escaped && css[i + 1] != '<') out.push_back(css[i++]);
+                else if (escaped) i++;
+                if (css[i] == '<') out += "\\3c ";
+                else out.push_back(css[i]);
+            }
+        }
     } else if (n->tag == "textarea") {
         // The parser drops a newline right after <textarea>: a value that starts with one needs a second.
         if (!n->data.empty() && n->data[0] == '\n') out += '\n';
         escape_text(n->data, out);
-        for (const Node* c : n->children) serialize_node(c, out);
+        for (const Node* c : n->children) serialize_node(c, out, level + 1);
     } else {
-        for (const Node* c : n->children) serialize_node(c, out);
+        for (const Node* c : n->children) serialize_node(c, out, level + 1);
     }
     out += "</";
     out += n->tag;
@@ -3060,10 +3298,25 @@ void Renderer::write_style(const Node* n, std::string& out) const {
     escape_attr(plain, out);
 }
 
+namespace {
+const char* const kFrozenBadgeCss =
+    "[data-tw-frozen=fatal] body{opacity:.85}[data-tw-badge]{position:fixed;right:6px;bottom:6px;z-index:2147483647;"
+    "font:11px/1.3 -apple-system,system-ui,sans-serif;color:#fff;background:rgba(60,60,60,.75);padding:2px 7px;"
+    "border-radius:9px}";
+}
+
 std::string Renderer::serialize() const {
     std::string out;
     out.reserve(4096);
     out += "<!DOCTYPE html>";
+    if (layout_stopped_) {
+        // Past the layout budget nothing of the widget's is laid out again, its stylesheets neither: the badge alone.
+        out += "<html data-tw-frozen=\"fatal\"><head><style>" + std::string(kFrozenBadgeCss) +
+               "</style></head><body><div data-tw-badge=\"fatal\">";
+        escape_text(frozen_reason_, out);
+        out += "</div></body></html>";
+        return out;
+    }
     // the frozen chrome: html attribute, badge style in head, badge in body (renderer elements, never in the widget's table)
     const Node* html = html_node_.get();
     out += "<html";
@@ -3072,6 +3325,7 @@ std::string Renderer::serialize() const {
     bool styled = !html->styles.empty() || !theme_vars_.empty() || overrides_.count(html->id);
     for (const auto& [name, value] : html->attrs) {
         if (name == "style") { styled = true; continue; }
+        if (css::iequals(name, "data-twid") || css::iequals(name, "data-lh-id") || css::iequals(name, "style")) continue;
         if (!css::is_attribute_name(name)) continue;
         out += " " + name + "=\"";
         escape_attr(value, out);
@@ -3087,7 +3341,7 @@ std::string Renderer::serialize() const {
         if (c == body_node_.get() && frozen_) {
             // badge before the body's own children would shift them; append it inside instead
             std::string body;
-            serialize_node(c, body);
+            serialize_node(c, body, 2);
             size_t close = body.rfind("</body>");
             // QUILL: no badge for an empty reason; the host draws its own over the frozen frame.
             if (close != std::string::npos && !frozen_reason_.empty()) {
@@ -3099,13 +3353,12 @@ std::string Renderer::serialize() const {
             out += body;
         } else if (c == head_node_.get() && frozen_) {
             std::string head;
-            serialize_node(c, head);
+            serialize_node(c, head, 2);
             size_t close = head.rfind("</head>");
-            const char* css = "<style>[data-tw-frozen=fatal] body{opacity:.85}[data-tw-badge]{position:fixed;right:6px;bottom:6px;z-index:2147483647;font:11px/1.3 -apple-system,system-ui,sans-serif;color:#fff;background:rgba(60,60,60,.75);padding:2px 7px;border-radius:9px}</style>";
-            if (close != std::string::npos) head.insert(close, css);
+            if (close != std::string::npos) head.insert(close, std::string("<style>") + kFrozenBadgeCss + "</style>");
             out += head;
         } else {
-            serialize_node(c, out);
+            serialize_node(c, out, 2);
         }
     }
     out += "</html>";
@@ -3120,6 +3373,7 @@ void Renderer::settle(std::vector<Json>& out) {
 
 void Renderer::rebuild(bool patch) {
     Meter meter(*this);
+    NameMeter name_meter(*this);
     struct Refresh {
         Renderer& r;
         ~Refresh() { r.refresh_editor(); }
@@ -3130,6 +3384,26 @@ void Renderer::rebuild(bool patch) {
     build_document(patch);
     paint_scan_ = true;
     animate();
+}
+
+Renderer::NameMeter::NameMeter(Renderer& renderer) : r(renderer) {
+#ifdef TW_LITEHTML_TWIDGET
+    if (r.name_meter_depth_++ == 0) {
+        const auto usage = litehtml::_id_usage();
+        names = usage.names;
+        bytes = usage.bytes;
+    }
+#endif
+}
+
+Renderer::NameMeter::~NameMeter() {
+#ifdef TW_LITEHTML_TWIDGET
+    if (--r.name_meter_depth_ != 0) return;
+    const auto usage = litehtml::_id_usage();
+    r.stats_.names += usage.names - names;
+    r.stats_.name_bytes += usage.bytes - bytes;
+    if (r.stats_.names > MAX_NAMES || r.stats_.name_bytes > MAX_NAME_BYTES) r.stop_names();
+#endif
 }
 
 void Renderer::charge(double spent) {
@@ -3159,11 +3433,11 @@ void Renderer::build_document(bool patch) {
     PatchLog log = std::move(patch_log_);
     patch_log_ = PatchLog{};
 #ifdef TW_LITEHTML_TWIDGET
-    if (patch && patching_) {
+    if (patch && patching_ && !layout_stopped_) {
         patch_log_ = std::move(log);
         bool patched = patch_document();
         patch_log_ = PatchLog{};
-        if (patched) return;
+        if (patched && !layout_stopped_) return;
     }
 #else
     (void)patch;
@@ -3181,6 +3455,7 @@ void Renderer::build_document(bool patch) {
     for (int pass = 0; pass < MAX_PASSES; pass++) {
         double a = now_ms();
         changed = container_->build(html_, vp_height_) || changed;
+        if (layout_stopped_) break;
         double b = now_ms();
         stats_.parse_ms += b - a;  // litehtml lays out inside createFromString+render; not separable
         stats_.passes++;
@@ -3194,6 +3469,16 @@ void Renderer::build_document(bool patch) {
             container_->viewport_resized(vp_height_);
             break;
         }
+    }
+    if (container_->exhausted()) {
+        // Past the layout budget (stop_layout): the document as far as it got is no picture of the widget. Built
+        // once more, from scratch, as the badge alone (serialize).
+        container_->drop();
+        html_ = serialize();
+        container_->build(html_, vp_height_);
+        vp_height_ = int(std::ceil(std::clamp(container_->height(), MIN_HEIGHT, max_height_)));
+        container_->viewport_resized(vp_height_);
+        changed = true;
     }
     doc_height_ = std::ceil(container_->height());
     stats_.builds++;
@@ -3396,7 +3681,7 @@ void Renderer::apply_overrides(StyleOverrides sampled) {
         patches.emplace_back(std::move(el), std::move(style));
     }
     double t0 = now_ms();
-    if (ok && container_->restyle(patches)) {
+    if (ok && container_->restyle(patches) && !layout_stopped_) {
         int h = int(std::ceil(std::clamp(container_->height(), MIN_HEIGHT, max_height_)));
         if (h == vp_height_) {
             doc_height_ = std::ceil(container_->height());
@@ -3427,6 +3712,7 @@ void Renderer::queue_animation_events() {
 }
 
 std::vector<Json> Renderer::tick() {
+    NameMeter name_meter(*this);
     std::vector<Json> out;
     check_hold(out);
     // Held back, a frame only hands out the coalesced moves; the build and the animation step wait.
@@ -4105,6 +4391,13 @@ int64_t Renderer::canvas_allowance(int id) {
     return Canvas::MAX_PIXELS - used;
 }
 
+size_t Renderer::canvas_path_floats(int id) {
+    size_t used = 0;
+    for (const auto& [node_id, canvas] : canvases_)
+        if (canvas->id() != id) used += canvas->path_floats();
+    return used;
+}
+
 void Renderer::report_size(std::vector<Json>& out) {
     if (track_resize_) note_resize();
     // Every frame asks; the message goes out when a number moved.
@@ -4227,6 +4520,7 @@ void Renderer::note_resize() {
 
 DisplayList Renderer::paint() {
     Meter meter(*this);
+    NameMeter name_meter(*this);
     // Messages from a build here go out with the next ones.
     settle(pending_events_);
     if (reuse_paint()) {
@@ -4292,7 +4586,7 @@ bool Renderer::scripted_only(const Json::Array& ops, std::vector<int64_t>& touch
         // Taking a property away goes back to what the document declares, which only a build knows.
         const std::string& value = op["value"].asString();
         if (value.empty() || value.size() > 256 || !is_layer_property(lower(op["name"].asString()))) return false;
-        int64_t id = int64_t(op["id"].asNumber());
+        int64_t id = node_id(op["id"]);
         auto it = promoted_.find(id);
         if (it == promoted_.end() || !it->second.scripted) return false;
         if (std::find(touched.begin(), touched.end(), id) == touched.end()) touched.push_back(id);
@@ -4305,7 +4599,7 @@ void Renderer::note_scripted(const Json::Array& ops) {
     double now = now_s();
     std::vector<int64_t> moving;
     for (const Json& op : ops)
-        if (op["op"].asString() == "style" && is_layer_property(lower(op["name"].asString()))) moving.push_back(int64_t(op["id"].asNumber()));
+        if (op["op"].asString() == "style" && is_layer_property(lower(op["name"].asString()))) moving.push_back(node_id(op["id"]));
     if (moving.empty()) return;
     bool changed = false;
     if (moving.size() > MAX_LAYERS) {
@@ -4332,7 +4626,7 @@ void Renderer::note_svg(const Json::Array& ops) {
     for (const Json& op : ops) {
         const std::string& kind = op["op"].asString();
         // An insertion changes its parent; a removed node is gone, and so is the way to its SVG.
-        const Node* n = node(int64_t(kind == "ins" ? op["parent"].asNumber() : op["id"].asNumber()));
+        const Node* n = node(node_id(kind == "ins" ? op["parent"] : op["id"]));
         int64_t root = 0;
         for (; n; n = n->parent)
             if (n->kind == Node::Element && n->tag == "svg") root = n->id;
@@ -4547,7 +4841,7 @@ Json Renderer::answer(const Json& q) {
     litehtml::element::ptr el;
     const Node* shadow = nullptr;
     if (q.find("id")) {
-        int64_t id = int64_t(q["id"].asNumber());
+        int64_t id = node_id(q["id"]);
         shadow = node(id);
         el = container_->element(id);
         if (!shadow || shadow->kind != Node::Element) return Json::object().set("error", "no such element");
@@ -4996,6 +5290,7 @@ std::string Renderer::editor_json() const {
 }
 
 std::vector<Json> Renderer::edit(uint64_t generation, const std::string& text, const std::string& input_type) {
+    NameMeter name_meter(*this);
     std::vector<Json> out;
     last_input_ = now_s();
     if (frozen_ || !editing_.id || generation != editing_.generation) return out;
@@ -5019,6 +5314,7 @@ std::vector<Json> Renderer::edit(uint64_t generation, const std::string& text, c
 }
 
 std::vector<Json> Renderer::end_editing() {
+    NameMeter name_meter(*this);
     std::vector<Json> out;
     blur(out);
     if (stale_) {
@@ -5093,6 +5389,7 @@ std::vector<int64_t> Renderer::chain(int64_t id) const {
 }
 
 std::vector<Json> Renderer::touch(int action, double x, double y, int pointer, bool primary, bool mouse, int modifiers, int button) {
+    NameMeter name_meter(*this);
     std::vector<Json> out;
     last_input_ = now_s();
     settle(out);
@@ -5168,7 +5465,14 @@ std::vector<Json> Renderer::touch(int action, double x, double y, int pointer, b
             return out;
         }
         t.moved = true;
-        if (container_->mouse(1, x, y)) restyled_by_input();
+        if (container_->mouse(1, x, y)) {
+            restyled_by_input();
+            // A layout past its budget freezes the renderer, and freeze() drops every touch: `t` with them.
+            if (touches_.find(pointer) == touches_.end()) {
+                flush_pending(out);
+                return out;
+            }
+        }
         if (t.target) {
             // A finger's events stay with the element it pressed; a mouse's go to the element under
             // it. Either way a capture takes the pointer events.
@@ -5240,6 +5544,7 @@ std::vector<Json> Renderer::touch(int action, double x, double y, int pointer, b
 }
 
 std::vector<Json> Renderer::hover(int action, double x, double y, int modifiers) {
+    NameMeter name_meter(*this);
     std::vector<Json> out;
     last_input_ = now_s();
     settle(out);
@@ -5335,6 +5640,7 @@ void Renderer::image_event(const char* type, int64_t id, float w, float h, std::
 }
 
 std::vector<Json> Renderer::image_ready(int id, float w, float h) {
+    NameMeter name_meter(*this);
     std::vector<Json> out;
     if (auto it = waiting_images_.find(id); it != waiting_images_.end()) {
         for (int64_t node_id : it->second) image_event(w > 0 || h > 0 ? "load" : "error", node_id, w, h, out);
@@ -5470,6 +5776,24 @@ void Renderer::count_paint() {
         pending_events_.push_back(Json::object().set("type", "paint").set("heavy", paint_.heavy()).set("backdrop", paint_.backdrop()));
     }
     if (auto verdict = paint_.check()) stop_paint(*verdict);
+}
+
+void Renderer::stop_layout(uint64_t boxes) {
+    if (layout_stopped_) return;
+    layout_stopped_ = true;
+    // The host logs it (renderer-violation); the widget is frozen here with the badge alone (build_document).
+    pending_violations_.push_back("layout limit: more than " + std::to_string(boxes - 1) + " boxes in one layout");
+    freeze("Layout limit exceeded", true);
+    // A build in progress rebuilds as the badge itself; a patch or a restyle falls back to one.
+    stale_ = true;
+}
+
+void Renderer::stop_names() {
+    if (layout_stopped_) return;
+    layout_stopped_ = true;
+    pending_violations_.push_back("name limit: more than " + std::to_string(MAX_NAMES) + " names or " + std::to_string(MAX_NAME_BYTES) + " bytes of names");
+    freeze("Name limit exceeded", true);
+    stale_ = true;
 }
 
 void Renderer::stop_paint(const paint::Verdict& verdict) {
@@ -5786,12 +6110,14 @@ void Renderer::paint_selection(DisplayList& list, int64_t layer, bool tint) cons
     if (!selectable_text()) return;
     const auto& runs = text_runs();
     // A run's Text command starts where its box does, in the coordinates of the groups around it.
+    // A box laid out at 1e30 px has no row a long can hold: clamped, so that the loop over rows below ends.
+    auto row_of = [](float y) { return std::isfinite(y) ? long(std::floor(std::clamp(y, -1e9f, 1e9f))) : 0L; };
     std::unordered_map<long, std::vector<size_t>> rows;
     for (size_t i = 0; i < runs.size(); i++)
-        if (runs[i].selectable && !runs[i].line_break) rows[long(std::floor(runs[i].box.y))].push_back(i);
+        if (runs[i].selectable && !runs[i].line_break) rows[row_of(runs[i].box.y)].push_back(i);
     if (rows.empty()) return;
     auto run_at = [&](const Rect& drawn) -> const TextRun* {
-        long below = long(std::floor(drawn.y - 0.05f)), above = long(std::floor(drawn.y + 0.05f));
+        long below = row_of(drawn.y - 0.05f), above = row_of(drawn.y + 0.05f);
         for (long row = below; row <= above; row++) {
             auto it = rows.find(row);
             if (it == rows.end()) continue;

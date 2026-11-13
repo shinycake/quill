@@ -4,6 +4,7 @@
 #pragma once
 
 #include <charconv>
+#include <climits>
 #include <clocale>
 #include <cmath>
 #include <cstdint>
@@ -68,7 +69,13 @@ public:
 
     bool asBool(bool def = false) const { return type_ == Type::Bool ? bool_ : def; }
     double asNumber(double def = 0) const { return type_ == Type::Number ? num_ : def; }
-    int asInt(int def = 0) const { return type_ == Type::Number && std::isfinite(num_) ? int(num_) : def; }
+    /// Truncated toward zero; a number past either end of `int` is that end.
+    int asInt(int def = 0) const {
+        if (type_ != Type::Number || !std::isfinite(num_)) return def;
+        if (num_ >= double(INT_MAX)) return INT_MAX;
+        if (num_ <= double(INT_MIN)) return INT_MIN;
+        return int(num_);
+    }
     const std::string& asString() const { static const std::string empty; return type_ == Type::String ? str_ : empty; }
     const Array& arr() const { static const Array empty; return type_ == Type::Array ? arr_ : empty; }
     const Object& obj() const { static const Object empty; return type_ == Type::Object ? obj_ : empty; }

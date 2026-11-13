@@ -1,8 +1,8 @@
 --- a/twidget/core/src/renderer.cpp
 +++ b/twidget/core/src/renderer.cpp
-@@ -3089,7 +3089,8 @@
+@@ -3344,7 +3344,8 @@
              std::string body;
-             serialize_node(c, body);
+             serialize_node(c, body, 2);
              size_t close = body.rfind("</body>");
 -            if (close != std::string::npos) {
 +            // QUILL: no badge for an empty reason; the host draws its own over the frozen frame.
@@ -37,3 +37,15 @@
      // Host-thread state.
      bool rendererReady_ = false;
      bool engineStarted_ = false;
+--- a/sandbox/packages/desktop/sandbox/src/intl.cpp
++++ b/sandbox/packages/desktop/sandbox/src/intl.cpp
+@@ -303,7 +303,8 @@
+     struct tm tmv {};
+ #ifdef _WIN32
+     // Microsoft documents gmtime_s through the year 3000 only: a later time is not given to it.
+-    bool converted = t <= 32535215999LL && gmtime_s(&tmv, &t) == 0;
++    // QUILL: nor one before 1970, which the CRT also treats as an invalid parameter (it ends the app).
++    bool converted = t >= 0 && t <= 32535215999LL && gmtime_s(&tmv, &t) == 0;
+ #else
+     bool converted = gmtime_r(&t, &tmv) != nullptr;
+ #endif

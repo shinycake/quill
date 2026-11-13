@@ -22,6 +22,10 @@ Background: `docs/decisions/message-widgets.md`.
   refused (CRLF bundles on Windows, #1425) aborted the app instead of
   stopping.
 
+- `sandbox/packages/desktop/sandbox/src/intl.cpp`: BasicIntl gives the
+  Windows `gmtime_s` no time before 1970. The CRT treats a negative time as
+  an invalid parameter, and its default handler ends the app.
+
 ## Added by the script
 
 - `twidget/generated/tw_ua_stylesheet.h`: the profile's UA layer from
