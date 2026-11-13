@@ -63,3 +63,7 @@ src/video_decode/waiting.rs 97 read
 src/video_decode/mod.rs 978 read
 src/video_decode/nv12.rs 321 read
 src/video_decode/ffi.rs 727 read
+src/video_edit.rs 902 read
+src/video_encoder.rs 309 read
+src/video_timeline.rs 537 read
+src/viewer_extras.rs 370 read
