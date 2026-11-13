@@ -75,4 +75,37 @@ src/state/session_apply_users.rs 92 read
 src/state/session_attach_icons.rs 41 read
 src/state/session_boost_settings.rs 74 read
 src/state/session_calls.rs 713 read (lines 1-686 read in full; test module lines 687-713 skimmed)
-77 / 137 files read
+src/state/session_chat_caps.rs 955 read
+src/state/session_chat_look.rs 144 read
+src/state/session_chat_search.rs 230 read
+src/state/session_chatlist.rs 456 read
+src/state/session_composer_topic.rs 78 read
+src/state/session_connection.rs 60 read
+src/state/session_date_jump.rs 559 read (lines 1-413 read in full; test module lines 414-559 skimmed)
+src/state/session_direct_messages.rs 348 read
+src/state/session_drafts.rs 275 read
+src/state/session_files.rs 658 read
+src/state/session_forum.rs 341 read
+src/state/session_forward.rs 193 read
+src/state/session_group_admin.rs 514 read
+src/state/session_group_edit.rs 137 read
+src/state/session_group_manage.rs 136 read
+src/state/session_history_window.rs 542 read
+src/state/session_links_boosts.rs 129 read
+src/state/session_main_profile_tab.rs 20 read
+src/state/session_members.rs 227 read
+src/state/session_message_menu.rs 767 read
+src/state/session_message_story.rs 204 read
+src/state/session_new.rs 54 read
+src/state/session_notifications.rs 374 read
+src/state/session_outcomes.rs 79 read
+src/state/session_peer_color.rs 52 read
+src/state/session_permissions_box.rs 107 read
+src/state/session_privacy_data.rs 471 read
+src/state/session_profile_panels.rs 273 read
+src/state/session_proxy.rs 197 read
+src/state/session_reply.rs 895 read
+src/state/session_reply_keyboard.rs 167 read
+src/state/session_requests.rs 252 read
+src/state/session_saved.rs 384 read
+110 / 137 files read
