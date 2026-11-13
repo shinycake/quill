@@ -64,6 +64,8 @@ pub struct Preferences {
     pub inapp_sounds_enabled: bool,
     /// tdesktop `desktopNotify` ("Desktop notifications" / the tray's
     /// "Disable notifications"): when off, no OS notification is shown.
+    /// Read only until the app-wide switch in `accounts.json` is first set
+    /// ([`desktop_notifications`]).
     #[serde(default = "default_true")]
     pub desktop_notifications: bool,
     /// Parity slice (platform-custom-keybindings): user-overridden shortcuts,

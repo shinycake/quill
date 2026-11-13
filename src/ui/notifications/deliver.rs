@@ -56,22 +56,8 @@ impl QuillApp {
         // Only probe the OS when there is something to decide about.
         let dnd = quill::notify_focus::needs_probe(drain.attention, drain.notifications.len())
             && quill::notify_focus::dnd_active();
-        if drain.attention
-            && quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
-                flash_enabled: true,
-                sound_wanted: false,
-                dnd,
-            })
-            .flash
-        {
-            match window {
-                Some(window) => window.request_attention(),
-                None => {
-                    if let Some(main) = self.main_window.handle {
-                        let _ = main.update(cx, |_, window, _| window.request_attention());
-                    }
-                }
-            }
+        if drain.attention {
+            self.request_message_attention(window, dnd, cx);
         }
         for queued in drain.notifications {
             let plan = quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
@@ -89,6 +75,36 @@ impl QuillApp {
             self.delivery
                 .notification_sounds
                 .play(NotificationSound::File(path));
+        }
+    }
+
+    /// The taskbar flash / Dock bounce a new message asked for, on any
+    /// account, unless Do Not Disturb is on. With no `window` it goes
+    /// through the main window's handle at once: a hidden or minimized
+    /// window draws no frame to do it from.
+    pub(in crate::ui) fn request_message_attention(
+        &self,
+        window: Option<&mut Window>,
+        dnd: bool,
+        cx: &mut Context<Self>,
+    ) {
+        #[cfg(test)]
+        attention_asks::note();
+        let plan = quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
+            flash_enabled: true,
+            sound_wanted: false,
+            dnd,
+        });
+        if !plan.flash {
+            return;
+        }
+        match window {
+            Some(window) => window.request_attention(),
+            None => {
+                if let Some(main) = self.main_window.handle {
+                    let _ = main.update(cx, |_, window, _| window.request_attention());
+                }
+            }
         }
     }
 
@@ -197,5 +213,25 @@ impl QuillApp {
         }
         self.calls.notified = Some((account.clone(), call_id));
         self.spawn_call_notification_as(&account, notification, cx);
+    }
+}
+
+/// How many times a new message asked for the taskbar flash / Dock bounce
+/// on this thread, so a test can see it was asked at once.
+#[cfg(test)]
+pub(in crate::ui) mod attention_asks {
+    use std::cell::Cell;
+
+    thread_local! {
+        static ASKS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    pub(super) fn note() {
+        ASKS.with(|asks| asks.set(asks.get().saturating_add(1)));
+    }
+
+    /// The asks since the last call.
+    pub(in crate::ui) fn take() -> u32 {
+        ASKS.with(Cell::take)
     }
 }

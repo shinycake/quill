@@ -202,7 +202,7 @@ fn authenticate(stream: &Stream) -> Result<(Value, String), (Value, i64, &'stati
                 .collect::<String>()
         })
         .filter(|name| !name.trim().is_empty())
-        .unwrap_or_else(|| "An agent".to_string());
+        .unwrap_or_else(|| super::activity::UNNAMED_AGENT.to_string());
     Ok((id, agent))
 }
 

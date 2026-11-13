@@ -25,8 +25,10 @@ impl QuillApp {
         for chat_id in drain.clears {
             self.dismiss_notification_as(Some(account), chat_id, cx);
         }
-        self.background.attention |= drain.attention;
         let dnd = dnd_active();
+        if drain.attention {
+            self.request_message_attention(None, dnd, cx);
+        }
         for queued in drain.notifications {
             let plan = plan_alert(AlertInput {
                 flash_enabled: false,
@@ -137,24 +139,13 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Render-time part (needs the window): the taskbar flash a background
-    /// notification asked for, account switches asked for by clicks, and
-    /// the chat a switch is waiting to open.
+    /// Render-time part (needs the window): account switches asked for by
+    /// clicks, and the chat a switch is waiting to open.
     pub(in crate::ui) fn flush_background_accounts(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if std::mem::take(&mut self.background.attention)
-            && plan_alert(AlertInput {
-                flash_enabled: true,
-                sound_wanted: false,
-                dnd: dnd_active(),
-            })
-            .flash
-        {
-            window.request_attention();
-        }
         let clicks: Vec<ChatClick> = self.background.clicks.lock_or_recover().drain(..).collect();
         let mut later = Vec::new();
         let mut on_screen = false;

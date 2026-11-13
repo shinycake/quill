@@ -241,7 +241,7 @@ pub struct SettingsState {
     /// tdesktop's "Play sounds" toggle. Loaded from `prefs.json` at
     /// connect time; the notification defaults dialog writes through.
     pub inapp_sounds_enabled: bool,
-    /// Mirror of `settings::Preferences::desktop_notifications` (tdesktop
+    /// The app's switch, `settings::desktop_notifications` (tdesktop
     /// `desktopNotify`, toggled from Settings or the tray menu).
     pub desktop_notifications: bool,
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
