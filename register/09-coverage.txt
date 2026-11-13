@@ -1,0 +1,78 @@
+src/state/fetch.rs 718 read (lines 1-549 read in full; test module lines 550-718 skimmed)
+src/state/folder_order_cache.rs 73 read
+src/state/forwards.rs 107 read (lines 1-74 read in full; test module lines 75-107 skimmed)
+src/state/group_call_stage.rs 452 read (lines 1-336 read in full; test module lines 337-452 skimmed)
+src/state/held.rs 94 read (lines 1-75 read in full; test module lines 76-94 skimmed)
+src/state/history_calendar.rs 285 read (lines 1-189 read in full; test module lines 190-285 skimmed)
+src/state/history_prune.rs 598 read
+src/state/history_retention.rs 161 read (lines 1-132 read in full; test module lines 133-161 skimmed)
+src/state/history_trim.rs 485 read (lines 1-237 read in full; test module lines 238-485 skimmed)
+src/state/history_types.rs 873 read
+src/state/info_types.rs 984 read
+src/state/login_url.rs 18 read
+src/state/logout_notes.rs 101 read
+src/state/map_thumbs.rs 236 read (lines 1-192 read in full; test module lines 193-236 skimmed)
+src/state/media_library.rs 581 read
+src/state/member_fetch_types.rs 147 read
+src/state/member_list.rs 66 read
+src/state/mod.rs 309 read (lines 1-307 read in full; test module lines 308-309 skimmed)
+src/state/notify_shown.rs 93 read
+src/state/open_view.rs 55 read
+src/state/optimistic.rs 124 read (lines 1-84 read in full; test module lines 85-124 skimmed)
+src/state/ownership_types.rs 417 read (lines 1-309 read in full; test module lines 310-417 skimmed)
+src/state/paged.rs 259 read (lines 1-184 read in full; test module lines 185-259 skimmed)
+src/state/paging.rs 35 read (lines 1-20 read in full; test module lines 21-35 skimmed)
+src/state/photo_gallery.rs 564 read (lines 1-524 read in full; test module lines 525-564 skimmed)
+src/state/profile_music.rs 352 read (lines 1-211 read in full; test module lines 212-352 skimmed)
+src/state/redraw.rs 307 read
+src/state/request_correlation.rs 184 read
+src/state/request_errors.rs 207 read
+src/state/request_kind/ai_compose_purpose.rs 33 read
+src/state/request_kind/auth_purpose.rs 33 read
+src/state/request_kind/bots_purpose.rs 54 read
+src/state/request_kind/calls_purpose.rs 57 read
+src/state/request_kind/chat_list_purpose.rs 50 read
+src/state/request_kind/chats_purpose.rs 35 read
+src/state/request_kind/communities_purpose.rs 22 read
+src/state/request_kind/earn_purpose.rs 28 read
+src/state/request_kind/gift_market_purpose.rs 22 read
+src/state/request_kind/grams_purpose.rs 17 read
+src/state/request_kind/group_type_purpose.rs 15 read
+src/state/request_kind/groups_purpose.rs 96 read
+src/state/request_kind/language_purpose.rs 13 read
+src/state/request_kind/live_story_purpose.rs 21 read
+src/state/request_kind/location_picker_purpose.rs 14 read
+src/state/request_kind/media_purpose.rs 25 read
+src/state/request_kind/messages_purpose.rs 85 read
+src/state/request_kind/mod.rs 125 read (lines 1-85 read in full; test module lines 86-125 skimmed)
+src/state/request_kind/passkeys_purpose.rs 15 read
+src/state/request_kind/payments_purpose.rs 69 read
+src/state/request_kind/search_purpose.rs 33 read
+src/state/request_kind/settings_purpose.rs 91 read
+src/state/request_kind/sticker_creator_purpose.rs 17 read
+src/state/request_kind/stickers_purpose.rs 67 read
+src/state/request_kind/stories_purpose.rs 52 read
+src/state/request_kind/suggested_post_purpose.rs 15 read
+src/state/request_kind/threads_purpose.rs 43 read
+src/state/request_kind/ton_wallet_purpose.rs 17 read
+src/state/request_kind/users_purpose.rs 53 read
+src/state/request_purpose.rs 226 read
+src/state/request_rollback.rs 471 read
+src/state/requests.rs 956 read
+src/state/saved_types.rs 165 read (lines 1-153 read in full; test module lines 154-165 skimmed)
+src/state/saves.rs 199 read (lines 1-129 read in full; test module lines 130-199 skimmed)
+src/state/scroll_memory.rs 253 read (lines 1-142 read in full; test module lines 143-253 skimmed)
+src/state/search_tabs_state.rs 349 read (lines 1-210 read in full; test module lines 211-349 skimmed)
+src/state/search_types.rs 693 read
+src/state/session.rs 143 read
+src/state/session_apply.rs 251 read
+src/state/session_apply_chats.rs 722 read
+src/state/session_apply_error.rs 142 read
+src/state/session_apply_messages.rs 595 read
+src/state/session_apply_ok.rs 918 read
+src/state/session_apply_queries.rs 240 read
+src/state/session_apply_users.rs 92 read
+src/state/session_attach_icons.rs 41 read
+src/state/session_boost_settings.rs 74 read
+src/state/session_calls.rs 713 read (lines 1-686 read in full; test module lines 687-713 skimmed)
+77 / 137 files read
