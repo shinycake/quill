@@ -320,10 +320,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// flipped in between is not missed.
     pub fn read_desktop_notifications(&mut self, app_root: Option<&std::path::Path>) {
         let prefs = load_preferences(&self.paths);
-        self.session.settings.desktop_notifications = app_root.map_or(
-            prefs.desktop_notifications,
-            |root| crate::settings::desktop_notifications(root, &prefs),
-        );
+        self.session.settings.desktop_notifications = app_root
+            .map_or(prefs.desktop_notifications, |root| {
+                crate::settings::desktop_notifications(root, &prefs)
+            });
     }
 
     /// Parity slice (platform-custom-keybindings): load the user's shortcut

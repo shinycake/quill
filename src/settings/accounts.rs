@@ -585,7 +585,9 @@ pub fn desktop_notifications(app_root: &Path, account: &Preferences) -> bool {
 /// The app's switch with no account on screen to ask: on until it is
 /// first switched.
 pub fn app_desktop_notifications(app_root: &Path) -> bool {
-    load_registry(app_root).desktop_notifications.unwrap_or(true)
+    load_registry(app_root)
+        .desktop_notifications
+        .unwrap_or(true)
 }
 
 /// Switch OS notifications on or off for every account, the ones with no
