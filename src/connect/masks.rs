@@ -1,6 +1,7 @@
 //! Connect driver: mask sticker sets (the manage dialog and the photo
 //! editor's Masks strip). Kept apart from the regular sticker panel, like
 //! tdesktop's separate `StickersType::Masks` lists.
+use super::settings::NoteSlot;
 use super::*;
 use crate::ids::RequestId;
 use crate::state::{MaskChangeTarget, MasksTab, RequestPurpose, StickersPurpose};
@@ -13,6 +14,8 @@ use crate::telegram::requests::{
 const STRIP_SETS: usize = 4;
 /// Mask stickers whose pictures the editor strip downloads.
 const STRIP_STICKERS: usize = 24;
+/// The line of a mask change that never left.
+const MASK_CHANGE_NOT_SENT: &str = "Could not change the mask sets";
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Send one mask request (the caller says whether one is already out).
@@ -40,10 +43,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             // in flight): its stage ends in the error.
             StickersPurpose::GetInstalledMaskSets => masks.installed.fail("not sent"),
             StickersPurpose::GetArchivedMaskSets { .. } => masks.archived.fail("not sent"),
-            // A change that never left is the change's own line.
-            _ => masks
-                .change_note
-                .refused(None, "Could not change the mask sets"),
+            // Changes send through `send_noted`, which owns their line.
+            _ => {}
         }
     }
 
@@ -141,18 +142,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             installed,
             archived,
         };
-        let sent = self.mask_request(purpose.into(), |id| {
-            change_sticker_set(id, set_id, installed, archived)
-        });
-        match &sent {
-            Ok(Some(id)) => {
-                let masks = &mut self.session.stickers.masks;
-                masks.begin_change(*id, MaskChangeTarget::Set(set_id));
-            }
-            Err(_) => self.note_mask_send_failed(purpose),
-            Ok(None) => {}
-        }
-        sent
+        let extra = self.session.request(purpose.into(), None);
+        self.send_noted(
+            NoteSlot::Masks(MaskChangeTarget::Set(set_id)),
+            extra,
+            MASK_CHANGE_NOT_SENT,
+            &change_sticker_set(extra, set_id, installed, archived),
+        )
+        .map(Some)
     }
 
     /// Move an installed mask set to the target's slot; the list commits
@@ -187,18 +184,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         ids.remove(from);
         ids.insert(to, source);
-        let sent = self.mask_request(StickersPurpose::ReorderInstalledMaskSets.into(), |id| {
-            reorder_installed_mask_sets(id, &ids)
-        });
-        match &sent {
-            Ok(Some(id)) => {
-                let masks = &mut self.session.stickers.masks;
-                masks.begin_change(*id, MaskChangeTarget::Reorder);
-            }
-            Err(_) => self.note_mask_send_failed(StickersPurpose::ReorderInstalledMaskSets),
-            Ok(None) => {}
-        }
-        sent
+        let extra = self
+            .session
+            .request(StickersPurpose::ReorderInstalledMaskSets.into(), None);
+        self.send_noted(
+            NoteSlot::Masks(MaskChangeTarget::Reorder),
+            extra,
+            MASK_CHANGE_NOT_SENT,
+            &reorder_installed_mask_sets(extra, &ids),
+        )
+        .map(Some)
     }
 
     /// The editor's Masks strip came on screen: load the installed mask

@@ -116,3 +116,60 @@ fn a_settled_request_leaves_a_shown_refusal_standing() {
     note.settled(RequestId(2));
     assert_eq!(note.line(), Some("no"));
 }
+
+fn sessions_change(session: &mut Session, purpose: RequestPurpose) -> RequestId {
+    let id = session.request(purpose, None);
+    session.settings.sessions_op.begin(id);
+    session.settings.sessions_note.begin(id);
+    id
+}
+
+#[test]
+fn an_ok_websites_answer_leaves_the_note_idle() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let id = session.request(
+        RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id: 55 }),
+        None,
+    );
+    session.settings.websites_op.begin(id);
+    session.settings.websites_note.begin(id);
+    apply_json(&mut session, &seq, &sink, &ok_json(id));
+    assert_eq!(session.settings.websites_note, ChangeNote::Idle);
+}
+
+#[test]
+fn an_ok_session_toggle_answer_leaves_the_note_idle() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let id = sessions_change(
+        &mut session,
+        RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { session_id: 22 }),
+    );
+    apply_json(&mut session, &seq, &sink, &ok_json(id));
+    assert_eq!(session.settings.sessions_note, ChangeNote::Idle);
+}
+
+#[test]
+fn an_ok_terminate_all_others_answer_leaves_the_note_idle() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let id = sessions_change(&mut session, RequestPurpose::TerminateAllOtherSessions);
+    apply_json(&mut session, &seq, &sink, &ok_json(id));
+    assert_eq!(session.settings.sessions_note, ChangeNote::Idle);
+}
+
+#[test]
+fn a_device_link_answer_leaves_the_note_idle() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let id = sessions_change(&mut session, RequestPurpose::ConfirmDeviceLogin);
+    session.settings.device_login = crate::state::DeviceLogin::Waiting { request: id };
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"session","@extra":"{}","id":11}}"#, id.0),
+    );
+    assert_eq!(session.settings.sessions_note, ChangeNote::Idle);
+}

@@ -32,7 +32,9 @@ use crate::telegram::requests_privacy::{
     PrivacySettingKey, get_blocked_message_senders, get_privacy_rules,
     get_read_date_privacy_settings, set_privacy_rules, set_read_date_privacy_settings,
 };
+pub(super) use note_send::NoteSlot;
 
+mod note_send;
 mod notifications;
 mod sessions;
 mod storage;
@@ -211,18 +213,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         );
-        self.session.settings.block_note.begin(extra);
-        if let Err(err) = self
-            .sender
-            .send_json(&set_message_sender_block_list(extra, user_id, false))
-        {
-            self.session.requests.take(extra);
-            self.session
-                .settings
-                .block_note
-                .refused(Some(extra), "The unblock request was not sent.");
-            return Err(err);
-        }
+        self.send_noted(
+            NoteSlot::Block,
+            extra,
+            "The unblock request was not sent.",
+            &set_message_sender_block_list(extra, user_id, false),
+        )?;
         if let Some(list) = self.session.settings.blocked_senders.data_mut() {
             list.retain(|id| *id != user_id);
             self.session.settings.blocked_total =
@@ -251,20 +247,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         );
+        let json = set_message_sender_block_list(extra, user_id, true);
         if origin == BlockOrigin::PrivacyPage {
-            self.session.settings.block_note.begin(extra);
-        }
-        if let Err(err) = self
-            .sender
-            .send_json(&set_message_sender_block_list(extra, user_id, true))
-        {
+            self.send_noted(
+                NoteSlot::Block,
+                extra,
+                "The block request was not sent.",
+                &json,
+            )?;
+        } else if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
-            if origin == BlockOrigin::PrivacyPage {
-                self.session
-                    .settings
-                    .block_note
-                    .refused(Some(extra), "The block request was not sent.");
-            }
             return Err(err);
         }
         let blocked = &mut self.session.settings.blocked_senders;
