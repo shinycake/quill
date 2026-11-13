@@ -1,39 +1,114 @@
-build.rs 494 read
-crates/panic-guard/src/lib.rs 53 read
-crates/quill-calls-sys/src/lib.rs 228 read
-crates/quill-calls-sys/src/loader.rs 226 read
-crates/webview-host/src/capture.rs 39 read
-crates/webview-host/src/carrier/browser_exit.rs 57 read
-crates/webview-host/src/carrier/lockdown.rs 541 read
-crates/webview-host/src/carrier/mod.rs 527 read
-crates/webview-host/src/carrier/relay.rs 477 read
-crates/webview-host/src/carrier/script.rs 226 read
-crates/webview-host/src/carrier/watchdog.rs 130 read
-crates/webview-host/src/main.rs 570 read
-crates/webview-host/src/shell.rs 58 read
-crates/webview-protocol/src/carrier.rs 581 read
-crates/webview-protocol/src/lib.rs 283 read
-crates/webview-protocol/src/lines.rs 106 read
-scripts/launch-floor/settle-probe/src/main.rs 65 read
-src/about.rs 80 read
-src/account_data.rs 273 read
-src/add_special.rs 126 read
-src/admin_extras.rs 161 read
-src/advanced/codes.rs 117 read
-src/advanced/debug_mode.rs 372 read
-src/advanced/experimental.rs 430 read
-src/advanced/hardware_video.rs 112 read
-src/advanced/mod.rs 12 read
-src/advanced/platform_log.rs 311 read
-src/advanced/test_environment.rs 300 read
-src/agent/access.rs 603 read
-src/agent/activity.rs 685 read
-src/agent/cli/client.rs 122 read
-src/agent/cli/connect.rs 494 read
-src/agent/cli/describe.rs 61 read
-src/agent/cli/files.rs 92 read
-src/agent/cli/flags.rs 714 read
-src/agent/cli/mod.rs 435 read
-src/agent/cli/setup_prompt.rs 237 read
-src/agent/cli/skill.rs 277 read
-src/agent/events.rs 508 read
+build.rs 494 read (non-test code)
+crates/panic-guard/src/lib.rs 53 read (non-test code)
+crates/quill-calls-sys/src/lib.rs 228 read (non-test code)
+crates/quill-calls-sys/src/loader.rs 226 read (non-test code)
+crates/webview-host/src/capture.rs 39 read (non-test code)
+crates/webview-host/src/carrier/browser_exit.rs 57 read (non-test code)
+crates/webview-host/src/carrier/lockdown.rs 541 read (non-test code)
+crates/webview-host/src/carrier/mod.rs 527 read (non-test code)
+crates/webview-host/src/carrier/relay.rs 477 read (non-test code)
+crates/webview-host/src/carrier/script.rs 226 read (non-test code)
+crates/webview-host/src/carrier/watchdog.rs 130 read (non-test code)
+crates/webview-host/src/main.rs 570 read (non-test code)
+crates/webview-host/src/shell.rs 58 read (non-test code)
+crates/webview-protocol/src/carrier.rs 581 read (non-test code)
+crates/webview-protocol/src/lib.rs 283 read (non-test code)
+crates/webview-protocol/src/lines.rs 106 read (non-test code)
+scripts/launch-floor/settle-probe/src/main.rs 65 read (non-test code)
+src/about.rs 80 read (non-test code)
+src/account_data.rs 273 read (non-test code)
+src/add_special.rs 126 read (non-test code)
+src/admin_extras.rs 161 read (non-test code)
+src/advanced/codes.rs 117 read (non-test code)
+src/advanced/debug_mode.rs 372 read (non-test code)
+src/advanced/experimental.rs 430 read (non-test code)
+src/advanced/hardware_video.rs 112 read (non-test code)
+src/advanced/mod.rs 12 read (non-test code)
+src/advanced/platform_log.rs 311 read (non-test code)
+src/advanced/test_environment.rs 300 read (non-test code)
+src/agent/access.rs 603 read (non-test code)
+src/agent/activity.rs 685 read (non-test code)
+src/agent/cli/client.rs 122 read (non-test code)
+src/agent/cli/connect.rs 494 read (non-test code)
+src/agent/cli/describe.rs 61 read (non-test code)
+src/agent/cli/files.rs 92 read (non-test code)
+src/agent/cli/flags.rs 714 skimmed (state, statics, flow; not every line)
+src/agent/cli/mod.rs 435 read (non-test code)
+src/agent/cli/setup_prompt.rs 237 read (non-test code)
+src/agent/cli/skill.rs 277 read (non-test code)
+src/agent/events.rs 508 read (non-test code)
+src/agent/grants.rs 510 read (non-test code)
+src/agent/guide.rs 68 read (non-test code)
+src/agent/link.rs 253 read (non-test code)
+src/agent/mcp.rs 420 read (non-test code)
+src/agent/mod.rs 50 read (non-test code)
+src/agent/pacing.rs 362 read (non-test code)
+src/agent/prompts.rs 245 read (non-test code)
+src/agent/server.rs 606 read (non-test code)
+src/agent/subscription.rs 111 read (non-test code)
+src/agent/summary.rs 760 read (non-test code)
+src/agent/td.rs 248 read (non-test code)
+src/agent/tools/ask.rs 175 read (non-test code)
+src/agent/tools/chats.rs 616 skimmed (state, statics, flow; not every line)
+src/agent/tools/history.rs 451 skimmed (state, statics, flow; not every line)
+src/agent/tools/messages.rs 552 skimmed (state, statics, flow; not every line)
+src/agent/tools/mod.rs 784 read (non-test code)
+src/agent/tools/people.rs 368 skimmed (state, statics, flow; not every line)
+src/agent/tools/status.rs 134 skimmed (state, statics, flow; not every line)
+src/agent/tools/target.rs 430 read (non-test code)
+src/agent/tools/td_call.rs 512 skimmed (state, statics, flow; not every line)
+src/agent/tools/td_offset.rs 179 read (non-test code)
+src/agent/tools/td_policy.rs 504 skimmed (state, statics, flow; not every line)
+src/agent/tools/td_redact.rs 220 skimmed (state, statics, flow; not every line)
+src/agent/tools/td_request.rs 328 skimmed (state, statics, flow; not every line)
+src/agent/tools/td_schema.rs 89 skimmed (state, statics, flow; not every line)
+src/agent/tools/ui.rs 790 skimmed (state, statics, flow; not every line)
+src/agent/tools/ui_shot.rs 289 skimmed (state, statics, flow; not every line)
+src/agent/tools/write/change.rs 323 skimmed (state, statics, flow; not every line)
+src/agent/tools/write/common.rs 802 skimmed (state, statics, flow; not every line)
+src/agent/tools/write/manage.rs 484 skimmed (state, statics, flow; not every line)
+src/agent/tools/write/mod.rs 159 skimmed (state, statics, flow; not every line)
+src/agent/tools/write/send.rs 538 skimmed (state, statics, flow; not every line)
+src/agent/ui_driver/bridge.rs 572 read (non-test code)
+src/agent/ui_driver/guard.rs 696 read (non-test code)
+src/agent/ui_driver/keys.rs 328 skimmed (state, statics, flow; not every line)
+src/agent/ui_driver/mod.rs 21 read (non-test code)
+src/agent/ui_driver/policy.rs 181 read (non-test code)
+src/agent/ui_driver/redact.rs 607 skimmed (state, statics, flow; not every line)
+src/agent/ui_driver/shot.rs 254 skimmed (state, statics, flow; not every line)
+src/agent/ui_driver/surface.rs 149 read (non-test code)
+src/agent/ui_driver/takeover.rs 704 read (non-test code)
+src/agent/ui_driver/tree.rs 390 skimmed (state, statics, flow; not every line)
+src/ai_compose/box_state.rs 448 read (non-test code)
+src/ai_compose/diff.rs 308 read (non-test code)
+src/ai_compose/limit.rs 66 read (non-test code)
+src/ai_compose/mod.rs 24 read (non-test code)
+src/ai_compose/prefs.rs 169 read (non-test code)
+src/ai_compose/preview.rs 167 read (non-test code)
+src/ai_compose/style.rs 296 read (non-test code)
+src/album.rs 683 read (non-test code)
+src/album_pin.rs 80 read (non-test code)
+src/animated_emoji.rs 266 read (non-test code)
+src/animation.rs 78 read (non-test code)
+src/app_theme/embedded.rs 219 read (non-test code)
+src/app_theme/file.rs 396 read (non-test code)
+src/app_theme/keys.rs 134 read (non-test code)
+src/app_theme/mod.rs 99 read (non-test code)
+src/app_theme/omarchy.rs 353 read (non-test code)
+src/app_theme/palette.rs 133 read (non-test code)
+src/app_theme/png.rs 85 skimmed (state, statics, flow; not every line)
+src/app_theme/store.rs 143 read (non-test code)
+src/archive_mute.rs 145 read (non-test code)
+src/auth.rs 496 read (non-test code)
+src/auto_delete.rs 193 read (non-test code)
+src/autoscroll.rs 99 read (non-test code)
+src/autostart.rs 464 read (non-test code)
+src/battery_saving.rs 254 read (non-test code)
+src/battery_signal.rs 562 read (non-test code)
+src/boost_box.rs 968 read (non-test code)
+src/bot_invite.rs 367 read (non-test code)
+src/bot_profile.rs 81 read (non-test code)
+src/bot_verification.rs 318 read (non-test code)
+src/bubble_layout.rs 977 skimmed (state, statics, flow; not every line)
+src/business_bot_bar.rs 201 read (non-test code)
+src/business_bots.rs 381 read (non-test code)
