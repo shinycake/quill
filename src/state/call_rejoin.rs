@@ -117,8 +117,9 @@ impl GroupCallRejoin {
         *self = GroupCallRejoin::Idle;
     }
 
-    /// The attempt behind `request` never reached TDLib (the send
-    /// failed): it is not counted.
+    /// The attempt behind `request` was dropped before it was sent (its
+    /// offer is no longer wanted): it is not counted. A send that fails
+    /// counts (`attempt_failed`), or it would be tried on every tick.
     pub fn attempt_unsent(&mut self, request: RequestId) {
         if let GroupCallRejoin::InFlight {
             request: mine,

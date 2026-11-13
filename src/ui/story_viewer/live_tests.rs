@@ -165,6 +165,25 @@ fn hold_the_feed_clock(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     }
 }
 
+/// The Stars demo places its effects once the burst clips, opened and
+/// tinted on the sticker player's worker threads, have their first frames
+/// (`demo_live_story_stars`). The test executor does not wait for those
+/// threads, so on a busy machine the effects came late, even in the middle
+/// of a test. This waits for the workers themselves, not for time.
+fn settle_star_bursts(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    for _ in 0..8 {
+        if app.read_with(vcx, |app, _| !app.stories.live.flying.is_empty()) {
+            return;
+        }
+        app.update(vcx, |app, cx| {
+            app.players.stickers.settle();
+            cx.notify();
+        });
+        frames(vcx);
+    }
+    panic!("the demo's star effects were never placed");
+}
+
 fn find(vcx: &mut VisualTestContext, selector: &'static str) -> Option<Bounds<Pixels>> {
     vcx.debug_bounds(selector)
 }
@@ -780,6 +799,7 @@ fn a_stream_in_pip_leaves_the_header_of_another_story_alone(cx: &mut TestAppCont
 fn star_effects_rise_over_the_stars_button_and_go(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
     let vcx = &mut vcx;
+    settle_star_bursts(&app, vcx);
     let layer = find(vcx, "live-story-effects").expect("the effects in flight");
     let stars = find(vcx, "live-story-stars").expect("the Stars button");
     assert_eq!(layer.size.width, px(128.));
@@ -804,6 +824,9 @@ fn star_effects_rise_over_the_stars_button_and_go(cx: &mut TestAppContext) {
 fn a_tinted_burst_is_made_off_thread_and_plays_for_effects_after_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
     let vcx = &mut vcx;
+    // The demo's own effects land first, so they cannot replace the
+    // test's clock and effects later on.
+    settle_star_bursts(&app, vcx);
     let file = FileId(9001);
     let effect = |started| FlyingStars {
         sender: MessageSender::User { user_id: 801 },
