@@ -21,7 +21,7 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
             stats.0
         ),
     );
-    let state = session.stories.insights.as_ref().unwrap();
+    let state = session.stories.insights.get(11, 5).unwrap();
     assert!(matches!(state.statistics, StoryStatsFetch::Loaded(_)));
 
     let page = |extra: u64, offset: &str| {
@@ -35,12 +35,13 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
     let second = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
     session.story_forwards_loading(11, 5, second, "n");
     apply_json(&mut session, &seq, &sink, &page(second.0, ""));
-    let state = session.stories.insights.as_ref().unwrap();
+    let state = session.stories.insights.get(11, 5).unwrap();
     assert_eq!(state.forwards.len(), 2);
     assert_eq!(state.forwards_total, 3);
     assert!(state.forwards_next_offset.is_empty());
 
-    // The viewer moved to another story: a late answer is dropped.
+    // The viewer moved to another story: a page nobody waits for is
+    // dropped, and each story keeps its own rows.
     session.begin_story_insights(11, 6);
     let late = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
     apply_json(&mut session, &seq, &sink, &page(late.0, "z"));
@@ -48,10 +49,14 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
         session
             .stories
             .insights
-            .as_ref()
+            .get(11, 6)
             .unwrap()
             .forwards
             .is_empty()
+    );
+    assert_eq!(
+        session.stories.insights.get(11, 5).unwrap().forwards.len(),
+        2
     );
 }
 
@@ -79,12 +84,12 @@ fn a_first_forwards_page_replaces_and_a_stray_page_is_dropped() {
         session
             .stories
             .insights
-            .as_ref()
+            .get(11, 5)
             .unwrap()
             .forwards_loading()
     );
     apply_json(&mut session, &seq, &sink, &page(again.0));
-    let state = session.stories.insights.as_ref().unwrap();
+    let state = session.stories.insights.get(11, 5).unwrap();
     assert_eq!(state.forwards.len(), 1);
     assert!(!state.forwards_loading());
 }
@@ -101,19 +106,19 @@ fn a_forwards_page_from_an_earlier_visit_is_not_appended() {
     session.begin_story_insights(11, 5);
     let old = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
     session.story_forwards_loading(11, 5, old, "");
-    // Another story and back: the new visit starts clean and asks again.
+    // Another story and back: the new visit asks again.
     session.begin_story_insights(11, 6);
     session.begin_story_insights(11, 5);
     let fresh = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
     session.story_forwards_loading(11, 5, fresh, "");
 
     apply_json(&mut session, &seq, &sink, &page(old.0));
-    let state = session.stories.insights.as_ref().unwrap();
+    let state = session.stories.insights.get(11, 5).unwrap();
     assert!(state.forwards.is_empty(), "the old page lands in nothing");
     assert!(state.forwards_loading(), "still waiting for its own");
 
     apply_json(&mut session, &seq, &sink, &page(fresh.0));
-    let state = session.stories.insights.as_ref().unwrap();
+    let state = session.stories.insights.get(11, 5).unwrap();
     assert_eq!(state.forwards.len(), 1);
     assert!(!state.forwards_loading());
 }
@@ -134,7 +139,7 @@ fn statistics_error_is_kept_for_the_panel() {
             stats.0
         ),
     );
-    let state = session.stories.insights.as_ref().unwrap();
+    let state = session.stories.insights.get(11, 5).unwrap();
     assert!(matches!(state.statistics, StoryStatsFetch::Failed(_)));
 }
 
@@ -166,7 +171,7 @@ fn statistics_answers_of_another_request_change_nothing() {
             old.0
         ),
     );
-    let state = session.stories.insights.as_ref().unwrap();
+    let state = session.stories.insights.get(11, 5).unwrap();
     assert_eq!(
         state.statistics,
         StoryStatsFetch::Loading { request: current }
@@ -245,10 +250,53 @@ fn a_statistics_send_that_failed_leaves_the_panel_a_failure_to_retry() {
     let (mut session, _sink) = session();
     session.begin_story_insights(11, 5);
     session.story_statistics_not_sent(11, 5, "no connection".into());
-    let state = session.stories.insights.as_ref().expect("insights kept");
+    let state = session.stories.insights.get(11, 5).expect("insights kept");
     assert_eq!((state.chat_id, state.story_id), (11, 5));
     assert_eq!(
         state.statistics,
         StoryStatsFetch::Failed("no connection".into())
     );
+}
+
+/// Sweep r5 (22-001): the channel statistics page and the viewer's panel
+/// show two stories at once. Opening one keeps the other's insights, and
+/// each story's answer lands in its own; past the cap the oldest goes.
+#[test]
+fn each_story_keeps_its_own_insights() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.begin_story_insights(11, 5);
+    let a = session.request_for_story(RequestPurpose::GetStoryStatistics, ChatId(11), 5);
+    session.story_statistics_requested(11, 5, a);
+    session.begin_story_insights(11, 6);
+    let b = session.request_for_story(RequestPurpose::GetStoryStatistics, ChatId(11), 6);
+    session.story_statistics_requested(11, 6, b);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"storyStatistics","@extra":"{}","story_interaction_graph":{GRAPH_DATA},"story_reaction_graph":{GRAPH_DATA}}}"#,
+            a.0
+        ),
+    );
+    let insights = &session.stories.insights;
+    assert!(matches!(
+        insights.get(11, 5).unwrap().statistics,
+        StoryStatsFetch::Loaded(_)
+    ));
+    assert_eq!(
+        insights.get(11, 6).unwrap().statistics,
+        StoryStatsFetch::Loading { request: b }
+    );
+    // Clearing one story leaves the other.
+    session.clear_story_insights(11, 6);
+    assert!(session.stories.insights.get(11, 6).is_none());
+    assert!(session.stories.insights.get(11, 5).is_some());
+    // Four more stories: the oldest, 5, goes.
+    for story in 7..11 {
+        session.begin_story_insights(11, story);
+    }
+    assert!(session.stories.insights.get(11, 5).is_none());
+    assert!(session.stories.insights.get(11, 10).is_some());
 }

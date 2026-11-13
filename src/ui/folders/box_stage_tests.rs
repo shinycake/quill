@@ -668,6 +668,40 @@ fn closing_the_share_box_keeps_a_link_saves_answer(cx: &mut TestAppContext) {
     });
 }
 
+/// Sweep r5 (16-001): closing the folder editor while its save is out hands
+/// the request on, so a refusal is still told; a box closed with nothing
+/// out leaves nothing behind.
+#[gpui_kit::test]
+fn closing_the_folder_editor_keeps_its_saves_answer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let request = sent(app, RequestPurpose::EditChatFolder, Some(5));
+        let mut dialog = FolderEditorDialog::new(window, cx, Some(5), FolderLoad::ready());
+        dialog.load = FolderLoad::Saving(request);
+        app.folders.editor = Some(dialog);
+        app.close_folder_editor(cx);
+        assert!(app.folders.editor.is_none(), "the box is gone");
+        assert!(app.folders.closed_asks.contains_key(&request));
+        // Still out: the entry waits.
+        assert!(!app.settle_folder_share(cx));
+        answer(app, request, REFUSED);
+        assert!(app.settle_folder_share(cx));
+        assert!(app.folders.closed_asks.is_empty());
+        assert!(
+            !app.screen.connection.status_note().is_empty(),
+            "the refusal is told"
+        );
+        app.folders.editor = Some(FolderEditorDialog::new(
+            window,
+            cx,
+            Some(5),
+            FolderLoad::ready(),
+        ));
+        app.close_folder_editor(cx);
+        assert!(app.folders.closed_asks.is_empty());
+    });
+}
+
 /// Sweep r3-08 review: a closed box's entry ends when its request is gone
 /// and its answer is not kept (the ring of answers dropped it), with no
 /// toast.

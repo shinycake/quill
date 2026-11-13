@@ -75,15 +75,17 @@ impl QuillApp {
         if self.live.is_none() {
             return;
         }
-        let current = self
+        let Some((chat_id, story_id)) = self
             .stories
             .viewer
             .current()
-            .map(|item| (item.chat_id, item.story_id));
+            .map(|item| (item.chat_id, item.story_id))
+        else {
+            return;
+        };
         let Some(state) = self
             .session()
-            .and_then(|s| s.stories.insights.as_ref())
-            .filter(|state| current == Some((ChatId(state.chat_id), state.story_id)))
+            .and_then(|s| s.stories.insights.get(chat_id.0, story_id))
         else {
             return;
         };
@@ -140,7 +142,7 @@ impl QuillApp {
         };
         let Some((offset, failed)) = self
             .session()
-            .and_then(|s| s.stories.insights.as_ref())
+            .and_then(|s| s.stories.insights.get(item.chat_id.0, item.story_id))
             .map(|state| {
                 (
                     state.forwards_next_offset.clone(),
@@ -220,10 +222,10 @@ impl QuillApp {
             .viewer
             .current()
             .map(|i| (i.chat_id, i.story_id));
-        let state = self
-            .session()
-            .and_then(|s| s.stories.insights.clone())
-            .filter(|state| current == Some((ChatId(state.chat_id), state.story_id)));
+        let state = current.and_then(|(chat_id, story_id)| {
+            self.session()
+                .and_then(|s| s.stories.insights.get(chat_id.0, story_id).cloned())
+        });
         let Some(state) = state else {
             return panel
                 .child(

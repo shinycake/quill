@@ -150,11 +150,7 @@ fn page_sheets(
             ))
         }
         StatsPage::Story(story_id) => {
-            let state = session
-                .stories
-                .insights
-                .as_ref()
-                .filter(|s| s.chat_id == chat_id && s.story_id == story_id)?;
+            let state = session.stories.insights.get(chat_id, story_id)?;
             let StoryStatsFetch::Loaded(stats) = &state.statistics else {
                 return None;
             };

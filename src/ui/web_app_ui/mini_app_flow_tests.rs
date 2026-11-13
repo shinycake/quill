@@ -444,6 +444,45 @@ fn a_write_access_answer_must_be_for_the_request_the_window_waits_on(cx: &mut Te
     });
 }
 
+/// Sweep r5 (24-001): a write-access check or grant whose request left
+/// flight with no answer ends: the app hears "no", and the window takes the
+/// next request. One still in flight waits.
+#[gpui_kit::test]
+fn a_lost_write_access_request_answers_no(cx: &mut TestAppContext) {
+    use crate::ui::web_app_ui::launch_flow::WriteAccess;
+    use quill::ids::RequestId;
+    use quill::state::{BotsPurpose, RequestPurpose};
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let received = open_window(app, cx);
+        let state = |app: &QuillApp| app.mini_apps.window.as_ref().map(|w| w.write_access);
+        let out = app
+            .demo_session
+            .as_mut()
+            .map(|session| {
+                session.request(
+                    RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id: BOT }),
+                    None,
+                )
+            })
+            .expect("the demo session");
+        app.with_window(|w| w.write_access = WriteAccess::Checking(out));
+        app.poll_mini_apps(cx);
+        assert_eq!(state(app), Some(WriteAccess::Checking(out)), "still out");
+        for lost in [
+            WriteAccess::Checking(RequestId(987_654)),
+            WriteAccess::Allowing(RequestId(987_655)),
+        ] {
+            app.with_window(|w| w.write_access = lost);
+            app.poll_mini_apps(cx);
+            assert_eq!(state(app), Some(WriteAccess::Idle));
+            let (event, data) = reply(&received);
+            assert_eq!(event, "write_access_requested");
+            assert_eq!(data["status"], "cancelled");
+        }
+    });
+}
+
 /// A `sendWebAppData` whose request left flight with no answer ends with an
 /// error note, and does not stay in the list for the life of the screen.
 #[gpui_kit::test]
