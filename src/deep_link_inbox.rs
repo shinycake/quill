@@ -38,7 +38,7 @@ pub fn sanitize_link(raw: &str) -> Option<String> {
     let lower = link.to_ascii_lowercase();
     if lower.starts_with("tg:") {
         let body = link.get(3..).unwrap_or_default();
-        let body = body.strip_prefix("//").unwrap_or(body);
+        let body = body.trim_prefix("//");
         // `tg://` alone (or `tg:///`) names nothing to open.
         if body.trim_matches('/').is_empty() {
             return None;

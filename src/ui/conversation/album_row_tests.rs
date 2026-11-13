@@ -76,7 +76,7 @@ fn audio(id: i32, text: &str) -> String {
 /// `item` (an `updateNewMessage`) with more message fields
 /// (`,"reply_to":{…}`).
 fn with(item: String, fields: &str) -> String {
-    let body = item.strip_suffix("}}").unwrap_or(&item);
+    let body = item.trim_suffix("}}");
     format!("{body}{fields}}}}}")
 }
 

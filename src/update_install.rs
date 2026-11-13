@@ -307,7 +307,7 @@ pub(crate) fn valid_release(release: &ReleaseInfo) -> bool {
     };
     let (Ok(version), Ok(tag_version), Some(asset), Ok(current)) = (
         semver::Version::parse(&release.version),
-        semver::Version::parse(tag.strip_prefix('v').unwrap_or(tag)),
+        semver::Version::parse(tag.trim_prefix('v')),
         release.asset.as_ref(),
         semver::Version::parse(crate::version::APP),
     ) else {

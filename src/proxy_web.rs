@@ -63,8 +63,8 @@ pub fn normalize_host(value: &str) -> Option<String> {
 
 fn trim_base_path(value: &str) -> &str {
     let value = value.trim();
-    let value = value.strip_prefix('/').unwrap_or(value);
-    value.strip_suffix('/').unwrap_or(value)
+    let value = value.trim_prefix('/');
+    value.trim_suffix('/')
 }
 
 /// tdesktop `NormalizeWebProxyBasePath`: one or more `/`-separated

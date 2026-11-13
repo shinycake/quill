@@ -150,7 +150,7 @@ impl Session {
     /// `SimilarChannels::ensureToggleLink`). Returns the new state.
     pub fn toggle_similar_strip(&mut self, chat_id: ChatId) -> Option<bool> {
         let strip = self.groups.similar_strips.get_mut(&chat_id.0)?;
-        strip.expanded = !strip.expanded;
+        strip.expanded.toggle();
         // History rows are rebuilt on a revision change.
         self.revision = self.revision.wrapping_add(1);
         Some(strip.expanded)

@@ -74,7 +74,7 @@ impl From<String> for ThemeId {
         if value == OMARCHY_ID {
             return ThemeId::Omarchy;
         }
-        let name = value.strip_prefix("custom:").unwrap_or(&value);
+        let name = value.trim_prefix("custom:");
         ThemeId::Custom(store::clean_name(name))
     }
 }

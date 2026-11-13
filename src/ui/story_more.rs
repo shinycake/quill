@@ -256,7 +256,7 @@ impl QuillApp {
 
     /// Mute / unmute the video story's sound.
     pub(super) fn toggle_story_mute(&mut self, cx: &mut Context<Self>) {
-        self.stories.muted = !self.stories.muted;
+        self.stories.muted.toggle();
         if self.stories.video.player().is_some() && self.story_volume() > 0.0 {
             self.sound_starts(cx);
         }

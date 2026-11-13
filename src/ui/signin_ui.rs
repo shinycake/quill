@@ -337,7 +337,7 @@ impl QuillApp {
     }
 
     fn signin_toggle_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.auth_ui.signin.picker_open = !self.auth_ui.signin.picker_open;
+        self.auth_ui.signin.picker_open.toggle();
         if self.auth_ui.signin.picker_open {
             // A list that failed is asked again when the picker opens.
             self.retry_countries(cx);

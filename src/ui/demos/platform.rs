@@ -35,6 +35,18 @@ register_demos![
         .setup(|app, _, cx| app.demo_update(UpdateDemo::Downloading, cx)),
 ];
 
+/// Notes shaped like a real release's: headings, bold, code and a link.
+const DEMO_NOTES: &str = "## What's new
+
+### New
+
+- **Release notes read as formatted text** in Settings, with `code` and [links](https://github.com/shinycake/quill/releases).
+- Improved navigation and video playback.
+
+### Fixes
+
+- Screen readers announce the update status once.";
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum UpdateDemo {
     Install,
@@ -65,7 +77,7 @@ impl QuillApp {
         }
         let release = quill::updater::ReleaseInfo {
             version: "0.2.0".into(),
-            notes: "Update complete: improved navigation, video playback and accessibility.".into(),
+            notes: DEMO_NOTES.into(),
             url: format!("{}/tag/v0.2.0", quill::updater::RELEASES_URL),
             asset: Some(quill::updater::ReleaseAsset {
                 url: format!(

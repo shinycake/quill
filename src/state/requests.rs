@@ -210,7 +210,7 @@ impl AuthRequestError {
         let base = self.base_message();
         match (self.class, self.flood_wait_secs) {
             (ErrorClass::Flood, Some(secs)) => {
-                let base = base.strip_suffix(" — wait and try again").unwrap_or(base);
+                let base = base.trim_suffix(" — wait and try again");
                 format!("{base} — try again in {secs} seconds")
             }
             _ => base.to_string(),

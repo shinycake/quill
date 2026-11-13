@@ -64,7 +64,7 @@ fn same_address(label: &str, url: &str) -> bool {
             .strip_prefix("https://")
             .or_else(|| text.strip_prefix("http://"))
             .unwrap_or(&text);
-        let text = text.strip_prefix("www.").unwrap_or(text);
+        let text = text.trim_prefix("www.");
         text.trim_end_matches('/').to_string()
     }
     bare(label) == bare(url)

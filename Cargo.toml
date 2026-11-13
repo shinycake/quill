@@ -5,6 +5,12 @@ resolver = "2"
 # Never crash (docs/contributing/panic-safety.md, phases A and B). Test code is
 # exempt through clippy.toml. The vendored third_party crates are not members
 # and do not inherit these.
+# Cargo's own lints (Rust 1.100): a dependency no target uses fails the build
+# instead of compiling for nothing. Platform-only crates go in a
+# [target.'cfg(..)'.dependencies] table.
+[workspace.lints.cargo]
+unused_dependencies = "deny"
+
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
@@ -22,7 +28,7 @@ indexing_slicing = "deny"
 name = "quill"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.100"
 license = "MIT"
 description = "Quill, an independent, unofficial Telegram desktop client built on GPUI and TDLib"
 repository = "https://github.com/shinycake/quill"
@@ -147,8 +153,6 @@ sha2 = "0.11"
 # zip entries only. The Windows in-app updater (src/update_install/bundle.rs)
 # also reads the deflated release zip, hence the pure-Rust inflate backend.
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
-# Linux in-app updater: reads the release tarball (flate2 above does the gunzip).
-tar = { version = "0.4", default-features = false }
 # Local passcode (docs/decisions/codex-local-passcode.md): PBKDF2-HMAC-SHA512 key
 # derivation and an XChaCha20-Poly1305 key wrap; no hand-rolled crypto.
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
@@ -220,6 +224,11 @@ features = ["component", "assets", "syntect"]
 [dependencies.gpui-base]
 version = "=0.9.1"
 optional = true
+
+# The Linux and Windows in-app updater (src/update_install/bundle.rs, not built
+# on macOS) reads the release tarball; flate2 above does the gunzip.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tar = { version = "0.4", default-features = false }
 
 # tray-icon is GTK/libappindicator on Linux and needs gtk::init plus a GTK main
 # loop, neither of which a GPUI process has; Linux uses ksni (pure-Rust

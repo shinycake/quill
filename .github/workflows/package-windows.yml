@@ -49,7 +49,7 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ !inputs.embed_credentials }}
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@v2
       - name: tests (core + replay)
         run: cargo test --no-default-features --locked -- --nocapture
@@ -188,7 +188,7 @@ jobs:
       # binary's ancestors (src/video_decode/ffi.rs).
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@v2
       - name: decoder tests against the built FFmpeg
         shell: pwsh

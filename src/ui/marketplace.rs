@@ -275,7 +275,7 @@ impl QuillApp {
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(draft) = this.payments.marketplace.open_draft_mut()
                                     {
-                                        draft.private = !draft.private;
+                                        draft.private.toggle();
                                     }
                                     cx.notify();
                                 })),

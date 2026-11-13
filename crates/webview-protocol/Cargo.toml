@@ -2,7 +2,7 @@
 name = "quill-webview-protocol"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.100"
 license = "MIT"
 description = "Wire types between Quill and its mini-app web view helper process (quill-webview)"
 repository = "https://github.com/shinycake/quill"

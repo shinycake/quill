@@ -158,18 +158,18 @@ impl ViewerOrientation {
     /// stays what the key promises.
     pub fn flip_horizontal(&mut self) {
         if self.swaps_axes() {
-            self.flip_v = !self.flip_v;
+            self.flip_v.toggle();
         } else {
-            self.flip_h = !self.flip_h;
+            self.flip_h.toggle();
         }
     }
 
     /// Mirror what the user sees top-to-bottom (`V`).
     pub fn flip_vertical(&mut self) {
         if self.swaps_axes() {
-            self.flip_h = !self.flip_h;
+            self.flip_h.toggle();
         } else {
-            self.flip_v = !self.flip_v;
+            self.flip_v.toggle();
         }
     }
 }

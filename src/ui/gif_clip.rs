@@ -407,11 +407,7 @@ impl GifPlay {
     /// A screenshot capture shows the first picture, so it is the same
     /// every run.
     fn frozen() -> bool {
-        #[cfg(feature = "demo-capture")]
-        if std::env::var_os("QUILL_DEMO_CAPTURE").is_some() {
-            return true;
-        }
-        false
+        cfg!(feature = "demo-capture") && std::env::var_os("QUILL_DEMO_CAPTURE").is_some()
     }
 
     /// The picture due now.

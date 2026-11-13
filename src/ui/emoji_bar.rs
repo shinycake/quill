@@ -253,7 +253,7 @@ impl QuillApp {
     /// The chevron: open the bar as a grid, or close it back to a strip.
     fn toggle_emoji_bar(&mut self, cx: &mut Context<Self>) {
         let bar = &mut self.composer_ui.suggest.bar;
-        bar.expanded = !bar.expanded;
+        bar.expanded.toggle();
         bar.grid.set_offset(point(px(0.), px(0.)));
         // Keep the highlighted tile in view in the new layout.
         if let Some(at) = self.composer_ui.suggest.selected() {

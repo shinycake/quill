@@ -2,7 +2,7 @@
 name = "quill-webview"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.100"
 license = "MIT"
 description = "Quill's mini-app window: a system web view (WKWebView, WebView2, WebKitGTK) in its own process, driven over stdin/stdout"
 repository = "https://github.com/shinycake/quill"

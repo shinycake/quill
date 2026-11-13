@@ -308,7 +308,7 @@ pub fn interpret_release(status: u16, body: &[u8], current: &str) -> UpdateState
 }
 
 pub(crate) fn release_version(tag: &str) -> Option<Version> {
-    Version::parse(tag.strip_prefix('v').unwrap_or(tag)).ok()
+    Version::parse(tag.trim_prefix('v')).ok()
 }
 
 /// The state for a stable release.

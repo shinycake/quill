@@ -2,7 +2,7 @@
 name = "quill-calls-sys"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
+rust-version = "1.100"
 license = "MIT"
 description = "Raw FFI bindings for libquill_calls (Telegram's tgcalls, LGPL-3.0, behind a C API), loaded at runtime"
 repository = "https://github.com/shinycake/quill"

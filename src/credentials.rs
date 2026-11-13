@@ -161,7 +161,7 @@ fn merge_dotenv(map: &mut HashMap<String, String>, text: &str) {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let line = line.strip_prefix("export ").unwrap_or(line).trim();
+        let line = line.trim_prefix("export ").trim();
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };

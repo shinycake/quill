@@ -14,7 +14,7 @@ Research snapshot 2026-09-16, pin recheck **2026-09-17**.
 
 ## UI family
 
-- Toolchain pin: **Rust 1.98.1** (2026-09-03 stable). GPUI Kit 0.6.1 / gpui-pre 0.3.5 require at least 1.92 (`oo7`).
+- Toolchain pin: **Rust 1.100.0** (2026-11-12 stable), also the MSRV (`rust-version` in every Cargo.toml): Quill uses 1.100 std APIs (`DropGuard`, `trim_prefix`, `bool::toggle`). See docs/decisions/rust-1-100.md.
 - Hello-world follows Kit docs: `gpui_kit::application()` + `gpui_kit::init` + `Root`.
 - Default Kit features kept to `component` + `assets`. No tree-sitter / inspector / editor language packs.
 - Synthetic chat uses Kit `MessageScroller` (auto-measured mixed heights, prepend, `remeasure_items`) and `TextareaState::submit_on_enter(true)`.

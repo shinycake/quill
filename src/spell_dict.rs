@@ -192,7 +192,7 @@ pub fn pick_dictionaries(
 /// UTF-8 text.
 fn decode_text(bytes: &[u8], charset: Option<&str>) -> Option<String> {
     if let Ok(s) = std::str::from_utf8(bytes) {
-        return Some(s.strip_prefix('\u{feff}').unwrap_or(s).to_string());
+        return Some(s.trim_prefix('\u{feff}').to_string());
     }
     let encoding = encoding_rs::Encoding::for_label(charset?.as_bytes())?;
     let (text, _, _) = encoding.decode(bytes);

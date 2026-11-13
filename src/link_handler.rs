@@ -121,7 +121,7 @@ pub fn parse_xdg_default(output: &str) -> LinkHandlerState {
     } else if name == LINUX_DESKTOP_FILE || name == LEGACY_LINUX_DESKTOP_FILE {
         LinkHandlerState::Ours
     } else {
-        LinkHandlerState::Other(name.strip_suffix(".desktop").unwrap_or(name).to_string())
+        LinkHandlerState::Other(name.trim_suffix(".desktop").to_string())
     }
 }
 
@@ -247,7 +247,7 @@ pub fn windows_state(existing_command: Option<&str>) -> LinkHandlerState {
         Some(command) if is_quill_command(command) => LinkHandlerState::Ours,
         Some(command) => {
             let file = command_file_name(command);
-            let name = file.strip_suffix(".exe").unwrap_or(&file);
+            let name = file.trim_suffix(".exe");
             LinkHandlerState::Other(if name.is_empty() {
                 "another app".into()
             } else {

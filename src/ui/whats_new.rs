@@ -413,18 +413,7 @@ fn release_section(note: &ReleaseNote, cx: &mut Context<QuillApp>) -> AnyElement
                 .child(tr(keys::Q_OPS_NO_RELEASE_NOTES_WERE_PROVIDED))
                 .into_any_element()
         } else {
-            TextView::markdown(
-                SharedString::from(format!("{id}-notes")),
-                note.notes.clone(),
-            )
-            .text_sm()
-            // The notes' own headings sit under the version, not above it.
-            .style(
-                TextViewStyle::default()
-                    .heading_font_size(|level, _| px(if level <= 2 { 15. } else { 14. })),
-            )
-            .selectable(true)
-            .into_any_element()
+            release_notes_markdown(format!("{id}-notes"), note.notes.clone())
         })
         .child(
             div().flex().child(
@@ -435,6 +424,22 @@ fn release_section(note: &ReleaseNote, cx: &mut Context<QuillApp>) -> AnyElement
                     .on_click(cx.listener(move |this, _, _, cx| this.open_link(&url, cx))),
             ),
         )
+        .into_any_element()
+}
+
+/// A release's notes as the markdown they are written in, small, with
+/// their own headings sitting under the version or section above them.
+pub(super) fn release_notes_markdown(
+    id: impl Into<SharedString>,
+    notes: impl Into<SharedString>,
+) -> AnyElement {
+    TextView::markdown(id.into(), notes.into())
+        .text_sm()
+        .style(
+            TextViewStyle::default()
+                .heading_font_size(|level, _| px(if level <= 2 { 15. } else { 14. })),
+        )
+        .selectable(true)
         .into_any_element()
 }
 

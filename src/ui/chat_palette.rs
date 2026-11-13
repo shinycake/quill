@@ -24,6 +24,7 @@ use gpui_kit::{Hsla, Rgba};
 use quill::telegram::envelope::ThemeSettings;
 use quill::theme_colorize::{Colorizer, Hsv, MIN_ACCEPTABLE_CONTRAST, adjusted, contrast};
 use std::cell::Cell;
+use std::mem::DropGuard;
 
 /// How outgoing bubbles recolour accent tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,25 +106,22 @@ thread_local! {
     static OUTGOING: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Restores the previous palette when dropped (also on unwind).
-struct Restore(Option<ChatPalette>, bool);
-
-impl Drop for Restore {
-    fn drop(&mut self) {
-        ACTIVE.with(|a| a.set(self.0));
-        OUTGOING.with(|o| o.set(self.1));
-    }
-}
-
 /// Run `f` with `palette` active; `outgoing` marks an outgoing message.
 pub(crate) fn with_palette<R>(
     palette: Option<ChatPalette>,
     outgoing: bool,
     f: impl FnOnce() -> R,
 ) -> R {
-    let _restore = Restore(
-        ACTIVE.with(|a| a.replace(palette)),
-        OUTGOING.with(|o| o.replace(outgoing)),
+    // Restores the previous palette when `f` returns or unwinds.
+    let _restore = DropGuard::new(
+        (
+            ACTIVE.with(|a| a.replace(palette)),
+            OUTGOING.with(|o| o.replace(outgoing)),
+        ),
+        |(palette, outgoing)| {
+            ACTIVE.with(|a| a.set(palette));
+            OUTGOING.with(|o| o.set(outgoing));
+        },
     );
     f()
 }

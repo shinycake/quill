@@ -99,7 +99,7 @@ pub fn read_vcard_file(path: &Path) -> VcardImport {
 /// must not lose the whole list).
 pub fn preview_from_bytes(file_name: &str, bytes: &[u8]) -> VcardImport {
     let text = String::from_utf8_lossy(bytes);
-    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let text = text.trim_prefix('\u{feff}');
     let (contacts, skipped, truncated) = parse_vcard(text);
     if contacts.is_empty() {
         return VcardImport::Failed {

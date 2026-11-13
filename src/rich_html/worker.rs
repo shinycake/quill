@@ -13,6 +13,7 @@ use crate::json_access::JsonExt;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs;
+use std::mem::DropGuard;
 use std::path::{Path, PathBuf};
 
 /// The `richMessage` of a message: its content, or the ephemeral content
@@ -94,35 +95,17 @@ pub fn run<T: Tdlib>(
     let (folder, html) = make_folder(&request.base_dir, &title)?;
     // Until the page is written, an error or a panic removes the folder
     // (it is this export's own: `create_named_folder` made it).
-    let guard = FolderGuard(Some(folder.clone()));
+    let guard = DropGuard::new(folder.clone(), |folder| {
+        let _ = fs::remove_dir_all(folder);
+    });
     let env = Env {
         request,
         files_root,
         date,
     };
     write_page(&env, tdlib, &page, &title, &folder, &html)?;
-    guard.keep();
+    DropGuard::dismiss(guard);
     Ok(html)
-}
-
-/// Removes a half-written export folder when dropped before [`keep`],
-/// which covers both an early return and unwinding from a panic.
-///
-/// [`keep`]: FolderGuard::keep
-struct FolderGuard(Option<PathBuf>);
-
-impl FolderGuard {
-    fn keep(mut self) {
-        self.0 = None;
-    }
-}
-
-impl Drop for FolderGuard {
-    fn drop(&mut self) {
-        if let Some(folder) = self.0.take() {
-            let _ = fs::remove_dir_all(folder);
-        }
-    }
 }
 
 /// What [`write_page`] needs besides the page and where it goes.
