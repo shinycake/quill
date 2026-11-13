@@ -82,8 +82,13 @@ fn reopening_settings_starts_at_the_top(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn every_setting_has_a_place_to_land(cx: &mut TestAppContext) {
+    // Agent access is process-wide, and Advanced's switch for it shows only
+    // while it is off: hold it off while the tests that turn it on wait.
+    let _guard = quill::locks::lock_or_recover(&crate::ui::agent_state::TEST_LOCK);
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
+    crate::ui::agent_state::reset_for_test(&AccountKey::primary());
+    access::set_enabled(false);
     let mut lost = Vec::new();
     for entry in settings_catalog::all() {
         if !entry.platforms.contains(Platforms::current()) || !Target::Entry(entry).shown(false) {
