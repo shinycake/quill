@@ -146,7 +146,9 @@ pub struct Prompt {
 }
 
 impl Prompt {
-    /// An answer with no OS prompt behind it.
+    /// An answer with no OS prompt behind it (the tests, and systems with
+    /// no prompt).
+    #[cfg(any(test, not(target_os = "macos")))]
     pub fn without_prompt(answer: Receiver<bool>) -> Self {
         Self {
             answer,
