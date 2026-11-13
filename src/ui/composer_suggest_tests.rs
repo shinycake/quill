@@ -198,6 +198,27 @@ fn escape_keeps_the_strip_closed_for_that_query(cx: &mut TestAppContext) {
     assert_eq!(shown(&app, vcx), None);
 }
 
+/// Esc closes the rows for the text the field holds, not for every later
+/// message: the same query typed after a send shows again.
+#[gpui_kit::test]
+fn escape_does_not_outlive_the_message(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    answer(&app, vcx, "fire", &[("🔥", "fire")]);
+    vcx.simulate_input("hot :fire");
+    vcx.simulate_keystrokes("escape");
+    assert_eq!(shown(&app, vcx), None);
+    vcx.update(|window, cx| window.press("enter", cx));
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    assert_eq!(text(&app, vcx), "", "the message was sent");
+    vcx.simulate_input("hot :fire");
+    assert!(
+        shown(&app, vcx).is_some(),
+        "the same query in the next message shows its rows"
+    );
+}
+
 /// The bug from 2026-11-11: "Yes" sent before the lone-word delay ran out
 /// left the delay running, and the strip opened over the empty field.
 #[gpui_kit::test]
