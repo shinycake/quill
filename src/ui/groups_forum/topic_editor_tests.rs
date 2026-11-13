@@ -105,3 +105,60 @@ fn cancel_waits_for_a_create_in_flight(cx: &mut TestAppContext) {
         assert_eq!(editor(app).cloned(), None, "nothing out: Cancel closes it");
     });
 }
+
+/// Closing the whole manage dialog (Esc, the backdrop) while a create is
+/// out keeps the send: its refusal is still told, and a dialog closed with
+/// nothing out leaves nothing behind.
+#[gpui_kit::test]
+fn closing_the_manage_dialog_keeps_a_create_in_flight(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let chat = ChatId(-1001);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_forum_manage_dialog(chat, window, cx);
+        app.begin_topic_editor(None, window, cx);
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::CreateForumTopic, Some(chat)))
+            .expect("the demo session");
+        if let Some(editor) = app
+            .admin
+            .forum_manage_dialog
+            .as_mut()
+            .and_then(|dialog| dialog.editor.as_mut())
+        {
+            editor.submit = Submit::Sending(vec![request]);
+        }
+        app.close_forum_manage_dialog(cx);
+        assert!(app.admin.forum_manage_dialog.is_none(), "the box is gone");
+        assert_eq!(app.admin.closed_topic_sends.len(), 1);
+        // Still out: it waits.
+        app.settle_topic_editor(cx);
+        assert_eq!(app.admin.closed_topic_sends.len(), 1);
+        // The refusal ends it in a toast.
+        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+            app.demo_ui.sink.clone();
+        let json = format!(
+            r#"{{"@type":"error","code":400,"message":"TOPIC_TITLE_EMPTY","@extra":"{}"}}"#,
+            request.0
+        );
+        let mut owned =
+            quill::telegram::client::copy_and_parse(&json, &app.demo_ui.seq, &sink).unwrap();
+        owned.seq = quill::telegram::client::LOCAL_ANSWER_SEQ;
+        app.demo_session.as_mut().unwrap().apply(owned);
+        app.settle_topic_editor(cx);
+        assert!(app.admin.closed_topic_sends.is_empty());
+        let note = app.screen.connection.status_note().to_string();
+        assert!(!note.is_empty(), "the refusal is told");
+        assert_ne!(
+            note,
+            quill::lang::tr(quill::lang::keys::Q_PEOPLE_TOPIC_CREATED),
+            "not as a success"
+        );
+        // A dialog closed with nothing out keeps nothing.
+        app.open_forum_manage_dialog(chat, window, cx);
+        app.begin_topic_editor(None, window, cx);
+        app.close_forum_manage_dialog(cx);
+        assert!(app.admin.closed_topic_sends.is_empty());
+    });
+}

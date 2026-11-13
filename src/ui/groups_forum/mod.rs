@@ -76,8 +76,12 @@ impl QuillApp {
         true
     }
 
+    /// Esc, the backdrop or the close button: a create or save still out
+    /// is kept, so its answer or refusal is still told.
     pub(super) fn close_forum_manage_dialog(&mut self, cx: &mut Context<Self>) {
-        self.admin.forum_manage_dialog = None;
+        if let Some(editor) = self.admin.forum_manage_dialog.take().and_then(|d| d.editor) {
+            self.keep_closed_topic_send(editor);
+        }
         cx.notify();
     }
 
@@ -292,6 +296,7 @@ impl QuillApp {
 
     /// The topic editor leaves its Sending stage on TDLib's answer.
     pub(in crate::ui) fn settle_topic_editor(&mut self, cx: &mut Context<Self>) {
+        self.settle_closed_topic_sends(cx);
         let requests = self.session().map(|session| &session.requests);
         let Some((view, target)) = self
             .admin
@@ -921,7 +926,9 @@ crate::ui::shell::register_dialogs! {
     .close(|app, _, cx| app.close_forum_manage_dialog(cx)),
 }
 
+mod closed_sends;
 mod forum_topics_pane;
+pub(super) use closed_sends::ClosedTopicSend;
 
 #[cfg(test)]
 mod forum_editor_tests {

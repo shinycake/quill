@@ -42,6 +42,8 @@ pub(crate) struct AdminUi {
     pub(super) group_confirm_dialog: Option<GroupConfirmDialog>,
     /// Slice G2: forum-topic management dialog.
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
+    /// Topic creates and saves whose manage dialog closed before the answer.
+    pub(super) closed_topic_sends: Vec<super::groups_forum::ClosedTopicSend>,
     /// The recent-actions list with the event ids it shows.
     pub(super) event_log_rows: super::event_log::EventLogRows,
     /// The recent-actions page last opened, with the timers that belong to
@@ -183,6 +185,7 @@ impl AdminUi {
             ownership_dialog: None,
             group_confirm_dialog: None,
             forum_manage_dialog: None,
+            closed_topic_sends: Vec::new(),
             event_log_rows: super::event_log::EventLogRows::new(),
             event_log_page: None,
             group_settings_dialog: None,
