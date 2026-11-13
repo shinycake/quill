@@ -31,3 +31,17 @@ src/owned_bots.rs 373 read
 src/paid_messages.rs 1404 read
 src/paid_messages_guard.rs 407 read
 src/paid_messages_trust.rs 214 read
+src/paid_reaction.rs 655 read
+src/passcode/idle.rs 395 read
+src/passcode/mod.rs 879 read
+src/passkey_probe.rs 119 read
+src/passkeys/login.rs 238 read
+src/passkeys/mod.rs 808 read
+src/payment_card/field_edit.rs 305 read
+src/payment_card/mod.rs 355 read
+src/payment_card/smartglocal.rs 147 read
+src/payment_card/stripe.rs 137 read
+src/payment_card/transport.rs 111 read
+src/payment_card/validate.rs 348 read
+src/payment_invoice.rs 253 read
+src/payment_invoice/builders.rs 165 read
