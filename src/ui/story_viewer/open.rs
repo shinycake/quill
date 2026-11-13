@@ -282,7 +282,8 @@ impl QuillApp {
         // Phase 9.6: (re)start the playback clock + tick whenever the
         // viewer (re)opens — also covers the deferred `StoryOpen::Waiting`
         // path, which funnels through here.
-        self.stories.playback.start(Instant::now());
+        let now = self.stories.clock.now();
+        self.stories.playback.start(now);
         self.stories.video.retry();
         self.sync_story_video(cx);
         self.ensure_story_tick(cx);

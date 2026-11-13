@@ -284,7 +284,8 @@ impl QuillApp {
 
     fn refresh_story_pause(&mut self, cx: &mut Context<Self>) {
         let paused = self.story_playback_paused();
-        self.stories.playback.set_paused(paused, Instant::now());
+        let now = self.stories.clock.now();
+        self.stories.playback.set_paused(paused, now);
         self.apply_story_native_pause(paused);
         self.ensure_story_tick(cx);
         cx.notify();
