@@ -136,8 +136,7 @@ fn closing_the_manage_dialog_keeps_a_create_in_flight(cx: &mut TestAppContext) {
         app.settle_topic_editor(cx);
         assert_eq!(app.admin.closed_topic_sends.len(), 1);
         // The refusal ends it in a toast.
-        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
-            app.demo_ui.sink.clone();
+        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
         let json = format!(
             r#"{{"@type":"error","code":400,"message":"TOPIC_TITLE_EMPTY","@extra":"{}"}}"#,
             request.0
