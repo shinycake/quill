@@ -81,3 +81,15 @@ src/ui/giveaway_create_ui.rs 793 read
 src/ui/giveaway_info_ui.rs 301 read
 src/ui/giveaway_pick_ui.rs 696 read
 src/ui/giveaway_state.rs 66 read
+src/ui/glyph_sweep.rs 443 read
+src/ui/group_admin_panels/invite_links_section.rs 714 read
+src/ui/group_admin_panels/mod.rs 243 read
+src/ui/group_admin_settings.rs 934 read
+src/ui/group_call_extras.rs 613 read
+src/ui/group_call_members.rs 382 read
+src/ui/group_call_members_view.rs 152 read
+src/ui/group_call_panel.rs 1000 read
+src/ui/group_call_settings.rs 159 read
+src/ui/group_call_share.rs 343 read
+src/ui/group_call_speaker.rs 281 read
+src/ui/group_call_stage_volume.rs 239 read
