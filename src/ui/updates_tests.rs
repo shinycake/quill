@@ -100,9 +100,7 @@ fn a_quit_that_never_lands_ends_in_install_failed(cx: &mut TestAppContext) {
 /// the release that fixes it.
 #[gpui_kit::test]
 fn the_timer_finds_a_newer_release_after_a_failed_download(cx: &mut TestAppContext) {
-    let _guard = quill::update_install::FORCE_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _forced = quill::update_install::force_answers();
     let (app, mut vcx) = new_app(cx);
     let newer = ReleaseInfo {
         version: "999.1.0".into(),
@@ -132,16 +130,12 @@ fn the_timer_finds_a_newer_release_after_a_failed_download(cx: &mut TestAppConte
             "the timer's check found the newer release"
         );
     });
-    quill::updater::force_latest_release(None);
-    quill::update_install::force_self_update_available(None);
 }
 
 /// A recheck that fails offline keeps the failed download's release on offer.
 #[gpui_kit::test]
 fn a_failed_recheck_keeps_the_release_of_a_failed_download(cx: &mut TestAppContext) {
-    let _guard = quill::update_install::FORCE_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let _forced = quill::update_install::force_answers();
     let (app, mut vcx) = new_app(cx);
     quill::updater::force_latest_release(None);
     quill::updater::force_check_failure(Some("offline"));
@@ -161,6 +155,4 @@ fn a_failed_recheck_keeps_the_release_of_a_failed_download(cx: &mut TestAppConte
             "the kept release stays"
         );
     });
-    quill::updater::force_check_failure(None);
-    quill::update_install::force_self_update_available(None);
 }

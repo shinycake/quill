@@ -346,16 +346,12 @@ fn a_password_holding_testmode_does_not_switch_environments(cx: &mut TestAppCont
     });
 }
 
-/// The self-update answer is process-wide; the tests that force it take
-/// this lock.
-use quill::update_install::FORCE_LOCK as AUTO_UPDATE_STATE;
-
 /// A release the check finds downloads at once on a copy that can replace
 /// itself; a copy a package manager owns only shows it.
 #[gpui_kit::test]
 fn a_release_the_check_finds_downloads_on_its_own(cx: &mut TestAppContext) {
     use quill::updater::{RELEASES_URL, ReleaseAsset, ReleaseInfo, UpdateState};
-    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let _forced = quill::update_install::force_answers();
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let release = ReleaseInfo {
@@ -401,7 +397,6 @@ fn a_release_the_check_finds_downloads_on_its_own(cx: &mut TestAppContext) {
             "the download finished (offline here) and its result is shown"
         );
     });
-    quill::update_install::force_self_update_available(None);
 }
 
 /// A failed download is checked again by the 4-hour timer, and the kept
@@ -409,7 +404,7 @@ fn a_release_the_check_finds_downloads_on_its_own(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn the_timer_checks_again_after_a_failed_download(cx: &mut TestAppContext) {
     use quill::updater::{RELEASES_URL, ReleaseAsset, ReleaseInfo, UpdateState};
-    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let _forced = quill::update_install::force_answers();
     let (app, _shell, mut vcx) = new_app(cx);
     let valid = ReleaseInfo {
         version: "999.0.0".into(),
@@ -443,15 +438,13 @@ fn the_timer_checks_again_after_a_failed_download(cx: &mut TestAppContext) {
             UpdateState::DownloadFailed(..)
         ));
     });
-    quill::updater::force_latest_release(None);
-    quill::update_install::force_self_update_available(None);
 }
 
 #[gpui_kit::test]
 fn a_low_disk_holds_the_update_download_until_it_is_healthy(cx: &mut TestAppContext) {
     use quill::disk_guard::FLOORS;
     use quill::updater::{RELEASES_URL, ReleaseAsset, ReleaseInfo, UpdateState};
-    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let _forced = quill::update_install::force_answers();
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let release = ReleaseInfo {
@@ -482,7 +475,6 @@ fn a_low_disk_holds_the_update_download_until_it_is_healthy(cx: &mut TestAppCont
         );
     });
     vcx.run_until_parked();
-    quill::update_install::force_self_update_available(None);
 }
 
 fn shown(vcx: &mut VisualTestContext, id: &'static str) -> bool {
@@ -502,7 +494,7 @@ fn click_id(vcx: &mut VisualTestContext, id: &'static str) {
 /// banner asks the same.
 #[gpui_kit::test]
 fn a_staged_update_asks_for_a_restart_from_the_title_bar(cx: &mut TestAppContext) {
-    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let _forced = quill::update_install::force_answers();
     let (app, _shell, mut vcx) = new_app_on(cx, "ready-update-staged");
     let vcx = &mut vcx;
     // The demo opens Settings over the chat list.
@@ -518,7 +510,6 @@ fn a_staged_update_asks_for_a_restart_from_the_title_bar(cx: &mut TestAppContext
         !shown(vcx, "title-bar-update"),
         "nothing to act on: the title bar has no update button"
     );
-    quill::update_install::force_self_update_available(None);
 }
 
 /// "Update Quill" in the title bar starts the download; the button follows
@@ -526,7 +517,7 @@ fn a_staged_update_asks_for_a_restart_from_the_title_bar(cx: &mut TestAppContext
 #[gpui_kit::test]
 fn update_quill_in_the_title_bar_downloads_the_release(cx: &mut TestAppContext) {
     use quill::updater::{UpdateControl, UpdateState};
-    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let _forced = quill::update_install::force_answers();
     let (app, _shell, mut vcx) = new_app_on(cx, "ready-update-install");
     let vcx = &mut vcx;
     app.update(vcx, |app, _| app.close_settings());
@@ -546,7 +537,6 @@ fn update_quill_in_the_title_bar_downloads_the_release(cx: &mut TestAppContext) 
         assert!(matches!(app.update_control(), UpdateControl::Install(_)));
     });
     assert!(shown(vcx, "title-bar-update"));
-    quill::update_install::force_self_update_available(None);
 }
 
 /// Sweep 07-023: the page reads the clipboard once, not on every render,

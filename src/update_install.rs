@@ -444,9 +444,38 @@ static FORCED_AVAILABLE: std::sync::Mutex<Option<Result<(), Unavailable>>> =
     std::sync::Mutex::new(None);
 
 /// The forced answers here and in the updater are process-wide: the tests
-/// that set them hold this lock.
+/// that set them hold this lock, through [`ForcedAnswers`].
 #[cfg(any(test, feature = "demo-capture"))]
-pub static FORCE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static FORCE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// One test's hold on the forced answers. Taking it waits for any other
+/// test that forces them; dropping it, also when an assert fails, clears
+/// every forced answer here and in the updater, so none leaks into the
+/// next test.
+#[cfg(any(test, feature = "demo-capture"))]
+pub struct ForcedAnswers {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+/// Take the forced answers for a test (see [`ForcedAnswers`]).
+#[cfg(any(test, feature = "demo-capture"))]
+pub fn force_answers() -> ForcedAnswers {
+    ForcedAnswers {
+        _lock: FORCE_LOCK.lock().unwrap_or_else(|e| e.into_inner()),
+    }
+}
+
+#[cfg(any(test, feature = "demo-capture"))]
+impl Drop for ForcedAnswers {
+    fn drop(&mut self) {
+        force_self_update_available(None);
+        #[cfg(feature = "ui")]
+        {
+            crate::updater::force_latest_release(None);
+            crate::updater::force_check_failure(None);
+        }
+    }
+}
 
 #[cfg(any(test, feature = "demo-capture"))]
 pub fn force_self_update_available(answer: Option<Result<(), Unavailable>>) {
