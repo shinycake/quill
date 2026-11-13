@@ -8,7 +8,7 @@
 use super::conference::input_ref;
 use super::*;
 use crate::calls::engine::{EngineError, GroupOffer, GroupOfferKey};
-use crate::state::{ConferenceInput, ConferenceOrigin};
+use crate::state::{ConferenceInput, ConferenceOrigin, GroupCallRejoin};
 use crate::telegram::requests::create_group_call;
 
 pub(super) enum OfferSend {
@@ -247,6 +247,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.sender.send_json(&json).is_err() {
             self.session.requests.take(extra);
             self.discard_offered_instance(key);
+            if matches!(send, OfferSend::Rejoin { .. }) {
+                // The attempt counts: a send that cannot leave would
+                // otherwise be built and tried again on every tick.
+                self.rejoin_attempt_failed(id, extra);
+            }
             self.undo_offer(id, extra, &send);
             return;
         }
@@ -315,12 +320,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             call.screen_share.fail(err.to_string());
         } else if let Some(call) = self.session.calls.group_call_mut(id) {
             call.transport.fail(err.to_string());
-            if matches!(send, OfferSend::Rejoin { .. }) {
-                // The attempt counts: the next one is due, or none is left.
-                call.rejoin.attempt_failed(extra);
-            }
+        }
+        if matches!(send, OfferSend::Rejoin { .. }) {
+            self.rejoin_attempt_failed(id, extra);
         }
         self.undo_offer(id, extra, &send);
+    }
+
+    /// The rejoin attempt behind `extra` could not be sent: the next one is
+    /// due, or none is left and the call says so, as when TDLib refuses the
+    /// join.
+    fn rejoin_attempt_failed(&mut self, id: i32, extra: RequestId) {
+        let current = self.session.calls.is_current_group_call(id);
+        let Some(call) = self.session.calls.group_call_mut(id) else {
+            return;
+        };
+        if call.rejoin.attempt_failed(extra) && call.rejoin == GroupCallRejoin::GaveUp && current {
+            self.session.calls.group_call_error = Some("Reconnect attempts exhausted.".to_string());
+        }
     }
 
     /// Puts back what starting the offer changed.
@@ -332,7 +349,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
             OfferSend::Rejoin { .. } => {
-                // Unsent, so not counted (a failed offer already moved on).
+                // Unwanted, so not counted (a failed offer or send already
+                // moved on).
                 if let Some(call) = self.session.calls.group_call_mut(id) {
                     call.rejoin.attempt_unsent(extra);
                 }

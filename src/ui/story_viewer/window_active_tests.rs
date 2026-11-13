@@ -5,13 +5,13 @@
 use super::open_tests::{frames, open_app};
 use crate::ui::app::QuillApp;
 use gpui_kit::{Entity, TestAppContext, VisualTestContext};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// What the viewer's tick does with the pause, then whether the story
 /// would be over an hour from now.
 fn finishes_later(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
     app.update(vcx, |app, _| {
-        let now = Instant::now();
+        let now = app.stories.clock.now();
         let paused = app.story_playback_paused();
         app.stories.playback.set_paused(paused, now);
         app.story_segment_finished(now + Duration::from_secs(3600))

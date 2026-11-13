@@ -76,8 +76,12 @@ impl QuillApp {
         true
     }
 
+    /// Esc, the backdrop or the close button: a create or save still out
+    /// is kept, so its answer or refusal is still told.
     pub(super) fn close_forum_manage_dialog(&mut self, cx: &mut Context<Self>) {
-        self.admin.forum_manage_dialog = None;
+        if let Some(editor) = self.admin.forum_manage_dialog.take().and_then(|d| d.editor) {
+            self.keep_closed_topic_send(editor);
+        }
         cx.notify();
     }
 
@@ -193,8 +197,14 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Leave the editor without sending anything.
+    /// Leave the editor without sending anything. While its create or save
+    /// is out, Cancel waits (as the welcome editor's does): the answer and
+    /// any refusal land in this editor, and a closed one would let New
+    /// Topic send a duplicate.
     fn cancel_topic_editor(&mut self, cx: &mut Context<Self>) {
+        if self.forum_editor_sending() {
+            return;
+        }
         if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
             dialog.editor = None;
         }
@@ -286,6 +296,7 @@ impl QuillApp {
 
     /// The topic editor leaves its Sending stage on TDLib's answer.
     pub(in crate::ui) fn settle_topic_editor(&mut self, cx: &mut Context<Self>) {
+        self.settle_closed_topic_sends(cx);
         let requests = self.session().map(|session| &session.requests);
         let Some((view, target)) = self
             .admin
@@ -653,6 +664,7 @@ impl QuillApp {
                         Button::new("topic-editor-cancel")
                             .label(tr(keys::CANCEL))
                             .ghost()
+                            .disabled(sending)
                             .on_click(cx.listener(|this, _, _, cx| this.cancel_topic_editor(cx))),
                     )
                     .child(
@@ -914,7 +926,9 @@ crate::ui::shell::register_dialogs! {
     .close(|app, _, cx| app.close_forum_manage_dialog(cx)),
 }
 
+mod closed_sends;
 mod forum_topics_pane;
+pub(super) use closed_sends::ClosedTopicSend;
 
 #[cfg(test)]
 mod forum_editor_tests {

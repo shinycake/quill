@@ -42,3 +42,18 @@ fn previews_show_by_default_and_the_switches_follow_tdesktop(cx: &mut TestAppCon
         assert!(app.notify_view_section(cx).is_none());
     });
 }
+
+/// With no account on screen (signing in, connecting) the switch reads and
+/// writes the app's own value instead of showing "on" (sweep 19-003).
+#[gpui_kit::test]
+fn with_no_account_on_screen_the_switch_is_the_apps(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.demo_session = None;
+        assert!(app.session().is_none());
+        app.set_desktop_notifications(false, cx);
+        assert!(!app.desktop_notifications_enabled());
+        app.set_desktop_notifications(true, cx);
+        assert!(app.desktop_notifications_enabled());
+    });
+}

@@ -35,7 +35,7 @@ impl QuillApp {
                 areas: Vec::new(),
             });
         let (position, total) = self.stories.viewer.position().unwrap_or((0, 0));
-        let now = Instant::now();
+        let now = self.stories.clock.now();
         let poster = self
             .session()
             .and_then(|s| s.chats.get(&item.chat_id.0))

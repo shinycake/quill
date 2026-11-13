@@ -548,3 +548,31 @@ fn a_down_client_reads_as_its_status_and_only_a_failed_one_retries() {
         assert!(one.live().is_none(), "no client");
     }
 }
+
+/// Another account's new message asks for the taskbar flash / Dock bounce
+/// when the poll hands it over, not on a render a hidden or minimized
+/// window never makes.
+#[gpui_kit::test]
+fn another_accounts_message_asks_for_attention_without_a_render(cx: &mut TestAppContext) {
+    use crate::ui::notifications::attention_asks;
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    attention_asks::take();
+    app.update(&mut vcx, |app, cx| {
+        let drain = quill::notify_accounts::NotifyDrain {
+            attention: true,
+            ..Default::default()
+        };
+        app.deliver_background(&other_account(), drain, cx);
+    });
+    assert_eq!(attention_asks::take(), 1);
+    app.update(&mut vcx, |app, cx| {
+        let quiet = quill::notify_accounts::NotifyDrain::default();
+        app.deliver_background(&other_account(), quiet, cx);
+    });
+    assert_eq!(
+        attention_asks::take(),
+        0,
+        "a drain with no new message asks nothing"
+    );
+}

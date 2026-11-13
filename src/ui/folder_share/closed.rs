@@ -22,9 +22,39 @@ pub(crate) enum ClosedAsk {
     /// session's, so only a failure has something to say; a success asks
     /// the list of a box reopened since (`refetch_open_folder_links`).
     LinkChange,
+    /// The folder editor's create or edit: the box closed while it was out,
+    /// so the toast says whether the folder was saved or why not.
+    FolderSaved { edited: bool },
 }
 
 impl QuillApp {
+    /// The toast for a saved folder: edited, or created.
+    pub(in crate::ui) fn folder_saved_note(edited: bool) -> StatusNote {
+        StatusNote::silent(tr(if edited {
+            keys::Q_CHATLIST_FOLDER_UPDATED
+        } else {
+            keys::Q_CHATLIST_FOLDER_CREATED
+        }))
+    }
+
+    /// Every way the folder editor closes (Cancel, Esc, the backdrop, a
+    /// replacing page): a save still out is handed to `closed_asks`, so
+    /// its answer is still told. A fetch for a merge is not a save; it ends
+    /// with the box.
+    pub(in crate::ui) fn close_folder_editor(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.folders.editor.take()
+            && let FolderLoad::Saving(request) = dialog.load
+        {
+            self.folders.closed_asks.insert(
+                request,
+                ClosedAsk::FolderSaved {
+                    edited: dialog.folder_id.is_some(),
+                },
+            );
+        }
+        cx.notify();
+    }
+
     /// Poll-loop half: the answer of each request a closed box left.
     /// Returns whether anything changed.
     pub(super) fn settle_closed_folder_asks(&mut self, cx: &mut Context<Self>) -> bool {
@@ -81,6 +111,9 @@ impl QuillApp {
                 // The delete or save landed: a box reopened meanwhile held its
                 // list back for it (`fetch_folder_share`) and asks it now.
                 (ClosedAsk::LinkChange, _) => self.refetch_open_folder_links(),
+                (ClosedAsk::FolderSaved { edited }, _) => {
+                    self.set_note(Self::folder_saved_note(edited));
+                }
             }
             changed = true;
         }

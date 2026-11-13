@@ -463,7 +463,7 @@ pub(crate) fn current_agent() -> String {
         .ok()
         .flatten()
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "An agent".to_string())
+        .unwrap_or_else(|| crate::agent::activity::UNNAMED_AGENT.to_string())
 }
 
 fn no_arguments() -> Value {

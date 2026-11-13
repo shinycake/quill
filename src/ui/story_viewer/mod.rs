@@ -813,6 +813,7 @@ pub(in crate::ui) mod chrome;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod click_through_tests;
+mod clock;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod cover_wait_tests;
@@ -874,6 +875,7 @@ mod video_wait_tests;
 #[cfg(feature = "demo-capture")]
 mod window_active_tests;
 
+pub(in crate::ui) use clock::StoryClock;
 pub(in crate::ui) use live_state::LiveStoryUi;
 pub(in crate::ui) use open::PendingStoryOpen;
 pub(in crate::ui) use story_open::StoryOpen;

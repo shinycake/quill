@@ -76,6 +76,7 @@ impl QuillApp {
         }
         self.poll_mini_app_session(cx);
         self.end_lost_data_sends(cx);
+        self.end_lost_write_access();
         let overdue = self.mini_apps.window.as_ref().is_some_and(|window| {
             window.helper.start_due_in(std::time::Instant::now()) == Some(Duration::ZERO)
         });
@@ -93,6 +94,30 @@ impl QuillApp {
             || self.session().is_some_and(|session| {
                 session.bots.web_apps.opening().is_some() || session.web_app_answer_due()
             })
+    }
+
+    /// A write-access check or grant whose request left flight with no
+    /// answer (the stale sweep, a reconnect) never reports: the app hears
+    /// "no", and its next request is not turned away as busy, as a lost
+    /// emoji status grant ends. Runs after the pass took its answers, so an
+    /// answered request is never taken for a lost one.
+    fn end_lost_write_access(&mut self) {
+        let waiting = match self.mini_apps.window.as_ref().map(|w| w.write_access) {
+            Some(
+                launch_flow::WriteAccess::Checking(request)
+                | launch_flow::WriteAccess::Allowing(request),
+            ) => request,
+            _ => return,
+        };
+        let lost = self
+            .session()
+            .is_some_and(|session| session.requests.get(waiting).is_none());
+        if lost {
+            self.with_window(|window| {
+                window.write_access = launch_flow::WriteAccess::Idle;
+                window.emit(BridgeReply::write_access_requested(false));
+            });
+        }
     }
 
     /// When a stage that watches other state (nothing pokes for it) wants

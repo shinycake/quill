@@ -91,20 +91,27 @@ pub(super) enum SuggestStage {
         built: BuiltFrom,
         rows: Option<Rows>,
     },
+    /// The user closed this query's rows with Esc. They stay closed while
+    /// the field holds it (tdesktop hides its autocomplete until the next
+    /// field change); any other text, a send or a chat switch leaves the
+    /// stage, so the dismissal never outlives the query.
+    Dismissed { query: SuggestQuery },
 }
 
 impl SuggestStage {
     pub(super) fn query(&self) -> Option<&SuggestQuery> {
         match self {
             Self::Idle => None,
-            Self::Waiting { query, .. } | Self::Live { query, .. } => Some(query),
+            Self::Waiting { query, .. } | Self::Live { query, .. } | Self::Dismissed { query } => {
+                Some(query)
+            }
         }
     }
 
     fn live(&self) -> Option<&SuggestQuery> {
         match self {
             Self::Live { query, .. } => Some(query),
-            Self::Idle | Self::Waiting { .. } => None,
+            Self::Idle | Self::Waiting { .. } | Self::Dismissed { .. } => None,
         }
     }
 }
@@ -113,9 +120,6 @@ impl SuggestStage {
 #[derive(Default)]
 pub(super) struct SuggestUi {
     pub stage: SuggestStage,
-    /// `(kind, trigger offset, query)` the user closed with Esc; stays
-    /// closed until the query changes.
-    pub dismissed: Option<(SuggestKind, usize, String)>,
     /// The chat and text whose sticker suggestions the user closed; they
     /// stay closed until the text changes (tdesktop hides its autocomplete
     /// on Esc until the next field change).
@@ -294,7 +298,6 @@ impl QuillApp {
         let ui = &self.composer_ui.suggest;
         let query = self
             .field_suggest_query(cx)
-            .filter(|q| ui.dismissed.as_ref() != Some(&(q.kind, q.range.start, q.query.clone())))
             .filter(|q| typed || ui.stage.query() == Some(q));
         if self.composer_ui.suggest.stage.query() != query.as_ref() {
             let shown = self.composer_ui.suggest.is_showing();
@@ -543,7 +546,7 @@ impl QuillApp {
         };
         ui.bar.release(BarOwner::Suggest);
         if remember {
-            ui.dismissed = Some((query.kind, query.range.start, query.query));
+            ui.stage = SuggestStage::Dismissed { query };
         }
         cx.notify();
         true

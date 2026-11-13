@@ -36,6 +36,17 @@ pub(super) fn open_app(
     let handle = cx.open_window(size(px(1100.), px(900.)), move |window, cx| {
         let view = cx
             .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(kind))));
+        // A photo story runs out after 5 s of the viewer's clock. Stopped
+        // before the first frame, with the demo's story started on it, a
+        // busy machine cannot move the viewer on between two steps; a test
+        // that needs the time to pass skips it.
+        view.update(cx, |app, _| {
+            app.stories.clock.freeze();
+            if app.stories.playback.is_running() {
+                let now = app.stories.clock.now();
+                app.stories.playback.start(now);
+            }
+        });
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| QuillShell::new(view));
         Root::new(shell, window, cx)
@@ -209,10 +220,11 @@ fn open_then_fail(
     app.update(vcx, |app, cx| {
         app.set_note(crate::ui::status_note::StatusNote::silent(""));
         app.open_story_viewer(ChatId(POSTER), story, scope, cx);
+        let now = app.stories.clock.now();
         if let Some(session) = app.demo_session.as_mut() {
             session
                 .stories
-                .story_fetch_failed((POSTER, story), None, std::time::Instant::now());
+                .story_fetch_failed((POSTER, story), None, now);
         }
         cx.notify();
     });

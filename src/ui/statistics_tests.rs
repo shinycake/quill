@@ -322,20 +322,11 @@ fn a_graph_that_failed_to_load_shows_its_reason_and_retry(cx: &mut TestAppContex
 
 #[gpui_kit::test]
 fn a_failed_story_statistics_page_has_a_retry(cx: &mut TestAppContext) {
-    use quill::state::{StoryInsightsState, StoryStatsFetch};
     let (app, mut vcx) = open_statistics(cx);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stories.insights = Some(StoryInsightsState {
-                chat_id: CHANNEL,
-                story_id: 5,
-                statistics: StoryStatsFetch::Failed("FLOOD_WAIT_5".into()),
-                forwards: Vec::new(),
-                forwards_total: 0,
-                forwards_next_offset: String::new(),
-                forwards_page: Default::default(),
-            });
+            session.story_statistics_not_sent(CHANNEL, 5, "FLOOD_WAIT_5".into());
             session.groups.stats.set_page(CHANNEL, StatsPage::Story(5));
         }
         cx.notify();

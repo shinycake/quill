@@ -97,6 +97,12 @@ struct RegistryFile {
     /// notifications from: All accounts"), app-wide like tdesktop's.
     #[serde(default = "default_true")]
     notify_from_all: bool,
+    /// tdesktop `desktopNotify` (Desktop notifications, the tray's
+    /// Disable notifications), app-wide like tdesktop's. `None` until it
+    /// is first switched here: each account then keeps the value its own
+    /// `prefs.json` had from earlier versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    desktop_notifications: Option<bool>,
     /// Account folders to delete before any client opens them again
     /// (`deletion`): a removal or log-out whose TDLib client was still
     /// closing when the app quit finishes on the next start.
@@ -111,6 +117,7 @@ struct AccountRegistry {
     /// The startup account: always one of the listed ones once tidied.
     active: Option<AccountKey>,
     notify_from_all: bool,
+    desktop_notifications: Option<bool>,
 }
 
 impl From<RegistryFile> for AccountRegistry {
@@ -145,6 +152,7 @@ impl From<RegistryFile> for AccountRegistry {
             entries,
             active: file.active,
             notify_from_all: file.notify_from_all,
+            desktop_notifications: file.desktop_notifications,
         }
     }
 }
@@ -155,6 +163,7 @@ impl From<AccountRegistry> for RegistryFile {
             accounts: registry.listed(),
             active: registry.active.clone(),
             notify_from_all: registry.notify_from_all,
+            desktop_notifications: registry.desktop_notifications,
             pending_deletes: registry.pending(),
         }
     }
@@ -169,6 +178,7 @@ impl Default for AccountRegistry {
             })],
             active: Some(AccountKey::primary()),
             notify_from_all: true,
+            desktop_notifications: None,
         }
     }
 }
@@ -559,6 +569,32 @@ pub fn notify_from_all(app_root: &Path) -> bool {
 pub fn set_notify_from_all(app_root: &Path, on: bool) -> std::io::Result<()> {
     update_registry(app_root, |registry| {
         registry.notify_from_all = on;
+        Ok(true)
+    })
+}
+
+/// Whether OS notifications show for an account whose prefs are
+/// `account`: the app's switch, every account's alike, or before it was
+/// first switched, the account's own value from earlier versions.
+pub fn desktop_notifications(app_root: &Path, account: &Preferences) -> bool {
+    load_registry(app_root)
+        .desktop_notifications
+        .unwrap_or(account.desktop_notifications)
+}
+
+/// The app's switch with no account on screen to ask: on until it is
+/// first switched.
+pub fn app_desktop_notifications(app_root: &Path) -> bool {
+    load_registry(app_root)
+        .desktop_notifications
+        .unwrap_or(true)
+}
+
+/// Switch OS notifications on or off for every account, the ones with no
+/// client running too.
+pub fn set_desktop_notifications(app_root: &Path, on: bool) -> std::io::Result<()> {
+    update_registry(app_root, |registry| {
+        registry.desktop_notifications = Some(on);
         Ok(true)
     })
 }
@@ -1162,6 +1198,50 @@ mod account_registry_tests {
         )
         .unwrap();
         assert!(notify_from_all(&root));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Desktop notifications are the app's: switched off while an account
+    /// had no client running, that account reads off when it connects,
+    /// whatever its own prefs file says.
+    #[test]
+    fn desktop_notifications_switch_reaches_an_account_with_no_client() {
+        let root = tmp_root("desktop-notify");
+        let key = add_account(&root, "Work").unwrap();
+        let mut earlier = load_preferences(&AccountPaths::for_root(&root, &key));
+        assert!(desktop_notifications(&root, &earlier), "default: on");
+        earlier.desktop_notifications = false;
+        assert!(
+            !desktop_notifications(&root, &earlier),
+            "never switched app-wide: the account's own value from before"
+        );
+        set_desktop_notifications(&root, false).unwrap();
+        let untouched = load_preferences(&AccountPaths::for_root(&root, &key));
+        assert!(
+            untouched.desktop_notifications,
+            "its own file still says on"
+        );
+        assert!(!desktop_notifications(&root, &untouched));
+        set_active_account(&root, &key).unwrap();
+        assert!(
+            !desktop_notifications(&root, &untouched),
+            "other edits keep it"
+        );
+        set_desktop_notifications(&root, true).unwrap();
+        assert!(desktop_notifications(&root, &earlier));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With no account on screen the menus read the app's switch, not a
+    /// default.
+    #[test]
+    fn with_no_account_on_screen_the_app_switch_is_read() {
+        let root = tmp_root("desktop-notify-app");
+        assert!(app_desktop_notifications(&root), "never switched: on");
+        set_desktop_notifications(&root, false).unwrap();
+        assert!(!app_desktop_notifications(&root));
+        set_desktop_notifications(&root, true).unwrap();
+        assert!(app_desktop_notifications(&root));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

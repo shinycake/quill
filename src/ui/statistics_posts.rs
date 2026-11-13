@@ -639,11 +639,7 @@ impl QuillApp {
                     .child(row_text(title, stamp(story.date))),
             );
         }
-        let state = session
-            .stories
-            .insights
-            .as_ref()
-            .filter(|s| s.chat_id == chat_id && s.story_id == story_id);
+        let state = session.stories.insights.get(chat_id, story_id);
         let public = state.map_or(0, |s| s.forwards_total);
         if let Some(info) = story.and_then(|s| s.interaction_info) {
             page = page.child(overview_grid(vec![

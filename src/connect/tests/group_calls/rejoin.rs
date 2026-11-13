@@ -158,3 +158,27 @@ fn only_the_failure_of_the_rejoin_in_flight_counts() {
     rejoin.want();
     assert_eq!(rejoin, GroupCallRejoin::GaveUp);
 }
+
+#[test]
+fn a_rejoin_that_cannot_be_sent_counts_toward_the_cap() {
+    let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();
+    // TDLib takes no `joinVideoChat` (the client is closing).
+    recorder.refuse(Some("joinVideoChat"));
+    ingest_call_json(&mut driver, &seq, &sink, &update(false, true));
+    for _ in 0..MAX_GROUP_CALL_REJOIN_ATTEMPTS {
+        driver.maybe_auto_rejoin_group_call().expect("a no-op");
+    }
+    assert_eq!(tracked(&driver).rejoin, GroupCallRejoin::GaveUp);
+    // Spent: later ticks build no native context and send nothing.
+    let leaves = handle.group_leaves().len();
+    for _ in 0..MAX_GROUP_CALL_REJOIN_ATTEMPTS {
+        driver.maybe_auto_rejoin_group_call().expect("a no-op");
+    }
+    assert_eq!(handle.group_leaves().len(), leaves);
+    assert_eq!(
+        driver.session.calls.group_call_error.as_deref(),
+        Some("Reconnect attempts exhausted.")
+    );
+    assert!(tracked(&driver).reconnecting(), "the banner is the way out");
+    let _ = std::fs::remove_dir_all(&dir);
+}

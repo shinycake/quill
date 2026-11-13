@@ -238,8 +238,6 @@ pub(crate) struct BackgroundAccounts {
     pub(super) pending_open: Option<PendingOpen>,
     /// tdesktop `notifyFromAll`, read from the account registry.
     pub(super) notify_from_all: bool,
-    /// A background notification asked for the taskbar flash / Dock bounce.
-    pub(super) attention: bool,
     /// A call ringing on a background account (`calls`).
     ringing: Option<calls::BackgroundRing>,
     /// Clients sent `close` and drained a little per poll (`closing`):
@@ -272,7 +270,6 @@ impl BackgroundAccounts {
             clicks: Arc::new(Mutex::new(Vec::new())),
             pending_open: None,
             notify_from_all: true,
-            attention: false,
             ringing: None,
             closing: ClosingSet::new(),
             close_waiters: Default::default(),

@@ -313,6 +313,8 @@ pub(crate) struct StoryUi {
     /// Phase 9.6: playback clock + segmented progress bar for the viewer;
     /// the frame clock moves it (`story_viewer::tick_rest`).
     pub(super) playback: StoryPlayback,
+    /// The time `playback` and the fetch waits are judged by.
+    pub(super) clock: super::story_viewer::StoryClock,
     /// What the tick last warmed custom-emoji reaction stickers for (the
     /// story, the ids it needs, how many stickers were known): the work
     /// repeats only when this changes.
@@ -553,6 +555,7 @@ impl StoryUi {
             stealth_box: None,
             viewer: super::story_viewer::StoryOpen::closed(),
             playback: StoryPlayback::default(),
+            clock: Default::default(),
             emoji_warm: None,
             open: None,
             media_saves: std::collections::HashMap::new(),
