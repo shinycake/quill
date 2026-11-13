@@ -10328,3 +10328,11 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | g-382 | The fixed 100 ms record step is gone (no allow line for it). `RecordingUi::wake_in` returns the wait to the capture's nearest real deadline (`Deadlines::next` in `record_wake.rs`): the chat action refresh, a round video's limit, a playing preview's end. The record bar's elapsed time and level are read when the bar draws (`VoiceCapture::live_bars`), and the frame clock redraws it: the pulsing dot is an on-screen animation, and a playing preview adds a frame request. Nothing wakes a recording that has nothing due. Resuming a recording or a preview re-arms the timer. Tests `a_recording_wakes_only_at_its_deadlines_while_no_window_draws` (no fixed-period re-arm, the deadline fires at its moment, cancel drops it) and the `record_wake` cases. |
 | g-336, 19-003 | `notify_windows_tick` no longer re-arms when nothing waits for input: the `None if open` arm is deleted, so the 300 ms clock runs only while a popup is `WaitingForInput`, as tdesktop's `_inputCheckTimer`. The decision is `NotifyWindows::next_step`. Tests `a_hovered_popup_that_is_not_waiting_leaves_the_clock_stopped`, `a_corner_sample_alone_leaves_the_clock_stopped`, `a_waiting_popup_keeps_the_input_poll`. |
 | (hotspot) | `src/ui/on_screen.rs` is back to its base: `GroupCallScreen::new` keeps the call shape `new(send_key_mode, window, cx)` and ignores the arguments, since the composer is made with the call's view. No `Hotspot-change` trailer is needed. |
+
+#### Fix round 6 (r4-09)
+
+| Ids | What changed |
+| --- | --- |
+| g-336, 19-003 | The step that closes popups returns a frame later (`animating \|\| closed` in `notify_windows_tick`): the restack the close runs starts the "Hide all" fade and any slide, which the step had not counted, so the clock no longer stops with "Hide all" on screen. A later step that finishes them stops the clock through `next_step`. Test `the_step_that_closes_the_last_popups_keeps_the_clock_for_hide_all`; the notify tests now take their time from the manual clock. |
+| g-382 | The `recording_tick_in_window` doc describes the deadline wake, not a 100 ms tick. |
+| (guard) | The reason of the `poll:QuillApp::arm_notify_clock` allow line says it polls only while a notification waits for input. No other allow or baseline line changed. |
