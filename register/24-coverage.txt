@@ -73,3 +73,7 @@ src/wake.rs 356 read
 src/voice_opus.rs 481 read
 src/wallpaper_raster/mod.rs 590 read
 src/wallpaper_raster/soft_light.rs 105 read
+src/web_app/mod.rs 150 read
+src/web_app/trust.rs 297 read
+src/web_app/theme.rs 178 read
+src/web_app/bridge.rs 1064 read
