@@ -9,7 +9,8 @@ use objc2::runtime::AnyObject;
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_av_foundation::{AVPlayerItem, AVPlayerItemStatus};
 use objc2_foundation::{
-    NSDictionary, NSKeyValueObservingOptions, NSObject, NSObjectProtocol, NSString, ns_string,
+    NSDictionary, NSKeyValueObservingOptions, NSObject, NSObjectNSKeyValueObserverRegistration,
+    NSObjectProtocol, NSString, ns_string,
 };
 use std::ffi::c_void;
 use std::ptr;

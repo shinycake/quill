@@ -125,7 +125,9 @@ pub(super) struct Ivars {
 enum Anim {
     #[default]
     Idle,
-    Animating(Retained<NSTimer>),
+    Animating {
+        _timer: Retained<NSTimer>,
+    },
 }
 
 define_class!(
@@ -451,7 +453,7 @@ impl PinnedPanel {
         let Ok(mut anim) = self.ivars().anim.try_borrow_mut() else {
             return;
         };
-        if !animating || matches!(*anim, Anim::Animating(_)) {
+        if !animating || matches!(*anim, Anim::Animating { .. }) {
             return;
         }
         let weak = Weak::from_retained(&self.retain());
@@ -481,7 +483,7 @@ impl PinnedPanel {
         let scheduled = unsafe {
             NSTimer::scheduledTimerWithTimeInterval_repeats_block(1. / 60., true, &block)
         };
-        *anim = Anim::Animating(scheduled);
+        *anim = Anim::Animating { _timer: scheduled };
     }
 
     fn draw_pins(&self) {
