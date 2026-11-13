@@ -124,7 +124,6 @@ background.restarts | failures in a row and the next start of each background ac
 background.clicks | account clicks from the tray and notifications, each with its key
 background.pending_open | the account to open once its client is ready, by key
 background.notify_from_all | the "notify from all accounts" setting
-background.attention | the dock attention for background accounts
 background.ringing * | a background account's ring, with its key: the call id is that account's
 background.closing | the clients closing, by key
 background.quit_close | the quit subscription that closes them

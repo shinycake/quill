@@ -639,6 +639,8 @@ mod avatar_icon;
 pub(in crate::ui) use avatar_icon::{AvatarDecode, forget_cached_icons};
 mod debug_notification;
 mod deliver;
+#[cfg(test)]
+pub(in crate::ui) use deliver::attention_asks;
 mod inline_reply;
 pub(in crate::ui) use inline_reply::activate_everything;
 #[cfg(target_os = "linux")]
