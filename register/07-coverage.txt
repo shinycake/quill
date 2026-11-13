@@ -1,0 +1,126 @@
+src/proxy_carrier/helper.rs 923 read
+src/proxy_carrier/helper/data_folder.rs 285 read
+src/proxy_carrier/helper/data_folder/processes.rs 60 read
+src/proxy_carrier/mod.rs 253 read
+src/proxy_extras.rs 100 read
+src/proxy_ops.rs 429 read
+src/proxy_sync.rs 82 read
+src/proxy_web.rs 422 read
+src/psa_about.rs 719 read
+src/pull_next/find.rs 103 read
+src/pull_next/layout.rs 141 read
+src/pull_next/mod.rs 912 read
+src/quick_action.rs 94 read
+src/quick_replies.rs 448 read
+src/quill_assets.rs 206 read
+src/quote_source.rs 471 read
+src/reaction_limit.rs 249 read
+src/reaction_who.rs 95 read
+src/release_notes.rs 187 read
+src/reply_options.rs 152 read
+src/request_share.rs 175 read
+src/resample.rs 101 read
+src/rich/draft.rs 250 read
+src/rich/input.rs 565 read
+src/rich/markup.rs 605 read
+src/rich/mod.rs 147 read
+src/rich/parse.rs 650 read
+src/rich/preview.rs 307 read
+src/rich/quote.rs 579 read
+src/rich_html/blocks.rs 734 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/rich_html/handle.rs 169 read
+src/rich_html/media.rs 194 read
+src/rich_html/mod.rs 70 read
+src/rich_html/page.rs 124 read
+src/rich_html/style.rs 114 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/rich_html/text.rs 315 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/rich_html/worker.rs 152 read
+src/row_fx.rs 276 read
+src/schedule.rs 551 read
+src/scratch.rs 408 read
+src/scratch/owned_file.rs 106 read
+src/screen_reader.rs 275 read
+src/search_filters.rs 520 read
+src/search_tabs.rs 328 read
+src/selection_drag.rs 327 read
+src/selection_pin.rs 388 read
+src/send_button.rs 347 read
+src/send_rights.rs 631 read
+src/send_to_menu.rs 197 read
+src/service_text/actions.rs 906 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/service_text/mod.rs 555 read
+src/service_text/wallet.rs 76 read
+src/service_text_tests/chats.rs 321 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/service_text_tests/content.rs 285 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/service_text_tests/mod.rs 323 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/service_text_tests/payments.rs 201 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings/accounts.rs 1167 read
+src/settings/accounts/deletion.rs 204 read
+src/settings/app_prefs.rs 408 read
+src/settings/appearance.rs 764 read
+src/settings/auto_download.rs 555 read
+src/settings/badge.rs 112 read
+src/settings/chat_prefs.rs 400 read
+src/settings/chat_windows.rs 245 read
+src/settings/deferred.rs 780 read
+src/settings/first_run.rs 141 read
+src/settings/media.rs 327 read
+src/settings/mod.rs 522 read
+src/settings/settings_search.rs 13 read
+src/settings/video_pip.rs 95 read
+src/settings/window_save.rs 295 read
+src/settings_account.rs 55 read
+src/settings_catalog/entries/about.rs 41 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/account.rs 86 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/advanced.rs 59 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/agent_access.rs 74 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/appearance.rs 98 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/calls.rs 40 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/chats.rs 111 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/connection.rs 50 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/data.rs 61 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/devices.rs 55 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/folders.rs 24 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/language.rs 32 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/mod.rs 45 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/notifications.rs 230 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/power.rs 65 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/privacy.rs 174 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/shortcuts.rs 21 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/system.rs 57 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/entries/telegram.rs 35 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/settings_catalog/fuzzy.rs 246 read
+src/settings_catalog/mod.rs 244 read
+src/settings_catalog/recent.rs 40 read
+src/settings_catalog/search.rs 155 read
+src/settings_catalog/synonyms.rs 43 read
+src/share_box.rs 240 read
+src/signin.rs 570 read
+src/single_instance.rs 1072 read
+src/single_instance/heartbeat.rs 142 read
+src/spell_catalog.rs 1001 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/spell_dict.rs 920 read
+src/spell_download.rs 334 read
+src/spell_win.rs 400 read
+src/spellcheck/mod.rs 1001 read
+src/spellcheck/user_words.rs 49 read
+src/star_packs.rs 76 read
+src/stars_gift.rs 183 read
+src/stars_rating.rs 259 read
+src/start_files.rs 490 read
+src/startup_trace.rs 113 read
+src/stat_chart/axis.rs 87 read
+src/stat_chart/currency.rs 191 read
+src/stat_chart/format.rs 230 read
+src/stat_chart/lines.rs 16 read
+src/stat_chart/mod.rs 264 read
+src/stat_chart/pie.rs 70 read
+src/stat_chart/slots.rs 183 read
+src/stat_chart/xlsx.rs 488 read (skimmed: data table, test file or pure renderer; logic and state scanned, not every line)
+src/state/account_notices.rs 825 read
+src/state/acks.rs 89 read
+src/state/answers.rs 56 read
+src/state/bot_stop.rs 37 read
+src/state/business_bot_bar.rs 22 read
+src/state/call_progress.rs 72 read
+src/state/call_rejoin.rs 134 read
