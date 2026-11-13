@@ -20,18 +20,15 @@ use crate::peer_qr::state::{
 use crate::telegram::requests::PrivacyWho;
 
 fn own_box() -> PeerQrBox {
-    PeerQrBox::new(QrSubject::Peer(QrPeer::User(1)), 7)
+    PeerQrBox::new(QrSubject::Peer(QrPeer::User(1)))
 }
 
 fn custom_box() -> PeerQrBox {
-    PeerQrBox::new(
-        QrSubject::Custom(CustomQr {
-            link: "https://t.me/+invite".into(),
-            title: None,
-            about: None,
-        }),
-        8,
-    )
+    PeerQrBox::new(QrSubject::Custom(CustomQr {
+        link: "https://t.me/+invite".into(),
+        title: None,
+        about: None,
+    }))
 }
 
 fn env(now: i64) -> QrEnv {

@@ -70,9 +70,8 @@ impl QuillApp {
         source: Option<EmojiCategorySource>,
         cx: &mut Context<Self>,
     ) {
-        self.pickers.media_panel.category = source;
-        self.pickers.media_panel.key = None;
-        self.pickers.media_panel.active_section = 0;
+        let tab = self.pickers.media_panel.tab;
+        self.pickers.media_panel.show(tab, source);
         cx.notify();
     }
 

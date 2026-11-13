@@ -1,6 +1,6 @@
 //! The slow passcode jobs (PBKDF2 off the UI thread) and where their
 //! answer lands.
-use super::{PasscodeJob, QuillApp};
+use super::{JobFate, JobKind, PasscodeJob, QuillApp};
 use gpui_kit::*;
 
 impl QuillApp {
@@ -16,48 +16,51 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.account.passcode.job = PasscodeJob::Running;
         self.account.passcode.set_error(None);
         let task = cx.background_executor().spawn(async move { job() });
         // screen-scope: the passcode is one lock over every account; only its window matters.
         // window-scope: `done` runs in its window (`in_window_of`); a held
         // lock reaches every window itself (`in_every_window`).
-        cx.spawn_in(window, async move |this, cx| {
+        let waiting = cx.spawn_in(window, async move |this, cx| {
             // The answer waits here for whichever window takes it: the one
             // that asked, or the main window when that one closed meanwhile.
-            let answer = std::rc::Rc::new(std::cell::RefCell::new(Some((task.await, done))));
+            let answer = std::rc::Rc::new(std::cell::Cell::new(Some((task.await, done))));
             let asked = answer.clone();
             let ran = this.update_in(cx, move |this, window, cx| {
-                let job = std::mem::take(&mut this.account.passcode.job);
-                let answered = asked.borrow_mut().take();
-                if job == PasscodeJob::Cancelled {
+                let fate = this.account.passcode.job.finish();
+                let answered = asked.take();
+                if fate == JobFate::Cancelled {
                     // A log-out from the lock screen wiped what it checked.
                     quill::passcode::global_unlock().clear();
                 } else if let Some((out, done)) = answered {
                     this.in_window_of(window, cx, |this, window, cx| done(this, out, window, cx));
                 }
-                this.lock_held_for_job(job, cx);
+                this.lock_held_for_job(fate, cx);
                 cx.notify();
             });
             if ran.is_err() {
                 let _ = this.update(cx, |this, cx| {
-                    let job = std::mem::take(&mut this.account.passcode.job);
-                    let answered = answer.borrow_mut().take();
-                    if job == PasscodeJob::Cancelled {
+                    let fate = this.account.passcode.job.finish();
+                    let answered = answer.take();
+                    if fate == JobFate::Cancelled {
                         quill::passcode::global_unlock().clear();
                         return;
                     }
                     match answered {
                         Some((out, done)) => {
-                            this.finish_passcode_job_in_main_window(out, done, job, cx)
+                            this.finish_passcode_job_in_main_window(out, done, fate, cx)
                         }
-                        None => this.lock_held_for_job(job, cx),
+                        None => this.lock_held_for_job(fate, cx),
                     }
                     cx.notify();
                 });
             }
-        })
-        .detach();
+        });
+        self.account.passcode.job = PasscodeJob::Running {
+            kind: JobKind::Hashing,
+            fate: JobFate::Counts,
+            task: waiting,
+        };
         cx.notify();
     }
 
@@ -70,11 +73,11 @@ impl QuillApp {
         &mut self,
         out: T,
         done: impl FnOnce(&mut Self, T, &mut Window, &mut Context<Self>) + 'static,
-        job: PasscodeJob,
+        fate: JobFate,
         cx: &mut Context<Self>,
     ) {
         let Some(main) = self.main_window.handle else {
-            self.lock_held_for_job(job, cx);
+            self.lock_held_for_job(fate, cx);
             return;
         };
         let app = cx.weak_entity();
@@ -85,7 +88,7 @@ impl QuillApp {
                 let _ = app.update(cx, |this, cx| {
                     this.in_window_scope(None, cx, |this, cx| {
                         done(this, out, window, cx);
-                        this.lock_held_for_job(job, cx);
+                        this.lock_held_for_job(fate, cx);
                     });
                 });
             });

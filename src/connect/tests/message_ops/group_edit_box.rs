@@ -118,7 +118,13 @@ fn a_refused_title_is_recorded_for_the_box() {
         )
         .unwrap();
     assert!(driver.session.requests.get(id).is_none());
-    let error = driver.session.groups.info_edit_errors.get(&9).unwrap();
+    let error = driver
+        .session
+        .groups
+        .info_edit_errors
+        .get(&9)
+        .and_then(|errors| errors.first())
+        .unwrap();
     assert_eq!(error.field, GroupInfoField::Title);
     // The next save starts clean.
     driver
@@ -218,7 +224,13 @@ fn a_refused_upgrade_is_recorded_for_the_box() {
             .unwrap(),
         )
         .unwrap();
-    let error = driver.session.groups.info_edit_errors.get(&9).unwrap();
+    let error = driver
+        .session
+        .groups
+        .info_edit_errors
+        .get(&9)
+        .and_then(|errors| errors.first())
+        .unwrap();
     assert_eq!(error.field, GroupInfoField::Settings);
     let _ = std::fs::remove_dir_all(&dir);
 }

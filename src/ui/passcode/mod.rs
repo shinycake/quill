@@ -24,8 +24,10 @@ use quill::passcode::{
 use quill::platform::{MemorySecretStore, SecretStore, os_secret_store};
 use quill::settings::{list_accounts, safe_app_root};
 use stages::LockState;
-pub(crate) use stages::{PasscodeBox, SystemUnlock};
-use std::cell::{Cell, RefCell};
+pub(crate) use stages::{
+    AutoLock, JobFate, JobKind, PasscodeBox, PasscodeJob, Shake, SystemUnlock,
+};
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -39,31 +41,6 @@ pub(crate) enum PasscodeView {
     Change,
     Remove,
 }
-
-/// A slow passcode job (PBKDF2, the system prompt). It belongs to the job,
-/// not to the box: closing the box leaves it running, so a lock asked
-/// meanwhile still waits for the answer (a Turn off cannot land under it).
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub(crate) enum PasscodeJob {
-    #[default]
-    Idle,
-    Running,
-    /// A lock was asked while it ran: it lands with the answer.
-    RunningThenLock,
-    /// The lock screen's Log out ran meanwhile: the job's thread still
-    /// runs, and its answer is dropped (`run_passcode_job`,
-    /// `spawn_system_unlock_wait`).
-    Cancelled,
-}
-
-impl PasscodeJob {
-    pub(crate) fn is_running(self) -> bool {
-        self != Self::Idle
-    }
-}
-
-/// How long the wrong-passcode shake runs.
-const SHAKE_MS: u64 = 420;
 
 pub(crate) struct PasscodeUi {
     /// A passcode is set (cached from `passcode.json`; refreshed after each
@@ -92,9 +69,11 @@ pub(crate) struct PasscodeUi {
     pub(crate) custom_time: Entity<InputState>,
     pub(crate) lock_error: lock_notice::LockNotice,
     pub(crate) job: PasscodeJob,
+    /// The task that locks by idle time and counts down a flood.
+    autolock: AutoLock,
     pub(crate) autolock_secs: u32,
     pub(crate) system_unlock: SystemUnlock,
-    shake_started: Option<Instant>,
+    shake: Shake,
     idle: IdleTracker,
     /// Demo fixtures must not touch the Keychain or the real data folder.
     pub(crate) demo: bool,
@@ -170,6 +149,7 @@ impl PasscodeUi {
             custom_time,
             lock_error: Default::default(),
             job: PasscodeJob::Idle,
+            autolock: AutoLock::Stopped,
             autolock_secs: config
                 .as_ref()
                 .map_or(passcode::DEFAULT_AUTOLOCK_SECS, |c| c.autolock_secs),
@@ -178,7 +158,7 @@ impl PasscodeUi {
             } else {
                 SystemUnlock::Off
             },
-            shake_started: None,
+            shake: Shake::Still,
             idle: IdleTracker::default(),
             demo: false,
             unlock_intents: UnlockIntents::default(),
@@ -243,19 +223,11 @@ impl PasscodeUi {
     }
 
     fn shake_offset(&self) -> f32 {
-        let Some(start) = self.shake_started else {
-            return 0.0;
-        };
-        let t = start.elapsed().as_millis() as f32 / SHAKE_MS as f32;
-        if t >= 1.0 {
-            return 0.0;
-        }
-        (t * std::f32::consts::PI * 6.0).sin() * 12.0 * (1.0 - t)
+        self.shake.offset()
     }
 
     fn shaking(&self) -> bool {
-        self.shake_started
-            .is_some_and(|s| s.elapsed() < Duration::from_millis(SHAKE_MS))
+        self.shake.running()
     }
 
     /// "Auto-Lock if away for…" where the OS reports idle time, otherwise
@@ -330,15 +302,28 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(panel) = self.account.passcode.panel.as_mut() {
-            *panel = PasscodeBox { view, error: None };
-        }
+        // A box closed while its job ran has nothing to move or focus.
+        let Some(panel) = self.account.passcode.panel.as_mut() else {
+            return;
+        };
+        *panel = PasscodeBox { view, error: None };
         self.clear_passcode_fields(window, cx);
         let first = match view {
             PasscodeView::Create => self.account.passcode.new.clone(),
             _ => self.account.passcode.old.clone(),
         };
         first.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    /// A job's refusal: a line in the open box, or, with the box closed
+    /// meanwhile, a note (nothing else would say the passcode was wrong).
+    fn passcode_job_failed(&mut self, err: &PasscodeError, cx: &mut Context<Self>) {
+        if self.account.passcode.is_open() {
+            self.account.passcode.set_error(Some(error_text(err)));
+        } else {
+            self.set_note(StatusNote::error(error_text(err)));
+        }
         cx.notify();
     }
 
@@ -403,7 +388,7 @@ impl QuillApp {
                         keys::Q_PREFS_LOCAL_PASSCODE_TURNED_ON,
                     )));
                 }
-                Err(err) => this.account.passcode.set_error(Some(error_text(&err))),
+                Err(err) => this.passcode_job_failed(&err, cx),
             },
             window,
             cx,
@@ -445,7 +430,7 @@ impl QuillApp {
                     this.goto_passcode_view(PasscodeView::Status, window, cx);
                     this.set_note(StatusNote::silent(tr(keys::Q_PREFS_LOCAL_PASSCODE_CHANGED)));
                 }
-                Err(err) => this.account.passcode.set_error(Some(error_text(&err))),
+                Err(err) => this.passcode_job_failed(&err, cx),
             },
             window,
             cx,
@@ -492,7 +477,7 @@ impl QuillApp {
                         keys::Q_PREFS_LOCAL_PASSCODE_TURNED_OFF,
                     )));
                 }
-                Err(err) => this.account.passcode.set_error(Some(error_text(&err))),
+                Err(err) => this.passcode_job_failed(&err, cx),
             },
             window,
             cx,
@@ -523,6 +508,11 @@ impl QuillApp {
     }
 
     pub(crate) fn set_autolock_secs(&mut self, secs: u32, cx: &mut Context<Self>) {
+        // A running job saves the config it loaded before hashing: a write
+        // now would be put back.
+        if self.account.passcode.job.is_running() {
+            return;
+        }
         if self.save_passcode_setting(|root| passcode::set_autolock(root, secs).map(|_| ())) {
             self.account.passcode.autolock_secs = secs;
             quill::wake::PASSCODE.poke();
@@ -553,6 +543,9 @@ impl QuillApp {
     }
 
     pub(crate) fn set_system_unlock(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.account.passcode.job.is_running() {
+            return;
+        }
         if !self.save_passcode_setting(|root| passcode::set_system_unlock(root, on).map(|_| ())) {
             cx.notify();
             return;
@@ -583,7 +576,7 @@ impl QuillApp {
         // off would leave Quill locked with no passcode to unlock it. The
         // lock waits for the job's answer.
         if self.account.passcode.job.is_running() {
-            self.account.passcode.job = PasscodeJob::RunningThenLock;
+            self.account.passcode.job.hold_lock();
             return;
         }
         let state = global_unlock();
@@ -624,14 +617,14 @@ impl QuillApp {
     fn lock_failed(&mut self, message: String, cx: &mut Context<Self>) {
         self.account.passcode.lock_error = lock_notice::LockNotice::Wrong(message);
         quill::wake::PASSCODE.poke();
-        self.account.passcode.shake_started = Some(Instant::now());
+        self.account.passcode.shake.start();
         self.account.passcode.lock.refocus();
         cx.notify();
     }
 
     /// Submit on the lock screen.
     pub(crate) fn submit_unlock(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.account.passcode.is_locked() || self.account.passcode.job.is_running() {
+        if !self.account.passcode.is_locked() || self.account.passcode.job.is_hashing() {
             return;
         }
         let typed = self.read_field(&self.account.passcode.lock.input, cx);
@@ -647,6 +640,10 @@ impl QuillApp {
         let Some(root) = self.passcode_root() else {
             return;
         };
+        // Typing the passcode leaves a system prompt nobody answers: its
+        // wait goes, and the OS prompt closes with it. An empty field or a
+        // fixture leaves it be.
+        self.account.passcode.job.leave_system_prompt();
         self.run_passcode_job(
             move || {
                 passcode::unlock(&root, &global_unlock(), &typed, passcode::unix_ms_now())
@@ -696,9 +693,8 @@ impl QuillApp {
         if self.account.passcode.job.is_running() {
             return;
         }
-        self.account.passcode.job = PasscodeJob::Running;
-        let receiver = super::system_unlock::authenticate(tr(keys::Q_PREFS_UNLOCK_QUILL));
-        self.spawn_system_unlock_wait(receiver, master, window, cx);
+        let prompt = super::system_unlock::authenticate(tr(keys::Q_PREFS_UNLOCK_QUILL));
+        self.spawn_system_unlock_wait(prompt, master, window, cx);
     }
 
     /// Auto-lock by idle time, and the flood countdown on the lock screen.
@@ -741,7 +737,7 @@ impl QuillApp {
     pub(crate) fn spawn_passcode_tick(&mut self, cx: &mut Context<Self>) {
         // screen-scope: the auto-lock timer belongs to the app and only reads the
         // passcode state, so it runs whichever account is on screen.
-        Self::spawn_app(cx, async move |this, cx| {
+        let task = Self::spawn_app(cx, async move |this, cx| {
             // Parked: nothing to time, so the next tick follows a long gap.
             let mut parked = true;
             loop {
@@ -766,8 +762,8 @@ impl QuillApp {
                 )
                 .await;
             }
-        })
-        .detach();
+        });
+        self.account.passcode.autolock = AutoLock::Watching { _task: task };
     }
 
     /// Tray "Lock Quill": lock, or show the passcode settings when none
@@ -798,8 +794,11 @@ impl QuillApp {
     pub(crate) fn passcode_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let locked = self.account.passcode.is_locked();
         self.account.passcode.lock.frame(locked, window, cx);
+        self.account.passcode.shake.settle();
         if locked {
-            if self.account.passcode.screen.take_system_offer() {
+            // The prompt waits for Quill to be the app in front: it would
+            // otherwise open over whatever else is active.
+            if window.is_window_active() && self.account.passcode.screen.take_system_offer() {
                 self.unlock_with_system(window, cx);
             }
             if self.account.passcode.shaking() {
@@ -871,8 +870,8 @@ impl QuillApp {
                     .label(tr(keys::PASSCODE_SUBMIT))
                     .primary()
                     .w_full()
-                    .loading(ui.job.is_running())
-                    .disabled(ui.job.is_running() || waiting)
+                    .loading(ui.job.is_hashing())
+                    .disabled(ui.job.is_hashing() || waiting)
                     .on_click(cx.listener(|this, _, window, cx| this.submit_unlock(window, cx))),
             );
         if system {
@@ -993,3 +992,6 @@ mod lock_layer_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod lock_waits_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod offer_tests;

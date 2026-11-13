@@ -759,6 +759,11 @@ impl VideoNoteCapture {
             .min(u64::from(i32::MAX as u32)) as i32
     }
 
+    /// How long until the capture reaches the 60 s limit.
+    pub fn time_left(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(ROUND_MAX_SECS as u64).saturating_sub(self.started.elapsed())
+    }
+
     /// Recording progress toward the 60 s limit, `0.0..=1.0`.
     pub fn progress(&self) -> f32 {
         (self.started.elapsed().as_secs_f32() / ROUND_MAX_SECS as f32).min(1.0)

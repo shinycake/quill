@@ -1187,7 +1187,12 @@ fn a_refusal_the_edit_box_has_no_field_for_still_fails_its_save() {
     }
     assert!(session.requests.failure(switch).is_some());
     assert!(session.requests.failure(link).is_some());
-    let error = session.groups.info_edit_errors.get(&13).expect("an error");
+    let error = session
+        .groups
+        .info_edit_errors
+        .get(&13)
+        .and_then(|errors| errors.last())
+        .expect("an error");
     assert_eq!(error.field, GroupInfoField::Username);
 }
 

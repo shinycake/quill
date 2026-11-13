@@ -80,8 +80,9 @@ async fn answer_wakes(
         // callback and the single-instance listener poke `signal`). A link
         // waiting behind another flow is not polled for: the deep-link pump
         // pokes `signal` when it frees its slot (`QuillApp::pump_deep_link`).
-        let wait = std::time::Duration::from_secs(60);
-        super::wake_wait::sleep_or_wake(cx.background_executor(), signal, seen, wait).await;
+        // No timeout: every source pokes, and a poke that lands while `turn`
+        // runs has moved the epoch past `seen`, so it ends this wait at once.
+        signal.wait_since(seen).await;
         seen = signal.epoch();
     }
 }
@@ -295,9 +296,9 @@ pub(super) fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit:
     });
     if cx.has_global::<MainWindow>() {
         cx.global_mut::<MainWindow>().state = MainWindowState::LeavingFullScreen { _poll: poll };
-    } else {
-        poll.detach();
     }
+    // Without the global there is no stage to own the poll, and no main
+    // window state to finish: dropping it ends the wait.
 }
 
 fn hide_or_minimize(window: &mut gpui_kit::Window) {

@@ -25,9 +25,11 @@ const SYMBOL_PIXELS: usize = 64;
 /// Tile backgrounds are smooth gradients, made at half size.
 const TILE_SCALE: f64 = 0.5;
 
-#[derive(Clone)]
 enum Slot {
-    Loading,
+    /// Being made off the UI thread; dropping the slot cancels the work.
+    Loading {
+        _job: Task<()>,
+    },
     Ready {
         image: Arc<RenderImage>,
         at: Instant,
@@ -60,7 +62,7 @@ pub(super) struct GiftArt {
 fn ready(slot: Option<&Slot>) -> Option<(Arc<RenderImage>, Instant)> {
     match slot? {
         Slot::Ready { image, at } => Some((image.clone(), *at)),
-        Slot::Loading | Slot::Failed => None,
+        Slot::Loading { .. } | Slot::Failed => None,
     }
 }
 
@@ -71,6 +73,21 @@ impl GiftArt {
             .drain()
             .map(|(_, slot)| slot)
             .chain(self.tiles.drain().map(|(_, slot)| slot))
+            .filter_map(|slot| ready(Some(&slot)).map(|(image, _)| image))
+            .collect::<Vec<_>>();
+        super::super::image_budget::retire_all(images);
+    }
+
+    /// Keep the tiles of one size. The others are not drawn again: they go,
+    /// the made ones through the retire sweep (a Quill-made image leaves the
+    /// atlas only that way), and any job still making one is dropped.
+    fn keep_tiles_of(&mut self, width: u32, height: u32) {
+        let (keep, gone): (HashMap<_, _>, HashMap<_, _>) = std::mem::take(&mut self.tiles)
+            .into_iter()
+            .partition(|(tile, _)| tile.width == width && tile.height == height);
+        self.tiles = keep;
+        let images = gone
+            .into_values()
             .filter_map(|slot| ready(Some(&slot)).map(|(image, _)| image))
             .collect::<Vec<_>>();
         super::super::image_budget::retire_all(images);
@@ -214,8 +231,7 @@ impl QuillApp {
                 missing.push(file);
                 continue;
             };
-            self.peer_qr.gift_art.stills.insert(key, Slot::Loading);
-            self.run_off_ui_then(
+            let job = self.run_off_ui_held(
                 move || {
                     let mut image = sticker_bgra(&path, format, edge)?;
                     if let Some(color) = tint {
@@ -237,6 +253,10 @@ impl QuillApp {
                 },
                 cx,
             );
+            self.peer_qr
+                .gift_art
+                .stills
+                .insert(key, Slot::Loading { _job: job });
         }
         if !missing.is_empty()
             && let Some(live) = self.live.as_mut()
@@ -284,8 +304,10 @@ impl QuillApp {
         if let Some(slot) = self.peer_qr.gift_art.tiles.get(&key) {
             return ready(Some(slot)).map(|(image, _)| image);
         }
-        self.peer_qr.gift_art.tiles.insert(key, Slot::Loading);
-        self.run_off_ui_then(
+        // A new size is a resized layout: the tiles of the old size are not
+        // drawn again, so they go (and with them any job still making them).
+        self.peer_qr.gift_art.keep_tiles_of(width, height);
+        let job = self.run_off_ui_held(
             move || render(tile_pixels(center, edge, width, height)),
             move |this, image, cx| {
                 if let Some(slot) = this.peer_qr.gift_art.tiles.get_mut(&key) {
@@ -298,7 +320,19 @@ impl QuillApp {
             },
             cx,
         );
+        self.peer_qr
+            .gift_art
+            .tiles
+            .insert(key, Slot::Loading { _job: job });
         None
+    }
+}
+
+#[cfg(test)]
+impl GiftArt {
+    /// How many gradient tiles are held (made or being made).
+    pub(super) fn tile_count(&self) -> usize {
+        self.tiles.len()
     }
 }
 

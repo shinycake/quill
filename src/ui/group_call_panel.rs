@@ -176,7 +176,7 @@ impl QuillApp {
         // Your own microphone: the ring follows the level while live.
         let (self_level, _) = self.group_call_self_level();
         let level_reach = (state == MuteButtonView::Live).then(|| {
-            // An unchanged target is no restart (`LevelAnimation::retarget`).
+            // Aimed again each frame: an unchanged target is not a new move.
             self.group_call
                 .level_anim
                 .retarget(self_level.clamp(0.0, 1.0), now);

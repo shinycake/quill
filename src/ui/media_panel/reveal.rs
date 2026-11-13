@@ -50,7 +50,7 @@ impl QuillApp {
         let now = surface_reveal::now();
         let animate = surface_reveal::animate(cx);
         let (drawn, moving) = {
-            let mut presence = self.frame.surfaces.media_panel.borrow_mut();
+            let presence = &mut self.frame.surfaces.media_panel;
             let drawn = presence.follow(state, scope, animate, now);
             (drawn, presence.moving(now))
         };

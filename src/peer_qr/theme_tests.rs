@@ -52,7 +52,7 @@ fn env(can_save: bool) -> QrEnv {
 }
 
 fn own_box() -> PeerQrBox {
-    PeerQrBox::new(QrSubject::Peer(QrPeer::User(1)), 3)
+    PeerQrBox::new(QrSubject::Peer(QrPeer::User(1)))
 }
 
 fn saves(effects: &[QrEffect]) -> Vec<ThemeChoice> {
@@ -553,7 +553,7 @@ fn losing_the_right_to_save_shows_the_saved_theme_again() {
 
 #[test]
 fn someone_elses_box_shows_their_theme_and_takes_no_picks() {
-    let mut qr = PeerQrBox::new(QrSubject::Peer(QrPeer::User(42)), 4);
+    let mut qr = PeerQrBox::new(QrSubject::Peer(QrPeer::User(42)));
     let served = ThemeChoice::Gift(Box::new(gift(5, "")));
     qr.apply(QrAction::Served(served.clone()), env(false));
     assert_eq!(qr.choice(), served);

@@ -28,8 +28,8 @@ use gpui_kit::component::{ActiveTheme, Sizable, WindowExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::group_call_create::{
-    BeforeCreate, COUNTDOWN_REFRESH_SECS, Countdown, CreateKind, CurrentCall, JoinAsStep,
-    LeaveText, SCHEDULE_MIN_AHEAD_SECS, before_create, check_schedule, countdown,
+    BeforeCreate, Countdown, CreateKind, CurrentCall, JoinAsStep, LeaveText,
+    SCHEDULE_MIN_AHEAD_SECS, before_create, check_schedule, countdown, countdown_wait,
     default_schedule_at, join_as_step, schedule_max,
 };
 use quill::ids::{ChatId, RequestId};
@@ -37,7 +37,7 @@ use quill::lang::{keys, tr, tr_with, trn};
 use quill::telegram::envelope::MessageSender;
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The open create flow: the chat, what it creates and the step on screen.
 pub(crate) struct GroupCallCreate {
@@ -81,7 +81,7 @@ pub(crate) struct ScheduleStep {
     /// The time Schedule refused, with why (outside the allowed range).
     /// Shown while that time is the picked one: another pick clears it.
     pub(crate) error: Option<(Option<i64>, &'static str)>,
-    /// Re-renders the countdown every ten seconds while the box shows.
+    /// Re-renders the countdown when its line changes, while the box shows.
     _refresh: Task<()>,
 }
 
@@ -180,7 +180,8 @@ impl QuillApp {
         let initial = default_schedule_at(now, &offset_at);
         let max = schedule_max(now, &offset_at);
         let picker = new_date_time_picker(window, cx, initial, max - now);
-        let refresh = self.schedule_refresh_timer(cx);
+        let wait = countdown_nap(initial, now);
+        let refresh = self.schedule_refresh_timer(Instant::now() + wait, cx);
         self.group_call_boxes.start_dialog = Some(GroupCallCreate {
             chat_id,
             kind: CreateKind::Schedule,
@@ -194,13 +195,14 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// One wake-up that redraws the countdown and arms the next, owned by the
-    /// schedule step (`ScheduleStep::_refresh`): leaving the step drops it.
-    fn schedule_refresh_timer(&mut self, cx: &mut Context<Self>) -> Task<()> {
+    /// One wake-up when the countdown line next changes (`countdown_wait` of
+    /// the picked time), then the next, owned by the schedule step
+    /// (`ScheduleStep::_refresh`): leaving the step drops it. A new pick
+    /// changes the time and redraws by itself.
+    fn schedule_refresh_timer(&mut self, due: Instant, cx: &mut Context<Self>) -> Task<()> {
         self.spawn_screen(cx, async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_secs(COUNTDOWN_REFRESH_SECS))
-                .await;
+            let wait = due.saturating_duration_since(Instant::now());
+            cx.background_executor().timer(wait).await;
             let _ = this.update(cx, |app, cx| {
                 if !matches!(
                     app.group_call_boxes
@@ -211,7 +213,8 @@ impl QuillApp {
                 ) {
                     return;
                 }
-                let next = app.schedule_refresh_timer(cx);
+                let due = app.schedule_countdown_due(cx);
+                let next = app.schedule_refresh_timer(due, cx);
                 if let Some(GroupCallCreate {
                     step: CreateStep::Schedule(step),
                     ..
@@ -222,6 +225,18 @@ impl QuillApp {
                 cx.notify();
             });
         })
+    }
+
+    /// When the picked time's countdown line next changes.
+    fn schedule_countdown_due(&self, cx: &App) -> Instant {
+        let now = WallClock::of(cx).now();
+        let picked = match self.group_call_boxes.start_dialog.as_ref().map(|f| &f.step) {
+            Some(CreateStep::Schedule(step)) => {
+                picked_unix(&step.picker, SCHEDULE_MIN_AHEAD_SECS, cx)
+            }
+            _ => None,
+        };
+        Instant::now() + countdown_nap(picked.unwrap_or(now), now)
     }
 
     fn close_group_call_create(&mut self, cx: &mut Context<Self>) {
@@ -764,6 +779,13 @@ pub(super) fn or_schedule_link(
         )
         .child(after)
         .into_any_element()
+}
+
+/// The nap before the countdown line is checked again: to its next change,
+/// and at most a minute, because a new pick moves that change and the one
+/// pending wake-up was set for the old pick.
+fn countdown_nap(date: i64, now: i64) -> Duration {
+    Duration::from_secs(countdown_wait(date, now).min(60))
 }
 
 /// The live "will start in …" line for the picked time.

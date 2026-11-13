@@ -85,6 +85,9 @@ pub enum NewChatStage {
     Creating {
         request: RequestId,
         back: NewChatBack,
+        /// The name the request asked for: a refusal of it (`NO_CHAT_TITLE`)
+        /// is about this text.
+        title: String,
     },
     /// A group exists; its dialog closes and the chat opens. (A supergroup's
     /// answer moves the stage to `Type`.)
@@ -94,6 +97,8 @@ pub enum NewChatStage {
         back: NewChatBack,
         failure: CreateFailure,
         reason: String,
+        /// The name that was refused.
+        title: String,
     },
     /// The create request is no longer pending and nothing answered it: the
     /// step `back` returns, without a reason.
@@ -237,6 +242,7 @@ pub enum StepView {
     Refused {
         failure: CreateFailure,
         reason: String,
+        title: String,
     },
 }
 
@@ -256,7 +262,22 @@ impl NewChatView {
     /// The refused create, shown on the step it returned to.
     pub fn failure(&self) -> Option<(CreateFailure, &str)> {
         match &self.state {
-            StepView::Refused { failure, reason } => Some((*failure, reason)),
+            StepView::Refused {
+                failure, reason, ..
+            } => Some((*failure, reason)),
+            _ => None,
+        }
+    }
+
+    /// The name TDLib refused as no title (`NO_CHAT_TITLE`): the name field
+    /// shows its error while it holds this text.
+    pub fn refused_title(&self) -> Option<&str> {
+        match &self.state {
+            StepView::Refused {
+                failure: CreateFailure::NoTitle,
+                title,
+                ..
+            } => Some(title),
             _ => None,
         }
     }
@@ -280,11 +301,13 @@ pub fn view(stage: &NewChatStage) -> NewChatView {
             back,
             failure,
             reason,
+            title,
         } => NewChatView {
             step: back.step(),
             state: StepView::Refused {
                 failure: *failure,
                 reason: reason.clone(),
+                title: title.clone(),
             },
         },
         NewChatStage::CreateLost { back } => plain(back.step()),
@@ -392,6 +415,7 @@ mod tests {
         NewChatStage::Creating {
             request: RequestId(7),
             back,
+            title: "A".into(),
         }
     }
 
@@ -485,11 +509,28 @@ mod tests {
             back: NewChatBack::Info,
             failure: CreateFailure::Restricted,
             reason: "nope".into(),
+            title: "A".into(),
         };
         let shown = view(&failed);
         assert_eq!(shown.step, NewChatStep::Info);
         assert_eq!(shown.failure(), Some((CreateFailure::Restricted, "nope")));
+        assert_eq!(
+            shown.refused_title(),
+            None,
+            "only NO_CHAT_TITLE is about the name"
+        );
         assert!(!shown.busy());
+    }
+
+    #[test]
+    fn a_no_title_refusal_names_the_text_that_was_refused() {
+        let refused = NewChatStage::CreateRefused {
+            back: NewChatBack::Info,
+            failure: CreateFailure::NoTitle,
+            reason: "NO_CHAT_TITLE".into(),
+            title: "A".into(),
+        };
+        assert_eq!(view(&refused).refused_title(), Some("A"));
     }
 
     #[test]

@@ -70,7 +70,7 @@ impl QuillApp {
         });
     }
 
-    /// The recording's 100 ms tick, run as the window it was recorded in
+    /// The recording's wake at its next deadline, run as the window it was recorded in
     /// (`recording_tick`). `false` once it ended.
     pub(in crate::ui) fn recording_tick_in_window(&mut self, cx: &mut Context<Self>) -> bool {
         let origin = self.recording.origin().flatten();

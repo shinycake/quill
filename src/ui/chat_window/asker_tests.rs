@@ -439,13 +439,13 @@ fn the_auto_delete_picker_closes_with_its_own_chat_only(cx: &mut TestAppContext)
         app.note_window_press(None);
         app.enter_chat_ui(crate::ui::chat_window::tests::CHANNEL, cx);
         assert_eq!(
-            app.notify.ttl_picker,
+            app.notify.ttl_picker(),
             Some(OTHER),
             "another window's chat change"
         );
         app.set_window_scope(Some(OTHER));
         app.close_ttl_picker_of_left_chat(None);
-        assert_eq!(app.notify.ttl_picker, None, "its own chat left");
+        assert_eq!(app.notify.ttl_picker(), None, "its own chat left");
     });
 }
 
@@ -547,11 +547,11 @@ fn each_window_keeps_its_own_gif_section(cx: &mut TestAppContext) {
             "the emoji section stays"
         );
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.media_panel.show(PanelTab::Gifs, None);
         // The chat window opens its GIF tab; the main window's stays open.
         app.note_window_press(Some(OTHER));
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.media_panel.show(PanelTab::Gifs, None);
         app.gif_tab_upkeep(cx);
         assert_eq!(
             searching(app),
@@ -599,14 +599,14 @@ fn a_gif_tab_shows_its_section_without_a_press(cx: &mut TestAppContext) {
         // The main window searched "dogs" and is in use.
         app.note_window_press(None);
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.media_panel.show(PanelTab::Gifs, None);
         app.pickers.gif_tab = GifTab::Wants(GifWanted::Search("dogs".into()));
         app.gif_tab_upkeep(cx);
         assert_eq!(searching(app).as_deref(), Some("dogs"));
         // The chat window's tab wants "cats", never answered.
         app.set_window_scope(Some(OTHER));
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.media_panel.show(PanelTab::Gifs, None);
         app.pickers.gif_tab = GifTab::Wants(GifWanted::Search("cats".into()));
         app.gif_tab_upkeep(cx);
         assert_eq!(
@@ -828,7 +828,7 @@ fn typed_gif_text_keeps_its_pause_through_the_upkeep(cx: &mut TestAppContext) {
             app.set_window_scope(None);
             app.note_window_press(None);
             app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-            app.pickers.media_panel.tab = PanelTab::Gifs;
+            app.pickers.media_panel.show(PanelTab::Gifs, None);
             app.pickers.gif_tab = GifTab::Wants(GifWanted::Search("dogs".into()));
             app.gif_tab_upkeep(cx);
             // The chat window shows "cat" (not in the list) and "cats" was
@@ -838,7 +838,7 @@ fn typed_gif_text_keeps_its_pause_through_the_upkeep(cx: &mut TestAppContext) {
                 app.note_window_press(Some(OTHER));
             }
             app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-            app.pickers.media_panel.tab = PanelTab::Gifs;
+            app.pickers.media_panel.show(PanelTab::Gifs, None);
             let flag = fired.clone();
             let pause = cx.spawn(async move |_, cx| {
                 cx.background_executor()
@@ -891,14 +891,14 @@ fn an_asked_gif_tab_whose_answer_was_replaced_asks_again(cx: &mut TestAppContext
         // The main window searched "dogs" and is in use.
         app.note_window_press(None);
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.media_panel.show(PanelTab::Gifs, None);
         app.pickers.gif_tab = GifTab::Wants(GifWanted::Search("dogs".into()));
         app.gif_tab_upkeep(cx);
         assert_eq!(searching(app).as_deref(), Some("dogs"));
         // The chat window asked for "cats" earlier; its answer is gone.
         app.set_window_scope(Some(OTHER));
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.media_panel.show(PanelTab::Gifs, None);
         app.pickers.gif_tab = GifTab::Asked {
             wanted: GifWanted::Search("cats".into()),
             round: AskRound::First,
@@ -930,13 +930,13 @@ fn a_spent_gif_ask_waits_for_a_press(cx: &mut TestAppContext) {
         };
         app.note_window_press(None);
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.media_panel.show(PanelTab::Gifs, None);
         app.pickers.gif_tab = GifTab::Wants(GifWanted::Search("dogs".into()));
         app.gif_tab_upkeep(cx);
         assert_eq!(searching(app).as_deref(), Some("dogs"));
         app.set_window_scope(Some(OTHER));
         app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        app.pickers.media_panel.tab = PanelTab::Gifs;
+        app.pickers.media_panel.show(PanelTab::Gifs, None);
         app.pickers.gif_tab = GifTab::Asked {
             wanted: GifWanted::Search("cats".into()),
             round: AskRound::Again,

@@ -518,7 +518,7 @@ impl QuillApp {
         match result {
             Ok(capture) if wanted => {
                 self.hold_capture(CaptureMedia::Video(capture), purpose);
-                self.spawn_voice_tick(cx);
+                self.begin_record_tick(cx);
                 let note = match purpose {
                     CaptureFor::Message => {
                         self.recording.set_locked(lock);
@@ -579,7 +579,7 @@ impl QuillApp {
         match result {
             Ok(capture) if wanted => {
                 self.hold_capture(CaptureMedia::Voice(capture), purpose);
-                self.spawn_voice_tick(cx);
+                self.begin_record_tick(cx);
                 let note = match purpose {
                     CaptureFor::Message => {
                         self.sync_voice_action();

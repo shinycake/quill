@@ -23,6 +23,20 @@ pub async fn sleep_or_wake(
         .await;
 }
 
+#[cfg(target_os = "macos")]
+/// Wait for `signal` to move past `seen` (no timeout), then a plain `gap`: a
+/// burst of pokes gets one pass per gap, and the thread is given back between
+/// two passes.
+pub async fn wake_paced(
+    executor: &BackgroundExecutor,
+    signal: &'static Signal,
+    seen: u64,
+    gap: Duration,
+) {
+    signal.wait_since(seen).await;
+    executor.timer(gap).await;
+}
+
 /// The fallback timer of a repeated [`sleep_or_wake`]. A GPUI timer cannot
 /// be cancelled: dropped, it still fires on a worker. So the timer a poke
 /// left pending serves the next rest too, unless that rest must end sooner.

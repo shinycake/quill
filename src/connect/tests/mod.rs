@@ -122,6 +122,7 @@ mod refused_requests;
 mod registration;
 mod replies_block;
 mod reply_keyboard;
+mod scope_burst;
 mod search;
 mod search_tabs;
 mod search_upgrades;

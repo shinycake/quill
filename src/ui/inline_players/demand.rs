@@ -19,9 +19,9 @@ pub(in crate::ui) enum Demand {
 /// Where a click's demand stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DemandStage {
-    /// Asked after its window's history pass `pass` ended; waits for a row
+    /// Asked after its window's history pass `pass` ended: waits for a row
     /// to render the clip. A pass that ends with no row for it expires it.
-    Asked { pass: u64 },
+    ForRow { pass: u64 },
     /// The player opened and was started as asked.
     Started,
 }
@@ -43,7 +43,7 @@ impl State {
         self.on_demand.retain(|key, asked| {
             let stale = asked.window == window
                 && List::of(*key) == list
-                && matches!(asked.stage, DemandStage::Asked { pass: at } if pass > at.saturating_add(1))
+                && matches!(asked.stage, DemandStage::ForRow { pass: at } if pass > at.saturating_add(1))
                 && !players.contains_key(key);
             !stale
         });
@@ -56,7 +56,7 @@ impl State {
         self.on_demand.retain(|key, asked| {
             let stale = asked.window == window
                 && list.is_none_or(|list| List::of(*key) == list)
-                && matches!(asked.stage, DemandStage::Asked { .. })
+                && matches!(asked.stage, DemandStage::ForRow { .. })
                 && !players.contains_key(key);
             !stale
         });
@@ -86,7 +86,7 @@ impl InlineVideos {
                 key,
                 OnDemand {
                     demand,
-                    stage: DemandStage::Asked { pass },
+                    stage: DemandStage::ForRow { pass },
                     window,
                 },
             )
@@ -106,7 +106,7 @@ impl InlineVideos {
             state
                 .on_demand
                 .get(&key)
-                .is_some_and(|asked| matches!(asked.stage, DemandStage::Asked { .. }))
+                .is_some_and(|asked| matches!(asked.stage, DemandStage::ForRow { .. }))
         })
         .unwrap_or(false)
     }

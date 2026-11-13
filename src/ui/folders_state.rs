@@ -10,8 +10,6 @@ pub(crate) struct FolderUi {
     pub(super) share: Option<FolderShareDialog>,
     /// "Add folder" for an `addlist` link.
     pub(super) invite: Option<FolderInviteDialog>,
-    /// The Add to folder box, with the chat it was opened for.
-    pub(super) menu_chat: Option<quill::ids::ChatId>,
     /// The shared folder's "N new chats" join dialog.
     pub(super) new_chats_dialog: Option<super::folder_extras::FolderNewChatsDialog>,
     /// Recommended folders being added from Settings > Folders: the
@@ -45,7 +43,6 @@ impl FolderUi {
             delete_confirm: None,
             share: None,
             invite: None,
-            menu_chat: None,
             new_chats_dialog: None,
             recommended_adds: std::collections::HashMap::new(),
             closed_asks: std::collections::HashMap::new(),

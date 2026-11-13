@@ -8,6 +8,7 @@
 //! asking; Quill.app has the key (`scripts/macos-package-smoke.sh`).
 
 use super::join_address;
+use super::{Answer, Receiver, channel};
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -24,18 +25,16 @@ use objc2_foundation::{
 use quill::location_picker::{GeoOutcome, GeoPoint};
 use std::cell::RefCell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
 
 struct Ivars {
-    answer: RefCell<Option<Sender<GeoOutcome>>>,
+    answer: RefCell<Option<Answer<GeoOutcome>>>,
     /// Set while the system's "Allow location" prompt is open.
-    prompt_open: Arc<AtomicBool>,
+    prompt_open: Arc<super::PromptGate>,
 }
 
 impl Ivars {
     fn answer(&self, outcome: GeoOutcome) {
-        self.prompt_open.store(false, Ordering::SeqCst);
+        self.prompt_open.set_open(false);
         if let Some(answer) = self
             .answer
             .try_borrow_mut()
@@ -111,8 +110,8 @@ define_class!(
 impl Delegate {
     fn new(
         mtm: MainThreadMarker,
-        answer: Sender<GeoOutcome>,
-        prompt_open: Arc<AtomicBool>,
+        answer: Answer<GeoOutcome>,
+        prompt_open: Arc<super::PromptGate>,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(Ivars {
             answer: RefCell::new(Some(answer)),
@@ -129,10 +128,9 @@ impl Delegate {
         // SAFETY: plain calls on the manager on the thread that made it.
         unsafe {
             let status = manager.authorizationStatus();
-            self.ivars().prompt_open.store(
-                status == CLAuthorizationStatus::NotDetermined,
-                Ordering::SeqCst,
-            );
+            self.ivars()
+                .prompt_open
+                .set_open(status == CLAuthorizationStatus::NotDetermined);
             match status {
                 CLAuthorizationStatus::NotDetermined => manager.requestWhenInUseAuthorization(),
                 CLAuthorizationStatus::AuthorizedAlways
@@ -152,7 +150,7 @@ struct Running {
     manager: Retained<CLLocationManager>,
     _delegate: Retained<Delegate>,
     /// The flag of the lookup it serves, to tell it from a later one.
-    lookup: Arc<AtomicBool>,
+    lookup: Arc<super::PromptGate>,
 }
 
 thread_local! {
@@ -170,7 +168,7 @@ fn has_usage_description() -> bool {
 }
 
 pub(super) fn locate(
-    prompt_open: &Arc<AtomicBool>,
+    prompt_open: &Arc<super::PromptGate>,
     _cancelled: futures_channel::oneshot::Receiver<()>,
 ) -> Receiver<GeoOutcome> {
     let (answer, receiver) = channel();
@@ -212,7 +210,7 @@ pub(super) fn locate(
 
 /// The lookup identified by `lookup` was dropped: stop its manager, unless a
 /// newer lookup has replaced it. Needs the thread that made the manager.
-pub(super) fn cancel(lookup: &Arc<AtomicBool>) {
+pub(super) fn cancel(lookup: &Arc<super::PromptGate>) {
     let current = RUNNING.with(|running| {
         let mut running = running.try_borrow_mut().ok()?;
         if running

@@ -106,3 +106,40 @@ fn a_main_viewer_stop_keeps_a_chat_windows_parked_clip(cx: &mut gpui_kit::TestAp
         assert_eq!(app.playback.intent, None);
     });
 }
+
+#[gpui_kit::test]
+fn the_idle_clock_arms_no_timer_while_the_pointer_rests_on_a_control(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8801);
+    open(&app, vcx, 8801);
+    app.update(vcx, |app, cx| {
+        app.viewer_note_pointer(true, cx);
+        assert!(app.viewer.visibility.has_timer(), "the open armed it");
+    });
+    // Its turn comes with the pointer on a control: it ends, no re-arm.
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_secs(3));
+    vcx.run_until_parked();
+    app.update(vcx, |app, cx| {
+        assert!(!app.viewer.visibility.has_timer(), "held: nothing runs");
+        // The pointer leaving the controls arms the real deadline.
+        app.viewer_note_pointer(false, cx);
+        assert!(app.viewer.visibility.has_timer());
+    });
+}
+
+#[gpui_kit::test]
+fn every_open_counts_once(cx: &mut gpui_kit::TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    add_photo(&app, vcx, 8801);
+    let before = app.read_with(vcx, |app, _| app.viewer.state.opened());
+    open(&app, vcx, 8801);
+    let once = app.read_with(vcx, |app, _| app.viewer.state.opened());
+    assert_ne!(once, before, "one open, one new count");
+    app.update(vcx, |app, cx| app.close_media_viewer(cx));
+    assert_eq!(app.read_with(vcx, |app, _| app.viewer.state.opened()), once);
+}

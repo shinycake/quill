@@ -41,7 +41,9 @@ pub(in crate::ui) enum MemberChangeKind {
     /// A restriction or ban lifted from the member dialog.
     Unban,
     /// "Remove user" from the Add exception / Remove user picker: the
-    /// picker closes when the ban is answered.
+    /// picker that sent it (its stage waits for this request) closes when
+    /// the ban is answered, and no other (another group's, or another kind
+    /// opened since).
     Kick,
 }
 

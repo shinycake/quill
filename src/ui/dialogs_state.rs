@@ -105,6 +105,9 @@ impl crate::ui::on_screen::Farewell for DialogUi {
         // The appearance box's status choices are resolved while the
         // session's `status_picker` is `ChatAppearance`.
         app.close_chat_appearance_dialog(cx);
+        // The color box's Apply waits on answers that are the old account's:
+        // closing forgets them, or they sit in the acks for good.
+        app.close_peer_color_dialog(cx);
         if app
             .session()
             .is_some_and(|session| session.groups.private_sharing.request_box_chat().is_some())

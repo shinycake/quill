@@ -225,7 +225,7 @@ fn auto_delete_opens_for_the_profiles_chat_without_opening_it(cx: &mut TestAppCo
     });
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.notify.ttl_picker, Some(ChatId(PROFILE_GROUP)));
+        assert_eq!(app.notify.ttl_picker(), Some(ChatId(PROFILE_GROUP)));
         assert_eq!(app.session().and_then(|s| s.open_chat_id()), shown_chat);
     });
 }

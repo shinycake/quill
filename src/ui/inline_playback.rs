@@ -19,7 +19,7 @@ use quill::telegram::envelope::MessageContent;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// The `image/gif` file a message loops in its row: a GIF animation, or a
 /// GIF sent as a picture file, which tdesktop plays as an animation too
@@ -401,29 +401,41 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn spawn_voice_tick(&mut self, cx: &mut Context<Self>) {
-        if self.recording.tick.is_some() {
+    /// A recording or its preview started: wake it at once, then at its
+    /// own deadlines (`record_wake.rs`). The wake-up is a timer the recording
+    /// holds, not a window's frame, which stops while Quill is behind another
+    /// app; the bar's time and level come from the frame clock while it draws.
+    pub(super) fn begin_record_tick(&mut self, cx: &mut Context<Self>) {
+        let now = cx.background_executor().now();
+        self.arm_record_timer(now, cx);
+    }
+
+    /// The wake-up that ran: step the recording, then arm the capture's next
+    /// deadline, or none when it has nothing due or ended.
+    fn record_wake(&mut self, cx: &mut Context<Self>) {
+        if !self.recording_tick_in_window(cx) {
+            self.recording.stop_wake();
             return;
         }
-        // The tick is the app's; each step runs as the recording's window.
-        // window-scope: `recording_tick_in_window` enters the recording's window itself.
-        let task = self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(100))
-                    .await;
-                let cont = this
-                    .update(cx, |this, cx| this.recording_tick_in_window(cx))
-                    .unwrap_or(false);
-                if !cont {
-                    break;
-                }
+        match self.recording.wake_in() {
+            Some(wait) => {
+                let due = cx.background_executor().now() + wait;
+                self.arm_record_timer(due, cx);
             }
-            let _ = this.update(cx, |this, _| {
-                this.recording.tick = None;
-            });
+            None => self.recording.stop_wake(),
+        }
+    }
+
+    /// The one wake-up task, due at `due`; it replaces the task that ran.
+    fn arm_record_timer(&mut self, due: std::time::Instant, cx: &mut Context<Self>) {
+        // window-scope: the step runs as the window the recording was made in (`recording_tick_in_window`).
+        // screen-scope: the recording is the app's alone and ends with the account switch (its farewell cancels it).
+        let task = cx.spawn(async move |this, cx| {
+            let wait = due.saturating_duration_since(cx.background_executor().now());
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |app, cx| app.record_wake(cx));
         });
-        self.recording.tick = Some(task);
+        self.recording.set_wake(due, task);
     }
 }
 

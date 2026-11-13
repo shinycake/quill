@@ -127,15 +127,19 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         app.group_call_screen.window_closed_by_user = Some(1);
         app.group_call_screen.view_of(5).open = crate::ui::group_call_state::CallBox::Settings;
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(1, gpui_kit::Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                1,
+                crate::ui::group_call_state::JoinSent::Demo,
+                gpui_kit::Task::ready(()),
+            ),
         );
-        app.group_call_screen
-            .composer
-            .update(cx, |input, cx| input.set_value("for A's chat", window, cx));
+        let composer = cx.new(|cx| gpui_kit::component::input::TextareaState::new(window, cx));
+        composer.update(cx, |input, cx| input.set_value("for A's chat", window, cx));
+        app.group_call_screen.view_of(5).composer = Some(composer);
     });
     switch(&app, &mut vcx);
     frames(&mut vcx);
-    app.read_with(&vcx, |app, cx| {
+    app.read_with(&vcx, |app, _| {
         assert_eq!(
             app.call_screen.wanted,
             crate::ui::calls_state::WindowWanted::Open
@@ -146,13 +150,15 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         ));
         let group = &app.group_call_screen;
         assert_eq!(group.window_closed_by_user, None);
-        assert!(group.view.is_none(), "A's call view and its box are gone");
+        assert!(
+            group.view.is_none(),
+            "A's call view, its box and its composer text are gone"
+        );
         assert!(
             group.stream_wish().is_none(),
             "no join waits for B's call 1"
         );
         assert_eq!(group.joining_call(), None, "no Join button waits for it");
-        assert_eq!(group.composer.read(cx).value().to_string(), "");
     });
 }
 

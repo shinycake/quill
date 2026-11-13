@@ -92,6 +92,11 @@ pub(crate) struct Capture {
     preview: Option<PlaybackClock>,
     /// The live camera image while a video message records.
     round: super::round_record::RoundPreview,
+    /// The wake-up for the capture's own deadlines: it belongs to the
+    /// recording, so whatever ends it ends the wake-up too, and it runs while
+    /// no window draws (a background recording keeps its chat action,
+    /// reports a failed device and sends a round video at its limit).
+    wake: RecordWake,
 }
 
 /// MED2: lock-to-record — a locked recording ignores Esc; only Send or
@@ -122,10 +127,19 @@ pub(crate) struct RecordingUi {
     pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
     /// What the OS says about the microphone and camera, and its prompt.
     pub(super) device_os: super::capture_access::DeviceOs,
-    /// The 100 ms tick that moves the record bar and the preview; it ends
-    /// itself (and clears this) when nothing needs it, and dropping the
-    /// owner stops it.
-    pub(super) tick: Option<gpui_kit::Task<()>>,
+}
+
+/// The recording's wake-up: not armed, or the task that runs the next one,
+/// with the instant it is due (a deadline of the capture, `record_wake.rs`).
+/// The recording holds it, so it ends with the recording.
+enum RecordWake {
+    Stopped,
+    Armed {
+        /// Read by the tests that watch when the wake-up falls.
+        #[cfg_attr(not(test), allow(dead_code))]
+        due: std::time::Instant,
+        _task: gpui_kit::Task<()>,
+    },
 }
 
 /// A recording still running, or a camera starting, is cancelled: its
@@ -208,7 +222,6 @@ impl RecordingUi {
             next_start: 0,
             open_voice: Arc::new(VoiceCapture::start),
             device_os: Default::default(),
-            tick: None,
         }
     }
 }
@@ -307,6 +320,51 @@ impl RecordingUi {
 
     pub(super) fn active(&self) -> bool {
         self.capture().is_some()
+    }
+
+    /// The recording's next wake-up is the task `task`, due at `due`; the
+    /// one that ran before is dropped. `false` when nothing records.
+    pub(super) fn set_wake(&mut self, due: std::time::Instant, task: gpui_kit::Task<()>) -> bool {
+        let Some(capture) = self.capture_mut() else {
+            return false;
+        };
+        capture.wake = RecordWake::Armed { due, _task: task };
+        true
+    }
+
+    /// The wait until the capture's next deadline, `None` when it has none.
+    pub(super) fn wake_in(&self) -> Option<std::time::Duration> {
+        let capture = self.capture()?;
+        let now = std::time::Instant::now();
+        let (acting, limit) = match &capture.media {
+            CaptureMedia::Voice(voice) => (!voice.is_paused(), None),
+            CaptureMedia::Video(video) => (true, Some(video.time_left())),
+        };
+        super::record_wake::Deadlines {
+            acting,
+            limit,
+            preview_end: capture
+                .preview
+                .as_ref()
+                .and_then(|clock| clock.ends_in_at(now)),
+        }
+        .next()
+    }
+
+    /// The wake-up ended: no next one is armed.
+    pub(super) fn stop_wake(&mut self) {
+        if let Some(capture) = self.capture_mut() {
+            capture.wake = RecordWake::Stopped;
+        }
+    }
+
+    /// When the next wake-up is due, if one is armed.
+    #[cfg(test)]
+    pub(super) fn wake_due(&self) -> Option<std::time::Instant> {
+        match &self.capture()?.wake {
+            RecordWake::Armed { due, .. } => Some(*due),
+            RecordWake::Stopped => None,
+        }
     }
 
     /// A recording runs or is about to: another one must not start.
@@ -459,6 +517,7 @@ impl QuillApp {
             delivery: Delivery::Normal,
             preview: None,
             round: Default::default(),
+            wake: RecordWake::Stopped,
         });
     }
 }

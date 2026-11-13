@@ -187,3 +187,34 @@ fn a_ban_answer_closes_only_the_picker_that_sent_it(cx: &mut TestAppContext) {
         assert!(app.admin.add_special.is_none());
     });
 }
+
+/// A kick answers after the picker was closed and another opened: only the
+/// picker the kick came from (whose stage waits for its request) closes.
+#[gpui_kit::test]
+fn a_kick_answer_closes_only_its_own_picker(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::SpecialStage;
+    use crate::ui::group_moderation::{MemberChange, MemberChangeKind};
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx, "group-add-exception");
+    let vcx = &mut vcx;
+    let kick = |request: u64| MemberChange {
+        request: RequestId(request),
+        kind: MemberChangeKind::Kick,
+    };
+    app.update(vcx, |app, cx| {
+        assert!(app.admin.add_special.is_some(), "the picker is open");
+        if let Some(picker) = app.admin.add_special.as_mut() {
+            picker.stage = SpecialStage::Kicking {
+                request: RequestId(9_000),
+            };
+        }
+        // A kick from another group's picker answers.
+        app.admin.member_changes.push(kick(9_001));
+        app.settle_member_changes(cx);
+        assert!(app.admin.add_special.is_some(), "not this picker's kick");
+        // Its own kick answers.
+        app.admin.member_changes.push(kick(9_000));
+        app.settle_member_changes(cx);
+        assert!(app.admin.add_special.is_none(), "its own kick closes it");
+    });
+}

@@ -435,7 +435,7 @@ fn the_clock_runs_only_while_a_countdown_shows(cx: &mut TestAppContext) {
             app.peer_qr
                 .open
                 .as_ref()
-                .is_some_and(|open| open.clock.is_some())
+                .is_some_and(|open| open.clock.is_running())
         })
     };
     assert!(!running(&app, vcx), "a username link never runs out");
@@ -458,6 +458,7 @@ fn the_clock_runs_only_while_a_countdown_shows(cx: &mut TestAppContext) {
                 },
             };
         }
+        app.frame.window_active.set(true);
         app.sync_qr_clock(cx);
     });
     assert!(running(&app, vcx), "a free code counts down");
@@ -466,6 +467,57 @@ fn the_clock_runs_only_while_a_countdown_shows(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     assert!(!running(&app, vcx), "the clock stops once the code ran out");
     assert_eq!(toast(&app, vcx), Some(QrToast::CodeExpired));
+}
+
+#[gpui_kit::test]
+fn the_clock_rests_in_the_background_and_runs_again_on_activation(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let running = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.peer_qr
+                .open
+                .as_ref()
+                .is_some_and(|open| open.clock.is_running())
+        })
+    };
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.privacy_data.new_chat =
+                Some(NewChatPrivacyState::Ready(NewChatPrivacy {
+                    allow_from_unknown: true,
+                    incoming_paid_message_star_count: 50,
+                }));
+        }
+        if let Some(open) = app.peer_qr.open.as_mut() {
+            open.state.free.mode = FreeMode::Temporary {
+                code: FreeCode {
+                    link: UserLinkData {
+                        url: "https://t.me/+free".into(),
+                        expires_at: quill::local_time::now_unix() + 3_600,
+                    },
+                    can_permanent: true,
+                },
+            };
+        }
+        app.frame.window_active.set(false);
+        app.sync_qr_clock(cx);
+    });
+    assert!(!running(&app, vcx), "no clock behind another app");
+    app.update(vcx, |app, cx| {
+        app.frame.window_active.set(true);
+        app.resume_qr_clock(cx);
+    });
+    assert!(running(&app, vcx), "activation starts the countdown");
+    app.update(vcx, |app, _| app.frame.window_active.set(false));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(1_100));
+    vcx.run_until_parked();
+    assert!(
+        !running(&app, vcx),
+        "the next tick finds the app hidden and stops"
+    );
 }
 
 /// A message price and a temporary free code, then the pill's menu.
@@ -732,4 +784,44 @@ fn a_newer_toast_is_not_hidden_by_the_older_toasts_timer(cx: &mut TestAppContext
         .advance_clock(std::time::Duration::from_millis(2_000));
     vcx.run_until_parked();
     assert_eq!(toast(&app, vcx), None, "the toast's own timer hides it");
+}
+
+/// Tiles are made for the layout on screen: a resize replaces them instead
+/// of leaving a set per size until the box closes.
+#[gpui_kit::test]
+fn a_resize_replaces_the_gift_tiles(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let (center, edge) = (Rgb::hex(0xFF_0000), Rgb::hex(0x00_00FF));
+    let count = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.peer_qr.gift_art_tiles())
+    };
+    app.update(vcx, |app, cx| {
+        for _ in 0..2 {
+            let _ = app.qr_gift_tile_image(center, edge, 40, 50, cx);
+        }
+        let _ = app.qr_gift_tile_image(edge, center, 40, 50, cx);
+    });
+    assert_eq!(count(&app, vcx), 2, "two gifts at one size");
+    vcx.run_until_parked();
+    let old = app.update(vcx, |app, cx| {
+        app.qr_gift_tile_image(center, edge, 40, 50, cx)
+            .map(|image| image.id.0)
+    });
+    assert!(old.is_some(), "the tile was made");
+    app.update(vcx, |app, cx| {
+        let _ = app.qr_gift_tile_image(center, edge, 60, 70, cx);
+    });
+    assert_eq!(count(&app, vcx), 1, "the old size's tiles went");
+    // The old tiles leave the atlas through the retire sweep.
+    crate::ui::image_budget::begin_frame();
+    crate::ui::image_budget::begin_frame();
+    let swept: Vec<usize> = crate::ui::image_budget::take_unshowable(true, &[])
+        .iter()
+        .map(|image| image.id.0)
+        .collect();
+    assert!(
+        old.is_some_and(|id| swept.contains(&id)),
+        "retired: {swept:?}"
+    );
 }

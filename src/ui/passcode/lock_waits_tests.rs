@@ -227,6 +227,57 @@ fn closing_the_passcode_box_keeps_a_lock_waiting_for_the_job(cx: &mut TestAppCon
 }
 
 #[gpui_kit::test]
+fn a_refused_job_whose_box_closed_says_so_in_a_note(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    // Turn off, Esc at once, and the passcode was wrong.
+    app.update_in(vcx, |app, window, cx| {
+        app.account.passcode.enabled = true;
+        app.open_passcode(cx);
+        app.run_passcode_job(
+            || (),
+            |app, (), _, cx| app.passcode_job_failed(&quill::passcode::PasscodeError::Wrong, cx),
+            window,
+            cx,
+        );
+        app.close_passcode(window, cx);
+    });
+    frame(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(!app.account.passcode.is_open(), "the box stayed closed");
+        assert_eq!(
+            app.connection.status_note(),
+            quill::passcode::PasscodeError::Wrong.to_string(),
+            "the refusal is not lost"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn the_auto_lock_and_touch_id_settings_wait_for_a_running_job(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.account.passcode.enabled = true;
+        // A fixture: settings write nowhere, so only the guard can refuse.
+        app.account.passcode.demo = true;
+        let before = app.account.passcode.autolock_secs;
+        app.run_passcode_job(|| (), |_, (), _, _| {}, window, cx);
+        // A write now would be put back by the job's own save.
+        app.set_autolock_secs(before + 3_600, cx);
+        assert_eq!(app.account.passcode.autolock_secs, before);
+        app.set_system_unlock(true, cx);
+        assert!(!app.account.passcode.system_unlock.is_on());
+    });
+    frame(vcx);
+    app.update(vcx, |app, cx| {
+        let before = app.account.passcode.autolock_secs;
+        app.set_autolock_secs(before + 3_600, cx);
+        assert_eq!(app.account.passcode.autolock_secs, before + 3_600);
+    });
+}
+
+#[gpui_kit::test]
 fn the_lock_closes_the_call_windows_boxes_and_refuses_new_ones(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
@@ -300,4 +351,131 @@ fn the_unlock_connects_only_the_account_that_waited(cx: &mut TestAppContext) {
         assert_eq!(app.connect.generation, generation, "nothing connects");
         assert!(app.account.passcode.connect_at_unlock.is_none());
     });
+}
+
+/// A system prompt nobody answers does not hold the lock screen: the
+/// passcode typed instead leaves it, and its late answer lands nowhere.
+#[gpui_kit::test]
+fn an_unanswered_system_prompt_is_left_by_typing_the_passcode(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    lock(&app, vcx);
+    let (answer, receiver) = futures_channel::oneshot::channel();
+    app.update_in(vcx, |app, window, cx| {
+        let master = quill::passcode::MasterKey::from_bytes([7; 32]);
+        app.spawn_system_unlock_wait(
+            crate::ui::system_unlock::Prompt::without_prompt(receiver),
+            master,
+            window,
+            cx,
+        );
+        assert!(app.account.passcode.job.is_running());
+        assert!(
+            !app.account.passcode.job.is_hashing(),
+            "the prompt is not a passcode check: the field stays usable"
+        );
+        // A passcode is typed and submitted: the prompt is left.
+        app.account
+            .passcode
+            .lock
+            .input
+            .update(cx, |input, cx| input.set_value("typed", window, cx));
+        app.submit_unlock(window, cx);
+        assert!(
+            app.account.passcode.job.is_hashing(),
+            "the passcode check replaced the prompt's wait"
+        );
+    });
+    frame(vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.account.passcode.job.is_running())
+            || app.read_with(vcx, |app, _| app.account.passcode.job.is_hashing()),
+        "the prompt's wait is gone"
+    );
+    // The OS finally says yes: nobody is waiting, so nothing unlocks.
+    assert!(answer.send(true).is_err());
+    frame(vcx);
+    assert!(app.read_with(vcx, |app, _| app.account.passcode.is_locked()));
+}
+
+/// Enter on an empty field leaves the OS prompt alone: it is still on
+/// screen, so Quill still waits for its answer.
+#[gpui_kit::test]
+fn an_empty_field_does_not_leave_the_system_prompt(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    lock(&app, vcx);
+    let (answer, receiver) = futures_channel::oneshot::channel();
+    app.update_in(vcx, |app, window, cx| {
+        let master = quill::passcode::MasterKey::from_bytes([7; 32]);
+        app.spawn_system_unlock_wait(
+            crate::ui::system_unlock::Prompt::without_prompt(receiver),
+            master,
+            window,
+            cx,
+        );
+        app.submit_unlock(window, cx);
+        assert!(app.account.passcode.job.is_running(), "still waiting");
+    });
+    frame(vcx);
+    assert!(
+        answer.send(true).is_ok(),
+        "the wait still holds its receiver"
+    );
+    frame(vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.account.passcode.is_locked()),
+        "the OS answer unlocks"
+    );
+}
+
+/// Log out on the lock screen ends a system prompt's job at once: nothing
+/// stays "running" for Settings to refuse on.
+#[gpui_kit::test]
+fn a_logout_leaves_a_system_prompt_job(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    lock(&app, vcx);
+    let (_answer, receiver) = futures_channel::oneshot::channel();
+    app.update_in(vcx, |app, window, cx| {
+        let master = quill::passcode::MasterKey::from_bytes([7; 32]);
+        app.spawn_system_unlock_wait(
+            crate::ui::system_unlock::Prompt::without_prompt(receiver),
+            master,
+            window,
+            cx,
+        );
+        assert!(app.account.passcode.job.is_running());
+        app.account.passcode.job.cancel();
+        assert!(!app.account.passcode.job.is_running());
+    });
+}
+
+/// A lock asked while a passcode check runs lands with its answer; a
+/// log-out from the lock screen cancels the answer instead.
+#[gpui_kit::test]
+fn a_running_job_holds_a_lock_and_a_logout_cancels_it(cx: &mut TestAppContext) {
+    use crate::ui::passcode::JobFate;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.account.passcode.enabled = true;
+        app.run_passcode_job(|| (), |_, (), _, _| {}, window, cx);
+        app.lock_by_passcode(cx);
+        let fate = |app: &QuillApp| match &app.account.passcode.job {
+            crate::ui::passcode::PasscodeJob::Running { fate, .. } => Some(*fate),
+            crate::ui::passcode::PasscodeJob::Idle => None,
+        };
+        assert_eq!(fate(app), Some(JobFate::ThenLock));
+        app.account.passcode.job.cancel();
+        assert_eq!(fate(app), Some(JobFate::Cancelled));
+        // A lock asked now does not un-cancel it.
+        app.lock_by_passcode(cx);
+        assert_eq!(fate(app), Some(JobFate::Cancelled));
+    });
+    frame(vcx);
+    assert!(
+        !app.read_with(vcx, |app, _| app.account.passcode.is_locked()),
+        "a cancelled job's answer locks nothing"
+    );
 }

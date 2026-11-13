@@ -127,10 +127,11 @@ impl QuillApp {
         };
         if asked {
             // A call that is gone has no links to share: nothing opens.
-            self.open_call_box(CallBox::Share {
-                speaker: true,
-                copied: false,
-            });
+            self.open_call_box(CallBox::Share(
+                crate::ui::group_call_state::ShareStage::Choosing(
+                    crate::ui::group_call_state::ShareLink::Speaker,
+                ),
+            ));
         } else {
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULDNT_GET_THE_INVITE_LINK,

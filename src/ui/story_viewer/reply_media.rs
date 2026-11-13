@@ -107,7 +107,7 @@ impl QuillApp {
     }
 
     pub(super) fn toggle_story_reply_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
-        if self.story_reply_panel_active() && self.pickers.media_panel.tab == tab {
+        if self.story_reply_panel_active() && self.pickers.media_panel.tab() == tab {
             if let Some(open) = self.stories.viewer_ui_mut() {
                 open.set_reply_panel(false);
             }

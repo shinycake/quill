@@ -1,7 +1,9 @@
 //! The notification windows' fade hold and tick clock.
 #![deny(clippy::indexing_slicing)]
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use super::{FRAME, INPUT_CHECK_MS, NotifyWindows};
 
 /// Why the window has not started its slow fade. It stays up until the
 /// user has touched the computer after it appeared (`notify_check_input`),
@@ -50,9 +52,50 @@ impl Hold {
     }
 }
 
-/// The tick that moves the windows: stopped, or the task that runs it.
-/// The tick stops itself when nothing is up; dropping the windows drops it.
+/// The tick that moves the windows: stopped, or the task that runs it and
+/// the instant it wakes at. The tick stops itself when nothing is up;
+/// dropping the windows drops it.
 pub(super) enum Clock {
     Stopped,
-    Running { _task: gpui_kit::Task<()> },
+    Running {
+        due: std::time::Instant,
+        _task: gpui_kit::Task<()>,
+    },
+}
+
+impl NotifyWindows {
+    /// When the clock steps next once nothing animates; stops it when no
+    /// popup waits for the user and no fade is due.
+    pub(super) fn next_step(&mut self, now: Instant) -> Option<Duration> {
+        let windows = self;
+        // Held, nothing is due: the hold ends on an event, which settles.
+        let deadline = (!windows.held())
+            .then(|| {
+                windows
+                    .shown
+                    .iter()
+                    .filter(|s| !s.unlinked() && !s.popup.hiding())
+                    .filter_map(|s| s.hold.hide_at())
+                    .min()
+            })
+            .flatten()
+            .map(|at| at.saturating_duration_since(now));
+        let waiting = windows
+            .shown
+            .iter()
+            .any(|s| s.hold.waiting() && !s.unlinked());
+        let next = match (deadline, waiting) {
+            (Some(deadline), true) => Some(deadline.min(Duration::from_millis(INPUT_CHECK_MS))),
+            (Some(deadline), false) => Some(deadline),
+            (None, true) => Some(Duration::from_millis(INPUT_CHECK_MS)),
+            (None, false) => None,
+        };
+        match next {
+            Some(delay) => Some(delay.max(FRAME)),
+            None => {
+                windows.clock = Clock::Stopped;
+                None
+            }
+        }
+    }
 }

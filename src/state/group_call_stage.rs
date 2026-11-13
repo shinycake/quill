@@ -41,17 +41,23 @@ impl GroupTransport {
         }
     }
 
-    /// A join press was taken and its request is out.
-    pub fn joining(&self) -> bool {
-        matches!(self, Self::Joining { .. })
+    /// No transport and no join on its way: after a join press this is the
+    /// join having ended without an answer (its error, or never sent).
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::NoTransport)
     }
 
-    /// The join request that waits for its answer.
+    /// The `joinVideoChat` request this transport waits on.
     pub fn join_request(&self) -> Option<RequestId> {
         match self {
             Self::Joining { request } => Some(*request),
             _ => None,
         }
+    }
+
+    /// A join press was taken and its request is out.
+    pub fn joining(&self) -> bool {
+        matches!(self, Self::Joining { .. })
     }
 
     /// The join `request` was made; a connected call keeps its transport.

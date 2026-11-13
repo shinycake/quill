@@ -260,9 +260,11 @@ impl QuillApp {
                 input.set_submit_on_enter(submit, cx);
             });
         });
-        self.group_call_screen.composer.update(cx, |input, cx| {
-            input.set_submit_on_enter(submit, cx);
-        });
+        if let Some(composer) = self.call_view().and_then(|view| view.composer.clone()) {
+            composer.update(cx, |input, cx| {
+                input.set_submit_on_enter(submit, cx);
+            });
+        }
         cx.notify();
     }
 

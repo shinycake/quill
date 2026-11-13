@@ -39,7 +39,6 @@ use super::calls::stream_title::{SEPARATOR_GAP, title_layout, title_rect};
 use super::calls::stream_view::blurred_photo;
 use super::calls::stream_volume::{KEY_STEP, VolumeHost};
 use super::group_call_panel::LEAVE_BG;
-use super::group_call_state::StreamJoining;
 use super::group_call_stream_photo::StreamPhoto;
 use super::video_player::VideoPlayer;
 use super::video_player::controls::{
@@ -62,7 +61,6 @@ use quill::telegram::envelope::MessageSender;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
 
 /// `groupCallNarrowSkip`, `groupCallWideVideoTop`.
 const SKIP: f32 = 9.;
@@ -77,8 +75,6 @@ const PIN_WIDTH: f32 = 40.;
 /// How far a press on the title band moves before it drags the window,
 /// so a double-click still toggles full screen.
 const DRAG_THRESHOLD: f32 = 4.;
-/// A join that neither lands nor reports an error gives up after this.
-const JOIN_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// You asked to watch a stream, or created a call: the window joins it
 /// once it is tracked.
@@ -96,7 +92,7 @@ pub(crate) enum StreamJoinIntent {
 }
 
 impl StreamJoinIntent {
-    fn matches(self, call: i32, chat: Option<i64>) -> bool {
+    pub(super) fn matches(self, call: i32, chat: Option<i64>) -> bool {
         match self {
             Self::Call(id) => id == call,
             Self::Created { chat: id, .. } => chat == Some(id),
@@ -260,155 +256,6 @@ impl QuillApp {
         }
         // Asking again brings a window you closed back.
         self.group_call_screen.window_closed_by_user = None;
-    }
-
-    /// Join the tracked stream from its window: the Join button, or the
-    /// join you asked for.
-    pub(super) fn join_stream(&mut self, id: i32, cx: &mut Context<Self>) {
-        self.dismiss_group_call_error(cx);
-        if self.send_group_call_join() {
-            let timeout = self.spawn_screen(cx, async move |this, cx| {
-                cx.background_executor().timer(JOIN_TIMEOUT).await;
-                let _ = this.update(cx, |app, cx| app.stream_join_ended(id, cx));
-            });
-            self.group_call_screen
-                .start_join(StreamJoining::new(id, timeout));
-        } else {
-            self.stream_join_failed();
-        }
-        cx.notify();
-    }
-
-    /// The join was not sent or did not land: stop waiting and say so.
-    fn stream_join_failed(&mut self) {
-        self.group_call_screen.clear_stream_joining();
-        let reason = tr(keys::Q_OPS_STREAM_JOIN_FAILED).to_string();
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.calls.group_call_error = Some(reason);
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.calls.group_call_error = Some(reason);
-        }
-    }
-
-    /// The join on its way landed or failed: stop waiting, and say so when
-    /// it failed. Run with the window sync, outside the draw.
-    pub(super) fn settle_stream_join(&mut self) {
-        let Some(joining) = self.group_call_screen.joining_call() else {
-            return;
-        };
-        let Some(facts) = self.group_call_stream_facts() else {
-            return;
-        };
-        if joining != facts.id {
-            self.stream_join_failed();
-        } else if facts.joined {
-            self.group_call_screen.clear_stream_joining();
-        } else if self.session().is_some_and(|session| {
-            // The call's transport failed: a join clears it, so while a
-            // join waits it is that join's failure (a failed screen share
-            // is kept apart, `screen_share_error`).
-            session
-                .calls
-                .active_group_call
-                .as_ref()
-                .is_some_and(|call| call.id == facts.id && call.transport.error().is_some())
-        }) {
-            // The connect failed without a join error.
-            self.stream_join_failed();
-        } else if self
-            .session()
-            .is_some_and(|s| s.calls.group_call_error.is_some())
-        {
-            self.group_call_screen.clear_stream_joining();
-        }
-    }
-
-    /// The join of `id` timed out, or the window saw it end: unless it
-    /// landed, the Join button comes back with the failure.
-    pub(super) fn stream_join_ended(&mut self, id: i32, cx: &mut Context<Self>) {
-        if self.group_call_screen.joining_call() != Some(id) {
-            return;
-        }
-        let joined = self
-            .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-            .is_some_and(|call| call.id == id && call.is_joined);
-        if joined {
-            self.group_call_screen.clear_stream_joining();
-        } else {
-            self.stream_join_failed();
-        }
-        cx.notify();
-    }
-
-    /// Run the join you asked for once its call is tracked. Any other
-    /// unjoined stream waits for its Join button.
-    pub(super) fn consume_stream_join_intent(&mut self, cx: &mut Context<Self>) {
-        let Some((intent, tracked_then)) = self.group_call_screen.stream_wish() else {
-            return;
-        };
-        // The fetch of the call it asked for failed: no call will come for
-        // this wish, whatever other call is tracked meanwhile.
-        if let StreamJoinIntent::Call(id) = intent {
-            let failed = if let Some(live) = self.live.as_mut() {
-                live.driver.session.calls.take_group_call_fetch_failure(id)
-            } else {
-                self.demo_session
-                    .as_mut()
-                    .is_some_and(|session| session.calls.take_group_call_fetch_failure(id))
-            };
-            if failed {
-                self.group_call_screen.clear_stream_wish();
-                return;
-            }
-        }
-        let Some(call) = self
-            .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-        else {
-            // The request that fetches the call failed: no call will come
-            // for this wish, so it must not join one much later.
-            if self
-                .session()
-                .is_some_and(|s| s.calls.group_call_error.is_some())
-            {
-                self.group_call_screen.clear_stream_wish();
-            }
-            return;
-        };
-        let chat = self.group_call_chat(call).map(|chat| chat.id.0);
-        if !intent.matches(call.id, chat) {
-            // Another call took the place of the one tracked when you
-            // asked: the wish is stale and must not join much later.
-            if tracked_then != Some(call.id) {
-                self.group_call_screen.clear_stream_wish();
-            }
-            return;
-        }
-        let (id, stream, joined) = (call.id, uses_stream_layout(call), call.is_joined);
-        self.group_call_screen.clear_stream_wish();
-        if joined {
-            return;
-        }
-        match intent {
-            StreamJoinIntent::Call(_) if stream => self.join_stream(id, cx),
-            StreamJoinIntent::Call(_) => {}
-            StreamJoinIntent::Created { join_as, .. } => {
-                if join_as.is_some() {
-                    if let Some(live) = self.live.as_mut() {
-                        live.driver.session.set_group_call_join_as(join_as);
-                    } else if let Some(session) = self.demo_session.as_mut() {
-                        session.set_group_call_join_as(join_as);
-                    }
-                }
-                if stream {
-                    self.join_stream(id, cx);
-                } else {
-                    self.send_group_call_join();
-                    cx.notify();
-                }
-            }
-        }
     }
 
     /// The window's content for a live stream. `full`: full screen or
@@ -805,7 +652,10 @@ impl QuillApp {
                 if matches!(&app.group_call.stream.photo,
                     StreamPhoto::Blurring { path: cached, .. } if *cached == path)
                 {
-                    app.group_call.stream.photo = StreamPhoto::Blurred { path, image };
+                    app.group_call.stream.photo = match image {
+                        Some(image) => StreamPhoto::Blurred { path, image },
+                        None => StreamPhoto::Failed { path },
+                    };
                     cx.notify();
                 }
             });
@@ -835,42 +685,48 @@ impl QuillApp {
         // The fade holds the task with its deadline (one task; a move only
         // pushes the deadline), so hiding the controls or leaving full
         // screen cancels it.
-        self.group_call.stream.controls.arm_timer(|| {
-            cx.spawn(async move |this, cx| {
-                loop {
-                    let next = this.update(cx, |app, _| app.group_call.stream.controls.hide_at());
-                    let Ok(Some(at)) = next else {
-                        break;
-                    };
-                    let wait = at.saturating_duration_since(cx.background_executor().now());
-                    cx.background_executor().timer(wait).await;
-                    // Asked outside the app's update: the window's own state.
-                    let handle = this
-                        .update(cx, |app, _| app.group_call.window.handle())
+        let Some(at) = self.group_call.stream.controls.hide_at() else {
+            return;
+        };
+        self.group_call
+            .stream
+            .controls
+            .arm_timer(|| Self::stream_hide_wake(at, cx));
+    }
+
+    /// One wake-up at the hide deadline `at`. A move pushed the deadline
+    /// meanwhile: the next wake-up replaces this task (`rearm_timer`).
+    fn stream_hide_wake(at: std::time::Instant, cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn(async move |this, cx| {
+            let wait = at.saturating_duration_since(cx.background_executor().now());
+            cx.background_executor().timer(wait).await;
+            // Asked outside the app's update: the window's own state.
+            let handle = this
+                .update(cx, |app, _| app.group_call.window.handle())
+                .ok()
+                .flatten();
+            let active = handle
+                .and_then(|handle| {
+                    cx.update_window(handle, |_, window, _| window.is_window_active())
                         .ok()
-                        .flatten();
-                    let active = handle
-                        .and_then(|handle| {
-                            cx.update_window(handle, |_, window, _| window.is_window_active())
-                                .ok()
-                        })
-                        .unwrap_or(false);
-                    let more = this.update(cx, |app, cx| {
-                        let controls = &mut app.group_call.stream.controls;
-                        let was = controls.shown();
-                        controls.tick(cx.background_executor().now());
-                        if was != controls.shown() {
-                            app.hide_stream_cursor(active);
-                            cx.notify();
-                        }
-                        app.group_call.stream.controls.hide_at().is_some()
-                    });
-                    if !matches!(more, Ok(true)) {
-                        break;
-                    }
+                })
+                .unwrap_or(false);
+            let _ = this.update(cx, |app, cx| {
+                let controls = &mut app.group_call.stream.controls;
+                let was = controls.shown();
+                controls.tick(cx.background_executor().now());
+                if was != controls.shown() {
+                    app.hide_stream_cursor(active);
+                    cx.notify();
                 }
-            })
-        });
+                if let Some(next) = app.group_call.stream.controls.hide_at() {
+                    app.group_call
+                        .stream
+                        .controls
+                        .rearm_timer(|| Self::stream_hide_wake(next, cx));
+                }
+            });
+        })
     }
 }
 

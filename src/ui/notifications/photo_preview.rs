@@ -7,16 +7,29 @@
 
 use super::*;
 use quill::ids::{AccountKey, FileId};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// How long a notification waits for its photo before it shows without.
 const PHOTO_WAIT: Duration = Duration::from_secs(3);
 
-/// How often a waiting notification looks for its photo.
-const PHOTO_CHECK: Duration = Duration::from_millis(100);
-
 /// TDLib's highest download priority: the user is about to see it.
 const PHOTO_PRIORITY: i32 = 32;
+
+/// A notification waiting for its photo. The entry owns the task that ends
+/// the wait at [`PHOTO_WAIT`]; the poll shows it earlier when the photo lands
+/// (`settle_preview_waits`). Removing the entry (a newer notification for the
+/// chat, its dismissal, the account going) cancels the task and shows nothing.
+pub(in crate::ui) struct PreviewWait {
+    /// The account the notification belongs to, resolved when it was
+    /// queued: whichever account is on screen later, it shows under this
+    /// one (`account_arg`).
+    account: AccountKey,
+    file: FileId,
+    locked: bool,
+    notification: quill::notify::OsNotification,
+    photo: Option<PathBuf>,
+    _deadline: Task<()>,
+}
 
 impl QuillApp {
     /// Show a notification with its sender picture and, when `preview` is
@@ -51,65 +64,103 @@ impl QuillApp {
             );
             return;
         };
-        self.delivery.next_preview_wait += 1;
-        let id = self.delivery.next_preview_wait;
-        self.delivery.preview_waits.insert(key.clone(), id);
-        let deadline = Instant::now() + PHOTO_WAIT;
-        // `None` means the account on screen: a switch while waiting would
-        // post this one under the other account.
-        let on_screen = self.session().map(|session| session.account.clone());
-        let mut waiting = Some((notification, photo));
+        let owner = key.0.clone();
+        self.arm_preview_wait(
+            key,
+            |deadline| PreviewWait {
+                account: owner,
+                file,
+                locked,
+                notification,
+                photo,
+                _deadline: deadline,
+            },
+            cx,
+        );
+    }
+
+    /// Hold a wait for `key` with the task that ends it at [`PHOTO_WAIT`].
+    fn arm_preview_wait(
+        &mut self,
+        key: (AccountKey, ChatId),
+        wait: impl FnOnce(Task<()>) -> PreviewWait,
+        cx: &mut Context<Self>,
+    ) {
         // screen-scope: the wait names the notification's account and checks it
         // against the account on screen itself before showing anything.
-        Self::spawn_app(cx, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(PHOTO_CHECK).await;
-                let done = this
-                    .update(cx, |app, cx| {
-                        let path = app.preview_path(account.as_ref(), file);
-                        if path.is_none() && Instant::now() < deadline {
-                            return false;
-                        }
-                        // Replaced or dismissed while waiting: never shown.
-                        if app.delivery.preview_waits.get(&key) != Some(&id) {
-                            return true;
-                        }
-                        if account.is_none()
-                            && app.session().map(|session| session.account.clone()) != on_screen
-                        {
-                            app.delivery.preview_waits.remove(&key);
-                            return true;
-                        }
-                        app.delivery.preview_waits.remove(&key);
-                        let Some((mut notification, mut photo)) = waiting.take() else {
-                            return true;
-                        };
-                        // The passcode lock came up while waiting: show
-                        // what a locked app shows.
-                        let now_locked = locked || app.account.passcode.is_locked();
-                        let path = if now_locked { None } else { path };
-                        if now_locked && !locked {
-                            notification.title = quill::notify::APP_TITLE.to_string();
-                            notification.body = quill::notify::GENERIC_BODY.to_string();
-                            photo = None;
-                        }
-                        app.show_notification_with_photo(
-                            account.clone(),
-                            notification,
-                            photo,
-                            path,
-                            now_locked,
-                            cx,
-                        );
-                        true
-                    })
-                    .unwrap_or(true);
-                if done {
-                    break;
-                }
+        let deadline = Self::spawn_app(cx, {
+            let key = key.clone();
+            async move |this, cx| {
+                cx.background_executor().timer(PHOTO_WAIT).await;
+                let _ = this.update(cx, |app, cx| app.settle_preview_wait(&key, cx));
             }
-        })
-        .detach();
+        });
+        self.delivery.preview_waits.insert(key, wait(deadline));
+    }
+
+    /// The poll's drain: every waiting notification whose photo has landed
+    /// shows now. The rest wait for their deadline task.
+    pub(in crate::ui) fn settle_preview_waits(&mut self, cx: &mut Context<Self>) -> bool {
+        let landed: Vec<_> = self
+            .delivery
+            .preview_waits
+            .iter()
+            .filter(|(_, wait)| {
+                self.preview_path(self.account_arg(&wait.account).as_ref(), wait.file)
+                    .is_some()
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        let settled = !landed.is_empty();
+        for key in landed {
+            self.settle_preview_wait(&key, cx);
+        }
+        settled
+    }
+
+    /// The photo landed or the wait ran out: show the notification, unless
+    /// it was replaced or dismissed meanwhile (then its entry is gone).
+    fn settle_preview_wait(&mut self, key: &(AccountKey, ChatId), cx: &mut Context<Self>) {
+        let Some(wait) = self.delivery.preview_waits.remove(key) else {
+            return;
+        };
+        let PreviewWait {
+            account,
+            file,
+            locked,
+            notification,
+            photo,
+            _deadline,
+        } = wait;
+        // This may be the deadline task's own turn: dropping it only ends
+        // the future once this update returns, and keeps it from settling a
+        // newer wait for the same chat.
+        drop(_deadline);
+        // The account may have moved to the background (or come on screen)
+        // since the wait began: the notification stays its own.
+        let account = self.account_arg(&account);
+        let path = self.preview_path(account.as_ref(), file);
+        let (mut notification, mut photo) = (notification, photo);
+        // The passcode lock came up while waiting: show what a locked app
+        // shows.
+        let now_locked = locked || self.account.passcode.is_locked();
+        let path = if now_locked { None } else { path };
+        if now_locked && !locked {
+            notification.title = quill::notify::APP_TITLE.to_string();
+            notification.body = quill::notify::GENERIC_BODY.to_string();
+            photo = None;
+        }
+        self.show_notification_with_photo(account, notification, photo, path, now_locked, cx);
+    }
+
+    /// `account` as the account argument of the notification calls: `None`
+    /// while it is the account on screen, else the key of its background
+    /// client.
+    fn account_arg(&self, account: &AccountKey) -> Option<AccountKey> {
+        match self.session() {
+            Some(session) if &session.account == account => None,
+            _ => Some(account.clone()),
+        }
     }
 
     /// The downloaded photo file, on the account that queued it.
@@ -146,3 +197,8 @@ impl QuillApp {
         live.driver.download_file(file, PHOTO_PRIORITY).is_ok()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "photo_preview_tests.rs"]
+mod tests;

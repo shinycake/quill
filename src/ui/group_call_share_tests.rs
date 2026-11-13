@@ -233,10 +233,11 @@ fn the_call_boxes_close_with_their_call(cx: &mut TestAppContext) {
     });
 
     app.update_in(vcx, |app, _, _| {
-        app.open_call_box(crate::ui::group_call_state::CallBox::Share {
-            speaker: true,
-            copied: false,
-        });
+        app.open_call_box(crate::ui::group_call_state::CallBox::Share(
+            crate::ui::group_call_state::ShareStage::Choosing(
+                crate::ui::group_call_state::ShareLink::Speaker,
+            ),
+        ));
         app.sync_group_call_boxes();
     });
     let open = app.read_with(vcx, |app, _| app.share_open());
@@ -280,10 +281,11 @@ fn a_box_needs_a_tracked_call(cx: &mut TestAppContext) {
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.active_group_call = None;
         }
-        let opened = app.open_call_box(crate::ui::group_call_state::CallBox::Share {
-            speaker: true,
-            copied: false,
-        });
+        let opened = app.open_call_box(crate::ui::group_call_state::CallBox::Share(
+            crate::ui::group_call_state::ShareStage::Choosing(
+                crate::ui::group_call_state::ShareLink::Speaker,
+            ),
+        ));
         assert!(!opened && !app.share_open());
     });
 }
@@ -299,7 +301,11 @@ fn a_join_and_a_wish_keep_each_other(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, _| {
         let screen = &mut app.group_call_screen;
         screen.want_stream(StreamJoinIntent::Call(5), None);
-        screen.start_join(StreamJoining::new(77, gpui_kit::Task::ready(())));
+        screen.start_join(StreamJoining::new(
+            77,
+            crate::ui::group_call_state::JoinSent::Demo,
+            gpui_kit::Task::ready(()),
+        ));
         assert!(screen.stream_wish().is_some(), "the wish for call 5 stays");
         assert_eq!(screen.joining_call(), Some(77));
         screen.want_stream(StreamJoinIntent::Call(6), None);

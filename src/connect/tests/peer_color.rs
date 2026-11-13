@@ -57,6 +57,13 @@ fn colors_need_premium_and_icons_load_once() {
     assert!(driver.load_background_emoji_icons().unwrap().is_none());
     driver.download_background_emoji_icons();
     assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 302);
+    // Asked once per file: the same list is not asked again, a replaced
+    // list of the same length is.
+    let mut asked = std::collections::HashSet::new();
+    assert!(driver.download_background_emoji_icons_once(&mut asked));
+    assert!(!driver.download_background_emoji_icons_once(&mut asked));
+    asked.remove(&crate::ids::FileId(302));
+    assert!(driver.download_background_emoji_icons_once(&mut asked));
 }
 
 /// The Appearance box asks for files, not for list lengths: a list that is

@@ -149,7 +149,7 @@ fn select_tone_opens_the_panel_for_the_row_chat_without_navigating(cx: &mut Test
         (
             app.session().and_then(|s| s.open_chat_id()),
             app.notify.mute_chat(),
-            app.notify.mute_box.is_some(),
+            app.notify.mute_box().is_some(),
             app.notify.mute_section() == crate::ui::notify_state::MuteSection::SoundPicker,
         )
     });

@@ -1463,3 +1463,41 @@ fn a_chat_window_the_platform_destroys_frees_its_chat(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(h.other_windows(cx).len(), 1, "asking again opens a window");
 }
+
+/// The recording's timer wakes for the capture's own deadlines, with no window
+/// drawing: it is not re-armed on a fixed short period, and the chat action's
+/// refresh falls at the right moment.
+#[gpui_kit::test]
+fn a_recording_wakes_only_at_its_deadlines_while_no_window_draws(cx: &mut TestAppContext) {
+    use crate::ui::record_wake::ACTION_REFRESH;
+    use std::time::Duration;
+    let h = new_app(cx);
+    record_in_window(&h, None, CaptureFor::Message, cx);
+    let armed_at = h.app.update(cx, |app, cx| {
+        app.begin_record_tick(cx);
+        cx.background_executor().now()
+    });
+    // The first step runs at once and arms the chat action's refresh.
+    cx.run_until_parked();
+    let due = h.app.update(cx, |app, _| app.recording.wake_due());
+    assert_eq!(due, Some(armed_at + ACTION_REFRESH));
+    // Time passes with nothing due: the timer is not re-armed.
+    cx.executor().advance_clock(Duration::from_millis(350));
+    cx.run_until_parked();
+    assert_eq!(
+        h.app.update(cx, |app, _| app.recording.wake_due()),
+        due,
+        "no wake-up on a fixed period"
+    );
+    // The deadline arrives: the step runs and arms the next deadline.
+    cx.executor()
+        .advance_clock(ACTION_REFRESH.saturating_sub(Duration::from_millis(350)));
+    cx.run_until_parked();
+    let next = h.app.update(cx, |app, _| app.recording.wake_due());
+    assert_eq!(next, Some(armed_at + ACTION_REFRESH * 2));
+    // Cancelling the recording drops its timer with it.
+    h.app.update(cx, |app, cx| app.cancel_recording(cx));
+    cx.executor().advance_clock(ACTION_REFRESH);
+    cx.run_until_parked();
+    assert_eq!(h.app.update(cx, |app, _| app.recording.wake_due()), None);
+}

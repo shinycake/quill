@@ -341,9 +341,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn open_folder_menu(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.close_mute_menu(cx);
-        self.notify.ttl_picker = None;
-        self.folders.menu_chat = Some(chat_id);
+        self.notify.open_folder_menu(chat_id);
         self.open_box(crate::ui::shell::DialogKind::FolderMenu);
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
@@ -370,7 +368,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn close_folder_menu(&mut self, cx: &mut Context<Self>) {
-        self.folders.menu_chat = None;
+        self.notify.close_folder_menu();
         cx.notify();
     }
 
@@ -413,7 +411,7 @@ impl QuillApp {
             Ok(()) => StatusNote::info(toast),
             Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_ADD_TO_FOLDER, &err)),
         });
-        self.folders.menu_chat = None;
+        self.notify.close_folder_menu();
         cx.notify();
     }
 
@@ -435,7 +433,7 @@ impl QuillApp {
                 &err,
             )),
         });
-        self.folders.menu_chat = None;
+        self.notify.close_folder_menu();
         cx.notify();
     }
 
@@ -447,7 +445,7 @@ impl QuillApp {
     /// shows now.
     pub(in crate::ui) fn folder_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
-        let open = self.folders.menu_chat;
+        let open = self.notify.folder_menu_chat();
         let mut panel = div().id("folder-menu").flex().flex_col().gap_1();
         let (Some(session), Some(chat_id)) = (session, open) else {
             return panel
@@ -547,7 +545,7 @@ impl QuillApp {
                                     &err,
                                 )));
                             }
-                            this.folders.menu_chat = None;
+                            this.notify.close_folder_menu();
                             cx.notify();
                         }
                         ChatList::Archive => {
@@ -559,7 +557,7 @@ impl QuillApp {
                                     &err,
                                 )));
                             }
-                            this.folders.menu_chat = None;
+                            this.notify.close_folder_menu();
                             cx.notify();
                         }
                         ChatList::Folder(folder_id) => {

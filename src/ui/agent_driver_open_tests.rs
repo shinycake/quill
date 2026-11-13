@@ -176,7 +176,7 @@ fn the_emoji_sticker_and_gif_panels_take_clicks_in_a_granted_chat(cx: &mut TestA
             panic!("{tab:?}: expected Done, got {reply:?}");
         };
         assert!(refusals.is_empty(), "{tab:?}: {refusals:?}");
-        let switched = vcx.update(|_, cx| app.read(cx).pickers.media_panel.tab);
+        let switched = vcx.update(|_, cx| app.read(cx).pickers.media_panel.tab());
         assert_ne!(switched, tab, "{tab:?}: the click switched the tab");
         app.update_in(vcx, |app, _, cx| {
             app.close_media_panel(cx);

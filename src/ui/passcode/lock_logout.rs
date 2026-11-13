@@ -49,9 +49,7 @@ impl QuillApp {
         }
         // A passcode check or system prompt still out would unlock the
         // wiped accounts again when it answered.
-        if self.account.passcode.job.is_running() {
-            self.account.passcode.job = super::PasscodeJob::Cancelled;
-        }
+        self.account.passcode.job.cancel();
         self.account.passcode.enabled = false;
         quill::wake::PASSCODE.poke();
         self.account.passcode.system_unlock = super::SystemUnlock::Off;

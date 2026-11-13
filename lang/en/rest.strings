@@ -128,6 +128,7 @@
 "qll_rest_could_not_check_the_gift" = "Couldn't check the gift code";
 "qll_rest_could_not_look_up_the" = "Couldn't look up the language";
 "qll_rest_could_not_use_the_gift" = "Couldn't use the gift code";
+"qll_rest_wait_for_the_current_gift" = "Wait for the current gift code";
 "qll_rest_gift_codes_need_a_signed" = "Gift codes need a signed-in account";
 "qll_rest_gifts_on_sale" = "Gifts on sale";
 "qll_rest_got_it" = "Got it";

@@ -75,7 +75,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `getForumTopicDefaultIcons` once; the answer fills
-    /// `Session::forum_topic_icons`.
+    /// `Session::forum_topic_icons`. `Ok(None)` when the list is here;
+    /// when an earlier asker's request is still out, its id (a second
+    /// editor waits on that one).
     pub fn load_forum_topic_icons(&mut self) -> Sent {
         let icons = &mut self.session.threads.forum_topic_icons;
         if !icons.can_ask() {

@@ -431,25 +431,20 @@ impl QuillApp {
         } else {
             format!("'{family}', {FONT_FALLBACK}")
         };
-        let Some(open) = self.peer_qr.open.as_mut() else {
+        if self.peer_qr.open.is_none() {
             return;
-        };
-        let box_id = open.state.id;
+        }
         let renderer = cx.svg_renderer();
         let link = picture.link.clone();
         let appearance = picture.appearance.clone();
         let rendering = self.run_off_ui_held(
             move || render_png(&renderer, &picture).and_then(finish),
             move |this, result, cx| {
-                // A box opened since then, even for the same link, is not
-                // the one that asked.
-                let open = this
-                    .peer_qr
-                    .open
-                    .as_mut()
-                    .filter(|open| open.state.id == box_id);
-                let same_box = open.is_some();
-                if let Some(open) = open {
+                // The render is held by the box that asked (`Export::Rendering`),
+                // so a box closed or replaced since dropped it: this answer
+                // is that box's.
+                let same_box = this.peer_qr.open.is_some();
+                if let Some(open) = this.peer_qr.open.as_mut() {
                     open.export = Export::Idle;
                 }
                 let current = same_box && this.qr_image_current(&link, &appearance, cx);

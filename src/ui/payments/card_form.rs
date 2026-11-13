@@ -35,9 +35,6 @@ pub(crate) struct CardInput {
     pub(crate) check: FieldCheck,
     /// A Backspace or Delete whose edit has not landed yet (`field_edit`).
     delete: DeleteEdit,
-    /// Number of the last Backspace or Delete press, so only the press that
-    /// took a snapshot can clear it.
-    presses: u64,
 }
 
 /// What the last check of a field found, tied to the text it judged: the
@@ -61,17 +58,26 @@ impl FieldCheck {
 }
 
 impl CardInput {
-    fn next_press(&mut self) -> u64 {
-        self.presses = self.presses.wrapping_add(1);
-        self.presses
-    }
-
-    /// The effect cycle of `press` is over: drop its snapshot, unless the
-    /// edit already took it or a newer press replaced it.
-    pub(crate) fn expire_delete(&mut self, press: u64) {
-        if matches!(self.delete, DeleteEdit::Snapshot { press: held, .. } if held == press) {
+    /// The effect cycle that took a snapshot is over: drop it, unless the
+    /// edit already took it or a newer press replaced it (then `cycle`
+    /// names a snapshot nobody holds any more).
+    pub(crate) fn expire_delete(&mut self, cycle: &std::rc::Weak<()>) {
+        if cycle.strong_count() > 0 {
             self.delete = DeleteEdit::None;
         }
+    }
+
+    /// Start a snapshot for a Backspace or Delete press; the handle ends
+    /// its effect cycle (`expire_delete`). A snapshot it replaces is gone,
+    /// so its own handle expires nothing.
+    fn hold_delete(&mut self, before: EditSnapshot) -> std::rc::Weak<()> {
+        let cycle = std::rc::Rc::new(());
+        let handle = std::rc::Rc::downgrade(&cycle);
+        self.delete = DeleteEdit::Snapshot {
+            before,
+            _cycle: cycle,
+        };
+        handle
     }
 
     /// The field is marked as an error: its text is the rejected text.
@@ -81,11 +87,16 @@ impl CardInput {
 }
 
 /// The text just before a Backspace or Delete, until the edit it belongs
-/// to has been read or the effect cycle it was taken in is over. The press
-/// number lets the end-of-cycle clear leave a newer press's snapshot alone.
+/// to has been read or the effect cycle it was taken in is over. The
+/// snapshot owns its cycle token: the end-of-cycle clear holds only a weak
+/// handle, so a newer press (or the edit taking the snapshot) leaves it
+/// with nothing to clear.
 pub(crate) enum DeleteEdit {
     None,
-    Snapshot { before: EditSnapshot, press: u64 },
+    Snapshot {
+        before: EditSnapshot,
+        _cycle: std::rc::Rc<()>,
+    },
 }
 
 impl DeleteEdit {
@@ -104,13 +115,28 @@ impl CardInput {
     pub(crate) fn has_delete_snapshot(&self) -> bool {
         matches!(self.delete, DeleteEdit::Snapshot { .. })
     }
+
+    /// The handle that ends the held snapshot's effect cycle.
+    pub(crate) fn delete_cycle(&self) -> Option<std::rc::Weak<()>> {
+        match &self.delete {
+            DeleteEdit::Snapshot { _cycle, .. } => Some(std::rc::Rc::downgrade(_cycle)),
+            DeleteEdit::None => None,
+        }
+    }
 }
 
 /// Editing, or waiting for the provider's token (Done is busy then and
 /// a second press does nothing, as `if (_stripe) return;` in tdesktop).
 pub(crate) enum CardPhase {
-    Editing,
-    Tokenizing { _task: Task<()> },
+    /// Editing the fields. `notice` is the provider's last refusal ("Your
+    /// card was declined."), shown until Done is pressed again or it is
+    /// dismissed. Error ids only, never card data.
+    Editing {
+        notice: Option<SharedString>,
+    },
+    Tokenizing {
+        _task: Task<()>,
+    },
 }
 
 pub(crate) struct CardForm {
@@ -128,10 +154,6 @@ pub(crate) struct CardForm {
     /// "Save Information for future use", when the form allows saving.
     pub(crate) save: Option<bool>,
     pub(crate) phase: CardPhase,
-    /// The provider's last refusal ("Your card was declined."), shown in
-    /// the form until Done is pressed again or it is closed. Error ids
-    /// only, never card data.
-    pub(crate) notice: Option<SharedString>,
 }
 
 impl CardForm {
@@ -162,6 +184,14 @@ impl CardForm {
     /// The country field is marked as an error.
     pub(crate) fn country_invalid(&self) -> bool {
         self.country_check.rejects(&self.country_iso)
+    }
+
+    /// The provider's last refusal, while the form is editing.
+    pub(crate) fn notice(&self) -> Option<&SharedString> {
+        match &self.phase {
+            CardPhase::Editing { notice } => notice.as_ref(),
+            CardPhase::Tokenizing { .. } => None,
+        }
     }
 
     pub(crate) fn is_tokenizing(&self) -> bool {
@@ -279,7 +309,6 @@ impl QuillApp {
                 state,
                 check: FieldCheck::Fine,
                 delete: DeleteEdit::None,
-                presses: 0,
             });
         }
         let card_form = CardForm {
@@ -291,8 +320,7 @@ impl QuillApp {
             country_focus: cx.focus_handle(),
             default_country,
             save: can_save.then_some(false),
-            phase: CardPhase::Editing,
-            notice: None,
+            phase: CardPhase::Editing { notice: None },
         };
         if let Some(dialog) = self.payments.dialog.as_mut() {
             dialog.page = PaymentPage::CardForm(Box::new(card_form));
@@ -427,20 +455,16 @@ impl QuillApp {
         // runs after that Change, so a press that changed nothing (at the
         // start or end of the text) leaves no snapshot for later typing,
         // even for a key already queued. The clear runs inside that second
-        // defer and only if the field still holds this press: a Change that
-        // took the snapshot, or a newer press, has replaced the number.
+        // defer and only if the field still holds this press (its cycle): a
+        // Change that took the snapshot, or a newer press, has replaced it.
         let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) else {
             return;
         };
-        let press = input.next_press();
-        input.delete = DeleteEdit::Snapshot {
-            before: snapshot,
-            press,
-        };
+        let cycle = input.hold_delete(snapshot);
         self.defer_screen_in(window, cx, move |this, window, cx| {
             this.defer_screen_in(window, cx, move |this, _, _| {
                 if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field)) {
-                    input.expire_delete(press);
+                    input.expire_delete(&cycle);
                 }
             });
         });
@@ -595,9 +619,6 @@ impl QuillApp {
         }
         let provider = form.provider.clone();
         let transport = self.card_transport();
-        if let Some(form) = self.card_form_mut() {
-            form.notice = None;
-        }
         let tokenizing = cx
             .background_executor()
             .spawn(async move { tokenize(&provider, &card, transport.as_ref()) });
@@ -634,7 +655,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(form) = self.card_form_mut() {
-            form.phase = CardPhase::Editing;
+            form.phase = CardPhase::Editing { notice: None };
         }
         let notice = match result {
             Ok(credentials) => {
@@ -660,14 +681,18 @@ impl QuillApp {
             }
         };
         if let Some(form) = self.card_form_mut() {
-            form.notice = Some(text.into());
+            form.phase = CardPhase::Editing {
+                notice: Some(text.into()),
+            };
         }
         cx.notify();
     }
 
     pub(in crate::ui) fn dismiss_card_notice(&mut self, cx: &mut Context<Self>) {
-        if let Some(form) = self.card_form_mut() {
-            form.notice = None;
+        if let Some(form) = self.card_form_mut()
+            && !form.is_tokenizing()
+        {
+            form.phase = CardPhase::Editing { notice: None };
         }
         cx.notify();
     }

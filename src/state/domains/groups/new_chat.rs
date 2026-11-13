@@ -120,7 +120,11 @@ impl Session {
     /// step at once: the create request is not held past its answer.
     pub fn settled_new_chat(&self, kind: NewChatKind, stage: &NewChatStage) -> NewChatStage {
         match stage {
-            NewChatStage::Creating { request, back } => {
+            NewChatStage::Creating {
+                request,
+                back,
+                title,
+            } => {
                 let outcome = self
                     .groups
                     .new_chats
@@ -140,6 +144,7 @@ impl Session {
                             back: *back,
                             failure,
                             reason,
+                            title: title.clone(),
                         }
                     }
                     None if self.requests.get(*request).is_some() => stage.clone(),

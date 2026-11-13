@@ -26,7 +26,7 @@ use quill::paid_messages::{
     PaidConfirm, SendGate, pays_bar_text, refund_label, remove_fee_text, stars_text,
 };
 use quill::state::Session;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 impl QuillApp {
@@ -473,12 +473,9 @@ impl QuillApp {
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(confirm.title()))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -549,12 +546,9 @@ impl QuillApp {
                     keys::MESSAGES_PRIVACY_REMOVE_FEE,
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

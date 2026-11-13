@@ -225,14 +225,18 @@ fn a_system_unlock_answered_after_its_window_closed_ends_the_wait(cx: &mut TestA
     let chat_window = open_chat_window(&app, main, cx);
     lock(&app, cx);
     cx.run_until_parked();
-    let (answer, receiver) = std::sync::mpsc::channel();
+    let (answer, receiver) = futures_channel::oneshot::channel();
     let _ = answer.send(false);
     cx.update_window(chat_window, |_, window, cx| {
         app.update(cx, |app, cx| {
             app.in_window_scope(Some(OTHER), cx, |app, cx| {
-                app.account.passcode.job = crate::ui::passcode::PasscodeJob::Running;
                 let master = quill::passcode::MasterKey::from_bytes([7; 32]);
-                app.spawn_system_unlock_wait(receiver, master, window, cx);
+                app.spawn_system_unlock_wait(
+                    crate::ui::system_unlock::Prompt::without_prompt(receiver),
+                    master,
+                    window,
+                    cx,
+                );
             });
         });
         window.remove_window();

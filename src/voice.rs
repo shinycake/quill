@@ -556,13 +556,14 @@ impl VoiceCapture {
         }
     }
 
-    /// Refresh the live bars from the levels heard so far.
-    pub fn sample_bar(&mut self) {
+    /// The bars of the levels heard so far, read when the bar draws.
+    pub fn live_bars(&self) -> Vec<u8> {
         if matches!(self.source, Source::Fixture { .. }) {
-            return;
+            return self.bars.clone();
         }
-        if let Ok(levels) = self.levels.lock() {
-            self.bars = collect_waveform(&levels, WAVEFORM_BAR_CAP);
+        match self.levels.lock() {
+            Ok(levels) => collect_waveform(&levels, WAVEFORM_BAR_CAP),
+            Err(_) => self.bars.clone(),
         }
     }
 

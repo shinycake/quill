@@ -283,6 +283,8 @@ impl QuillApp {
         }
         if woke {
             self.resume_event_log_poll(cx);
+            self.resume_global_ptt_permission(cx);
+            self.resume_qr_clock(cx);
         }
     }
 

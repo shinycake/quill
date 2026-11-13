@@ -191,3 +191,35 @@ fn a_repicked_removed_pack_is_not_restored_twice(cx: &mut TestAppContext) {
         assert_eq!(shown, 1);
     });
 }
+
+/// Quitting waits for the writes still out: both of two writes queued for a
+/// file are taken, and awaiting them runs both, in the order asked.
+#[gpui_kit::test]
+fn quitting_flushes_the_writes_still_out(cx: &mut TestAppContext) {
+    use crate::ui::language_state::LanguageFile;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let pending = app.update(vcx, |app, cx| {
+        for name in ["A", "B"] {
+            let written = written.clone();
+            app.language
+                .writes
+                .spawn(LanguageFile::Choice, cx, move || {
+                    quill::locks::lock_or_recover(&written).push(name);
+                });
+        }
+        app.language.writes.take_pending()
+    });
+    assert_eq!(pending.len(), 1, "one chain per file");
+    let done = app.update(vcx, |_, cx| {
+        cx.spawn(async move |_, _| {
+            for task in pending {
+                task.await;
+            }
+        })
+    });
+    vcx.run_until_parked();
+    drop(done);
+    assert_eq!(*quill::locks::lock_or_recover(&written), vec!["A", "B"]);
+}

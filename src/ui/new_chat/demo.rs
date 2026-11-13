@@ -181,6 +181,7 @@ impl QuillApp {
             dialog.stage = NewChatStage::Creating {
                 request: CREATE_REQUEST,
                 back: NewChatBack::Info,
+                title: String::new(),
             };
         }
         cx.notify();

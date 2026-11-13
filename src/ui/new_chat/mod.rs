@@ -22,7 +22,7 @@ use gpui_kit::*;
 use quill::auto_delete::TTL_CHOICES;
 use quill::group_info_edit::TITLE_MAX;
 use quill::group_type::{GroupTypeData, USERNAME_MAX, plan_group_type_save};
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
 use quill::new_chat::{
     NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep, NewChatView, Release,
@@ -32,28 +32,37 @@ use quill::new_chat::{
 /// The description shows three lines and grows to eight.
 const DESCRIPTION_ROWS: (usize, usize) = (3, 8);
 
-/// The name the last Confirm judged, so the name field's error is about that
-/// text: typing anything else ends it with no reset, whoever refused it.
+/// The dialog's own verdict on the name the last Confirm judged, so the name
+/// field's error is about that text: typing anything else ends it with no
+/// reset. TDLib's `NO_CHAT_TITLE` refusal is not kept here: the stage that
+/// asked holds the refused text (`NewChatStage::CreateRefused`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TitleCheck {
     /// Nothing judged yet.
     Fine,
-    /// Confirm found this name empty or too long.
-    Rejected(String),
-    /// This name went to TDLib; its `NO_CHAT_TITLE` refusal is about it.
-    Sent(String),
+    /// This name went through Confirm and the dialog's own check refused it
+    /// (empty or too long).
+    Judged(String),
 }
 
 impl TitleCheck {
-    /// The error shows while the field still holds the judged text and it
-    /// was refused by the dialog's own check or by TDLib.
-    pub(crate) fn shows_error(&self, server_rejected: bool, current: &str) -> bool {
-        match self {
+    /// The error shows while the field holds the text the dialog's own check
+    /// refused, or the text TDLib refused as no title (`server_refused`).
+    pub(crate) fn shows_error(&self, server_refused: Option<&str>, current: &str) -> bool {
+        let own = match self {
             Self::Fine => false,
-            Self::Rejected(text) => text == current,
-            Self::Sent(text) => server_rejected && text == current,
-        }
+            Self::Judged(text) => text == current && title_refused(text),
+        };
+        own || server_refused == Some(current)
     }
+}
+
+/// The dialog's own check of a name: empty or too long.
+fn title_refused(title: &str) -> bool {
+    matches!(
+        plan_new_chat(NewChatKind::Group, title, "", &[], None, 0),
+        Err(NewChatInvalid::EmptyTitle | NewChatInvalid::TitleTooLong)
+    )
 }
 
 pub(crate) struct NewChatDialog {
@@ -74,12 +83,30 @@ pub(crate) struct NewChatDialog {
     pub(crate) auto_delete: Option<i32>,
     /// The auto-delete step's picker over [`TTL_CHOICES`].
     auto_delete_picker: Entity<SelectState<Vec<SharedString>>>,
-    /// What the name field shows: the dialog's own check on Confirm, or
-    /// TDLib's `NO_CHAT_TITLE` (`NewChatView::failure`), one verdict.
+    /// The dialog's own check of the name on Confirm.
     title: TitleCheck,
     /// The type step of a supergroup or channel (tdesktop
     /// `SetupChannelBox`, which starts on Public).
     type_box: Option<GroupTypeBox>,
+}
+
+/// What a create's send says to the dialog: the request it waits on, or the
+/// note to show (a create of this kind still out, or the send's own error).
+fn created(
+    result: Result<Option<RequestId>, quill::connect::ConnectSendError>,
+) -> Result<RequestId, StatusNote> {
+    match result {
+        Ok(Some(request)) => Ok(request),
+        // A create of this kind is still out (the dialog's own was let go,
+        // TDLib cannot cancel it): say so rather than do nothing.
+        Ok(None) => Err(StatusNote::info(tr(
+            keys::Q_PEOPLE_CHAT_STILL_BEING_CREATED,
+        ))),
+        Err(err) => Err(StatusNote::error(user_error_for(
+            keys::Q_NEW_CHAT_FAILED,
+            &err,
+        ))),
+    }
 }
 
 impl QuillApp {
@@ -265,7 +292,7 @@ impl QuillApp {
 
     /// The dialog goes: a create still out does not open its chat over what
     /// the person does next, and an answered one is forgotten.
-    fn drop_new_chat_dialog(&mut self) {
+    pub(in crate::ui) fn drop_new_chat_dialog(&mut self) {
         if let Some(dialog) = self.admin.create_chat_dialog.take()
             && let Some(live) = self.live.as_mut()
         {
@@ -350,7 +377,7 @@ impl QuillApp {
         match plan_new_chat(kind, &title, &description, &[], None, 0) {
             Err(NewChatInvalid::EmptyTitle | NewChatInvalid::TitleTooLong) => {
                 if let Some(dialog) = self.new_chat_dialog_mut() {
-                    dialog.title = TitleCheck::Rejected(title);
+                    dialog.title = TitleCheck::Judged(title);
                     let input = dialog.title_input.clone();
                     input.update(cx, |input, cx| input.focus(window, cx));
                 }
@@ -395,19 +422,19 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        match live.driver.create_new_chat(&request, photo) {
-            Ok(Some(request)) => {
-                if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
-                    dialog.title = TitleCheck::Sent(title);
-                }
-                self.set_new_chat_stage(NewChatStage::Creating { request, back }, cx);
+        match created(live.driver.create_new_chat(&request, photo)) {
+            Ok(request) => {
+                self.set_new_chat_stage(
+                    NewChatStage::Creating {
+                        request,
+                        back,
+                        title,
+                    },
+                    cx,
+                );
             }
-            Ok(None) => {}
-            Err(err) => {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NEW_CHAT_FAILED,
-                    &err,
-                )));
+            Err(note) => {
+                self.set_note(note);
                 cx.notify();
             }
         }
@@ -625,6 +652,8 @@ crate::ui::shell::register_dialogs! {
 
 mod demo;
 
+#[cfg(test)]
+mod release_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod ui_tests;

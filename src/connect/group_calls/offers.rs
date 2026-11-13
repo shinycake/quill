@@ -12,8 +12,12 @@ use crate::state::{ConferenceInput, ConferenceOrigin};
 use crate::telegram::requests::create_group_call;
 
 pub(super) enum OfferSend {
-    /// `joinVideoChat` or `joinLiveStory`.
-    Join,
+    /// `joinVideoChat` or `joinLiveStory`. `muted`: it joins with the
+    /// microphone closed (push-to-talk), whatever the tracked flag says when
+    /// the payload lands.
+    Join {
+        muted: bool,
+    },
     Rejoin {
         conference: Option<ConferenceInput>,
         orphaned_presentation: bool,
@@ -86,7 +90,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // is another request's, which must stay.
             if matches!(
                 send,
-                OfferSend::Join | OfferSend::Rejoin { .. } | OfferSend::Screen
+                OfferSend::Join { .. } | OfferSend::Rejoin { .. } | OfferSend::Screen
             ) {
                 self.undo_offer(key.id(), extra, &send);
             }
@@ -118,7 +122,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let id = key.id();
         let calls = &self.session.calls;
         match send {
-            OfferSend::Join => {
+            OfferSend::Join { .. } => {
                 let story = calls
                     .story_stream
                     .as_ref()
@@ -174,9 +178,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let tracked_muted = tracked.is_some_and(|call| call.is_muted_self);
         let tracked_video = tracked.is_some_and(|call| call.my_video.is_enabled());
         (params.is_muted, params.is_my_video_enabled) = match send {
-            OfferSend::Join if is_story => (true, tracked_video),
-            OfferSend::Join
-            | OfferSend::Rejoin {
+            OfferSend::Join { .. } if is_story => (true, tracked_video),
+            OfferSend::Join { muted } => (tracked_muted || *muted, tracked_video),
+            OfferSend::Rejoin {
                 conference: None, ..
             } => (tracked_muted, tracked_video),
             OfferSend::Rejoin { .. } => (tracked_muted, false),
@@ -201,7 +205,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) {
         let id = key.id();
         let json = match &send {
-            OfferSend::Join
+            OfferSend::Join { .. }
             | OfferSend::Rejoin {
                 conference: None, ..
             } => self.group_join_request(extra, id, params),
@@ -258,7 +262,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
             OfferSend::Conference => self.forget_accepted_invite(),
-            OfferSend::Join | OfferSend::Screen => {}
+            OfferSend::Join { .. } => {
+                // The join went out as muted or not: the tracked mark follows
+                // what was sent, so a join that never left changes nothing.
+                if let Some(call) = self.session.calls.group_call_mut(id) {
+                    call.is_muted_self = params.is_muted;
+                }
+            }
+            OfferSend::Screen => {}
         }
     }
 
@@ -315,7 +326,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Puts back what starting the offer changed.
     fn undo_offer(&mut self, id: i32, extra: RequestId, send: &OfferSend) {
         match send {
-            OfferSend::Join => {
+            OfferSend::Join { .. } => {
                 if let Some(call) = self.session.calls.group_call_mut(id) {
                     call.transport.join_unsent(extra);
                 }

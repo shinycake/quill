@@ -98,6 +98,10 @@ impl QuillApp {
                         },
                         None => AddContactStage::NotJoined { name: first },
                     };
+                } else if request.is_none() {
+                    // The driver declined without an error (an import of
+                    // another box is still out): say so, never a dead button.
+                    self.set_note(StatusNote::error(tr(keys::Q_NOTES_FAILED_ADD_CONTACT)));
                 }
             }
             Err(err) => self.set_note(StatusNote::error(user_error_for(
@@ -108,10 +112,11 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Apply the import's answer to the box that sent it: close it when the
-    /// chat opens, or switch to the "not joined" text. An answer for a box
-    /// that was closed is dropped, never applied to the next one.
-    fn take_new_contact_outcome(&mut self, cx: &mut Context<Self>) {
+    /// Poll drain: apply the import's answer to the box that sent it: close
+    /// it when the chat opens, or switch to the "not joined" text. An answer
+    /// for a box that was closed is dropped, never applied to the next one.
+    /// `true` when an answer was taken.
+    pub(in crate::ui) fn drain_new_contact(&mut self, cx: &mut Context<Self>) -> bool {
         let sent = self
             .dialogs
             .add_contact_dialog
@@ -133,6 +138,7 @@ impl QuillApp {
             .as_mut()
             .filter(|_| outcome.is_some())
             .map(|dialog| std::mem::replace(&mut dialog.stage, AddContactStage::Form));
+        let taken = outcome.is_some();
         match outcome {
             None => {}
             Some(NewContactOutcome::Joined(_)) => {
@@ -155,6 +161,7 @@ impl QuillApp {
                 cx.notify();
             }
         }
+        taken
     }
 
     /// The New Contact box, hosted like the other kit dialogs.
@@ -169,7 +176,6 @@ impl QuillApp {
                 this.close_add_contact_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            this.take_new_contact_outcome(cx);
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::ADD_CONTACT_BUTTON)))

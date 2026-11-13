@@ -151,15 +151,37 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
         &mut driver,
         json!({"@type":"upgradedGift","@extra":quote.as_extra(),"name":"PlushPepe-123","title":"Plush Pepe","resale_parameters":{"@type":"giftResaleParameters","star_count":25,"gram_cent_count":0,"gram_only":false}}),
     );
+    let note = |driver: &ConnectDriver<_>| {
+        driver
+            .session
+            .payments
+            .marketplace_gift
+            .as_ref()
+            .and_then(|gift| gift.note())
+    };
     assert!(
         driver
             .buy_marketplace_gift(GiftPrice::Stars(24), "Hi", true)
             .is_err()
     );
+    // A refusal always says why in the purchase's one note.
+    assert_eq!(
+        note(&driver).as_deref(),
+        Some(crate::lang::tr(
+            crate::lang::keys::Q_OPS_PURCHASE_REFUSED_REVIEW_THE_QUOTE
+        ))
+    );
     assert!(
         driver
             .buy_marketplace_gift(GiftPrice::Stars(25), "Too long", true)
             .is_err()
+    );
+    assert_eq!(
+        note(&driver).as_deref(),
+        Some(crate::lang::tr(
+            crate::lang::keys::Q_MARKETPLACE_COMMENT_TOO_LONG
+        )),
+        "the comment's own reason, not a generic one"
     );
     let buy = driver
         .buy_marketplace_gift(GiftPrice::Stars(25), "🎁!", true)

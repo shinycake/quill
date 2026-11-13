@@ -725,6 +725,16 @@ impl RequestRegistry {
         self.pending.values().any(|p| p.purpose == purpose)
     }
 
+    /// The in-flight request for `purpose`, when one is out (for a caller
+    /// that joins a request an earlier asker sent, rather than sending a
+    /// second one).
+    pub fn id_for_purpose(&self, purpose: RequestPurpose) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| p.purpose == purpose)
+            .map(|p| p.id)
+    }
+
     /// Ids of in-flight requests for `chat_id` with any of `purposes`.
     pub fn ids_for_chat(&self, purposes: &[RequestPurpose], chat_id: ChatId) -> Vec<RequestId> {
         self.ids_for_chat_where(chat_id, |purpose| purposes.contains(&purpose))

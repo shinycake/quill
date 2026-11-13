@@ -33,9 +33,11 @@ pub(super) fn backdrop_radius() -> f64 {
     f64::from(GRADIENT_RADIUS_TO_CARD) * CARD_WIDTH
 }
 
-#[derive(Clone)]
 enum Slot {
-    Loading,
+    /// Being made off the UI thread; dropping the slot cancels the work.
+    Loading {
+        _job: Task<()>,
+    },
     Ready {
         image: Arc<RenderImage>,
         at: Instant,
@@ -47,7 +49,7 @@ impl Slot {
     fn ready(&self) -> Option<(Arc<RenderImage>, Instant)> {
         match self {
             Slot::Ready { image, at } => Some((image.clone(), *at)),
-            Slot::Loading | Slot::Failed => None,
+            Slot::Loading { .. } | Slot::Failed => None,
         }
     }
 }
@@ -201,8 +203,7 @@ impl QuillApp {
         if art.backdrops.iter().any(|(k, _)| *k == key) {
             return;
         }
-        art.backdrops.push((key, Slot::Loading));
-        self.run_off_ui_then(
+        let job = self.run_off_ui_held(
             move || render_image(backdrop_pixels(center, edge)),
             move |this, image, cx| {
                 let art = &mut this.peer_qr.art;
@@ -217,6 +218,10 @@ impl QuillApp {
             },
             cx,
         );
+        self.peer_qr
+            .art
+            .backdrops
+            .push((key, Slot::Loading { _job: job }));
     }
 
     fn ensure_qr_code(&mut self, link: &str, ink: Rgb, side: f64, cx: &mut Context<Self>) {
@@ -225,11 +230,11 @@ impl QuillApp {
         if art.codes.iter().any(|(k, _)| *k == key) {
             return;
         }
-        art.codes.push((key.clone(), Slot::Loading));
         let renderer = cx.svg_renderer();
         let link = link.to_string();
         let pixels = (side * CODE_SCALE).round().max(1.) as u32;
-        self.run_off_ui_then(
+        let wanted = key.clone();
+        let job = self.run_off_ui_held(
             move || {
                 let grid = QrGrid::encode(&link)?;
                 rasterize(
@@ -255,6 +260,10 @@ impl QuillApp {
             },
             cx,
         );
+        self.peer_qr
+            .art
+            .codes
+            .push((wanted, Slot::Loading { _job: job }));
     }
 
     fn ensure_qr_still(&mut self, emoji: &str, cx: &mut Context<Self>) {
@@ -263,14 +272,10 @@ impl QuillApp {
         {
             return;
         }
-        self.peer_qr
-            .art
-            .stills
-            .insert(emoji.to_string(), Slot::Loading);
         let renderer = cx.svg_renderer();
         let svg = emoji_svg(emoji);
         let key = emoji.to_string();
-        self.run_off_ui_then(
+        let job = self.run_off_ui_held(
             move || rasterize(&renderer, &svg, STILL_PIXELS, STILL_PIXELS),
             move |this, image, cx| {
                 if let Some(slot) = this.peer_qr.art.stills.get_mut(&key) {
@@ -286,6 +291,10 @@ impl QuillApp {
             },
             cx,
         );
+        self.peer_qr
+            .art
+            .stills
+            .insert(emoji.to_string(), Slot::Loading { _job: job });
     }
 
     /// The backdrop layers to draw, bottom first, each with its opacity:
@@ -331,7 +340,7 @@ impl QuillApp {
         match wanted.map(|(_, slot)| slot) {
             Some(Slot::Ready { image, .. }) => Some(image.clone()),
             Some(Slot::Failed) => None,
-            Some(Slot::Loading) | None => codes
+            Some(Slot::Loading { .. }) | None => codes
                 .iter()
                 .rev()
                 .find_map(|(_, slot)| slot.ready())

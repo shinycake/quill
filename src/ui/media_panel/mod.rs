@@ -128,7 +128,7 @@ pub(super) struct MediaPanel {
     panel_mode: PanelMode,
     /// The "Set Status for..." box, once a status asked for a custom time.
     pub until: Option<status_time_box::StatusUntil>,
-    pub tab: PanelTab,
+    tab: PanelTab,
     pub list: ListState,
     /// Rows that touched the viewport at the list's last layout, read
     /// before it lays out again (see [`on_screen_rows`]).
@@ -136,12 +136,33 @@ pub(super) struct MediaPanel {
     pub rows: Vec<PanelRow>,
     pub sections: Vec<PanelSection>,
     pub key: Option<PanelKey>,
-    pub active_section: usize,
+    active_section: usize,
     pub hovered: Option<FileId>,
     /// The sticker category chosen in the strip under the search field,
     /// by what it searches: a reload of the category list cannot make it
     /// name another one.
-    pub category: Option<quill::telegram::EmojiCategorySource>,
+    category: Option<quill::telegram::EmojiCategorySource>,
+}
+
+impl MediaPanel {
+    /// The one writer of what the panel lists: `tab` with `category` chosen,
+    /// from the first section and with its rows rebuilt. Every change of
+    /// tab, category or selector starts the view over through here, so a
+    /// writer cannot leave the rows or section of the one before.
+    pub(in crate::ui) fn show(
+        &mut self,
+        tab: PanelTab,
+        category: Option<quill::telegram::EmojiCategorySource>,
+    ) {
+        self.tab = tab;
+        self.category = category;
+        self.key = None;
+        self.active_section = 0;
+    }
+
+    pub(in crate::ui) fn tab(&self) -> PanelTab {
+        self.tab
+    }
 }
 
 impl Default for MediaPanel {
@@ -291,8 +312,7 @@ impl QuillApp {
     pub(super) fn open_media_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         self.cancel_recording_here(cx);
         self.set_media_panel_mode(PanelMode::Compose);
-        self.pickers.media_panel.category = None;
-        self.set_media_panel_tab(tab, cx);
+        self.set_media_panel_tab(tab, true, cx);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.open_media_panel();
         }
@@ -358,12 +378,15 @@ impl QuillApp {
         true
     }
 
-    fn set_media_panel_tab(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
-        if self.pickers.media_panel.tab != tab {
-            self.pickers.media_panel.tab = tab;
-            self.pickers.media_panel.category = None;
-            self.pickers.media_panel.key = None;
-            self.pickers.media_panel.active_section = 0;
+    /// Show `tab`. Another tab always starts over; `start_over` does so for
+    /// the tab already showing too (opening the panel: no chosen category,
+    /// the first section).
+    fn set_media_panel_tab(&mut self, tab: PanelTab, start_over: bool, cx: &mut Context<Self>) {
+        let changed = self.pickers.media_panel.tab != tab;
+        if changed || start_over {
+            self.pickers.media_panel.show(tab, None);
+        }
+        if changed {
             self.pickers.gif_tab.stop_typing();
             // GIFs download and play only while their tab shows.
             self.sync_gif_downloads();
@@ -427,8 +450,9 @@ impl QuillApp {
         let query = self.panel_query(cx);
         // Typing leaves the chosen category (tdesktop hides the strip
         // while the field has text).
-        if !query.is_empty() {
-            self.pickers.media_panel.category = None;
+        if !query.is_empty() && self.pickers.media_panel.category.is_some() {
+            let tab = self.pickers.media_panel.tab;
+            self.pickers.media_panel.show(tab, None);
         }
         let key = PanelKey {
             tab: self.pickers.media_panel.tab,

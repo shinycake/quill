@@ -72,6 +72,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.send_json_request(extra, &serde_json::json!({"@type":"getOption","@extra":extra.as_extra(),"name":"gift_text_length_max"}).to_string());
     }
 
+    /// A refused purchase says so in the purchase's note, the one error line
+    /// the box draws for it (the reasons that have their own line set it
+    /// first).
+    fn refuse_purchase(&mut self) -> ConnectSendError {
+        if let Some(gift) = self.session.payments.marketplace_gift.as_mut() {
+            gift.set_note(
+                crate::lang::tr(crate::lang::keys::Q_OPS_PURCHASE_REFUSED_REVIEW_THE_QUOTE)
+                    .to_string(),
+            );
+        }
+        ConnectSendError::InvalidRequest
+    }
+
     /// The supplied price must equal the server quote shown at confirmation.
     pub fn buy_marketplace_gift(
         &mut self,
@@ -80,7 +93,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         private: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() || !price.valid() {
-            return Err(ConnectSendError::InvalidRequest);
+            return Err(self.refuse_purchase());
         }
         let max = self.session.payments.gift_text_length_max;
         if !comment.is_empty() && max.is_none_or(|limit| comment.chars().count() > limit) {
@@ -111,7 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         if gift.price() != Some(price) || !quote.allows(price) {
-            return Err(ConnectSendError::InvalidRequest);
+            return Err(self.refuse_purchase());
         }
         let quote = quote.clone();
         let json_fields = (gift.requested_name.clone(), gift.recipient, gift.chat_id);

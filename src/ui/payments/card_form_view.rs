@@ -245,7 +245,7 @@ impl QuillApp {
                     .on_click(cx.listener(|this, &on, _, cx| this.toggle_card_save(on, cx))),
             );
         }
-        if let Some(notice) = &form.notice {
+        if let Some(notice) = form.notice() {
             // Inside the checkout, as tdesktop's panel toast: a window
             // toast would paint under the dialog.
             let alert = Alert::error("payment-card-notice-alert", notice.clone())

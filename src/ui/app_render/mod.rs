@@ -104,7 +104,12 @@ impl Render for QuillApp {
         let main_active = window.is_window_active() || super::frame_clock::assume_active();
         self.note_main_place(window, main_active);
         self.frame.main_active.set(main_active);
+        let was_active = self.frame.window_active.get();
         let active = self.follow_windows(cx);
+        if active && !was_active {
+            self.resume_global_ptt_permission(cx);
+            self.resume_qr_clock(cx);
+        }
         self.sync_video_avatar(active, window.scale_factor(), cx);
         self.sync_userpic_videos(active, window.scale_factor(), history_drawn);
         self.viewer_follow_window_fullscreen(window);

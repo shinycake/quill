@@ -6,6 +6,7 @@ use super::group_call_state::CallBox;
 use super::group_call_stream_layout::StreamJoinIntent;
 use super::*;
 use crate::ui::status_note::StatusNote;
+use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
@@ -73,31 +74,31 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Send the join for the tracked call. False when it could not be
-    /// sent (no call, a 1:1 call is on, the connection refused it).
-    pub(super) fn send_group_call_join(&mut self) -> bool {
+    /// Send the join for the tracked call, and the request that carries it.
+    /// `None` when it could not be sent (no call, a 1:1 call is on, the
+    /// connection refused it).
+    pub(super) fn send_group_call_join(&mut self) -> Option<super::group_call_state::JoinSent> {
         let id = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|c| c.id);
         let Some(id) = id else {
             self.set_note(StatusNote::silent(tr(keys::Q_AV_NO_VOICE_CHAT_TO_JOIN)));
-            return false;
+            return None;
         };
         // Push-to-talk joins with the microphone closed.
         let ptt_on = self
             .session()
             .is_some_and(|s| s.calls.prefs.push_to_talk.enabled);
-        if ptt_on {
-            if let Some(live) = self.live.as_mut() {
-                live.driver.session.set_group_call_self_muted(true);
-            } else if let Some(session) = self.demo_session.as_mut() {
-                session.set_group_call_self_muted(true);
-            }
-        }
         if let Some(live) = self.live.as_mut() {
-            let result = live.driver.join_video_chat(id);
-            let sent = result.is_ok();
+            // The join carries the mute: the tracked mark follows it once the
+            // join goes out, and a join that never leaves (refused, or its
+            // offer failing) leaves the call as it was.
+            let result = live.driver.join_video_chat_with(id, ptt_on);
+            let sent = result
+                .as_ref()
+                .ok()
+                .map(|request| super::group_call_state::JoinSent::Request(*request));
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_AV_JOINING_VOICE_CHAT)),
                 Err(err) => {
@@ -107,6 +108,9 @@ impl QuillApp {
             sent
         } else if let Some(session) = self.demo_session.as_mut() {
             // As the driver's join: it starts without the last error.
+            if ptt_on {
+                session.set_group_call_self_muted(true);
+            }
             if let Some(call) = session.calls.active_group_call.as_mut() {
                 call.transport.clear_error();
                 call.is_joined = true;
@@ -114,9 +118,9 @@ impl QuillApp {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_AV_SCREENSHOT_DEMO_VOICE_CHAT_NO,
             )));
-            true
+            Some(super::group_call_state::JoinSent::Demo)
         } else {
-            false
+            None
         }
     }
 
@@ -832,22 +836,60 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The composer's unsent text belongs to the call it was typed in: a
-    /// change of call empties it, so Send never posts it to the next call.
+    /// Make the tracked call's composer when its view has none. The view is
+    /// the call's (`sync_group_call_boxes` replaces it whole), so the unsent
+    /// text of one call is never sent to the next.
     pub(super) fn sync_group_call_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let id = self
-            .session()
-            .and_then(|session| session.calls.active_group_call.as_ref())
-            .map(|call| call.id);
-        if self.group_call_screen.composer_call == id {
+        let submit_on_enter = self.chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
+        let Some(view) = self.call_view_mut() else {
+            return;
+        };
+        if view.composer.is_some() {
             return;
         }
-        if self.group_call_screen.composer_call.is_some() {
-            self.group_call_screen.composer.update(cx, |input, cx| {
-                input.set_value("", window, cx);
+        let composer = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder(tr(keys::Q_AV_MESSAGE_THE_VOICE_CHAT))
+                .auto_grow(1, 3)
+                .submit_on_enter(submit_on_enter)
+        });
+        // The composer outlives the window it was made in (a reopened call
+        // window shows it again), so Enter finds the call window at hand.
+        cx.subscribe(&composer, |this, state, event: &InputEvent, cx| {
+            let InputEvent::PressEnter { secondary, shift } = event else {
+                return;
+            };
+            let (secondary, shift) = (*secondary, *shift);
+            let Some(handle) = this.group_call.window.handle() else {
+                return;
+            };
+            let state = state.clone();
+            let app = cx.weak_entity();
+            // screen-scope: the composer is the on-screen account's tracked call's;
+            // the closure sends only while it is still that call's composer.
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, cx| {
+                    let _ = app.update(cx, |this, cx| {
+                        if this.call_view().and_then(|view| view.composer.as_ref()) != Some(&state)
+                        {
+                            return;
+                        }
+                        let marked =
+                            state.update(cx, |input, cx| input.marked_text_range(window, cx));
+                        if quill::composer::should_send_on_enter(
+                            quill::composer::enter_event_from_kit(shift, secondary, marked),
+                            this.chat_prefs.send_key_mode,
+                        ) {
+                            this.send_group_call_message(window, cx);
+                        }
+                    });
+                });
             });
+        })
+        .detach();
+        if let Some(view) = self.call_view_mut() {
+            view.composer = Some(composer);
         }
-        self.group_call_screen.composer_call = id;
     }
 
     /// Phase C2h: send the in-call chat composer
@@ -855,8 +897,11 @@ impl QuillApp {
     /// `updateNewGroupCallMessage`. Clears on send — a send failure
     /// surfaces via `group_call_error`.
     pub(super) fn send_group_call_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(composer) = self.call_view().and_then(|view| view.composer.clone()) else {
+            return;
+        };
         let text = quill::composer::send_text_on_enter(
-            self.group_call_screen.composer.read(cx).value().to_string(),
+            composer.read(cx).value().to_string(),
             self.chat_prefs.send_key_mode,
         );
         if text.trim().is_empty() {
@@ -865,7 +910,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             match live.driver.send_group_call_message(text) {
                 Ok(_) => {
-                    self.group_call_screen.composer.update(cx, |input, cx| {
+                    composer.update(cx, |input, cx| {
                         input.set_value("", window, cx);
                     });
                 }

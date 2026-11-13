@@ -386,6 +386,57 @@ fn a_request_without_a_field_that_failed_keeps_the_box_open(cx: &mut TestAppCont
     });
 }
 
+/// A title request left out by Cancel fails after a later Save was sent:
+/// the later Save reads only the refusals of its own requests.
+#[gpui_kit::test]
+fn another_saves_late_refusal_does_not_fail_this_save(cx: &mut TestAppContext) {
+    use super::SaveStage;
+    use quill::state::{GroupInfoEditError, GroupInfoField, RequestPurpose};
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-group-edit-box");
+    let vcx = &mut vcx;
+    let chat = open_box(&app, vcx);
+    app.update(vcx, |app, _| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        let title = session.request(RequestPurpose::SetChatTitle, Some(chat));
+        let description = session.request(RequestPurpose::SetChatDescription, Some(chat));
+        if let Some(edit) = app.admin.group_edit_box.as_mut() {
+            edit.saving = SaveStage::Saving(vec![description]);
+        }
+        if let Some(session) = app.demo_session.as_mut() {
+            // The earlier title request fails late; the description is done.
+            session.requests.take(title);
+            session.requests.take(description);
+            session.groups.info_edit_errors.insert(
+                chat.0,
+                vec![GroupInfoEditError {
+                    request: title,
+                    field: GroupInfoField::Title,
+                    reason: "CHAT_TITLE_NOT_MODIFIED".into(),
+                }],
+            );
+        }
+        assert!(
+            app.group_edit_box().is_none(),
+            "this Save sent no title: it saved"
+        );
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .groups
+                .info_edit_errors
+                .entry(chat.0)
+                .or_default()
+                .push(GroupInfoEditError {
+                    request: description,
+                    field: GroupInfoField::Description,
+                    reason: "too long".into(),
+                });
+        }
+        assert!(app.group_edit_box().is_some(), "its own refusal fails it");
+    });
+}
+
 fn exit_request(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId) -> RequestId {
     use super::SaveStage;
     use quill::state::RequestPurpose;
@@ -414,10 +465,11 @@ fn a_leave_that_succeeds_closes_the_box_after_a_refused_title_save(cx: &mut Test
         if let Some(session) = app.demo_session.as_mut() {
             session.groups.info_edit_errors.insert(
                 chat.0,
-                GroupInfoEditError {
+                vec![GroupInfoEditError {
+                    request: quill::ids::RequestId(u64::MAX),
                     field: GroupInfoField::Title,
                     reason: "CHAT_TITLE_NOT_MODIFIED".into(),
-                },
+                }],
             );
         }
     });
@@ -465,6 +517,48 @@ fn a_refused_leave_stays_refused_after_the_registry_forgets_it(cx: &mut TestAppC
     );
     app.read_with(vcx, |app, _| {
         let edit = app.group_edit_box().expect("box");
+        assert!(matches!(
+            edit.state(app.session()),
+            EditBoxView::Failed { reason, .. } if reason == "CHAT_ADMIN_REQUIRED"
+        ));
+    });
+}
+
+#[gpui_kit::test]
+fn a_refused_toggle_save_stays_refused_after_the_registry_forgets_it(cx: &mut TestAppContext) {
+    use super::{EditBoxView, SaveStage};
+    use quill::state::RequestPurpose;
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-group-edit-box");
+    let vcx = &mut vcx;
+    let chat = open_box(&app, vcx);
+    app.update(vcx, |app, cx| {
+        let id = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::LeaveChat, Some(chat)))
+            .expect("session");
+        if let Some(edit) = app.admin.group_edit_box.as_mut() {
+            edit.saving = SaveStage::Saving(vec![id]);
+        }
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(id);
+            session
+                .requests
+                .record_failure(id, "CHAT_ADMIN_REQUIRED".into());
+        }
+        app.settle_group_edit_box(cx);
+        // 64 more refusals push this one out of the registry.
+        if let Some(session) = app.demo_session.as_mut() {
+            for _ in 0..80 {
+                let other = session.request(RequestPurpose::LeaveChat, None);
+                session.requests.take(other);
+                session.requests.record_failure(other, "X".into());
+            }
+            assert!(session.requests.failure(id).is_none(), "evicted");
+        }
+    });
+    app.read_with(vcx, |app, _| {
+        let edit = app.group_edit_box().expect("the box stays open");
         assert!(matches!(
             edit.state(app.session()),
             EditBoxView::Failed { reason, .. } if reason == "CHAT_ADMIN_REQUIRED"

@@ -90,7 +90,7 @@ fn an_empty_name_keeps_the_first_step(cx: &mut TestAppContext) {
     assert_eq!(step(&app, vcx), Some(NewChatStep::Info));
     assert_eq!(
         app.read_with(vcx, |app, _| app.new_chat_dialog().map(|d| d.title.clone())),
-        Some(super::TitleCheck::Rejected("  ".into()))
+        Some(super::TitleCheck::Judged("  ".into()))
     );
 }
 
@@ -147,6 +147,7 @@ fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext
             dialog.stage = NewChatStage::Creating {
                 request,
                 back: NewChatBack::Info,
+                title: String::new(),
             };
         }
         assert!(app.new_chat_view().is_some_and(|view| view.busy()));
@@ -156,6 +157,36 @@ fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext
     click(vcx, "new-chat-cancel");
     assert_eq!(step(&app, vcx), None);
     assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
+}
+
+/// The account switch's farewell lets the dialog go, a create still out
+/// included: nothing opens its chat over the account the person is on when
+/// they come back.
+#[gpui_kit::test]
+fn an_account_switch_drops_a_create_still_out(cx: &mut TestAppContext) {
+    use crate::ui::on_screen::Farewell;
+    use quill::new_chat::{NewChatBack, NewChatStage};
+    use quill::state::RequestPurpose;
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-new-channel");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::SetChatTitle, None))
+            .expect("demo session");
+        if let Some(dialog) = app.admin.create_chat_dialog.as_mut() {
+            dialog.stage = NewChatStage::Creating {
+                request,
+                back: NewChatBack::Info,
+                title: String::new(),
+            };
+        }
+    });
+    app.update_in(vcx, |app, window, cx| {
+        crate::ui::admin_state::AdminUi::farewell(app, window, cx);
+    });
+    assert_eq!(step(&app, vcx), None, "the dialog went with the account");
 }
 
 /// A plain group whose create was answered ends its dialog (and with it
@@ -179,6 +210,7 @@ fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
             dialog.stage = NewChatStage::Creating {
                 request,
                 back: NewChatBack::Info,
+                title: String::new(),
             };
         }
     });
@@ -191,4 +223,20 @@ fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.admin.create_chat_dialog.is_none()));
     assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
+}
+
+/// TDLib's refusal is about the text the stage holds: it shows again when
+/// that text is typed back, whatever the dialog's own last Confirm judged.
+#[test]
+fn a_refused_name_shows_its_error_when_typed_back() {
+    use super::TitleCheck;
+    // "A" was refused by the server; Confirm on an empty name followed.
+    let judged = TitleCheck::Judged(String::new());
+    assert!(judged.shows_error(Some("A"), "A"), "typed back: refused");
+    assert!(
+        !judged.shows_error(Some("A"), "AB"),
+        "another text: no error"
+    );
+    assert!(judged.shows_error(None, ""), "the dialog's own refusal");
+    assert!(!TitleCheck::Fine.shows_error(None, "A"));
 }

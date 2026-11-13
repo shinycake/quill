@@ -288,6 +288,7 @@ fn channel_auto_translate_is_parsed_gated_and_toggled() {
         .groups
         .info_edit_errors
         .get(&13)
+        .and_then(|errors| errors.first())
         .expect("the refusal is recorded for the Edit box");
     assert_eq!(error.field, crate::state::GroupInfoField::Settings);
 }
