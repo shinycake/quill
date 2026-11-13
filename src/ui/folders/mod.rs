@@ -33,8 +33,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::FolderEditor, |this, _, cx| {
-                this.folders.editor = None;
-                cx.notify();
+                this.close_folder_editor(cx);
             });
         app.update(cx, |this, cx| {
             let title = match this.folders.editor.as_ref().and_then(|d| d.folder_id) {
@@ -61,8 +60,7 @@ impl QuillApp {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.folders.editor = None;
-                            cx.notify();
+                            this.close_folder_editor(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderEditor, window, cx);
                         })),
                 )
@@ -846,7 +844,7 @@ impl QuillApp {
                 &err,
             )));
         }
-        self.folders.editor = None;
+        self.close_folder_editor(cx);
         self.folders.delete_confirm = None;
         self.open_settings(Some(quill::settings_catalog::Page::Folders), cx);
         cx.notify();
@@ -874,10 +872,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.folders.editor.is_some(),
         QuillApp::build_folder_editor_dialog,
     )
-    .close(|app, _, cx| {
-            app.folders.editor = None;
-            cx.notify();
-        }),
+    .close(|app, _, cx| app.close_folder_editor(cx)),
 
     FolderDelete => DialogSpec::new(
         1800,

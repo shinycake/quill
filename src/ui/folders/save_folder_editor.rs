@@ -122,11 +122,7 @@ impl QuillApp {
     /// The folder is saved: the editor closes and the toast says so.
     pub(in crate::ui) fn folder_editor_saved(&mut self, edited: bool) {
         self.folders.editor = None;
-        self.set_note(if edited {
-            StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_UPDATED))
-        } else {
-            StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_CREATED))
-        });
+        self.set_note(Self::folder_saved_note(edited));
     }
 
     pub(in crate::ui) fn open_folder_delete(&mut self, folder_id: i32, cx: &mut Context<Self>) {
