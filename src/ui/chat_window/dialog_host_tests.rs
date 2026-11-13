@@ -244,7 +244,6 @@ fn a_closed_windows_flow_asks_as_the_main_window(cx: &mut TestAppContext) {
             Some(None),
             "the closed window asks for nothing"
         );
-        assert_eq!(app.mini_app_window(), None, "the mini app forgot it");
         app.as_asked_by(Some(OTHER), |app| {
             app.set_note(StatusNote::info("Added to the attachment menu"))
         });

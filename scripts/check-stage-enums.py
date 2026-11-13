@@ -14,7 +14,8 @@ hold what ends it:
 
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
-  `JoinHandle`, `Subscription`, channel end or deadline (an `Instant`, or a
+  `JoinHandle`, `Subscription`, `PopupId` (the popup a stage opened, whose
+  answer is matched against it), channel end or deadline (an `Instant`, or a
   field named `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*`) in it, or in the
   types it names. A field typed by one of the enum's own generic
   parameters (`enum Lifecycle<R> { Running(R) }`) counts, unless the enum is
@@ -82,7 +83,7 @@ IN_FLIGHT = set(
     "Building Cutting Encoding Activating Rendering Listing Jumping Capturing".split()
 )
 CARRIER = re.compile(
-    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
+    r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime|PopupId)\b"
     # A deadline held as a number: `commit_at_ms`, `retry_at_secs`, `deadline`.
     r"|\b(?:deadline|(?:retry|commit)_at_\w+|\w+_until_\w+)\s*:"
 )

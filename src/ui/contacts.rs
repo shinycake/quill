@@ -40,9 +40,9 @@ impl QuillApp {
             let Some(dialog_state) = this.dialogs.import_contacts_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
-            let state = dialog_state.stage.state();
-            let can_import = state.can_import();
-            let body = Self::import_contacts_body(&state, cx).into_any_element();
+            let view = dialog_state.stage.view();
+            let can_import = view.can_import();
+            let body = Self::import_contacts_body(view, cx).into_any_element();
             let footer = div()
                 .flex()
                 .justify_end()

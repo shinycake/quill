@@ -85,10 +85,13 @@ fn the_group_avatar_opens_its_photos_newest_first(cx: &mut TestAppContext) {
     });
     assert!(reopened, "the photos landed: the gallery opens");
     let late = app.update(&mut vcx, |app, cx| {
+        // The gallery that just opened gives the photo to open (and close)
+        // again meanwhile.
+        let photo = app.viewer.state.items().to_vec();
         app.close_media_viewer(cx);
         app.wait_for_profile_gallery(owner);
-        // Another photo was opened (and closed) meanwhile.
-        app.viewer.open_gen += 1;
+        app.viewer.state = quill::media_viewer::MediaViewer::open(photo, 0);
+        app.viewer.state.close();
         app.pump_profile_gallery(cx);
         (
             app.viewer.state.is_open(),

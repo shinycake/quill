@@ -26,95 +26,107 @@ const HEIGHT: Pixels = px(20.);
 /// pill's less this, so the two are concentric.
 const INSET: Pixels = px(2.);
 
-/// The fill's share of the pill: settled, or easing to a new target.
-enum Fill {
-    Settled(f32),
-    Easing { from: f32, to: f32, since: Instant },
+/// The pill's motion, in one value with the control it follows: where the
+/// fill eases from and to (settled when they are equal), and for a ready
+/// update when the finished download started fading into the restart
+/// label. The control itself stays the source of truth; this only
+/// remembers the last target so a change can ease instead of jump.
+#[derive(Clone, Copy)]
+pub(super) enum UpdatePill {
+    /// Any other control: shown at once, the fill settled at its share.
+    Other { share: f32 },
+    /// The last control showed the download's percentage.
+    Percent { from: f32, to: f32, since: Instant },
+    /// The update is ready. `swap` is when the percentage began fading into
+    /// the restart label; `None` for an update that was ready without a
+    /// download to watch (shown at once).
+    Ready {
+        from: f32,
+        to: f32,
+        since: Instant,
+        swap: Option<Instant>,
+    },
 }
 
-impl Default for Fill {
+impl Default for UpdatePill {
     fn default() -> Self {
-        Self::Settled(0.0)
+        Self::Other { share: 0.0 }
     }
 }
 
-/// What the last control was, and for a ready update how its percentage
-/// fades into the restart label.
-#[derive(Default, Clone, Copy)]
-enum Phase {
-    #[default]
-    Other,
-    Downloading,
-    /// The update is ready. `Some(since)` when the swap began; `None` for
-    /// an update that was ready without a download to watch (shown at once).
-    Ready(Option<Instant>),
-}
-
-/// The pill's motion: where the fill eases from and to, and when the
-/// finished download started fading into the restart label. The control
-/// itself stays the source of truth; this only remembers the last target
-/// so a change can ease instead of jump.
-#[derive(Default)]
-pub(super) struct UpdatePill {
-    fill: Fill,
-    phase: Phase,
-}
-
 impl UpdatePill {
+    /// The fill's glide: from, to and when it began (`from == to`: settled).
+    fn glide(self, now: Instant) -> (f32, f32, Instant) {
+        match self {
+            Self::Other { share } => (share, share, now),
+            Self::Percent { from, to, since }
+            | Self::Ready {
+                from, to, since, ..
+            } => (from, to, since),
+        }
+    }
+
     /// Follows `control` at `now`: a new download share eases the fill
     /// there, and a download that finishes fades into the restart label.
     /// Any other change shows at once.
     pub(super) fn follow(&mut self, control: &UpdateControl, now: Instant) {
         let target = control.fraction().unwrap_or(1.0);
-        let downloading = matches!(control, UpdateControl::Downloading { .. });
+        let downloading = matches!(control, UpdateControl::Progress { .. });
         let ready = matches!(control, UpdateControl::Restart | UpdateControl::Restarting);
-        let was_downloading = matches!(self.phase, Phase::Downloading);
-        let eases = was_downloading && (downloading || ready);
-        let to = match self.fill {
-            Fill::Settled(to) | Fill::Easing { to, .. } => to,
-        };
-        if !eases {
-            self.fill = Fill::Settled(target);
+        let was_downloading = matches!(self, Self::Percent { .. });
+        let was_ready = matches!(self, Self::Ready { .. });
+        // A pill already `Ready` keeps its glide for the next `Restart`
+        // pass: resetting it would jump the fill to 100% after a frame.
+        let eases = (was_downloading && (downloading || ready)) || (was_ready && ready);
+        let (from, to, since) = self.glide(now);
+        let (from, to, since) = if !eases {
+            (target, target, now)
         } else if target != to {
-            self.fill = Fill::Easing {
-                from: self.fill(now),
-                to: target,
-                since: now,
-            };
-        }
-        self.phase = match (ready, self.phase) {
-            (true, Phase::Ready(started)) => Phase::Ready(started),
-            (true, _) => Phase::Ready(was_downloading.then_some(now)),
-            (false, _) if downloading => Phase::Downloading,
-            (false, _) => Phase::Other,
+            (self.fill(now), target, now)
+        } else {
+            (from, to, since)
+        };
+        *self = match (ready, *self) {
+            (true, Self::Ready { swap, .. }) => Self::Ready {
+                from,
+                to,
+                since,
+                swap,
+            },
+            (true, _) => Self::Ready {
+                from,
+                to,
+                since,
+                swap: was_downloading.then_some(now),
+            },
+            (false, _) if downloading => Self::Percent { from, to, since },
+            (false, _) => Self::Other { share: target },
         };
     }
 
     /// The share of the pill filled at `now`, 0 to 1.
     pub(super) fn fill(&self, now: Instant) -> f32 {
-        match self.fill {
-            Fill::Settled(to) => to,
-            Fill::Easing { from, to, since } => {
-                let t = progress(now.saturating_duration_since(since), FILL);
-                from + (to - from) * super::sidebar_reveal::ease_out_cubic(t)
-            }
-        }
+        let (from, to, since) = self.glide(now);
+        let t = progress(now.saturating_duration_since(since), FILL);
+        from + (to - from) * super::sidebar_reveal::ease_out_cubic(t)
     }
 
     /// How far the percentage has faded into the restart label, 0 to 1.
     pub(super) fn ready_mix(&self, now: Instant) -> f32 {
-        match self.phase {
-            Phase::Other | Phase::Downloading => 0.0,
-            Phase::Ready(None) => 1.0,
-            Phase::Ready(Some(since)) => progress(now.saturating_duration_since(since), SWAP),
+        match self {
+            Self::Other { .. } | Self::Percent { .. } => 0.0,
+            Self::Ready { swap: None, .. } => 1.0,
+            Self::Ready {
+                swap: Some(since), ..
+            } => progress(now.saturating_duration_since(*since), SWAP),
         }
     }
 
     pub(super) fn animating(&self, now: Instant) -> bool {
-        let filling = matches!(self.fill, Fill::Easing { since, .. }
-            if now.saturating_duration_since(since) < FILL);
-        let swapping = matches!(self.phase, Phase::Ready(Some(since))
-            if now.saturating_duration_since(since) < SWAP);
+        let (from, to, since) = self.glide(now);
+        let filling = from != to && now.saturating_duration_since(since) < FILL;
+        let swapping = matches!(self, Self::Ready { swap: Some(since), .. }
+            if now.saturating_duration_since(*since) < SWAP);
         filling || swapping
     }
 }
@@ -211,6 +223,12 @@ impl QuillApp {
             return None;
         }
         let now = Instant::now();
+        // The share downloaded lives in the download thread's counter and
+        // sends no signal, so a drawn pill asks for a few frames a second
+        // while the download runs: nothing ticks once it is not drawn.
+        if matches!(control, UpdateControl::Progress { .. }) {
+            self.request_app_tick(4, cx);
+        }
         let (fill, mix) = if cx.reduce_motion() {
             (
                 self.update_pill.fill(now.checked_add(FILL).unwrap_or(now)),
@@ -223,7 +241,7 @@ impl QuillApp {
             }
             (self.update_pill.fill(now), self.update_pill.ready_mix(now))
         };
-        let downloading = matches!(control, UpdateControl::Downloading { .. });
+        let downloading = matches!(control, UpdateControl::Progress { .. });
         let ready = matches!(control, UpdateControl::Restart | UpdateControl::Restarting);
         let label = Self::update_control_label(&control);
         // A release page this copy cannot install over itself still reads
@@ -360,7 +378,7 @@ mod tests {
     fn downloading(bytes: u64) -> UpdateControl {
         let progress = DownloadProgress::default();
         progress.add(bytes);
-        UpdateControl::Downloading {
+        UpdateControl::Progress {
             progress,
             total: 100,
         }
@@ -402,6 +420,15 @@ mod tests {
         assert_eq!(pill.fill(later), 1.0);
         assert_eq!(pill.ready_mix(later), 1.0);
         assert!(!pill.animating(later));
+        // A later follow mid-glide goes on gliding, not to the end at once.
+        let mut pill = UpdatePill::default();
+        pill.follow(&downloading(90), now);
+        pill.follow(&UpdateControl::Restart, now);
+        pill.follow(&UpdateControl::Restart, now + FILL / 2);
+        assert!(pill.fill(now + FILL / 2) < 1.0);
+        let mut pill = UpdatePill::default();
+        pill.follow(&downloading(90), now);
+        pill.follow(&UpdateControl::Restart, now);
         // Later frames keep the swap's start.
         pill.follow(&UpdateControl::Restart, later);
         assert_eq!(pill.ready_mix(later), 1.0);

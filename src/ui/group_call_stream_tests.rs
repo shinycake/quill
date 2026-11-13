@@ -447,7 +447,7 @@ fn the_first_frame_replaces_the_blurred_photo(cx: &mut TestAppContext) {
         .read_with(call, |app, _| app.group_call.stream.player.clone())
         .expect("the stream has a player");
     assert!(!player.has_live_frame());
-    assert_eq!(player.state(), crate::ui::video_player::PlayState::Opening);
+    assert_eq!(player.state(), crate::ui::video_player::PlayState::NotOpen);
     source.push(black_frame(1, 640, 360));
     frames(call);
     assert!(player.has_live_frame());

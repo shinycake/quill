@@ -348,7 +348,7 @@ fn a_password_holding_testmode_does_not_switch_environments(cx: &mut TestAppCont
 
 /// The self-update answer is process-wide; the tests that force it take
 /// this lock.
-static AUTO_UPDATE_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+use quill::update_install::FORCE_LOCK as AUTO_UPDATE_STATE;
 
 /// A release the check finds downloads at once on a copy that can replace
 /// itself; a copy a package manager owns only shows it.
@@ -401,6 +401,49 @@ fn a_release_the_check_finds_downloads_on_its_own(cx: &mut TestAppContext) {
             "the download finished (offline here) and its result is shown"
         );
     });
+    quill::update_install::force_self_update_available(None);
+}
+
+/// A failed download is checked again by the 4-hour timer, and the kept
+/// release, still the latest, downloads again from the check's answer.
+#[gpui_kit::test]
+fn the_timer_checks_again_after_a_failed_download(cx: &mut TestAppContext) {
+    use quill::updater::{RELEASES_URL, ReleaseAsset, ReleaseInfo, UpdateState};
+    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let (app, _shell, mut vcx) = new_app(cx);
+    let valid = ReleaseInfo {
+        version: "999.0.0".into(),
+        notes: String::new(),
+        url: format!("{RELEASES_URL}/tag/v999.0.0"),
+        asset: Some(ReleaseAsset {
+            url: format!(
+                "{RELEASES_URL}/download/v999.0.0/{}",
+                quill::updater::update_asset_name()
+            ),
+            size: 100,
+            sha256: "a".repeat(64),
+        }),
+    };
+    quill::update_install::force_self_update_available(Some(Ok(())));
+    quill::updater::force_latest_release(Some(valid.clone()));
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.preferences.update_state = UpdateState::DownloadFailed(valid.clone(), "stopped");
+        app.recheck_for_updates(cx);
+        assert!(
+            matches!(app.preferences.update_state, UpdateState::Checking(..)),
+            "the timer checks for a release again"
+        );
+    });
+    // The check finds the kept release: it downloads again (offline here,
+    // so it ends in the same failure, shown again).
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        assert!(matches!(
+            app.preferences.update_state,
+            UpdateState::DownloadFailed(..)
+        ));
+    });
+    quill::updater::force_latest_release(None);
     quill::update_install::force_self_update_available(None);
 }
 

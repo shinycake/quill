@@ -2,6 +2,7 @@
 //! build makes from the same state, around sender runs, day separators,
 //! the unread divider and albums.
 use super::*;
+use crate::ui::vanish::Deletion;
 
 const BASE_DATE: i64 = 1790632000;
 
@@ -538,7 +539,7 @@ fn a_crumbling_message_makes_the_rows_build_whole(cx: &mut TestAppContext) {
     quill::power_saving::set_force_all(false);
     quill::power_saving::set_os_reduce_motion(false);
     app.update(vcx, |app, _| {
-        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))], Deletion::Local);
     });
     let crumbling = app.read_with(vcx, |app, _| !app.history.vanishing.borrow().is_empty());
     assert!(crumbling, "begin_vanish skipped the dissolve");
@@ -610,7 +611,7 @@ fn a_dissolve_keeps_the_rows_key_until_it_moves_on(cx: &mut TestAppContext) {
     };
     assert_eq!(key(&app, vcx), None, "no dissolve, no key part");
     app.update(vcx, |app, _| {
-        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))], Deletion::Local);
         app.paint_vanishing_for_test();
     });
     check(
@@ -668,7 +669,7 @@ fn only_the_closing_gap_is_remeasured_by_list_index(cx: &mut TestAppContext) {
     quill::power_saving::set_force_all(false);
     quill::power_saving::set_os_reduce_motion(false);
     app.update(vcx, |app, _| {
-        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))], Deletion::Local);
         app.paint_vanishing_for_test();
     });
     check(
@@ -712,7 +713,7 @@ fn two_reads_in_one_round_see_the_same_phase(cx: &mut TestAppContext) {
     quill::power_saving::set_force_all(false);
     quill::power_saving::set_os_reduce_motion(false);
     app.update(vcx, |app, _| {
-        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))]);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(id(5))], Deletion::Local);
         app.paint_vanishing_for_test();
     });
     check(

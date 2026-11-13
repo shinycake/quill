@@ -89,21 +89,7 @@ impl VideoPip {
     /// The waiting indicator shows after tdesktop's delay; a redraw is
     /// armed for when it is up.
     fn waiting_shown(&mut self, waiting: bool, cx: &mut Context<Self>) -> bool {
-        use super::super::WaitingCheck;
-        match self
-            .waiting
-            .observe(waiting, cx.background_executor().now())
-        {
-            WaitingCheck::Settled { shown } => shown,
-            WaitingCheck::Pending(wait) => {
-                let timer = cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(wait).await;
-                    let _ = this.update(cx, |_, cx| cx.notify());
-                });
-                self.waiting.arm(timer);
-                false
-            }
-        }
+        self.waiting.shown_in(waiting, cx)
     }
 
     pub(super) fn icon_button(
@@ -219,7 +205,7 @@ impl Render for VideoPip {
             cx,
         );
         let waiting = self.waiting_shown(
-            gap || matches!(transport.state, PlayState::Opening | PlayState::Buffering),
+            gap || matches!(transport.state, PlayState::NotOpen | PlayState::Buffering),
             cx,
         );
         let close_active = self.active("close", OverState::Close, window, cx);

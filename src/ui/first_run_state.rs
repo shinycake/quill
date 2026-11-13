@@ -91,7 +91,7 @@ impl IntroLook {
 /// The transport of a clip that has not shown a picture yet.
 fn opening() -> Transport {
     Transport {
-        state: PlayState::Opening,
+        state: PlayState::NotOpen,
         position: 0.,
         duration: None,
         buffered: Vec::new(),
@@ -247,7 +247,7 @@ impl FirstRun {
             Self::Writing { .. } => true,
             Self::Playing { player, .. } => matches!(
                 player.transport().state,
-                PlayState::Opening | PlayState::Ready
+                PlayState::NotOpen | PlayState::Ready
             ),
             Self::Highlights { since } => elapsed_since(*since, now) < CARD_IN,
             Self::Notice | Self::Done => false,
@@ -285,7 +285,7 @@ fn sunk(outro: Outro, now: Instant) -> f32 {
 /// How far the clip has risen out of black.
 fn rising(transport: &Transport) -> f32 {
     match transport.state {
-        PlayState::Opening | PlayState::Ready => 0.,
+        PlayState::NotOpen | PlayState::Ready => 0.,
         _ => (transport.position / FADE_IN.as_secs_f64()).clamp(0., 1.) as f32,
     }
 }
@@ -307,7 +307,7 @@ pub(super) fn outro_start(
     };
     match transport.state {
         PlayState::Failed => already(1.),
-        PlayState::Opening | PlayState::Ready => {
+        PlayState::NotOpen | PlayState::Ready => {
             (elapsed_since(opened_at, now) >= OPEN_TIMEOUT).then_some(())?;
             already(1.)
         }
@@ -345,7 +345,7 @@ mod tests {
     fn the_clip_rises_from_black_while_it_plays() {
         let now = Instant::now();
         let look = |state, position| intro_look(&transport(state, position), None, now);
-        let opening = look(PlayState::Opening, 0.);
+        let opening = look(PlayState::NotOpen, 0.);
         assert!(opening.skippable && opening.veil == 1. && opening.curtain == 1.);
         let rising = look(PlayState::Playing, 0.45);
         assert!(rising.veil > 0.4 && rising.veil < 0.6, "{rising:?}");
@@ -383,7 +383,7 @@ mod tests {
         let failed = outro_start(&transport(PlayState::Failed, 0.), opened, opened);
         let look = intro_look(&transport(PlayState::Failed, 0.), failed, opened);
         assert_eq!((look.curtain, look.card), (0., 1.));
-        let opening = transport(PlayState::Opening, 0.);
+        let opening = transport(PlayState::NotOpen, 0.);
         assert_eq!(
             outro_start(&opening, opened, opened + Duration::from_secs(1)),
             None

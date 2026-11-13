@@ -156,9 +156,27 @@ pub(super) enum Drag {
     Quality,
 }
 
+/// The release a drag ends with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Release {
+    Strip,
+    Stage,
+    Quality,
+}
+
 impl Drag {
     pub(super) fn strip_held(&self) -> bool {
         matches!(self, Self::Strip { .. })
+    }
+
+    /// The release that ends this drag, for a mouse-up that never came.
+    pub(super) fn release(&self) -> Option<Release> {
+        match self {
+            Self::Idle => None,
+            Self::Strip { .. } => Some(Release::Strip),
+            Self::Pressed(_) | Self::Dragging(_) => Some(Release::Stage),
+            Self::Quality => Some(Release::Quality),
+        }
     }
 }
 
@@ -262,6 +280,12 @@ impl EditorMotion {
         if matches!(self.drag, Drag::Quality) {
             self.drag = Drag::Idle;
         }
+    }
+
+    /// Every drag ends where it is: the editor goes on to encode, or the
+    /// release never reached it (the window lost the pointer or focus).
+    pub(super) fn end_drag(&mut self) {
+        self.drag = Drag::Idle;
     }
 
     /// The held part of the strip is let go; any other drag stays.
@@ -456,6 +480,41 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The pointer moved over the strip's window. With the button down the
+    /// held part follows; with it up, a mouse-up that never came (let go
+    /// outside the window) ends the held part here.
+    fn video_timeline_moved(&mut self, pressed: bool, x: f32, cx: &mut Context<Self>) {
+        if pressed {
+            self.video_timeline_drag(x, cx);
+        } else {
+            self.release_lost_video_drag(cx);
+        }
+    }
+
+    /// A mouse-up that never came (let go outside the window, or in
+    /// another one; also the window's blur): whatever drag is held ends the
+    /// way its own release does (the strip resumes playback, the picture's
+    /// press ends its crop grid or toggles the pause, the quality line
+    /// lets go).
+    pub(in crate::ui) fn release_lost_video_drag(&mut self, cx: &mut Context<Self>) {
+        let release = self
+            .composer_ui
+            .send_box
+            .video_editor
+            .as_ref()
+            .and_then(|editor| editor.motion.drag.release());
+        match release {
+            Some(Release::Strip) => self.video_timeline_release(cx),
+            Some(Release::Stage) => self.video_stage_release(cx),
+            Some(Release::Quality) => {
+                if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
+                    editor.motion.release_quality();
+                }
+            }
+            None => {}
+        }
+    }
+
     /// The strip is let go: playback resumes from where the drag left it,
     /// and a moved head sends the picture into the bubble.
     fn video_timeline_release(&mut self, cx: &mut Context<Self>) {
@@ -576,12 +635,13 @@ impl QuillApp {
                 });
                 let move_app = app.clone();
                 window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
-                    if phase == DispatchPhase::Bubble
-                        && event.pressed_button == Some(MouseButton::Left)
-                    {
-                        let x = f32::from(event.position.x - origin);
-                        let _ = move_app.update(cx, |this, cx| this.video_timeline_drag(x, cx));
+                    if phase != DispatchPhase::Bubble {
+                        return;
                     }
+                    let pressed = event.pressed_button == Some(MouseButton::Left);
+                    let x = f32::from(event.position.x - origin);
+                    let _ =
+                        move_app.update(cx, |this, cx| this.video_timeline_moved(pressed, x, cx));
                 });
                 let up_app = app.clone();
                 window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
@@ -935,4 +995,52 @@ fn paint_labels(
             let _ = duration.paint(origin, line_height, TextAlign::Left, None, window, cx);
         },
     );
+}
+
+#[cfg(test)]
+mod release_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::prelude::v1::test;
+
+    /// Every kind of held drag has the release that ends it; an idle
+    /// editor has none.
+    #[test]
+    fn every_held_drag_has_a_release() {
+        let press = StagePress {
+            at: Point::default(),
+            grab: None,
+            start: quill::video_timeline::CropArea::FULL,
+        };
+        assert_eq!(Drag::Idle.release(), None);
+        assert_eq!(Drag::Quality.release(), Some(Release::Quality));
+        assert_eq!(Drag::Pressed(press).release(), Some(Release::Stage));
+        assert_eq!(Drag::Dragging(press).release(), Some(Release::Stage));
+        let strip = Drag::Strip {
+            grab: Grab::Head,
+            shift: 0.0,
+            seek: Seek::default(),
+        };
+        assert_eq!(strip.release(), Some(Release::Strip));
+    }
+
+    /// A drag that lost its mouse-up ends with `end_drag`, so the loop and
+    /// the cover bubble it kept held go on.
+    #[test]
+    fn ending_a_drag_lets_the_strip_go() {
+        let mut motion = EditorMotion {
+            drag: Drag::Strip {
+                grab: Grab::Head,
+                shift: 0.0,
+                seek: Seek::default(),
+            },
+            ..EditorMotion::default()
+        };
+        assert!(motion.drag.strip_held());
+        motion.end_drag();
+        assert!(!motion.drag.strip_held());
+        assert!(matches!(motion.drag, Drag::Idle));
+    }
 }

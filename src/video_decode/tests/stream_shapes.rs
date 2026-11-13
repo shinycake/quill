@@ -222,6 +222,7 @@ impl Rig {
                 ..State::default()
             }),
             wake: Condvar::new(),
+            progress: Condvar::new(),
         });
         let decoder = Decoder::start(demuxer, &shared, want_audio);
         let mut player = Player {

@@ -126,6 +126,34 @@ fn a_gone_story_opened_from_a_card_or_the_tray_drops_the_open_quietly(cx: &mut T
     }
 }
 
+#[gpui_kit::test]
+fn an_open_whose_request_was_dropped_ends_with_the_failure_note(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-channels");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.open_story_viewer(ChatId(POSTER), 96, StoryOpenScope::Single, cx)
+    });
+    frames(vcx);
+    let ask = app.read_with(vcx, |app, _| app.stories.viewer.ask());
+    let Some(super::story_open::StoryAsk::Out(request)) = ask else {
+        panic!("the open waits on its getStory: {ask:?}");
+    };
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(request);
+        }
+        cx.notify();
+    });
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.stories.viewer.waiting(), None, "the open is dropped");
+        assert_eq!(
+            app.connection.note().text(),
+            tr(keys::Q_MEDIA_STORY_LOAD_FAILED)
+        );
+    });
+}
+
 /// Maya's stories in the `ready-story-viewer` demo.
 const MAYA: i64 = 52;
 

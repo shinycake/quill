@@ -30,8 +30,13 @@ pub(super) enum Poll {
     Off,
     /// A poll is due at this time (on screen) or when it comes back.
     Due(Instant),
-    /// The poll with this request is with TDLib; only its answer ends it.
-    Asking(quill::ids::RequestId),
+    /// The poll with this request is with TDLib; only its answer ends it,
+    /// or the request leaving flight with none (dropped by the stale sweep
+    /// or a reconnect), which a look after `asked` finds.
+    Asking {
+        request: quill::ids::RequestId,
+        asked: Instant,
+    },
 }
 
 /// One window's card of a widget: the width it gives it (CSS px) and the

@@ -58,6 +58,19 @@ pub struct Control<'a> {
     pub on_keepalive: &'a mut dyn FnMut(u8),
 }
 
+/// Where one `transact` stands: waiting for the key, or CTAPHID_CANCEL went
+/// out and the key gets a short grace to answer it.
+enum Phase {
+    /// Until the control's deadline, unless it is cancelled first.
+    Waiting {
+        deadline: Instant,
+    },
+    Cancelling {
+        reason: HidError,
+        until: Instant,
+    },
+}
+
 impl Control<'_> {
     fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::SeqCst)
@@ -113,7 +126,7 @@ pub(crate) enum Assembly {
     #[default]
     Idle,
     /// An initialization packet came; continuation packets fill `data`.
-    Reading {
+    Partial {
         cmd: u8,
         total: usize,
         data: Vec<u8>,
@@ -141,7 +154,7 @@ impl Assembly {
                 return Err(HidError::Protocol("short init packet"));
             };
             let total = usize::from(u16::from_be_bytes(*len));
-            *self = Self::Reading {
+            *self = Self::Partial {
                 cmd: kind & 0x7F,
                 total,
                 data: data
@@ -151,7 +164,7 @@ impl Assembly {
                 next_seq: 0,
             };
         } else {
-            let Self::Reading {
+            let Self::Partial {
                 total,
                 data,
                 next_seq,
@@ -167,7 +180,7 @@ impl Assembly {
             let want = total.saturating_sub(data.len());
             data.extend_from_slice(body.get(..want.min(body.len())).unwrap_or_default());
         }
-        if let Self::Reading {
+        if let Self::Partial {
             cmd, total, data, ..
         } = self
             && data.len() >= *total
@@ -245,13 +258,14 @@ impl Channel {
     ) -> Result<Vec<u8>, HidError> {
         self.send(cmd, payload)?;
         let mut assembly = Assembly::default();
-        // Set once CTAPHID_CANCEL went out: the reason and its grace end.
-        let mut cancelling: Option<(HidError, Instant)> = None;
+        let mut phase = Phase::Waiting {
+            deadline: control.deadline,
+        };
         loop {
-            if cancelling.is_none() {
+            if let Phase::Waiting { deadline } = phase {
                 let reason = if control.cancelled() {
                     Some(HidError::Cancelled)
-                } else if Instant::now() >= control.deadline {
+                } else if Instant::now() >= deadline {
                     Some(HidError::Timeout)
                 } else {
                     None
@@ -261,10 +275,13 @@ impl Channel {
                     // KEEPALIVE_CANCEL; wait briefly so the channel is
                     // clean, then give up either way.
                     let _ = self.send(CMD_CANCEL, &[]);
-                    cancelling = Some((reason, Instant::now() + CANCEL_GRACE));
+                    phase = Phase::Cancelling {
+                        reason,
+                        until: Instant::now() + CANCEL_GRACE,
+                    };
                 }
             }
-            if let Some((reason, until)) = &cancelling
+            if let Phase::Cancelling { reason, until } = &phase
                 && Instant::now() >= *until
             {
                 return Err(reason.clone());
@@ -277,18 +294,18 @@ impl Channel {
             };
             match answer {
                 CMD_KEEPALIVE => {
-                    if cancelling.is_none() {
+                    if matches!(phase, Phase::Waiting { .. }) {
                         (control.on_keepalive)(data.first().copied().unwrap_or_default());
                     }
                 }
                 CMD_ERROR => {
-                    if let Some((reason, _)) = cancelling {
+                    if let Phase::Cancelling { reason, .. } = phase {
                         return Err(reason);
                     }
                     return Err(HidError::Device(data.first().copied().unwrap_or_default()));
                 }
                 answer if answer == cmd => {
-                    if let Some((reason, _)) = cancelling {
+                    if let Phase::Cancelling { reason, .. } = phase {
                         return Err(reason);
                     }
                     return Ok(data);

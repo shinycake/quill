@@ -48,13 +48,7 @@ fn edit_avatar(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, info: VideoS
                 window,
                 cx,
             );
-            let serial = app
-                .composer_ui
-                .send_box
-                .video_editor
-                .as_ref()
-                .map_or(0, |editor| editor.serial());
-            app.video_editor_probed(serial, Some(info), None, window, cx);
+            app.video_editor_probed(Some(info), None, window, cx);
         });
     });
     frames(vcx);
@@ -146,14 +140,14 @@ fn a_failed_avatar_encode_returns_the_editor_with_its_line(cx: &mut TestAppConte
             .video_editor
             .as_mut()
             .map(|editor| {
-                let serial = editor.encode_serial();
-                if let Some(serial) = serial {
-                    editor.start_encode(serial, VideoSource::default(), gpui_kit::Task::ready(()));
+                let ready = editor.can_encode();
+                if ready {
+                    editor.start_encode(VideoSource::default(), gpui_kit::Task::ready(()));
                 }
-                serial
+                ready
             });
         assert!(
-            started.flatten().is_some()
+            started == Some(true)
                 && app
                     .composer_ui
                     .send_box
@@ -193,9 +187,9 @@ fn closing_the_editor_stops_the_encode_it_waits_for(cx: &mut TestAppContext) {
         app.update(vcx, |app, cx| {
             let job = cx.spawn(async move |_, _| flag.set(true));
             if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut()
-                && let Some(serial) = editor.encode_serial()
+                && editor.can_encode()
             {
-                editor.start_encode(serial, clip, job);
+                editor.start_encode(clip, job);
             }
             if close {
                 app.close_video_editor(cx);
@@ -226,4 +220,34 @@ fn a_pick_lands_only_while_the_sources_still_wait_for_it() {
     sources.begin_pick(gpui_kit::Task::ready(()));
     sources.close();
     assert!(!sources.end_pick());
+}
+
+#[gpui_kit::test]
+fn opening_an_editor_over_another_deletes_the_first_ones_cover_file(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let clip = VideoSource {
+        duration_ms: 5_000,
+        width: 1280,
+        height: 720,
+        has_audio: true,
+        ..VideoSource::default()
+    };
+    edit_avatar(&app, vcx, clip);
+    let cover = quill::scratch::unique_dir("quill-cover-test").join("cover.png");
+    std::fs::write(&cover, b"png").expect("write the cover");
+    app.update(vcx, |app, _| {
+        if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut() {
+            editor.cover = Some(crate::ui::video_editor::CoverFrame {
+                at_ms: 0,
+                path: cover.clone(),
+                still: None,
+            });
+        }
+    });
+    edit_avatar(&app, vcx, clip);
+    assert!(
+        !cover.exists(),
+        "the replaced editor's cover frame is deleted"
+    );
 }

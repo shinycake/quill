@@ -22,7 +22,6 @@ src/ui/sticker_player/display.rs DISPLAYS | keyed by window scope
 src/ui/emoji_effect.rs ANCHORS,ACTIVE | keyed by chat and message; a chat shows in one window
 src/ui/emoji_effect.rs NEXT_HEAD | an id counter
 src/ui/communities/requests.rs NEXT | an id counter: undo ids are unique across windows
-src/ui/vanish.rs PAINTED | keyed by chat and message; a chat shows in one window
 src/ui/premium_sticker_effect.rs NOTES | keyed by chat and message under one account (`keep_shown` clears it when the account changes); a chat shows in one window
 src/ui/message_effect_badge.rs BADGES,REPLAYS | keyed by chat and message; a chat shows in one window
 src/ui/message_effect_badge.rs APP | a weak handle to the one app
@@ -69,7 +68,6 @@ src/ui/touch_bar/mac/mod.rs HOST,INBOX,SYNC_SCHEDULER,BAR_SCREEN,APPLIED,BINDING
 src/ui/video_player/mod.rs NEXT | an id counter
 src/ui/video_player/decoder_load.rs LOADS,REFRESHES | counters
 src/ui/video_player/controls/pip/open.rs LATEST,WRITING | the one Picture-in-Picture
-src/ui/video_editor.rs OPENED | a counter
 src/ui/presence.rs LAST_INPUT_MS | the app's last input, any window
 src/ui/tray_settings.rs WINDOW_SKIPS_TASKBAR | an app setting
 src/ui/window_control.rs CONNECTION | the X connection
@@ -91,3 +89,4 @@ src/ui/profile_photo_sources/camera.rs SHOTS | a counter that only has to give e
 src/ui/notifications/linux_dbus.rs NOTIFIER | the process's one D-Bus session connection, not a window's
 src/ui/media_viewer/screen_cover.rs X11_LAST | one cached X11 work-area answer; the entry carries its WindowId and bounds, so another window's read misses and asks the server
 src/ui/notifications/linux_dbus.rs PROBE | the process's one notification-daemon capability probe, asked on demand; not a window's
+src/ui/vanish/painted.rs PAINTED | keyed by chat and message; a chat shows in one window

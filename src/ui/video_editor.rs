@@ -257,7 +257,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let serial = next_editor_serial();
+        self.release_video_editor();
         let worker = cx.background_spawn({
             let source = source.clone();
             async move { probe_source(&source) }
@@ -265,13 +265,13 @@ impl QuillApp {
         let probe = self.spawn_scoped_in(window, cx, async move |this, cx| {
             let info = worker.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.video_editor_probed(serial, info, initial, window, cx);
+                this.video_editor_probed(info, initial, window, cx);
             });
         });
         self.composer_ui.send_box.video_editor = Some(VideoEditorDialog {
             target,
             source,
-            stage: EditorStage::Reading { serial, probe },
+            stage: EditorStage::Reading { probe },
             cover: None,
             still_cut: StillCut::Idle,
             motion: EditorMotion::default(),
@@ -282,7 +282,6 @@ impl QuillApp {
 
     pub(super) fn video_editor_probed(
         &mut self,
-        serial: u64,
         info: Option<VideoSource>,
         initial: Option<VideoEdits>,
         window: &mut Window,
@@ -293,7 +292,7 @@ impl QuillApp {
             .send_box
             .video_editor
             .as_ref()
-            .is_none_or(|editor| !editor.is_reading(serial))
+            .is_none_or(|editor| !editor.is_reading())
         {
             return;
         }
@@ -432,12 +431,19 @@ impl QuillApp {
     }
 
     pub(super) fn close_video_editor(&mut self, cx: &mut Context<Self>) {
+        self.release_video_editor();
+        cx.notify();
+    }
+
+    /// Take the open editor away and delete its cover frame's file. Every
+    /// way an editor ends (closing, or another one replacing it) goes
+    /// through here.
+    fn release_video_editor(&mut self) {
         if let Some(editor) = self.composer_ui.send_box.video_editor.take()
             && let Some(cover) = editor.cover
         {
             let _ = std::fs::remove_file(cover.path);
         }
-        cx.notify();
     }
 
     /// The open editor is making a sticker for a set.
@@ -483,9 +489,9 @@ impl QuillApp {
             self.close_video_editor(cx);
             return true;
         }
-        let Some(serial) = editor.encode_serial() else {
+        if !editor.can_encode() {
             return false;
-        };
+        }
         let encode_source = source.clone();
         // Owned from the worker on: an encode whose editor went before the
         // answer removes its file with the answer.
@@ -500,7 +506,7 @@ impl QuillApp {
                     .send_box
                     .video_editor
                     .as_ref()
-                    .is_some_and(|editor| editor.is_encoding(serial));
+                    .is_some_and(|editor| editor.is_encoding());
                 match result {
                     Ok(output) if current => {
                         this.apply_video_edit(output.keep(), source, edits, info, cx);
@@ -518,7 +524,7 @@ impl QuillApp {
             });
         });
         if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-            editor.start_encode(serial, info, job);
+            editor.start_encode(info, job);
         }
         cx.notify();
         false
@@ -653,15 +659,6 @@ impl QuillApp {
             .on_ok(on_ok)
             .on_close(on_close)
     }
-}
-
-/// A serial base no earlier editor used, so a probe, still or strip frame
-/// still running for a closed editor never matches a newly opened one.
-/// Each editor counts up from its base for its own requests.
-pub(super) fn next_editor_serial() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static OPENED: AtomicU64 = AtomicU64::new(0);
-    (OPENED.fetch_add(1, Ordering::Relaxed) + 1) << 32
 }
 
 /// tdesktop `Mp4FileName`: an encoded copy is an mp4 file.

@@ -44,7 +44,7 @@ impl Canvas {
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum ToldStage {
     #[default]
-    Loading,
+    Untold,
     Started,
     Stopped,
 }
@@ -228,7 +228,7 @@ fn events(json: &str, told: &mut Told) -> Vec<RuntimeEvent> {
                 out.push(RuntimeEvent::Height(height));
             }
             if event.get("rendered").and_then(Value::as_bool) == Some(true)
-                && told.stage == ToldStage::Loading
+                && told.stage == ToldStage::Untold
             {
                 told.stage = ToldStage::Started;
                 out.push(RuntimeEvent::Started);

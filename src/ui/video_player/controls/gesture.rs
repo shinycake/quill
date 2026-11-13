@@ -3,7 +3,7 @@
 //! with it and nothing clears the timer by hand. (The Space hold is
 //! `quill::media_viewer::BoostState`, which holds its timer the same way.)
 
-use gpui_kit::Task;
+use gpui_kit::{Context, Task};
 use quill::media_viewer::waiting_wait;
 use std::time::{Duration, Instant};
 
@@ -15,71 +15,67 @@ pub(crate) enum WaitingGate {
     /// Not waiting.
     #[default]
     Idle,
-    /// Waiting since `since`, the delay not up; `timer` redraws when it is
-    /// (`None` until [`WaitingGate::arm`]).
-    Delayed {
-        since: Instant,
-        timer: Option<Task<()>>,
-    },
+    /// Waiting since `since`, the delay not up; `timer` redraws when it is.
+    Delayed { since: Instant, _timer: Task<()> },
     /// Waiting past the delay: the spinner shows.
     Shown,
 }
 
-/// What [`WaitingGate::observe`] decided.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WaitingCheck {
-    /// Not waiting, or the delay is up and the spinner shows.
-    Settled { shown: bool },
-    /// Waiting, not long enough yet: redraw after this long.
-    Pending(Duration),
-}
-
 impl WaitingGate {
-    /// Feed whether the clip waits now. A pending delay that already has
-    /// its timer reports `Settled { shown: false }`.
-    pub(crate) fn observe(&mut self, waiting: bool, now: Instant) -> WaitingCheck {
+    /// [`Self::observe`] for a view: the timer redraws `cx`'s view when the
+    /// delay is up.
+    pub(crate) fn shown_in<V: 'static>(&mut self, waiting: bool, cx: &mut Context<V>) -> bool {
+        let now = cx.background_executor().now();
+        self.observe(waiting, now, |wait| {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update(cx, |_, cx| cx.notify());
+            })
+        })
+    }
+
+    /// Feed whether the clip waits now; `true` while the spinner shows. A
+    /// stall that begins asks `arm` for the timer that redraws when the
+    /// delay is up (given the time left) and holds it, built whole with the
+    /// stage; one that ends takes it away.
+    pub(crate) fn observe(
+        &mut self,
+        waiting: bool,
+        now: Instant,
+        arm: impl FnOnce(Duration) -> Task<()>,
+    ) -> bool {
         if !waiting {
             *self = Self::Idle;
-            return WaitingCheck::Settled { shown: false };
+            return false;
         }
         let since = match self {
             Self::Delayed { since, .. } => *since,
             Self::Idle => now,
-            Self::Shown => return WaitingCheck::Settled { shown: true },
+            Self::Shown => return true,
         };
         match waiting_wait(since, now) {
             None => {
                 *self = Self::Shown;
-                WaitingCheck::Settled { shown: true }
+                true
             }
             Some(wait) => {
-                match self {
-                    Self::Delayed { timer: Some(_), .. } => {
-                        return WaitingCheck::Settled { shown: false };
-                    }
-                    Self::Delayed { .. } => {}
-                    Self::Idle | Self::Shown => {
-                        *self = Self::Delayed { since, timer: None };
-                    }
+                if !matches!(self, Self::Delayed { .. }) {
+                    *self = Self::Delayed {
+                        since,
+                        _timer: arm(wait),
+                    };
                 }
-                WaitingCheck::Pending(wait)
+                false
             }
-        }
-    }
-
-    /// Keep the timer that redraws once the delay is up (dropped if the
-    /// wait already ended).
-    pub(crate) fn arm(&mut self, armed: Task<()>) {
-        if let Self::Delayed { timer, .. } = self {
-            *timer = Some(armed);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{WaitingCheck, WaitingGate};
+    use super::WaitingGate;
     use gpui_kit::Task;
+    use std::cell::Cell;
     use std::time::{Duration, Instant};
 
     fn ms(base: Instant, n: u64) -> Instant {
@@ -87,31 +83,26 @@ mod tests {
     }
 
     #[test]
-    fn a_wait_that_ends_takes_its_timer_and_a_shown_spinner_needs_none() {
+    fn a_stall_arms_one_timer_and_a_wait_that_ends_takes_it() {
         let t0 = Instant::now();
+        let armed = Cell::new(Vec::new());
+        let arm = |wait| {
+            let mut all = armed.take();
+            all.push(wait);
+            armed.set(all);
+            Task::ready(())
+        };
         let mut gate = WaitingGate::default();
-        gate.arm(Task::ready(()));
-        assert!(matches!(gate, WaitingGate::Idle), "nothing waits for it");
-        assert_eq!(
-            gate.observe(true, ms(t0, 0)),
-            WaitingCheck::Pending(Duration::from_millis(500))
-        );
-        gate.arm(Task::ready(()));
-        assert_eq!(
-            gate.observe(true, ms(t0, 100)),
-            WaitingCheck::Settled { shown: false },
-            "the timer is already set"
-        );
-        assert_eq!(
-            gate.observe(false, ms(t0, 200)),
-            WaitingCheck::Settled { shown: false }
-        );
+        assert!(!gate.observe(false, ms(t0, 0), arm));
         assert!(matches!(gate, WaitingGate::Idle));
-        gate.observe(true, ms(t0, 300));
-        assert_eq!(
-            gate.observe(true, ms(t0, 900)),
-            WaitingCheck::Settled { shown: true }
-        );
+        assert!(!gate.observe(true, ms(t0, 0), arm));
+        assert!(!gate.observe(true, ms(t0, 100), arm), "the timer is set");
+        assert_eq!(armed.take(), vec![Duration::from_millis(500)]);
+        assert!(!gate.observe(false, ms(t0, 200), arm));
+        assert!(matches!(gate, WaitingGate::Idle));
+        gate.observe(true, ms(t0, 300), arm);
+        assert!(gate.observe(true, ms(t0, 900), arm));
         assert!(matches!(gate, WaitingGate::Shown));
+        assert_eq!(armed.take(), vec![Duration::from_millis(500)]);
     }
 }

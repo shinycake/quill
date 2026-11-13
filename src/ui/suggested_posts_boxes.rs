@@ -21,7 +21,7 @@ use quill::suggested_posts::{
     SuggestedPrice, currency_tabs, field_text, price_about_member, price_section_title,
     price_submit_label, shortfall,
 };
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 impl QuillApp {
@@ -492,16 +492,13 @@ impl QuillApp {
             };
             let title = price_box.mode.price_title();
             let body = this.suggest_price_body(&price_box, cx);
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))
@@ -571,16 +568,13 @@ impl QuillApp {
                         ),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(mode.time_title()))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

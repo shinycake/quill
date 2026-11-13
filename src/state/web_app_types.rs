@@ -14,6 +14,9 @@ pub struct WebAppPending {
     pub bot_user_id: i64,
     pub chat_id: Option<i64>,
     pub source: LaunchSource,
+    /// The chat window the launch was pressed in (`None`: the main
+    /// window); the app opens its boxes and notes there.
+    pub window: Option<crate::ids::ChatId>,
 }
 
 /// The answer to an open call.
@@ -23,6 +26,8 @@ pub enum WebAppOpenResult {
         bot_user_id: i64,
         chat_id: Option<i64>,
         source: LaunchSource,
+        /// The window the launch was pressed in (`WebAppPending::window`).
+        window: Option<crate::ids::ChatId>,
         /// `webAppInfo.launch_id`; 0 for `getWebAppUrl` and link apps.
         launch_id: i64,
         url: String,
@@ -340,6 +345,7 @@ mod forget_tests {
             bot_user_id: 5,
             chat_id: None,
             source: LaunchSource::MenuButton,
+            window: None,
         }
     }
 
@@ -357,6 +363,7 @@ mod forget_tests {
             bot_user_id: 5,
             chat_id: None,
             source: LaunchSource::MenuButton,
+            window: None,
             launch_id: 77,
             url: "https://example.com".into(),
         });

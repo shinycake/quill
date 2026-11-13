@@ -30,10 +30,10 @@ use quill::lang::{keys, tr};
 /// What shows over the picture.
 pub(crate) enum PictureState {
     /// The clip waits for data (shown only past the delay).
-    Waiting,
+    Spinner,
     /// The clip is downloading: `progress` 0–1 when known; the click
     /// cancels.
-    Downloading {
+    Progress {
         progress: Option<f32>,
         on_cancel: Handler,
     },
@@ -82,7 +82,7 @@ impl PictureState {
     pub(crate) fn live(overlay: LiveOverlay, parts: LiveOverlayParts) -> Option<Self> {
         Some(match overlay {
             LiveOverlay::None => return None,
-            LiveOverlay::Opening { spinner } => PictureState::LiveOpening {
+            LiveOverlay::Placeholder { spinner } => PictureState::LiveOpening {
                 placeholder: parts.placeholder,
                 spinner,
             },
@@ -335,14 +335,14 @@ impl RenderOnce for PictureOverlay {
             Err(state) => state,
         };
         let content: AnyElement = match state {
-            PictureState::Waiting => div()
+            PictureState::Spinner => div()
                 .id(("viewer-waiting", row_id))
                 .test_support()
                 .role(Role::ProgressIndicator)
                 .aria_label(tr(keys::Q_AV_LOADING_VIDEO))
                 .child(Spinner::new().with_size(SPINNER).color(white))
                 .into_any_element(),
-            PictureState::Downloading {
+            PictureState::Progress {
                 progress,
                 on_cancel,
             } => {

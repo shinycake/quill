@@ -8944,7 +8944,7 @@ Review round and file-complete pass (round 2):
 | 12-D013, 12-D014, 02-002 | A tray read (`Read::Reading { job, _tasks: Held }`) owns its worker and give-up tasks: leaving the stage (answer, give-up, forget, supersede) drops them. Sound, media, photo-size and thumbnail reads use it, as `spawn_app` tasks (the reads are the app's). |
 | price box | `PriceDialog::too_high` is `PriceVerdict { Typing, TooHigh { text } }`: the line shows only while the field holds the refused text, so editing clears it. |
 | 13-037 | `StoryComposer::id` (never 0, new per opening); the file dialog's answer applies only to the composer that asked (`take_story_media_asked_by`). |
-| 14-002 | The timer's `recheck_for_updates` leaves `DownloadFailed` and `InstallFailed` for the button. |
+| 14-002 | The timer's `recheck_for_updates` leaves `InstallFailed` for the button. It no longer leaves `DownloadFailed` for it: superseded by the r4-12 round 3 and round 4 tables (the timer checks again from `DownloadFailed`). |
 | 14-004 | `UpdateState::Checking(Job)`, `Downloading(.., Job)` and `Installing(.., Job)` own their tasks (`updater::Job`): replacing the stage cancels the check, the download wait and its redraw timer. The 4-hour loop is the app's own timer and ends with the app. |
 | 14-005 | A community ban waits as a `PendingBan` that holds its `RequestId` (from `fetch_community_member_chats`, or the one already in flight for the same member); a newer ask for the member is followed, and any wait whose ask answered settles (one still out no longer holds up another). A wait ends with the box it was pressed from (`drop_bans_over`, from the dialog close and the shell's replacement of the box), and, as before, when another box is open at the answer. Nothing is banned for a forgotten press. |
 | 14-004 | `take_draft_clear` no longer falls back to any clear of the chat. A pending `DraftClear` holds its send's messages (`Asked(RequestId)` from the send, `Made(MessageId)` once the answer to that request names the temporary message: `SendAnswered` in `MessagesState::sent_answers`). The ack (`SendAck { chat_id, slot, old_message_id }`) finds its clear by `old_message_id`, so a reply from a supergroup's main composer, acked under the replied-to message's topic, still clears the draft of the slot it was typed in (the clear returns that slot). With no message match only the clear of the very slot the ack names is taken, never a neighbour's. Tests: `a_reply_from_the_main_composer_is_acked_under_another_topic`, `a_send_answer_names_the_temporary_message_of_its_request`. |
@@ -10823,3 +10823,113 @@ superseded by this.
 | 12-003, `apply_ton_wallet_ok` | An `updateTonWalletState` pushed while `own` is `Loading { request: Some(r) }` answers that load (`own.answered(Some(r), state)`); otherwise `Fetch::replace_data` keeps the stage. The `ok` of `loadTonWalletState` only fails a load still waiting, so a state an earlier load left no longer settles it and the fetch is asked again. Tests `the_update_then_the_ok_settles_the_load` and `an_ok_with_no_update_for_this_load_fails_it_despite_an_earlier_state`. |
 | g-073 row, round-3 paragraph | Written as the code is: no `PaneView` / `StartupOutcome`, the `StartupStep::Waiting` allow line stays, `WorkerTicket` and `Opening` are gone, and a failed date lookup is `JumpLookup::Failed` in the asking window. |
 | `Hotspot-change` trailer of 4fbce02bf | History is not rewritten; the integrator squashes r4-06 with a message that has no such trailer. |
+### Sweep fixes (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| 23-008 | `StoryOpen::Waiting` holds `StoryAsk`: `Out(RequestId)` (the `getStory` the press is waiting on, found with `request_for_story_in_flight` after the send; the demo records the ask it would have sent) or `NoneOut` (nothing went out). `resolve_pending_story_open` ends the wait with the failure note when that request left flight with no story and no error recorded (a dropped request), and when none went out. Test `an_open_whose_request_was_dropped_ends_with_the_failure_note`. |
+| 23-001 | `ToastQueue` keeps `Footer::{Plain(note), Toasted(note)}` instead of a copy of the note reset by `advance`. `note()` reads a toasted note only while its toast is on screen or waiting (`holds`), so the note ends with its toast; `drop_toasts` turns it into a plain note (the footer keeps it without a session). |
+| 23-004, 23-005 | `EditorStage::Reading` and `Encoding` carry no `serial`: the stage holds the task that would answer, so a replaced stage cannot be answered (`is_reading()`, `is_encoding()`, `can_encode()`); `next_editor_serial` and its static are gone. Opening an editor over another goes through `release_video_editor`, which deletes the old cover file (test `opening_an_editor_over_another_deletes_the_first_ones_cover_file`). The avatar encode names its file by time. |
+| 23-006, g-431..g-433 | The release recheck is one timer task held in `preferences.update_recheck` (each fire arms the next; replacing or dropping ends it). The download's 250 ms redraw loop is gone: the title-bar pill asks for 4 frames a second on the frame clock while it draws a download, so nothing ticks once it is not drawn. `UpdateControl::Downloading` is `Progress` (a derived view of `UpdateState::Downloading`, which owns the task). |
+| 23-007 | `MediaViewer` carries `ViewerOpen`, minted by every `MediaViewer::open*` and kept by `close`; `ViewerUi::open_gen` and its six hand bumps are gone. `PendingGallery` holds the `ViewerOpen` it was asked over. Test `every_open_is_a_new_one_and_a_closed_viewer_remembers_the_last`. |
+| 23-009, 24-009, g-439..g-446 | `Cell`/`try_borrow_mut` in place of `RefCell` borrows: the dialog bodies (`Rc<Cell<Option<_>>>` and `take()`), `text_reveal::CURRENT`, `window_frame::APPLIED`. |
+| 23-010 | A `StripFrame::Failed` slot paints its nearest cut neighbour (the one before, else the one after), so one bad timestamp leaves no hole (tests in `frames.rs`). |
+| 24-001, 24-003, 24-004 | Popups have a `PopupId`; `show_popup` returns it, `popups` is keyed by it, and `AccessStage::Asking`, `WriteAccess::Asking`, `PhoneFlow::Asking` and `SetStage::Confirming` hold the id of the popup they opened. An answer from any other popup leaves the stage (test `an_access_answer_from_another_popup_leaves_the_stage`). `check-stage-enums.py` counts `PopupId` as what ends such a stage. |
+| 24-002 | `SetStage::Resolving { request: Option }` is `Deferred` (the shared lookup was busy; asked again each tick until the timeout) and `Resolving { request }`. |
+| 24-005 | `LaunchFlow::take_lost`: a wait whose request left flight with no answer ends with the "couldn't start" note, so the mini-app poll stops waiting (test `a_wait_whose_request_left_flight_is_given_up`). |
+| 24-006 | `MiniApps::generation` is gone; the poll task is held in `MiniApps::poll` and ends itself. |
+| 24-007 | `Poll::Asking { request, asked }`: `schedule_widget_polls` makes a poll whose request left flight `Due` after a period, and looks again when a period has passed without an answer (test `a_poll_whose_request_was_dropped_is_due_again`). |
+| 24-011 | `VoiceCapture::drop` removes the file of a capture nobody ended (after the encoder ends, off the UI thread); a fixture's and a handed-on file are kept (tests in `voice.rs`). |
+| 24-008 | Not a leak: `Answers::take_for` drops every answer it is not asked for, and the preview's drain runs on every poll, so a link arriving after Cancel is dropped at once (test `a_share_link_arriving_after_cancel_is_dropped`). |
+| 23-002 | Skipped (plausible): the dropped order is held only until the model shows it (`Echo::Caught` ends it), and the driver's optimistic reorder puts the dropped order into the model before the send returns, so a later server refusal rolls back a hold that is already over. Only a refusal before any sync saw the dropped order would hold it, and `reorder_refused` covers the synchronous refusals. No Touch Bar on Linux to drive it. |
+| 23-003 | Skipped: tdesktop seeks the viewer's video while the slider moves (`playbackControlsSeekProgress`), as the comment at `Command::ViewerSeek` says. |
+| 23-011 | Fixed in fix round 2 (below). Skipped before: the retry on reopen is the documented choice (a pass that retried would hammer a connection that is down); a backoff retry needs a clock the pump does not have, and tdesktop's source was not at hand to copy its rule. |
+| g-403..g-430, g-434..g-438 | Names that said work was in flight on values that hold none: `Decoding::Active`, `Stage::Claimed`, `LookStage::Coming`, `Phase::Intact`/`Percent`/`NoPicture`, `PlayState::NotOpen`, `PictureState::{Spinner, Progress}`, `LiveOverlay::Placeholder`, `WaitingCheck::ShowAfter`, `Echo::OldOrder`, `PickerFill::Held`, `Unavailable::Undecided`, `Kind::HelperHolds`, `ToldStage::Untold`, `SendResult`, `ExtractionStage::{NoChild, Spawned}`, `VcardImport::Picked`, `Assembly::Partial`, `Cancellation::Active`. The open poll of `VideoPlayer` is gone: `Player::on_open` runs a wake from the decode thread when the file opens, and a capture's still waits on a condvar (`wait_open`, `wait_frame`). The caBLE scan waits on a stop signal instead of a 200 ms flag check. `run_poll_loop`'s gap is `throttle`. |
+
+Tests: `story_viewer::open_tests`, `profile_photo_sources::tests`,
+`video_editor_timeline::frames`, `web_app_ui::{emoji_status_tests,
+launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
+`media_viewer`, `video_decode::tests`.
+
+#### Fix round 2 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| toast footer | `Footer::Kept(note)`: `drop_toasts` (before a session exists) keeps a toast-kind note for the footer line, and `advance` (called only with a session) turns it into the blank default, so a failed sign-in's error no longer swallows the progress notes after sign-in. |
+| AVPlayer open | `avplayer_open::OpenWatch`: a key-value observer on `AVPlayerItem.status` signals `Backend::on_open`, so the open wake exists on macOS too. `awaits_picture` lost its `NotOpen` branch; a backend that signals gets no vsync frames while it opens (`await_open` clears the wait, the wake asks for the first picture). |
+| 23-011 | A reconnect (`updateConnectionState` to Ready) gives every failed translation its attempts back (`Session::translations_back_online`), and the pump's scan keeps unsettled messages, failures that ran out of attempts included, so a chat that stays open asks again. |
+| recheck timer | `recheck_for_updates` starts a check only from Idle, UpToDate, NoRelease or Failed: it never turns a known update (Available, Staged, Downloading, Installing, Installed) into `Checking`. Superseded by the round 3 and 5 tables: `DownloadFailed` is in the timer's start set too, and its check keeps the kept release. |
+| updates.rs doc | `RECHECK_EVERY` has its own doc again. |
+| self-update probe | `finish_previous_update` answers `AVAILABILITY` when `current_exe` fails and when the cleanup thread cannot start. `wait_with_timeout` is `child_timeout::wait_within` plus the kill. |
+| widgets drain | `schedule_widget_polls` does not call a poll dropped while its answer waits in `bots.widget_answers` (held back while locked). |
+| story doc | `StoryAsk::NoneOut` says what gives it. |
+| vanish | `GhostStage::Waiting { deletion: Deletion, requested }`: `Deletion::Sent(RequestId)` is ended by the answer (a refused delete drops the ghost: `settle_ghosts`, run by `poll_drains`), `Local` is the demo's. A ghost turns to dust only when the session knows the deletion (`message_deleted`), in every merge case. `LATEST` and the painted rows of a closed window are dropped (`painted::window_closed`). Split `vanish/painted.rs`. |
+| popups | The popups map holds only `App`, `Clipboard` and `CloseConfirm`; a stage that opened its popup holds the `PopupId` and `popup_owner` asks each stage whether it owns an answer's id. `show_popup` returns the ids it replaced and `show_mini_app_popup` answers them, so no later helper event is needed (`answer_replaced_popups` is gone). |
+| mini-app window | `MiniAppWindow::launch_window` replaces `MiniApps::from_window`: the poll and the helper's events run as the window the open app's flow started in. `mini_app_watch_due` ticks only while the phone flow waits on a request. |
+| emoji status | `SetStage::Deferred` is gone: the suggested emoji's own lookup (`ConnectDriver::resolve_suggested_emoji`) does not wait behind the shared slot, so the stage goes straight to `Resolving { request }`. |
+| helper pipe tests | The broken sink holds a sender dropped when the writer thread ends; the tests block on `recv()`. |
+| translate Hide | A Hide that TDLib refuses (the flag is back) ends its Undo toast with an error note (`end_refused_hide_toast`): superseded, that function is gone; `HideStage` and `end_refused_hide` settle it (r4-12 round 3 table). |
+| suggested posts | The Decline box closes when its post is decided elsewhere (`close_decided_decline`) and `confirm_suggest_decline` sends nothing for a decided post; the dead `.loading/.disabled` and the dead busy branch of Publish are gone. |
+| touch bar | `PickerFill::{Unfilled, Shown(contents), Held { shown, waiting }}` compares against what is shown first; `Anim::{Idle, Animating(timer)}` replaces `Option<NSTimer>`. |
+| update pill | `UpdatePill` is one enum (`Other`, `Percent`, `Ready`) carrying the glide and the swap start. |
+| video editor | A pointer move with the button up ends a held strip, a window losing focus ends it, and `start_encode` ends every drag. |
+| video player | `Stage::Landing` carries the instant of the loop seek; one not left after `LANDING_WAIT` is sent again. The FFmpeg volume reopen comment says what a failed open does. |
+| video decode | `Decoding::Gone(reason)`: a dead decode thread's failure stays, `seek` and `fail` leave it alone, and the decode loop notifies on a failed seek and on the end. |
+| video/mod.rs | The extraction worker blocks in `waitid` (unix) or `Child::wait` (Windows) instead of polling `try_wait`; cancel kills by pid or handle while the stage says `Spawned`, and the worker reaps. |
+| vcard import | `VcardImport::Picked` is gone; `BoxView::{Reading, Shown}` is the box's view of an `ImportStage`. |
+| voice | `Drop for VoiceFinish` removes the file of a finish nobody completed (a fixture's is kept); `VoiceCapture::drop` closes the microphone on the discard thread. |
+| BLE scan (Linux) | The stop branch is polled first, and a stream that ends sends `Available(false)`. |
+| CTAPHID | `Phase::{Waiting { deadline }, Cancelling { reason, until }}` replaces `Option<(HidError, Instant)>`. |
+| baselines | `poll:scan` is gone from the owned-timers baseline; stale allow lines for `Phase::Opening`, `LiveOverlay::Opening` and `poll:run_poll_loop` are gone. `app-wide-fields.txt` lists the new `UpdatePill` paths in place of the old ones. |
+
+#### Fix round 3 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| 23-011 | `translation_unsettled` is true for everything but `Done`, so a `Pending` message stays in the pump's scan; `needs_translation` still keeps the ask from going twice. Ask, fail out of attempts, reconnect, asked again is tested through `finish_translation`. |
+| open wake | `PlayerCell.drawn_in` remembers the view the element last painted in; the open wake redraws it with the watchers, so an unwatched autoplaying inline clip leaves its still. |
+| mini-app window | `WebAppPending.window` is set from `asking_window()` when the open request goes out (`note_open_window`) and rides into `WebAppOpenResult::Opened.window`; `spawn_mini_app_window` takes it from the matched answer. The helper's queued events are drained before the session poll, so a popup shown from the poll side does not treat a queued `PopupClosed` as replaced. A lost `sendWebAppData` ends with an error (`end_lost_data_sends`) and keeps the poll alive until it does. Superseded by the round 4 table: the window is a parameter of every driver launch call; `note_open_window` is gone. |
+| vanish | `begin_vanish` returns whether a ghost holds the request; the callers `expect` it only then. `Crumbling` keeps the `Deletion` until its answer is taken; `prune_vanishing` leaves ghosts holding a request to `settle_ghosts`, which forgets it. `settle_vanishing` runs in every window; a waiting ghost whose message is gone in a chat not shown is dropped. Split `vanish/settle.rs`. Superseded by the round 4 table: a waiting ghost lets go of its `Deletion` too (`settle_ghosts`). |
+| video editor | `Drag::release` names the release for any held drag; the blur and button-up-move hooks run it (`release_lost_video_drag`). |
+| translate Hide | `HideStage::Sent(RequestId)` in `TranslateScreen` is settled by the `toggleChatIsTranslatable` answer through `RequestAcks`; it outlives the toast, and Undo forgets it. `toggle_chat_is_translatable` returns its request. |
+| suggested posts | Decline is not opened or confirmed, and Accept not confirmed, while a Publish or Decline of the post is out. |
+| update pill | A pill already `Ready` keeps its glide for the next `Restart` pass. |
+| recheck timer | From `DownloadFailed` the timer retries the download from the kept release without going through `Checking`. Superseded by the round 4 and 5 tables: the timer runs a check from `DownloadFailed`, keeping the release. |
+| emoji status | `Ok(None)` from `change_emoji_status` answers `UNKNOWN_ERROR`. A `getCustomEmojiStickers` answer or error pokes `MINI_APPS`; `mini_app_watch_due` carries the lookup's 15 s deadline instead of a 250 ms tick. |
+| tests | `emoji_status_tests.rs` and `mini_app_flow_tests.rs` block on `recv()` instead of `recv_timeout`. |
+| hybrid sign-in | After the code is shown, `Available(false)` or a stopped scanner ends the ceremony with the phone error. |
+| AVPlayer | `OpenWatch` holds its item and removes the observer in `Drop`; the observer is released on the main queue. `buffer` is `Option<(Instant, BufferState)>`. |
+| FFmpeg reopen | The open wake lives in the backend and every player it opens forwards to it; a clip that failed is not reopened. Superseded by the round 4 and 5 tables: each reopen gets a fresh wake slot, and a refused one registers again. |
+| video decode | `wait_frame` also stops on `at_end()` and `is_stopped()`. |
+| waiting gate | `WaitingGate::Delayed { since, _timer }` is built whole by `observe`; `shown_in` spawns the redraw timer. |
+| voice | `Recording::{Ours, HandedOn}` replaces the empty `PathBuf` sentinel in `VoiceCapture` and `VoiceFinish`. |
+
+#### Fix round 4 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| vanish | `settle_ghosts` turns every answered ghost's `Deletion` into `Local`, waiting or crumbling, so none keeps a request nothing will answer. `vanish_overlay` does not count a ghost at `Phase::Done` as running (`animating`). Test: a delete answered while waiting stops asking for frames after the crumble and is pruned with no later poll. |
+| FFmpeg reopen | The reopen moves the open wake into a fresh slot before the new player forwards to it, so a dropped player still opening fires an empty slot. Test: a gated demuxer is mid-open at `set_volume`; its open does not fire the wake, the new player's does, once. |
+| mini-app window | The window goes into `open_web_app`, `get_web_app_url`, `get_main_web_app` and `get_web_app_link_url`, and `mark_web_app_pending` builds `WebAppPending` whole; `note_open_window` is gone. The connect test passes the window to the driver call; a UI test reads `launch_window()` inside `as_asked_by(Some(12))`. A UI test cannot send through a live driver, so the capture is covered by those two halves. |
+| tests | No wall-clock deadline in the new tests: `Player::wait_open_settled` and `wait_frame_settled` wait on the decode thread's condvar with no deadline; the update test advances the manual clock. |
+| video editor | `release_tests.rs` drives `release_lost_video_drag` (the blur hook) and `video_timeline_moved` (the button-up move hook) with a held quality line and a held picture: the drag is idle and the crop grid goes. |
+| translate Hide | The `TranslateScreen` farewell calls `forget_hide`, so an account switch with a Hide out leaves nothing in the old client's acks. Test: farewell, settle the request, nothing to take. |
+| recheck timer | Supersedes round 3's row: from `DownloadFailed` the timer runs a fresh check (`Checking`), not only a retry of the kept release. A newer release that fixes a bad download is found; the kept one, when still the latest, downloads again from the check's answer. A check that fails offline leaves `Failed`, and the next timer checks again. `updater::force_latest_release` is the test seam; test on the manual clock. Superseded by the round 5 table: a failed check keeps the release (`DownloadFailed`). |
+| docs | The 14-002 and translate Hide rows of earlier rounds say they are superseded. |
+| suggested posts | The old test's doc comment is back above its test. |
+
+#### Fix round 5 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| recheck timer | Supersedes round 4's row: from `DownloadFailed(release, _)` the timer's check keeps the release. `check_for_updates_keeping` maps a `Failed(message)` answer to `DownloadFailed(release, message)`, so an offline recheck leaves the release notes, the Update button and the pill. `Available`, `UpToDate` and `NoRelease` apply as before. Tests on the manual clock force the check failure (`updater::force_check_failure`) and the self-update answer, so none depends on the real process. |
+| FFmpeg reopen | Supersedes round 4's row for the refused branch: after the wake is put back, `set_volume` calls `on_open` again, which runs at once for a player that settled while the slot was empty, else queues a forwarder that finds the slot empty after the first. The test seam `reopen_with` is a closure that may refuse; the test refuses after the first open settled and the wake fires once. |
+| decisions | The five round 2 to 4 rows that stated the old behaviour say they are superseded. |
+
+#### Fix round 6 (r4-12)
+
+| Ids | What changed |
+| --- | --- |
+| FFmpeg reopen tests | The refused-reopen test asserts with `try_recv`: the wake runs on the test thread inside `set_volume`, so a missing re-registration fails the assertion instead of hanging. A second test covers the other order: the reopen is refused while the old player still opens, then the open settles, and the wake fires exactly once (one `Ok`, then `Empty`). A probe registered after both forwarders marks the settle without a wait. Checked by reverting: without the re-registration only the first test fails; without the put-back both fail. |
+| decisions | The round 4 "recheck timer" row is marked superseded by round 5. |
+| open_wake doc | The field comment describes the current design: the wake waits in the slot, a reopen moves it to a fresh slot, a refused reopen puts it back and registers again. |

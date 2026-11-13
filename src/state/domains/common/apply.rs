@@ -226,6 +226,8 @@ impl Session {
                     // And the keyword searches given up while offline.
                     self.stickers.emoji.keyword_lookups.forgive_failures();
                     self.stickers.emoji.keyword_emojis.forgive_failures();
+                    // And translations that ran out of attempts offline.
+                    self.translations_back_online();
                 }
                 self.connection = state;
             }

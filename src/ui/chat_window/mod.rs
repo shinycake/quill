@@ -764,6 +764,8 @@ impl QuillApp {
             self.main_window
                 .shown_dialogs
                 .forget(open.handle.window_id());
+            // Nor does it keep its paint record of the delete animations.
+            super::vanish::window_closed(open.handle.window_id());
         }
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its media panel goes: the GIF downloads follow the panels left.

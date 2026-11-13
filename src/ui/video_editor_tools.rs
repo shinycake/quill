@@ -103,7 +103,7 @@ impl QuillApp {
             match video.state() {
                 PlayState::Failed => {}
                 // Still opening: it was told where to start and to play.
-                PlayState::Opening => playing = true,
+                PlayState::NotOpen => playing = true,
                 // Ran to the file's end (the range ends there): back to
                 // the range's start, then play.
                 PlayState::Ended => {
@@ -287,7 +287,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn video_stage_release(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn video_stage_release(&mut self, cx: &mut Context<Self>) {
         let reduce = cx.reduce_motion();
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;

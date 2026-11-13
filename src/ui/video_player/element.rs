@@ -115,6 +115,7 @@ impl RenderOnce for VideoFrame {
         let picture = self.player.pull(now, hint);
         let target = window.current_view();
         self.player.note_live_view(target);
+        self.player.note_drawn_in(target);
         let surface = picture.as_ref().is_some_and(Picture::is_surface);
         let picture = picture.map(|picture| picture_element(picture, self.fit, self.radii));
         let paused = (self.paused_overlay && self.player.state() == PlayState::Paused)

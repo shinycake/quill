@@ -835,3 +835,39 @@ fn a_silent_clip_has_no_detached_sound() {
     assert!(player.take_audio_tap().is_none());
     assert!(!player.sound_detached());
 }
+
+#[test]
+fn a_wake_registered_before_the_open_runs_when_the_file_opens() {
+    let (player, _calls) = scripted_player(None, false, 3);
+    let (opened, heard) = std::sync::mpsc::channel();
+    player.on_open(move || {
+        let _ = opened.send(());
+    });
+    assert!(wait_until(|| heard.try_recv().is_ok()));
+    // After the open it runs at once, on the caller's thread.
+    let (late, heard_late) = std::sync::mpsc::channel();
+    player.on_open(move || {
+        let _ = late.send(());
+    });
+    assert!(heard_late.try_recv().is_ok());
+}
+
+/// A clip with no picture to give (a seek at or past the last one) ends the
+/// wait for a picture: it does not wait out a clip that has ended. The wait
+/// has no deadline, so one that ignored the end would never return.
+#[test]
+fn waiting_for_a_picture_ends_when_the_clip_has_none() {
+    let (mut player, _calls) = scripted_player(Some(0), false, 3);
+    player.wait_open_settled();
+    player.wait_frame_settled();
+    assert!(player.take_frame().is_none());
+}
+
+#[test]
+fn waiting_for_the_open_and_the_first_picture_returns_when_they_come() {
+    let (mut player, _calls) = scripted_player(None, false, 3);
+    player.wait_open_settled();
+    assert!(player.info().is_some());
+    player.wait_frame_settled();
+    assert!(player.take_frame().is_some());
+}

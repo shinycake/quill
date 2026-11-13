@@ -2,9 +2,7 @@
 //! (needs the `demo-capture` feature for gpui-kit's test support).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::{
-    IconName, PANEL_OPACITY, SliderDrag, VideoControlsState, WaitingCheck, WaitingGate, volume_icon,
-};
+use super::{IconName, PANEL_OPACITY, SliderDrag, VideoControlsState, WaitingGate, volume_icon};
 use std::time::{Duration, Instant};
 
 #[test]
@@ -23,36 +21,23 @@ fn the_waiting_gate_waits_half_a_second() {
     let t0 = Instant::now();
     let ms = |n| t0 + Duration::from_millis(n);
     let mut gate = WaitingGate::default();
-    assert_eq!(
-        gate.observe(false, t0),
-        WaitingCheck::Settled { shown: false }
-    );
+    let asked = std::cell::Cell::new(None);
+    let arm = |wait| {
+        asked.set(Some(wait));
+        gpui_kit::Task::ready(())
+    };
+    assert!(!gate.observe(false, t0, arm));
     // A stall begins: wait out the rest of the delay.
-    assert_eq!(
-        gate.observe(true, ms(100)),
-        WaitingCheck::Pending(Duration::from_millis(500))
-    );
-    assert_eq!(
-        gate.observe(true, ms(300)),
-        WaitingCheck::Pending(Duration::from_millis(300))
-    );
+    assert!(!gate.observe(true, ms(100), arm));
+    assert_eq!(asked.take(), Some(Duration::from_millis(500)));
+    assert!(!gate.observe(true, ms(300), arm));
+    assert_eq!(asked.take(), None, "its timer is set");
     // A short stall that ends never shows anything.
-    assert_eq!(
-        gate.observe(false, ms(400)),
-        WaitingCheck::Settled { shown: false }
-    );
-    assert_eq!(
-        gate.observe(true, ms(1000)),
-        WaitingCheck::Pending(Duration::from_millis(500))
-    );
-    assert_eq!(
-        gate.observe(true, ms(1500)),
-        WaitingCheck::Settled { shown: true }
-    );
-    assert_eq!(
-        gate.observe(true, ms(4000)),
-        WaitingCheck::Settled { shown: true }
-    );
+    assert!(!gate.observe(false, ms(400), arm));
+    assert!(!gate.observe(true, ms(1000), arm));
+    assert_eq!(asked.take(), Some(Duration::from_millis(500)));
+    assert!(gate.observe(true, ms(1500), arm));
+    assert!(gate.observe(true, ms(4000), arm));
 }
 
 #[test]
@@ -107,7 +92,7 @@ fn the_time_labels_pass_aa_on_any_picture() {
 mod ui {
     use super::super::{
         ControllerActions, PictureOverlay, PictureState, VideoController, VideoControlsState,
-        WaitingCheck, WaitingGate, speed_trigger,
+        WaitingGate, speed_trigger,
     };
     use crate::ui::chat_theme::set_theme_mode;
     use crate::ui::video_player::PlayState;
@@ -161,27 +146,16 @@ mod ui {
             let boosted = self.controls.boost.is_active();
             let waiting = matches!(
                 self.transport.state,
-                PlayState::Opening | PlayState::Buffering
+                PlayState::NotOpen | PlayState::Buffering
             );
-            let now = cx.background_executor().now();
-            let shown = match self.gate.observe(waiting, now) {
-                WaitingCheck::Settled { shown } => shown,
-                WaitingCheck::Pending(wait) => {
-                    let timer = cx.spawn(async move |this, cx| {
-                        cx.background_executor().timer(wait).await;
-                        let _ = this.update(cx, |_, cx| cx.notify());
-                    });
-                    self.gate.arm(timer);
-                    false
-                }
-            };
+            let shown = self.gate.shown_in(waiting, cx);
             let picture = if self.failed {
                 Some(PictureState::Failed {
                     detail: "video format not supported".into(),
                     open: Some(Rc::new(|_, _| {})),
                 })
             } else {
-                shown.then_some(PictureState::Waiting)
+                shown.then_some(PictureState::Spinner)
             };
             div()
                 .size_full()

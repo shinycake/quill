@@ -373,7 +373,7 @@ const NO_AUDIO_SECS: u64 = 3;
 /// input is encoded to Opus OGG in-process while 10 ms levels feed the
 /// live waveform.
 pub struct VoiceCapture {
-    pub path: PathBuf,
+    recording: Recording,
     source: Source,
     /// Bars shown while recording (the waveform so far).
     pub bars: Vec<u8>,
@@ -466,7 +466,7 @@ impl VoiceCapture {
             }
         };
         Ok(Self {
-            path,
+            recording: Recording::Ours(path),
             source: Source::Live(Live {
                 clock: RunClock::started_at(Instant::now()),
                 mic,
@@ -487,7 +487,7 @@ impl VoiceCapture {
     /// Screenshot / fixture bar. Does not open a microphone.
     pub fn preview(path: PathBuf, seconds: i32, bars: Vec<u8>) -> Self {
         Self {
-            path,
+            recording: Recording::Ours(path),
             source: Source::Fixture {
                 seconds: seconds.max(0),
                 clock: RunClock::started_at(Instant::now()),
@@ -550,7 +550,10 @@ impl VoiceCapture {
             Source::Fixture { clock, .. } => !clock.is_running(),
             Source::Closed => false,
         };
-        ready.then_some(self.path.as_path())
+        match &self.recording {
+            Recording::Ours(path) if ready => Some(path.as_path()),
+            _ => None,
+        }
     }
 
     /// Refresh the live bars from the levels heard so far.
@@ -596,8 +599,11 @@ impl VoiceCapture {
     /// UI runs this off the UI thread.
     pub fn discard(mut self) {
         self.stop_live();
-        if !self.is_fixture() {
-            let _ = fs::remove_file(&self.path);
+        let path = self.recording.hand_on();
+        if let Some(path) = path
+            && !self.is_fixture()
+        {
+            let _ = fs::remove_file(&path);
         }
     }
 
@@ -626,7 +632,7 @@ impl VoiceCapture {
             (Source::Live(_) | Source::Closed, None) => Ending::NoEncoder,
         };
         VoiceFinish {
-            path: std::mem::take(&mut self.path),
+            recording: self.recording.take(),
             ending,
             levels: self.levels.clone(),
             bars: std::mem::take(&mut self.bars),
@@ -689,11 +695,33 @@ fn join_worker(_worker: Option<Worker>) -> Option<Result<u64, String>> {
     None
 }
 
+/// Whose the recording's file is: ours to remove, or handed on (to the draft,
+/// or removed already), after which no `Drop` touches it.
+enum Recording {
+    Ours(PathBuf),
+    HandedOn,
+}
+
+impl Recording {
+    /// The file, once: the caller owns it from here.
+    fn hand_on(&mut self) -> Option<PathBuf> {
+        match std::mem::replace(self, Self::HandedOn) {
+            Self::Ours(path) => Some(path),
+            Self::HandedOn => None,
+        }
+    }
+
+    /// The whole value, leaving this one handed on.
+    fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::HandedOn)
+    }
+}
+
 /// A voice capture whose microphone is closed: everything needed to end
 /// the file, and `Send`, so [`Self::complete`] can run on a background
 /// thread.
 pub struct VoiceFinish {
-    path: PathBuf,
+    recording: Recording,
     ending: Ending,
     levels: Arc<Mutex<Vec<u8>>>,
     bars: Vec<u8>,
@@ -714,24 +742,26 @@ enum Ending {
 impl VoiceFinish {
     /// Join the encoder and keep the file when it holds audio.
     pub fn complete(mut self) -> Result<VoiceDraft, String> {
+        // The file is the draft's from here (or removed on an error).
+        let Some(path) = self.recording.hand_on() else {
+            return Err(crate::media_tools::no_audio_message(false));
+        };
         let (fixture, samples) = match std::mem::replace(&mut self.ending, Ending::NoEncoder) {
             Ending::Fixture(seconds) => (Some(seconds), None),
             Ending::Encoder(worker) => (None, join_worker(Some(worker))),
             Ending::NoEncoder => (None, None),
         };
-        let len = fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
+        let len = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         let encoded = match samples {
             Some(Err(ref reason)) => Err(reason.clone()),
             Some(Ok(0)) => Err(crate::media_tools::no_audio_message(false)),
             _ if fixture.is_some() => Ok(()),
-            _ if len == 0 || !self.path.is_file() => {
-                Err(crate::media_tools::no_audio_message(false))
-            }
+            _ if len == 0 || !path.is_file() => Err(crate::media_tools::no_audio_message(false)),
             _ => Ok(()),
         };
         if let Err(reason) = encoded {
             if fixture.is_none() {
-                let _ = fs::remove_file(&self.path);
+                let _ = fs::remove_file(&path);
             }
             return Err(reason);
         }
@@ -752,16 +782,81 @@ impl VoiceFinish {
             bars.push(8);
         }
         Ok(VoiceDraft {
-            path: std::mem::take(&mut self.path),
+            path,
             duration_secs,
             bars,
         })
     }
 }
 
+/// Closes the microphone of `source` and hands back the encoder to join.
+#[cfg(feature = "ui")]
+fn end_source(source: Source) -> Option<Worker> {
+    match source {
+        Source::Live(live) => {
+            drop(live.mic);
+            Some(live.worker)
+        }
+        Source::Fixture { .. } | Source::Closed => None,
+    }
+}
+
+#[cfg(not(feature = "ui"))]
+fn end_source(_source: Source) -> Option<Worker> {
+    None
+}
+
 impl Drop for VoiceCapture {
+    /// A capture dropped without `finish`, `close_microphone` or `discard`
+    /// (the account switched, the composer went, Quill quit while
+    /// recording) belongs to nobody: its file goes once the encoder ends,
+    /// like a video note's. A fixture's file is kept, and one handed on
+    /// (its path taken) is not ours. The microphone closes on the thread
+    /// that ends the encoder, not here (closing a stream can stall).
     fn drop(&mut self) {
-        let _detached_encoder = self.stop_mic();
+        if self.is_fixture() {
+            return;
+        }
+        let path = self.recording.hand_on();
+        let source = std::mem::replace(&mut self.source, Source::Closed);
+        let Some(path) = path else {
+            return;
+        };
+        if !matches!(source, Source::Live(_)) {
+            let _ = fs::remove_file(&path);
+            return;
+        }
+        // The encoder is still writing the file: close the microphone and
+        // let it end first, off this thread (joining waits on the disk).
+        let _ = crate::thread_guard::spawn_guarded("quill-voice-discard", move || {
+            let _ = join_worker(end_source(source));
+            let _ = fs::remove_file(&path);
+        });
+    }
+}
+
+impl Drop for VoiceFinish {
+    /// A finish dropped before `complete` took its file (the window went,
+    /// the account switched, Quill quit): the recording belongs to nobody,
+    /// so its file goes once the encoder ends, as a capture's does. A
+    /// fixture's file is kept, and a file `complete` handed on is not ours.
+    fn drop(&mut self) {
+        let Some(path) = self.recording.hand_on() else {
+            return;
+        };
+        match std::mem::replace(&mut self.ending, Ending::NoEncoder) {
+            Ending::Fixture(_) => {}
+            Ending::NoEncoder => {
+                let _ = fs::remove_file(&path);
+            }
+            Ending::Encoder(worker) => {
+                // The encoder may still be writing: end it off this thread.
+                let _ = crate::thread_guard::spawn_guarded("quill-voice-discard", move || {
+                    let _ = join_worker(Some(worker));
+                    let _ = fs::remove_file(&path);
+                });
+            }
+        }
     }
 }
 
@@ -842,6 +937,61 @@ pub fn voice_file_ready(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch_file(name: &str) -> PathBuf {
+        let path = crate::scratch::unique_dir("quill-voice-drop").join(name);
+        fs::write(&path, b"ogg").expect("write the file");
+        path
+    }
+
+    #[test]
+    fn a_capture_dropped_without_an_end_removes_its_file() {
+        let path = scratch_file("lost.ogg");
+        let capture = VoiceCapture {
+            recording: Recording::Ours(path.clone()),
+            source: Source::Closed,
+            bars: Vec::new(),
+            levels: Arc::default(),
+        };
+        drop(capture);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_finish_dropped_before_complete_removes_its_file_and_a_fixture_keeps_it() {
+        let path = scratch_file("unfinished.ogg");
+        let finish = VoiceCapture {
+            recording: Recording::Ours(path.clone()),
+            source: Source::Closed,
+            bars: Vec::new(),
+            levels: Arc::default(),
+        }
+        .close_microphone();
+        drop(finish);
+        assert!(!path.exists(), "nobody took the file");
+        let kept = scratch_file("fixture-finish.ogg");
+        drop(VoiceCapture::preview(kept.clone(), 5, Vec::new()).close_microphone());
+        assert!(kept.exists(), "a fixture's file is kept");
+        // A finish that completes hands its file on: nothing is removed.
+        let done = scratch_file("done.ogg");
+        let draft = VoiceCapture::preview(done.clone(), 5, Vec::new())
+            .close_microphone()
+            .complete();
+        assert!(draft.is_ok());
+        assert!(done.exists());
+    }
+
+    #[test]
+    fn a_fixture_capture_and_a_handed_on_file_are_kept() {
+        let path = scratch_file("fixture.ogg");
+        drop(VoiceCapture::preview(path.clone(), 5, Vec::new()));
+        assert!(path.exists(), "a fixture's file is kept");
+        let finished = VoiceCapture::preview(path.clone(), 5, Vec::new())
+            .close_microphone()
+            .complete();
+        assert!(finished.is_ok());
+        assert!(path.exists(), "a finished capture's file is the draft's");
+    }
 
     #[cfg(feature = "ui")]
     #[test]

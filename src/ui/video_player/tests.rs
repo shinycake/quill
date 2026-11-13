@@ -71,6 +71,10 @@ struct Script {
     /// The decoder failed.
     error: Option<PlayerError>,
     dropped: bool,
+    /// The backend says when it opened (`Backend::on_open`); the wake
+    /// waits here.
+    signals: bool,
+    wake: Option<Box<dyn FnOnce() + Send>>,
 }
 
 struct Scripted(Rc<RefCell<Script>>);
@@ -89,6 +93,12 @@ fn image() -> Arc<RenderImage> {
 }
 
 impl Backend for Scripted {
+    fn on_open(&mut self, wake: Box<dyn FnOnce() + Send>) -> bool {
+        let mut script = self.0.borrow_mut();
+        script.wake = Some(wake);
+        script.signals
+    }
+
     fn status(&mut self) -> BackendStatus {
         let mut script = self.0.borrow_mut();
         if script.at_end {
@@ -184,7 +194,7 @@ fn calls(script: &Rc<RefCell<Script>>) -> Vec<String> {
 fn play_waits_for_the_open_then_starts_the_backend() {
     let (player, script) = scripted(false);
     player.play();
-    assert_eq!(player.state(), PlayState::Opening);
+    assert_eq!(player.state(), PlayState::NotOpen);
     assert!(calls(&script).is_empty());
     // Opening wants pictures every frame, until the first one comes.
     assert!(player.frame_demand(Instant::now()).animates);
@@ -205,6 +215,51 @@ fn a_player_stuck_opening_stops_asking_for_frames() {
             .frame_demand(start + Duration::from_secs(60))
             .animates
     );
+}
+
+#[gpui_kit::test]
+fn a_backend_that_signals_its_open_needs_no_frames_while_opening(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (player, script) = scripted(false);
+    script.borrow_mut().signals = true;
+    let _wake = cx
+        .update(|cx| player.await_open(cx))
+        .expect("the backend signals");
+    player.play();
+    assert!(
+        !player.frame_demand(Instant::now()).animates,
+        "nothing to poll while it opens"
+    );
+    // The open lands, however late: the wake asks for the first picture.
+    script.borrow_mut().ready = true;
+    let wake = script.borrow_mut().wake.take().expect("the wake was kept");
+    wake();
+    cx.run_until_parked();
+    assert!(player.frame_demand(Instant::now()).animates);
+}
+
+#[gpui_kit::test]
+fn the_open_wake_redraws_the_view_an_unwatched_clip_was_drawn_in(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    let (player, script) = scripted(false);
+    script.borrow_mut().signals = true;
+    let _wake = cx
+        .update(|cx| player.await_open(cx))
+        .expect("the backend signals");
+    player.play();
+    // No watcher: only the element's own view knows the clip.
+    let view = cx.update(|cx| gpui_kit::AppContext::new(cx, |_| ()));
+    player.note_drawn_in(view.entity_id());
+    let redraws = Rc::new(std::cell::Cell::new(0u32));
+    let seen = redraws.clone();
+    let _sub = cx.update(|cx| cx.observe(&view, move |_, _| seen.set(seen.get() + 1)));
+    script.borrow_mut().ready = true;
+    let wake = script.borrow_mut().wake.take().expect("the wake was kept");
+    wake();
+    cx.run_until_parked();
+    assert_eq!(redraws.get(), 1, "the view it was drawn in is redrawn");
 }
 
 #[test]
@@ -630,7 +685,7 @@ mod viewer {
         app.read_with(vcx, |app, _| {
             assert!(app.viewer.state.is_open());
             let transport = app.viewer_transport().expect("a player for the clip");
-            assert_eq!(transport.state, PlayState::Opening);
+            assert_eq!(transport.state, PlayState::NotOpen);
             assert_eq!(transport.duration, Some(10.0));
             assert!(app.viewer.video_layer.is_some(), "the video layer is drawn");
         });

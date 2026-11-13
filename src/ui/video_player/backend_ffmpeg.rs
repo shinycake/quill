@@ -27,7 +27,7 @@ use super::transport::{
 use super::{Backend, ErrorKind, Picture, PictureStats, PlayerError, Present, Pulled, Purpose};
 use quill::video_decode::{BgraPool, OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::super::audio::StreamSound;
@@ -117,6 +117,32 @@ pub(super) struct FfmpegBackend {
     nv12_paused_until: Option<Instant>,
     /// A picture stepped to while paused, shown on the next pull.
     pending_step: Option<VideoFrame>,
+    /// The wake the player asked for (`on_open`), waiting here until the
+    /// open it waits for settles. A reopen moves it to a fresh slot; a
+    /// refused reopen puts it back and registers with the old player again.
+    open_wake: OpenWake,
+    /// What the next reopen runs over instead of the file (tests).
+    #[cfg(test)]
+    reopen_with: Option<ReopenSeam>,
+}
+
+/// What a test's reopen runs instead of the file: the demuxer it opens, or
+/// the refusal; it runs where the reopen asks for the new player.
+#[cfg(test)]
+type ReopenSeam = Box<dyn FnOnce() -> Result<Box<dyn quill::video_decode::Demuxer>, String>>;
+
+/// The wake for the clip's open, shared by the players the backend opens.
+type OpenWake = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
+
+/// Runs the wake in `slot` once, if it is still there.
+fn forward_open(slot: &OpenWake) -> impl FnOnce() + Send + 'static {
+    let slot = slot.clone();
+    move || {
+        let wake = slot.lock().ok().and_then(|mut wake| wake.take());
+        if let Some(wake) = wake {
+            wake();
+        }
+    }
 }
 
 impl FfmpegBackend {
@@ -140,7 +166,19 @@ impl FfmpegBackend {
             on_screen: OnScreen::Nothing,
             nv12_paused_until: None,
             pending_step: None,
+            open_wake: OpenWake::default(),
+            #[cfg(test)]
+            reopen_with: None,
         }
+    }
+
+    /// Open the file again for `options` on a new player.
+    fn open_player(&mut self, options: &OpenOptions) -> Result<Player, String> {
+        #[cfg(test)]
+        if let Some(reopen) = self.reopen_with.take() {
+            return Player::with_demuxer(reopen()?, options.clone());
+        }
+        Player::open(&self.path, options.clone())
     }
 
     /// Whether to hand over NV12 surfaces now: off macOS, unless the
@@ -263,6 +301,14 @@ fn elapsed_us(since: Instant) -> u32 {
 }
 
 impl Backend for FfmpegBackend {
+    fn on_open(&mut self, wake: Box<dyn FnOnce() + Send>) -> bool {
+        if let Ok(mut slot) = self.open_wake.lock() {
+            *slot = Some(wake);
+        }
+        self.player.on_open(forward_open(&self.open_wake));
+        true
+    }
+
     fn status(&mut self) -> BackendStatus {
         self.attach_sound();
         let info = self.player.info();
@@ -336,9 +382,14 @@ impl Backend for FfmpegBackend {
     /// is turned up, where it was.
     fn set_volume(&mut self, volume: f32) {
         self.volume = volume.clamp(0.0, 1.0);
-        if self.volume > 0.0 && !self.options.want_audio {
-            // Sound is wanted only once the reopen worked: a failed one
-            // leaves the clip as it was, and the next turn-up tries again.
+        // A clip that failed to open stays failed: a reopen would start a
+        // decode thread for nothing.
+        if self.volume > 0.0 && !self.options.want_audio && self.player.error().is_none() {
+            // Sound is wanted only once the reopen started: one that is
+            // refused at once leaves the clip as it was, and the next
+            // turn-up tries again. The open itself runs on the new player's
+            // thread, so a failure there (the file just opened, so a rare
+            // one) shows as the clip failing, not as the old player.
             let reopened = OpenOptions {
                 want_audio: true,
                 output: self.output,
@@ -346,16 +397,36 @@ impl Backend for FfmpegBackend {
             };
             let position = self.player.position();
             let running = self.player.is_playing();
-            if let Ok(mut player) = Player::open(&self.path, reopened.clone()) {
+            // The wake moves to a slot of its own before the new player
+            // opens: the dropped player may still be opening, and its
+            // forwarder then finds nothing to fire early.
+            let wake = self.open_wake.lock().ok().and_then(|mut wake| wake.take());
+            let fresh: OpenWake = Arc::new(Mutex::new(wake));
+            if let Ok(mut player) = self.open_player(&reopened) {
                 player.set_rate(self.want.rate);
                 player.seek(position);
                 if running {
                     player.play();
                 }
+                // The new player says when it opened, for a wake still
+                // waiting on the clip's open.
+                self.open_wake = fresh;
+                player.on_open(forward_open(&self.open_wake));
                 self.options = reopened;
                 self.player = player;
                 self.sound = None;
                 self.pending_step = None;
+            } else {
+                // Refused: the old player's open still settles it.
+                if let Some(wake) = fresh.lock().ok().and_then(|mut wake| wake.take())
+                    && let Ok(mut slot) = self.open_wake.lock()
+                {
+                    slot.get_or_insert(wake);
+                }
+                // The old player may have settled while the slot was empty,
+                // its forwarder finding nothing: register again, which runs
+                // at once for a settled player and finds the wake back.
+                self.player.on_open(forward_open(&self.open_wake));
             }
         }
         if let Some(sound) = &self.sound {
@@ -448,24 +519,15 @@ pub(super) fn render_image(frame: VideoFrame, pool: &BgraPool) -> Option<Arc<Ren
 /// picture there: the still a screenshot capture shows.
 #[cfg(feature = "demo-capture")]
 pub(super) fn first_picture(path: &Path, at: f64) -> Option<(VideoFrame, Option<f64>)> {
-    let mut player = Player::open(path, OpenOptions::viewer()).ok()?;
     let deadline = Instant::now() + std::time::Duration::from_secs(2);
-    while player.info().is_none() && player.error().is_none() && Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    let mut player = Player::open(path, OpenOptions::viewer()).ok()?;
+    player.wait_open(deadline);
     if at > 0.0 {
         player.seek(at);
     }
-    while Instant::now() < deadline {
-        if let Some(frame) = player.take_frame() {
-            return Some((frame, player.duration()));
-        }
-        if player.error().is_some() {
-            return None;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    None
+    player.wait_frame(deadline);
+    let frame = player.take_frame()?;
+    Some((frame, player.duration()))
 }
 
 #[cfg(test)]
@@ -543,6 +605,189 @@ mod tests {
         output.settle_device();
         assert!(!backend.status().has_sound);
         assert!(!backend.player.has_sound(), "the wall clock is");
+    }
+
+    /// A clip whose `info` waits for a signal, so its open can be held.
+    struct Gated {
+        opening: mpsc::Receiver<()>,
+    }
+
+    impl Demuxer for Gated {
+        fn info(&self) -> MediaInfo {
+            let _ = self.opening.recv();
+            MediaInfo {
+                frame_rate: 25.0,
+                has_video: true,
+                ..MediaInfo::default()
+            }
+        }
+
+        fn next(&mut self) -> Result<Option<Item>, String> {
+            Ok(None)
+        }
+
+        fn seek(&mut self, _secs: f64) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// A volume reopen while the first player is still opening: the open
+    /// wake is not fired by the dropped player's open, only by the new
+    /// player's, which is the open that is drawn.
+    #[test]
+    fn a_reopen_for_volume_mid_open_fires_the_wake_for_the_new_players_open_only() {
+        let options = OpenOptions {
+            want_audio: false,
+            ..OpenOptions::viewer()
+        };
+        let (release_first, first_gate) = mpsc::channel();
+        let first = Player::with_demuxer(
+            Box::new(Gated {
+                opening: first_gate,
+            }),
+            options.clone(),
+        )
+        .unwrap();
+        let mut backend = FfmpegBackend::with_player(Path::new("gated"), options, first);
+        let (release_second, second_gate) = mpsc::channel();
+        backend.reopen_with = Some(Box::new(move || {
+            Ok(Box::new(Gated {
+                opening: second_gate,
+            }))
+        }));
+        let (woken, heard) = mpsc::channel();
+        assert!(backend.on_open(Box::new(move || {
+            let _ = woken.send(());
+        })));
+        // Runs right after the forwarder on the first player's open.
+        let (first_opened, first_open_done) = mpsc::channel();
+        backend.player.on_open(move || {
+            let _ = first_opened.send(());
+        });
+        backend.set_volume(0.5);
+        assert!(backend.options.want_audio, "the reopen started");
+        let _ = release_first.send(());
+        assert!(first_open_done.recv().is_ok(), "the first open settled");
+        assert!(
+            heard.try_recv().is_err(),
+            "the dropped player's open woke it"
+        );
+        let _ = release_second.send(());
+        assert!(heard.recv().is_ok(), "the new player's open wakes it");
+        assert!(heard.try_recv().is_err(), "once");
+    }
+
+    /// A reopen that is refused while the first player settles its open: the
+    /// first player's forwarder finds the slot empty, and the wake put back
+    /// afterwards still fires, once.
+    #[test]
+    fn a_refused_reopen_still_fires_a_wake_the_old_player_settled_for() {
+        let options = OpenOptions {
+            want_audio: false,
+            ..OpenOptions::viewer()
+        };
+        let (release_first, first_gate) = mpsc::channel();
+        let first = Player::with_demuxer(
+            Box::new(Gated {
+                opening: first_gate,
+            }),
+            options.clone(),
+        )
+        .unwrap();
+        let mut backend = FfmpegBackend::with_player(Path::new("gated"), options, first);
+        let (woken, heard) = mpsc::channel();
+        assert!(backend.on_open(Box::new(move || {
+            let _ = woken.send(());
+        })));
+        // Runs right after the forwarder on the first player's open.
+        let (first_opened, first_open_done) = mpsc::channel();
+        backend.player.on_open(move || {
+            let _ = first_opened.send(());
+        });
+        // The refusal comes after the first open settled, with the wake
+        // out of the live slot.
+        backend.reopen_with = Some(Box::new(move || {
+            let _ = release_first.send(());
+            let _ = first_open_done.recv();
+            Err("refused".into())
+        }));
+        backend.set_volume(0.5);
+        assert!(!backend.options.want_audio, "the reopen was refused");
+        assert!(heard.try_recv().is_ok(), "the wake fires inside set_volume");
+        assert!(heard.try_recv().is_err(), "once");
+    }
+
+    /// A reopen refused while the first player is still opening: the open
+    /// settles afterwards, and the two forwarders on it wake once.
+    #[test]
+    fn a_refused_reopen_while_the_old_player_opens_fires_the_wake_once() {
+        let options = OpenOptions {
+            want_audio: false,
+            ..OpenOptions::viewer()
+        };
+        let (release_first, first_gate) = mpsc::channel();
+        let first = Player::with_demuxer(
+            Box::new(Gated {
+                opening: first_gate,
+            }),
+            options.clone(),
+        )
+        .unwrap();
+        let mut backend = FfmpegBackend::with_player(Path::new("gated"), options, first);
+        let (woken, heard) = mpsc::channel();
+        assert!(backend.on_open(Box::new(move || {
+            let _ = woken.send(());
+        })));
+        backend.reopen_with = Some(Box::new(|| Err("refused".into())));
+        backend.set_volume(0.5);
+        assert!(!backend.options.want_audio, "the reopen was refused");
+        assert!(heard.try_recv().is_err(), "the open has not settled");
+        // Runs after both forwarders on the first player's open.
+        let (probed, probe_done) = mpsc::channel();
+        backend.player.on_open(move || {
+            let _ = probed.send(());
+        });
+        let _ = release_first.send(());
+        assert!(probe_done.recv().is_ok(), "the open settled");
+        assert!(heard.try_recv().is_ok(), "the wake fires");
+        assert!(heard.try_recv().is_err(), "once");
+    }
+
+    /// A clip whose decoding failed.
+    struct Broken;
+
+    impl Demuxer for Broken {
+        fn info(&self) -> MediaInfo {
+            MediaInfo {
+                frame_rate: 25.0,
+                has_video: true,
+                ..MediaInfo::default()
+            }
+        }
+
+        fn next(&mut self) -> Result<Option<Item>, String> {
+            Err("broken".into())
+        }
+
+        fn seek(&mut self, _secs: f64) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    /// A clip that failed is not reopened for its volume.
+    #[test]
+    fn a_failed_clip_is_not_reopened_for_its_volume() {
+        let options = OpenOptions {
+            want_audio: false,
+            ..OpenOptions::viewer()
+        };
+        let player = Player::with_demuxer(Box::new(Broken), options.clone()).unwrap();
+        // Returns once the decode thread hit the error.
+        player.wait_frame_settled();
+        assert!(player.error().is_some());
+        let mut backend = FfmpegBackend::with_player(Path::new("broken"), options, player);
+        backend.set_volume(0.5);
+        assert!(!backend.options.want_audio, "no reopen was started");
     }
 
     #[test]

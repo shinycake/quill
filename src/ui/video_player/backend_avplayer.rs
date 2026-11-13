@@ -11,6 +11,7 @@
 //! player only calls its backend from the UI thread).
 #![deny(clippy::indexing_slicing)]
 
+use super::avplayer_open::OpenWatch;
 use super::transport::{
     BackendStatus, Correction, Engine, EngineHealth, RATE_TOLERANCE, Want, reconcile,
 };
@@ -68,9 +69,12 @@ pub(super) struct AvPlayerBackend {
     want: Want,
     /// The present time of the last pull.
     last_present: Option<Instant>,
-    /// The buffer state as last read, and when.
-    buffer: BufferState,
-    buffer_read: Option<Instant>,
+    /// The buffer state as last read, with when it was read (`None` before
+    /// the first read and after a seek).
+    buffer: Option<(Instant, BufferState)>,
+    /// The observer that says when the item left `unknown`, while it is
+    /// registered.
+    open_watch: Option<OpenWatch>,
 }
 
 #[derive(Clone, Default)]
@@ -82,7 +86,8 @@ struct BufferState {
 
 impl AvPlayerBackend {
     /// Create the item and player; `status` reports `ready` once AVPlayer
-    /// says `readyToPlay` (the player polls it while opening).
+    /// says `readyToPlay`, and `on_open` wakes the player when the item
+    /// leaves `unknown` (a key-value observer on its `status`).
     pub(super) fn open(path: &Path) -> Result<Self, PlayerError> {
         let mtm = MainThreadMarker::new().ok_or_else(|| {
             PlayerError::new(ErrorKind::Open, tr(keys::Q_AV_VIDEO_PLAYBACK_MUST_START_ON))
@@ -123,8 +128,8 @@ impl AvPlayerBackend {
                 muted_tracks: None,
                 want: Want::default(),
                 last_present: None,
-                buffer: BufferState::default(),
-                buffer_read: None,
+                buffer: None,
+                open_watch: None,
             })
         }
     }
@@ -154,14 +159,21 @@ impl AvPlayerBackend {
         unsafe { (self.item.status(), self.player.rate()) }
     }
 
-    /// Read the buffer state if [`BUFFER_POLL`] passed since the last read.
-    fn read_buffer(&mut self, now: Instant) {
-        if self
-            .buffer_read
-            .is_some_and(|at| now.saturating_duration_since(at) < BUFFER_POLL)
-        {
-            return;
+    /// The buffer state, read again if [`BUFFER_POLL`] passed since the
+    /// last read.
+    fn read_buffer(&mut self, now: Instant) -> Option<&BufferState> {
+        let fresh = self
+            .buffer
+            .as_ref()
+            .is_some_and(|(at, _)| now.saturating_duration_since(*at) < BUFFER_POLL);
+        if !fresh {
+            let state = self.read_buffer_now();
+            self.buffer = Some((now, state));
         }
+        self.buffer.as_ref().map(|(_, state)| state)
+    }
+
+    fn read_buffer_now(&self) -> BufferState {
         // SAFETY: reading the buffer state of a live item on the main
         // thread.
         let (empty, keeps_up) = unsafe {
@@ -170,12 +182,11 @@ impl AvPlayerBackend {
                 self.item.isPlaybackLikelyToKeepUp(),
             )
         };
-        self.buffer = BufferState {
+        BufferState {
             empty,
             keeps_up,
             ranges: self.buffered(),
-        };
-        self.buffer_read = Some(now);
+        }
     }
 
     /// Time-domain stretching keeps voices intelligible away from 1x.
@@ -264,20 +275,28 @@ impl AvPlayerBackend {
 }
 
 impl Backend for AvPlayerBackend {
+    fn on_open(&mut self, wake: Box<dyn FnOnce() + Send>) -> bool {
+        self.open_watch = Some(OpenWatch::start(&self.item, wake));
+        true
+    }
+
     fn status(&mut self) -> BackendStatus {
-        self.read_buffer(Instant::now());
+        let buffer = self
+            .read_buffer(Instant::now())
+            .cloned()
+            .unwrap_or_default();
         let (status, rate) = self.engine_state();
         let playing = self.want.playing;
         BackendStatus {
             health: EngineHealth::read(
                 status == AVPlayerItemStatus::ReadyToPlay,
                 status == AVPlayerItemStatus::Failed,
-                playing && self.buffer.empty && !self.buffer.keeps_up,
+                playing && buffer.empty && !buffer.keeps_up,
                 playing && rate == 0.0 && self.at_end_position(),
             ),
             position: self.position(),
             duration: self.duration(),
-            buffered: self.buffer.ranges.clone(),
+            buffered: buffer.ranges,
             // AVPlayer mixes the soundtrack itself; a silent clip just
             // plays nothing.
             has_sound: true,
@@ -289,7 +308,9 @@ impl Backend for AvPlayerBackend {
             self.apply_pitch(want.rate);
         }
         self.want = want;
-        self.read_buffer(Instant::now());
+        let keeps_up = self
+            .read_buffer(Instant::now())
+            .is_some_and(|buffer| buffer.keeps_up);
         let (status, rate) = self.engine_state();
         if status == AVPlayerItemStatus::ReadyToPlay {
             self.apply_audio_on();
@@ -299,7 +320,7 @@ impl Backend for AvPlayerBackend {
             running: rate != 0.0,
             rate: f64::from(rate),
             at_end: self.at_end_position(),
-            keeps_up: self.buffer.keeps_up,
+            keeps_up,
         };
         match reconcile(want, engine) {
             // SAFETY: messaging a live AVPlayer on the main thread; a
@@ -322,7 +343,7 @@ impl Backend for AvPlayerBackend {
             self.player
                 .seekToTime_toleranceBefore_toleranceAfter(time, zero, zero);
         }
-        self.buffer_read = None;
+        self.buffer = None;
     }
 
     fn set_volume(&mut self, volume: f32) {
@@ -425,6 +446,8 @@ impl Drop for AvPlayerBackend {
         // SAFETY: stop audio before the player is released (main thread:
         // the player is dropped where it lives). An output left attached
         // keeps the item's timebases and listeners alive for good.
+        // The watch removes its observer as it drops, before the item goes.
+        drop(self.open_watch.take());
         unsafe {
             self.player.pause();
             self.item.removeOutput(&self.output);

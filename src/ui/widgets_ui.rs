@@ -726,7 +726,7 @@ impl QuillApp {
                     };
                     // Only the poll that is out: a restart or a replaced
                     // widget forgot it, and its late answer is not ours.
-                    if entry.poll != Poll::Asking(request) {
+                    if !matches!(entry.poll, Poll::Asking { request: out, .. } if out == request) {
                         continue;
                     }
                     let period = match data {
@@ -765,8 +765,36 @@ impl QuillApp {
     }
 
     /// Polls what is due on screen and sets the timer for the next one.
-    fn schedule_widget_polls(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn schedule_widget_polls(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
+        // A poll whose request left flight with no answer was dropped: its
+        // widget polls again after a period, as after a refused ask.
+        let dropped: Vec<WidgetKey> = self
+            .widgets
+            .entries
+            .iter()
+            .filter_map(|(key, entry)| match entry.poll {
+                // An answered request also left flight: its answer waits in
+                // `bots.widget_answers` until the drain lands it (held back
+                // while the app is locked), and is not a dropped one.
+                Poll::Asking { request, .. }
+                    if self.session().is_some_and(|session| {
+                        session.requests.get(request).is_none()
+                            && !session.bots.widget_answers.iter().any(|answer| {
+                                matches!(answer, WidgetAnswer::PublicData { request: asked, .. } if *asked == request)
+                            })
+                    }) =>
+                {
+                    Some(*key)
+                }
+                _ => None,
+            })
+            .collect();
+        for key in dropped {
+            if let Some(entry) = self.widgets.entries.get_mut(&key) {
+                entry.poll = Poll::Due(now + quill::message_widget::DEFAULT_POLL_PERIOD);
+            }
+        }
         let due: Vec<WidgetKey> = self
             .widgets
             .entries
@@ -781,7 +809,10 @@ impl QuillApp {
                 .and_then(|live| live.driver.poll_widget_public_data(key).ok());
             if let Some(entry) = self.widgets.entries.get_mut(&key) {
                 entry.poll = match asked {
-                    Some(request) => Poll::Asking(request),
+                    Some(request) => Poll::Asking {
+                        request,
+                        asked: now,
+                    },
                     None => Poll::Due(now + quill::message_widget::DEFAULT_POLL_PERIOD),
                 };
             }
@@ -793,7 +824,16 @@ impl QuillApp {
             .filter(|e| e.presence.is_shown())
             .filter_map(|e| match e.poll {
                 Poll::Due(at) => Some(at),
-                _ => None,
+                // Looked at again when a normal poll period has passed
+                // without the answer.
+                Poll::Asking { asked, .. } => {
+                    let period = quill::message_widget::DEFAULT_POLL_PERIOD;
+                    asked
+                        .checked_add(period)
+                        .filter(|look| *look > now)
+                        .or_else(|| now.checked_add(period))
+                }
+                Poll::Off => None,
             })
             .min();
         let Some(next) = next else {

@@ -16,7 +16,7 @@
 
 use super::caption::CaptionLayout;
 use super::*;
-use crate::ui::video_player::controls::{PictureOverlay, PictureState, WaitingCheck, WaitingGate};
+use crate::ui::video_player::controls::{PictureOverlay, PictureState, WaitingGate};
 use crate::ui::video_player::{PlayState, WeakVideoPlayer, video_frame};
 
 /// Where the media sits in the window, and its zoomed box inside that.
@@ -72,18 +72,7 @@ impl ViewerVideoLayer {
     /// Whether the clip has waited long enough for the spinner; arms a
     /// redraw for when it will have (an opening clip asks for no frames).
     fn waiting_shown(&mut self, waiting: bool, cx: &mut Context<Self>) -> bool {
-        let now = cx.background_executor().now();
-        match self.waiting.observe(waiting, now) {
-            WaitingCheck::Settled { shown } => shown,
-            WaitingCheck::Pending(wait) => {
-                let timer = cx.spawn(async move |this, cx| {
-                    cx.background_executor().timer(wait).await;
-                    let _ = this.update(cx, |_, cx| cx.notify());
-                });
-                self.waiting.arm(timer);
-                false
-            }
-        }
+        self.waiting.shown_in(waiting, cx)
     }
 }
 
@@ -103,7 +92,7 @@ impl Render for ViewerVideoLayer {
                     return Empty.into_any_element();
                 }
                 Some(player) => {
-                    waiting = matches!(player.state(), PlayState::Opening | PlayState::Buffering);
+                    waiting = matches!(player.state(), PlayState::NotOpen | PlayState::Buffering);
                     video_frame(&player)
                         .object_fit(ObjectFit::Contain)
                         .into_any_element()
@@ -117,7 +106,7 @@ impl Render for ViewerVideoLayer {
         };
         let spinner = self
             .waiting_shown(waiting, cx)
-            .then(|| PictureOverlay::new(self.open_gen, PictureState::Waiting));
+            .then(|| PictureOverlay::new(self.open_gen, PictureState::Spinner));
         div()
             .absolute()
             .left(px(geometry.origin.0))
@@ -300,7 +289,7 @@ impl QuillApp {
         };
         let geometry = self.viewer_geometry(&item, window, cx);
         let layer = self.update_viewer_layer(&item, geometry, cx);
-        let open_gen = self.viewer.open_gen as usize;
+        let open_gen = self.viewer.state.opened().get() as usize;
         div()
             .id("media-viewer-overlay")
             .occlude()
@@ -364,7 +353,7 @@ impl QuillApp {
         if let Some(player) = self.viewer.clip.player() {
             player.set_orientation(self.viewer.reorient.orientation().turns, false);
         }
-        let open_gen = self.viewer.open_gen;
+        let open_gen = self.viewer.state.opened().get();
         let layer = self
             .viewer
             .video_layer

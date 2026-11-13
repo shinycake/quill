@@ -237,7 +237,7 @@ impl QuillApp {
                 .video
                 .play_requested_within(Duration::from_secs(1), Instant::now())
                 || transport.is_playing()
-                || transport.state == PlayState::Opening;
+                || transport.state == PlayState::NotOpen;
             return video_finished(
                 transport.position,
                 duration,

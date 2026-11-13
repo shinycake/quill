@@ -8,7 +8,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::web_app_ui::helper_pipe::HelperWriter;
 use crate::ui::web_app_ui::invoice::InvoiceWatch;
 use crate::ui::web_app_ui::{
-    Awaited, MiniAppWindow, PendingOpen, PopupPurpose, RenderAction, theme_params,
+    Awaited, MiniAppWindow, PendingOpen, PopupOwner, RenderAction, theme_params,
 };
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
@@ -18,7 +18,6 @@ use quill_webview_protocol::{HostCommand, ShellEvent, decode};
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
 
 const BOT: i64 = 900;
 
@@ -73,6 +72,7 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
         settings_button: false,
         popups: Default::default(),
         popup_seq: 0,
+        launch_window: None,
         write_access: crate::ui::web_app_ui::launch_flow::WriteAccess::Idle,
         privacy_policy_url: None,
         in_attachment_menu: false,
@@ -84,9 +84,7 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
 }
 
 fn next(received: &mpsc::Receiver<HostCommand>) -> HostCommand {
-    received
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the window wrote to the helper")
+    received.recv().expect("the window wrote to the helper")
 }
 
 fn reply(received: &mpsc::Receiver<HostCommand>) -> (String, serde_json::Value) {
@@ -133,10 +131,14 @@ fn the_phone_prompt_asks_and_cancel_answers_cancelled(cx: &mut TestAppContext) {
                 .collect::<Vec<_>>(),
             [("cancel", "Cancel"), ("share", "Share")]
         );
-        assert!(matches!(
-            app.mini_apps.window.as_ref().unwrap().popups.get(&popup.id),
-            Some(PopupPurpose::Phone)
-        ));
+        assert_eq!(
+            app.mini_apps
+                .window
+                .as_ref()
+                .unwrap()
+                .popup_owner(super::PopupId::from_wire(&popup.id).unwrap()),
+            Some(PopupOwner::Phone)
+        );
         // A second request while the prompt is up is refused.
         app.handle_web_app_event(WebAppEvent::RequestPhone, cx);
         assert_eq!(reply(&received).1["status"], "cancelled");
@@ -348,7 +350,7 @@ fn a_popup_replaced_by_another_is_answered(cx: &mut TestAppContext) {
             .mini_apps
             .window
             .as_ref()
-            .map(|window| window.popups.keys().cloned().collect())
+            .map(|window| window.open_popups().iter().map(|id| id.wire()).collect())
             .unwrap_or_default();
         assert_eq!(open, std::slice::from_ref(&confirm.id));
         answer(app, &confirm.id, "cancel", cx);
@@ -357,11 +359,11 @@ fn a_popup_replaced_by_another_is_answered(cx: &mut TestAppContext) {
     });
 }
 
-/// Area C's startattach finding: the poll that answers a mini-app flow runs
-/// as the main window, so it keeps the window the flow started in and its
-/// boxes open there. The poll's own steps (no window asked) keep it.
+/// Area C's startattach finding, per window: the window an open app's flow
+/// started in is kept by that app's window, so a later flow started in
+/// another window does not take its notes and boxes.
 #[gpui_kit::test]
-fn the_mini_app_poll_keeps_the_window_its_flow_started_in(cx: &mut TestAppContext) {
+fn the_open_app_keeps_the_window_its_flow_started_in(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let window = Some(quill::ids::ChatId(12));
     app.update_in(&mut vcx, |app, main, cx| {
@@ -369,18 +371,34 @@ fn the_mini_app_poll_keeps_the_window_its_flow_started_in(cx: &mut TestAppContex
     });
     vcx.run_until_parked();
     app.update(&mut vcx, |app, cx| {
-        app.as_asked_by(window, |app| app.ensure_mini_app_poll(cx));
-        assert_eq!(app.mini_apps.from_window, window);
-        app.unasked(|app| app.ensure_mini_app_poll(cx));
-        assert_eq!(
-            app.mini_apps.from_window, window,
-            "the poll's own steps keep it"
-        );
-        app.ensure_mini_app_poll(cx);
-        assert_eq!(
-            app.mini_apps.from_window, None,
-            "a flow the main window started"
-        );
+        let _received = open_window(app, cx);
+        assert_eq!(app.mini_app_window(), None);
+        app.with_window(|window| window.launch_window = Some(quill::ids::ChatId(12)));
+        assert_eq!(app.mini_app_window(), window);
+        // A mini-app link started from another window does not move it.
+        app.as_asked_by(Some(quill::ids::ChatId(13)), |app| {
+            app.ensure_mini_app_poll(cx)
+        });
+        assert_eq!(app.mini_app_window(), window, "the app's own window");
+        app.mini_app_window_closed(quill::ids::ChatId(12));
+        assert_eq!(app.mini_app_window(), None, "its window closed");
+    });
+}
+
+/// Sweep r4-12 round 4: a launch pressed in a chat window takes that window
+/// (it rides with the open request into `WebAppPending`, see the connect
+/// test), not the main window's.
+#[gpui_kit::test]
+fn a_launch_takes_the_window_it_was_pressed_in(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, main, cx| {
+        app.open_chat_in_new_window(quill::ids::ChatId(12), main, cx)
+    });
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, _| {
+        assert_eq!(app.launch_window(), None, "the main window");
+        let pressed = app.as_asked_by(Some(quill::ids::ChatId(12)), |app| app.launch_window());
+        assert_eq!(pressed, Some(quill::ids::ChatId(12)));
     });
 }
 
@@ -406,11 +424,12 @@ fn a_write_access_answer_must_be_for_the_request_the_window_waits_on(cx: &mut Te
         // Its own answer asks the person.
         let consent = WriteAnswer::new(RequestId(5), BOT, WriteAccessResult::NeedsConsent);
         app.finish_write_access(consent, cx);
-        assert_eq!(state(app), Some(WriteAccess::Asking));
+        assert!(matches!(state(app), Some(WriteAccess::Asking { .. })));
+        let asking = state(app);
         prompt(&received);
         // A late answer does nothing while the person decides.
         app.finish_write_access(consent, cx);
-        assert_eq!(state(app), Some(WriteAccess::Asking));
+        assert_eq!(state(app), asking);
         // The grant being asked for answers only to its own request.
         app.with_window(|w| w.write_access = WriteAccess::Allowing(RequestId(7)));
         let late = WriteAnswer::new(RequestId(5), BOT, WriteAccessResult::Granted);
@@ -422,5 +441,28 @@ fn a_write_access_answer_must_be_for_the_request_the_window_waits_on(cx: &mut Te
         let (event, data) = reply(&received);
         assert_eq!(event, "write_access_requested");
         assert_eq!(data["status"], "allowed");
+    });
+}
+
+/// A `sendWebAppData` whose request left flight with no answer ends with an
+/// error note, and does not stay in the list for the life of the screen.
+#[gpui_kit::test]
+fn a_lost_data_send_ends_with_an_error(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        // A request nothing has in flight: dropped, as the stale sweep or
+        // a reconnect leaves it.
+        app.mini_apps
+            .data_sends
+            .push(quill::ids::RequestId(987_654));
+        assert!(
+            !app.poll_mini_apps(cx),
+            "the poll has nothing left to wait for"
+        );
+        assert!(app.mini_apps.data_sends.is_empty());
+        assert_eq!(
+            app.connection.note().text(),
+            quill::lang::tr(quill::lang::keys::Q_MEDIA_COULDNT_SEND_THE_APPS_DATA)
+        );
     });
 }

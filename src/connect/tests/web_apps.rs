@@ -78,6 +78,7 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             "https://bot.example/app",
             LaunchSource::InlineButton,
             &theme,
+            None,
         )
         .expect("sent");
     let sent = h.last("openWebApp");
@@ -110,11 +111,41 @@ fn open_web_app_sends_theme_and_keeps_the_launch_context() {
             bot_user_id: 42,
             chat_id: Some(5),
             source: LaunchSource::InlineButton,
+            window: None,
             launch_id: 777,
             url: "https://bot.example/app?tgWebAppData=x".into(),
         })
     );
     assert!(h.driver.session.bots.web_apps.opening().is_none());
+}
+
+/// Sweep r4-12: the window the launch was pressed in rides with the open
+/// request, so the answer opens the app there whatever pass lands it.
+#[test]
+fn the_open_answer_carries_the_window_the_launch_was_pressed_in() {
+    let mut h = Harness::ready();
+    let theme = ThemeParams::light_default();
+    let extra = h
+        .driver
+        .open_web_app(
+            ChatId(5),
+            42,
+            "https://bot.example/app",
+            LaunchSource::InlineButton,
+            &theme,
+            Some(ChatId(12)),
+        )
+        .expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"7","url":{{"@type":"webAppUrl","url":"https://bot.example/app?x","require_same_origin":false}}}}"#,
+        extra.as_extra()
+    ));
+    let Some(WebAppOpenResult::Opened { window, .. }) =
+        h.driver.session.bots.web_apps.take_open_result()
+    else {
+        panic!("not opened");
+    };
+    assert_eq!(window, Some(ChatId(12)));
 }
 
 #[test]
@@ -123,7 +154,7 @@ fn a_refused_open_reports_a_failure_and_clears_the_context() {
     let theme = ThemeParams::light_default();
     let extra = h
         .driver
-        .get_main_web_app(ChatId(5), 42, "promo", &theme)
+        .get_main_web_app(ChatId(5), 42, "promo", &theme, None)
         .expect("sent");
     assert_eq!(h.last("getMainWebApp")["start_parameter"], "promo");
     h.ingest(&format!(
@@ -155,11 +186,12 @@ fn only_the_latest_launch_asked_opens() {
             "https://bot.example/a",
             LaunchSource::InlineButton,
             &theme,
+            None,
         )
         .expect("sent");
     let second = h
         .driver
-        .get_web_app_url(ChatId(5), 43, "https://bot.example/b", "Open", &theme)
+        .get_web_app_url(ChatId(5), 43, "https://bot.example/b", "Open", &theme, None)
         .expect("sent");
     assert_eq!(
         h.driver
@@ -209,12 +241,13 @@ fn a_refused_second_launch_leaves_the_first_alone() {
             "https://bot.example/a",
             LaunchSource::InlineButton,
             &theme,
+            None,
         )
         .expect("sent");
     h.recorder.refuse_sends(true);
     assert!(
         h.driver
-            .get_web_app_url(ChatId(5), 43, "https://bot.example/b", "Open", &theme)
+            .get_web_app_url(ChatId(5), 43, "https://bot.example/b", "Open", &theme, None)
             .is_err()
     );
     h.recorder.refuse_sends(false);
@@ -241,7 +274,14 @@ fn keyboard_button_apps_use_get_web_app_url_and_may_send_data() {
     let theme = ThemeParams::light_default();
     let extra = h
         .driver
-        .get_web_app_url(ChatId(5), 42, "https://bot.example/form", "Order", &theme)
+        .get_web_app_url(
+            ChatId(5),
+            42,
+            "https://bot.example/form",
+            "Order",
+            &theme,
+            None,
+        )
         .expect("sent");
     let sent = h.last("getWebAppUrl");
     assert!(sent.get("chat_id").is_none());
@@ -604,7 +644,7 @@ fn named_app_links_search_first() {
     assert!(app.request_write_access);
     let theme = ThemeParams::light_default();
     h.driver
-        .get_web_app_link_url(ChatId(5), 42, "shop", "ref", true, &theme)
+        .get_web_app_link_url(ChatId(5), 42, ("shop", "ref"), true, &theme, None)
         .expect("sent");
     let sent = h.last("getWebAppLinkUrl");
     assert_eq!(sent["allow_write_access"], true);
@@ -654,7 +694,14 @@ fn attachment_menu_launch_sends_the_chat_context() {
     let mut h = Harness::ready();
     let theme = ThemeParams::light_default();
     h.driver
-        .open_web_app(ChatId(5), 42, "", LaunchSource::AttachmentMenu, &theme)
+        .open_web_app(
+            ChatId(5),
+            42,
+            "",
+            LaunchSource::AttachmentMenu,
+            &theme,
+            None,
+        )
         .expect("sent");
     let sent = h.last("openWebApp");
     assert_eq!(sent["chat_id"], 5);
@@ -772,6 +819,7 @@ fn a_launch_dropped_by_a_switch_opens_nothing_and_is_closed() {
             "https://bot.example/app",
             LaunchSource::InlineButton,
             &theme,
+            None,
         )
         .expect("sent");
     h.driver.forget_web_app_launches();
@@ -790,7 +838,7 @@ fn an_unshown_answer_is_closed_on_a_switch() {
     let theme = ThemeParams::light_default();
     let extra = h
         .driver
-        .open_web_app(ChatId(5), 42, "", LaunchSource::InlineButton, &theme)
+        .open_web_app(ChatId(5), 42, "", LaunchSource::InlineButton, &theme, None)
         .expect("sent");
     h.ingest(&format!(
         r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"778","url":{{"@type":"webAppUrl","url":"https://bot.example/app?x","require_same_origin":false}}}}"#,
@@ -809,7 +857,7 @@ fn a_new_launch_closes_the_app_of_an_unshown_answer() {
     let theme = ThemeParams::light_default();
     let first = h
         .driver
-        .open_web_app(ChatId(5), 42, "", LaunchSource::InlineButton, &theme)
+        .open_web_app(ChatId(5), 42, "", LaunchSource::InlineButton, &theme, None)
         .expect("sent");
     h.ingest(&format!(
         r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"779","url":{{"@type":"webAppUrl","url":"https://bot.example/a","require_same_origin":false}}}}"#,
@@ -820,7 +868,7 @@ fn a_new_launch_closes_the_app_of_an_unshown_answer() {
         Some(WebAppOpenResult::Opened { launch_id: 779, .. })
     ));
     h.driver
-        .open_web_app(ChatId(5), 43, "", LaunchSource::InlineButton, &theme)
+        .open_web_app(ChatId(5), 43, "", LaunchSource::InlineButton, &theme, None)
         .expect("sent");
     assert_eq!(h.driver.session.bots.web_apps.open_result().cloned(), None);
     assert_eq!(h.driver.session.bots.web_apps.dropped_launches, vec![779]);
