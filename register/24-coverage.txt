@@ -36,3 +36,14 @@ src/ui/window_control.rs 685 read
 src/ui/window_chrome.rs 84 read
 src/ui/window_frame.rs 334 read
 src/ui/window_keys.rs 147 read
+src/update_install.rs 977 read
+src/update_install/swap.rs 623 read
+src/update_install/claim.rs 476 read
+src/update_install/parent.rs 103 read
+src/update_install/manifest.rs 93 read
+src/update_install/staged.rs 574 read
+src/update_install/layout.rs 238 read
+src/update_install/bundle.rs 319 read
+src/update_install/fetch.rs 189 read
+src/update_install/macos.rs 322 read
+src/update_install/macos/codesign.rs 282 read
