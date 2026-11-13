@@ -1239,7 +1239,7 @@ mod tests {
         session
             .settings
             .block_change_refused(Some(RequestId(999)), 70, true, "refused".into());
-        assert!(session.settings.blocked_senders.is_outdated());
+        assert!(session.settings.blocked_senders.waits_for(page));
         assert_eq!(session.settings.blocked_ids(), &[61]);
     }
 

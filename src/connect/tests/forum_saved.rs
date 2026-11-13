@@ -211,8 +211,10 @@ fn topic_icons_load_once_and_create_edit_carry_the_icon() {
     let first = f.driver.load_forum_topic_icons().unwrap();
     assert!(first.is_some());
     assert_eq!(f.sent("getForumTopicDefaultIcons").len(), 1);
-    // Deduped while in flight: the second asker waits on the first's request.
-    assert_eq!(f.driver.load_forum_topic_icons().unwrap(), first);
+    // Deduped while in flight: the second asker sends nothing and waits on
+    // the fetch's stage, which holds the first's request.
+    assert_eq!(f.driver.load_forum_topic_icons().unwrap(), None);
+    assert_eq!(f.driver.session.threads.forum_topic_icons.request(), first);
     assert_eq!(f.sent("getForumTopicDefaultIcons").len(), 1);
 
     f.driver

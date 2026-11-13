@@ -291,7 +291,8 @@ fn terminate_session_error_surfaces_honestly() {
 
 /// Sweep r4-03 round 2 (item 11): a terminate refused while the refetch of
 /// the list is out does not end that refetch; its answer still lands and
-/// the refusal is told as a toast.
+/// the refusal is told on the sessions note (r4-05: a change's refusal is its
+/// note's line, no longer a toast).
 #[test]
 fn a_refused_terminate_does_not_end_the_refetch_out() {
     let (mut session, sink) = session();
@@ -301,6 +302,7 @@ fn a_refused_terminate_does_not_end_the_refetch_out() {
         None,
     );
     session.settings.sessions_op.begin(terminate);
+    session.settings.sessions_note.begin(terminate);
     let refetch = session.request(RequestPurpose::GetActiveSessions, None);
     session.settings.sessions.begin_with(refetch);
     apply_json(
@@ -313,7 +315,7 @@ fn a_refused_terminate_does_not_end_the_refetch_out() {
         ),
     );
     assert!(session.settings.sessions.waits_for(refetch));
-    assert!(!session.chats_state.chat_action_error.is_empty());
+    assert!(session.settings.sessions_note.line().is_some());
     apply_json(
         &mut session,
         &seq,

@@ -599,10 +599,10 @@ impl SettingsState {
         }
     }
 
-    /// A block or unblock of `user_id` was refused. A sent one (`request`
-    /// is known) takes its optimistic change back and says why; a page in
-    /// flight, its own stand-in or one asked meanwhile, is asked again so
-    /// the list matches the server. One that never went out changed nothing.
+    /// A block or unblock of `user_id` was refused: its note says why. A
+    /// sent one (`request` is known) takes its optimistic change back, and a
+    /// page in flight keeps its place. One that never went out changed
+    /// nothing.
     pub fn block_change_refused(
         &mut self,
         request: Option<RequestId>,
@@ -614,10 +614,9 @@ impl SettingsState {
         if request.is_none() {
             return;
         }
+        // Only the optimistic change goes back; a page fetch in flight
+        // keeps its place.
         self.undo_block_change(user_id, block);
-        if self.blocked_senders.is_loading() {
-            self.blocked_senders.outdate();
-        }
     }
 
     pub fn export_links(&self) -> impl Iterator<Item = &crate::export::handle::WorkerLink> {
