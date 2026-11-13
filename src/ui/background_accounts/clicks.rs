@@ -111,7 +111,7 @@ impl QuillApp {
                     if let Some(live) = self
                         .background
                         .client_mut(&account)
-                        .and_then(|client| client.live.as_mut())
+                        .and_then(|client| client.live_mut())
                     {
                         let _ = live.driver.mark_chat_as_read(click.chat_id);
                     }

@@ -15,24 +15,49 @@ use std::collections::VecDeque;
 /// How many refused requests the registry remembers.
 const FAILURES_KEPT: usize = 64;
 
+/// The reason shown for a request whose failure the registry forgot.
+const FORGOTTEN_FAILURE: &str = "REQUEST_NOT_CONFIRMED";
+
 /// The last requests TDLib refused, with the reason, newest last.
 #[derive(Debug, Default)]
-pub struct Failures(VecDeque<(u64, String)>);
+pub struct Failures {
+    kept: VecDeque<(u64, String)>,
+    /// The ids whose failure was forgotten to make room: such a request,
+    /// gone with no failure on record, may have failed, so it does not read
+    /// as done. Failures are forgotten in failure order, not id order, so
+    /// the ids themselves are kept (a mark at the highest would also flag an
+    /// older request that succeeded). The lowest are let go past
+    /// `FORGOTTEN_KEPT`: a box that old is long closed.
+    forgotten: std::collections::BTreeSet<u64>,
+}
+
+/// How many forgotten failures' ids are remembered.
+const FORGOTTEN_KEPT: usize = 1024;
 
 impl RequestRegistry {
     /// Remember that request `id` was refused.
     pub fn record_failure(&mut self, id: RequestId, reason: String) {
-        let kept = &mut self.failures.0;
-        if kept.len() >= FAILURES_KEPT {
-            kept.pop_front();
+        let failures = &mut self.failures;
+        if failures.kept.len() >= FAILURES_KEPT
+            && let Some((forgotten, _)) = failures.kept.pop_front()
+        {
+            failures.forgotten.insert(forgotten);
+            if failures.forgotten.len() > FORGOTTEN_KEPT {
+                failures.forgotten.pop_first();
+            }
         }
-        kept.push_back((id.0, reason));
+        failures.kept.push_back((id.0, reason));
+    }
+
+    /// Request `id` is gone, and its failure may have been forgotten.
+    fn failure_forgotten(&self, id: RequestId) -> bool {
+        self.failures.forgotten.contains(&id.0) && self.failure(id).is_none()
     }
 
     /// Why request `id` was refused, while the registry still remembers.
     pub fn failure(&self, id: RequestId) -> Option<&str> {
         self.failures
-            .0
+            .kept
             .iter()
             .rev()
             .find(|(key, _)| *key == id.0)
@@ -86,6 +111,14 @@ impl Submit {
                 }
                 if ids.iter().any(|id| requests.get(*id).is_some()) {
                     SubmitView::Sending
+                } else if ids
+                    .iter()
+                    .any(|id| requests.get(*id).is_none() && requests.failure_forgotten(*id))
+                {
+                    // Gone, with no failure on record, and older than the
+                    // failures the registry let go of: it may have failed
+                    // while nobody looked, so the box keeps its form.
+                    SubmitView::Failed(FORGOTTEN_FAILURE.to_string())
                 } else {
                     SubmitView::Done
                 }
@@ -174,5 +207,42 @@ mod tests {
         }
         assert_eq!(registry.failure(RequestId(0)), None);
         assert_eq!(registry.failure(RequestId(199)), Some("e199"));
+    }
+
+    /// 09-003: a failure the registry forgot before the box looked does not
+    /// read as saved.
+    #[test]
+    fn a_forgotten_failure_does_not_read_as_done() {
+        let mut registry = RequestRegistry::default();
+        let sent = Submit::sent(vec![RequestId(0)]);
+        // Nothing failed yet and the request is gone: done.
+        assert_eq!(sent.view(Some(&registry)), SubmitView::Done);
+        for id in 0..200 {
+            registry.record_failure(RequestId(id), format!("e{id}"));
+        }
+        assert_eq!(
+            sent.view(Some(&registry)),
+            SubmitView::Failed(FORGOTTEN_FAILURE.to_string())
+        );
+        // A newer request that is gone without a failure still reads done.
+        let newer = Submit::sent(vec![RequestId(500)]);
+        assert_eq!(newer.view(Some(&registry)), SubmitView::Done);
+    }
+
+    /// An older request that was confirmed does not read as failed because
+    /// newer failures pushed the registry's memory past its id.
+    #[test]
+    fn newer_failures_do_not_flag_an_older_confirmed_request() {
+        let mut registry = RequestRegistry::default();
+        let confirmed = Submit::sent(vec![RequestId(5)]);
+        for id in 1_000..1_200 {
+            registry.record_failure(RequestId(id), format!("e{id}"));
+        }
+        assert_eq!(confirmed.view(Some(&registry)), SubmitView::Done);
+        let lost = Submit::sent(vec![RequestId(1_000)]);
+        assert_eq!(
+            lost.view(Some(&registry)),
+            SubmitView::Failed(FORGOTTEN_FAILURE.to_string())
+        );
     }
 }

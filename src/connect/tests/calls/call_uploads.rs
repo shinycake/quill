@@ -35,7 +35,7 @@ fn the_call_log_goes_out_once_and_a_failure_offers_it_again() {
         &answer(retry, r#"{"@type":"ok","@extra":"EXTRA"}"#),
     );
     let summary = driver.session.calls.summary.as_ref().expect("summary");
-    assert_eq!(summary.log, CallUpload::Sent);
+    assert_eq!(summary.log, CallUpload::Uploaded);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

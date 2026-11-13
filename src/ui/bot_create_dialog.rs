@@ -17,8 +17,6 @@ use quill::lang::{keys, tr, tr_with};
 use quill::owned_bots::{self, NAME_MAX, UsernameProblem};
 use quill::state::{DeepLinkAction, ManagedBotShare};
 use quill::telegram::envelope::{RequestManagedBotSpec, UsernameCheckResult};
-use std::cell::Cell;
-use std::rc::Rc;
 use std::time::Duration;
 
 /// Wait after the last keystroke before asking the server.
@@ -32,9 +30,19 @@ pub(super) struct BotCreateDialog {
     share: Option<ManagedBotShare>,
     name: Entity<InputState>,
     username: Entity<InputState>,
-    /// Counts keystrokes, so only the last one starts a check.
-    version: u64,
+    /// The pause before the availability check, if one is running. Each
+    /// keystroke replaces it, so only the last one starts a check, and
+    /// closing the box cancels it.
+    check: UsernameCheck,
     _subscription: Subscription,
+}
+
+/// Where the debounce of the username check stands.
+enum UsernameCheck {
+    /// No check is due (nothing typed, or the typed name has a problem).
+    Idle,
+    /// The pause after the last keystroke; the check starts when it ends.
+    Waiting { _timer: Task<()> },
 }
 
 impl QuillApp {
@@ -130,9 +138,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // An earlier createBot may still be in flight (its box was closed
-        // while "Creating..."). Resetting would bump the generation and its
-        // answer would no longer match, so it is never reported; a new box
-        // would adopt that submission and its own share would never be
+        // while "Creating..."). Resetting would drop the request the stage
+        // waits for, so its answer would never be reported, and a new box
+        // would adopt that submission, so its own share would never be
         // answered. So a second press waits: `drain_bot_create` reports the
         // first answer, and the press says so.
         let creating = self
@@ -172,7 +180,7 @@ impl QuillApp {
             share,
             name,
             username: username.clone(),
-            version: 0,
+            check: UsernameCheck::Idle,
             _subscription: subscription,
         });
         self.open_box(DialogKind::BotCreate);
@@ -198,26 +206,25 @@ impl QuillApp {
         let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() else {
             return;
         };
-        dialog.version += 1;
-        let version = dialog.version;
+        dialog.check = UsernameCheck::Idle;
         cx.notify();
         if owned_bots::username_problem(&typed).is_some() {
             return;
         }
-        self.spawn_screen(cx, async move |this, cx| {
+        let timer = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(CHECK_DELAY).await;
-            let _ = this.update(cx, |this, cx| this.check_bot_username(version, cx));
-        })
-        .detach();
+            let _ = this.update(cx, |this, cx| this.check_bot_username(cx));
+        });
+        if let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() {
+            dialog.check = UsernameCheck::Waiting { _timer: timer };
+        }
     }
 
-    fn check_bot_username(&mut self, version: u64, cx: &mut Context<Self>) {
-        let Some(dialog) = self.dialogs.bot_create_dialog.as_ref() else {
+    fn check_bot_username(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() else {
             return;
         };
-        if dialog.version != version {
-            return;
-        }
+        dialog.check = UsernameCheck::Idle;
         let full = owned_bots::full_username(dialog.username.read(cx).value().as_ref());
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.check_new_bot_username(&full);
@@ -487,16 +494,10 @@ impl QuillApp {
                 .child(body)
                 .child(footer)
                 .into_any_element();
-            let content = Rc::new(Cell::new(Some(content)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::CREATE_BOT_TITLE)))
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |slot, _, _| {
-                        let body = content.take().unwrap_or_else(|| div().into_any_element());
-                        slot.child(body)
-                    },
-                ))
+                .content(crate::ui::shell::one_shot_dialog_content(content))
                 .on_close(on_close)
         })
     }

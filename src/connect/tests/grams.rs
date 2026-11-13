@@ -86,7 +86,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert!(grams.open && grams.load == crate::gift_market::PageLoad::Ready);
+    assert!(grams.is_open() && grams.load == crate::gift_market::PageLoad::Ready);
     assert_eq!(grams.rows.len(), 11);
     assert_eq!(grams.balance_nano, Some(12_750_000_000));
     assert_eq!(
@@ -243,4 +243,113 @@ fn a_failed_probe_is_a_stage_and_is_asked_again_on_the_next_open() {
         "the first try's answer is dropped"
     );
     assert_eq!(grams.balance_nano, None);
+}
+
+/// Sweep r4-10 round 4: Retry after a failed *next* page asks that page
+/// again and keeps the rows; after a failed first page it starts over.
+#[test]
+fn retry_after_a_failed_next_page_keeps_the_rows() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: String| {
+        driver
+            .ingest(copy_and_parse(&json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let refused = json!({"@type": "error", "code": 400, "message": "BAD_REQUEST"});
+
+    driver.open_grams(false).unwrap();
+    let first = sent_request(&recorder, "getTonTransactions");
+    // A first page that fails has no rows: Retry starts the tab over.
+    ingest(&mut driver, answer(&first["@extra"], refused.clone()));
+    assert!(driver.session.payments.hub.grams.load.error().is_some());
+    assert!(driver.retry_grams().unwrap().is_some());
+    let again = sent_request(&recorder, "getTonTransactions");
+    assert_eq!(again["offset"], "");
+    ingest(
+        &mut driver,
+        answer(
+            &again["@extra"],
+            serde_json::from_str::<Value>(FIXTURE).unwrap(),
+        ),
+    );
+    let loaded = driver.session.payments.hub.grams.rows.len();
+    assert_eq!(loaded, 11);
+    assert!(driver.retry_grams().unwrap().is_none(), "nothing failed");
+
+    // The next page fails: Retry asks it again and the rows stay.
+    driver.fetch_more_grams().unwrap();
+    let more = sent_request(&recorder, "getTonTransactions");
+    assert_eq!(more["offset"], "page-2");
+    ingest(&mut driver, answer(&more["@extra"], refused));
+    assert!(driver.session.payments.hub.grams.load.error().is_some());
+    assert!(driver.retry_grams().unwrap().is_some());
+    let retried = sent_request(&recorder, "getTonTransactions");
+    assert_eq!(retried["offset"], "page-2");
+    let grams = &driver.session.payments.hub.grams;
+    assert_eq!(grams.rows.len(), loaded, "the loaded rows are kept");
+    assert!(grams.load.is_loading());
+}
+
+/// Sweep r4-04 fix 3: the revenue request has a stage. A failure says so, a
+/// reopen's answer is matched to the open that asked, and an older open's
+/// late answer lands nowhere.
+#[test]
+fn the_revenue_request_is_matched_and_its_failure_is_drawn() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: String| {
+        driver
+            .ingest(copy_and_parse(&json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let stats = |extra: &Value, available: &str| {
+        answer(
+            extra,
+            json!({"@type": "gramRevenueStatistics",
+                   "revenue_by_day_graph": {"@type": "statisticalGraphError", "error_message": ""},
+                   "status": {"@type": "gramRevenueStatus", "total_amount": "1", "balance_amount": "1",
+                              "available_amount": available, "withdrawal_enabled": true},
+                   "usd_rate": 0.0}),
+        )
+    };
+    driver.open_grams(false).unwrap();
+    let first = sent_request(&recorder, "getGramRevenueStatistics");
+    driver.open_grams(false).unwrap();
+    let revenues = sent_of(&recorder, "getGramRevenueStatistics");
+    assert_eq!(revenues.len(), 2);
+    let second = revenues[1].clone();
+    // The older open's answer is not the one the section waits for.
+    ingest(&mut driver, stats(&first["@extra"], "1000000000"));
+    assert!(driver.session.payments.hub.grams.withdrawable().is_none());
+    ingest(&mut driver, stats(&second["@extra"], "2000000000"));
+    assert_eq!(
+        driver
+            .session
+            .payments
+            .hub
+            .grams
+            .withdrawable()
+            .map(|r| r.available_nano),
+        Some(2_000_000_000)
+    );
+    // A reopen whose request fails says so.
+    driver.open_grams(false).unwrap();
+    let third = sent_of(&recorder, "getGramRevenueStatistics")[2].clone();
+    ingest(
+        &mut driver,
+        answer(
+            &third["@extra"],
+            json!({"@type": "error", "code": 500, "message": "oops"}),
+        ),
+    );
+    assert!(driver.session.payments.hub.grams.revenue.error().is_some());
 }

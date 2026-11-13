@@ -82,7 +82,7 @@ impl QuillApp {
                     .session
                     .stickers
                     .emoji
-                    .upgraded_gift_statuses
+                    .upgraded_gift_statuses()
                     .iter()
                     .any(|s| {
                         s.gift

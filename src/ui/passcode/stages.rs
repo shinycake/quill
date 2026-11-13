@@ -1,9 +1,54 @@
-//! The passcode UI's two small stages: the open Settings box and the
-//! system-prompt unlock switch, each one value with its data inside.
+//! The passcode UI's small stages: the open Settings box, the
+//! system-prompt unlock switch, the running job and the auto-lock watcher,
+//! each one value with its data inside.
 #![deny(clippy::indexing_slicing)]
 
 use super::PasscodeView;
+use gpui_kit::Task;
 use quill::passcode::MasterKey;
+use std::time::{Duration, Instant};
+
+/// How long the wrong-passcode shake runs.
+const SHAKE_MS: u64 = 420;
+
+/// The wrong-passcode shake: still, or running since an instant. A frame
+/// that finds it over settles it (`settle`), so no stale start is left.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Shake {
+    Still,
+    Running { since: Instant },
+}
+
+impl Shake {
+    pub(super) fn start(&mut self) {
+        *self = Self::Running {
+            since: Instant::now(),
+        };
+    }
+
+    /// A shake that ran its time is over.
+    pub(super) fn settle(&mut self) {
+        if !self.running() {
+            *self = Self::Still;
+        }
+    }
+
+    pub(super) fn running(self) -> bool {
+        matches!(self, Self::Running { since } if since.elapsed() < Duration::from_millis(SHAKE_MS))
+    }
+
+    /// The field's horizontal offset in px.
+    pub(super) fn offset(self) -> f32 {
+        let Self::Running { since } = self else {
+            return 0.0;
+        };
+        let t = since.elapsed().as_millis() as f32 / SHAKE_MS as f32;
+        if t >= 1.0 {
+            return 0.0;
+        }
+        (t * std::f32::consts::PI * 6.0).sin() * 12.0 * (1.0 - t)
+    }
+}
 
 /// Touch ID / system-prompt unlock: off, or on with the master key kept
 /// while locked so the prompt can unlock again without the passcode
@@ -71,6 +116,128 @@ impl LockState {
             },
             (Self::Locked { locks }, false) => Self::Unlocked { locks },
             (same, _) => same,
+        }
+    }
+}
+
+/// The auto-lock watcher (`spawn_passcode_tick`): not started, or running
+/// as the task this value holds, so the app going away drops it.
+#[derive(Default)]
+pub(crate) enum AutoLock {
+    #[default]
+    Stopped,
+    Watching {
+        _task: Task<()>,
+    },
+}
+
+/// A slow passcode job (PBKDF2, the system prompt). It belongs to the job,
+/// not to the box: closing the box leaves it running, so a lock asked
+/// meanwhile still waits for the answer (a Turn off cannot land under it).
+/// The stage holds the task that waits for the answer, so the answer is
+/// always the held job's; replacing the stage drops the wait.
+#[derive(Default)]
+pub(crate) enum PasscodeJob {
+    #[default]
+    Idle,
+    Running {
+        kind: JobKind,
+        fate: JobFate,
+        task: Task<()>,
+    },
+}
+
+/// What a running job is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum JobKind {
+    /// PBKDF2 on a background thread: it must answer, its result sets or
+    /// clears the master key.
+    Hashing,
+    /// The OS prompt (Touch ID, system password): the user can leave it by
+    /// typing the passcode instead.
+    SystemPrompt,
+}
+
+/// What happens with a running job's answer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum JobFate {
+    /// The answer lands.
+    Counts,
+    /// A lock was asked while it ran: it lands with the answer.
+    ThenLock,
+    /// The lock screen's Log out ran meanwhile: the job's thread still
+    /// runs, and its answer is dropped (`run_passcode_job`; a system prompt
+    /// is left at once instead, see `PasscodeJob::cancel`).
+    Cancelled,
+}
+
+impl PasscodeJob {
+    pub(crate) fn is_running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+
+    /// A passcode check is out: it cannot be left, and the unlock waits.
+    pub(crate) fn is_hashing(&self) -> bool {
+        matches!(
+            self,
+            Self::Running {
+                kind: JobKind::Hashing,
+                ..
+            }
+        )
+    }
+
+    /// The job ends with its answer. Returns what the answer does; an idle
+    /// stage answers like a job that counts.
+    pub(crate) fn finish(&mut self) -> JobFate {
+        match std::mem::take(self) {
+            Self::Idle => JobFate::Counts,
+            Self::Running { fate, task, .. } => {
+                // The task is the caller: let it finish the update it is in.
+                task.detach();
+                fate
+            }
+        }
+    }
+
+    /// Leave a system prompt that is still out (the user types the
+    /// passcode instead): its task and channel are dropped, so a late
+    /// answer lands nowhere. A passcode check cannot be left.
+    pub(crate) fn leave_system_prompt(&mut self) -> bool {
+        let leaves = matches!(
+            self,
+            Self::Running {
+                kind: JobKind::SystemPrompt,
+                fate: JobFate::Counts,
+                ..
+            }
+        );
+        if leaves {
+            *self = Self::Idle;
+        }
+        leaves
+    }
+
+    /// A lock asked while the job runs lands with its answer.
+    pub(crate) fn hold_lock(&mut self) {
+        if let Self::Running { fate, .. } = self
+            && *fate == JobFate::Counts
+        {
+            *fate = JobFate::ThenLock;
+        }
+    }
+
+    /// Log out from the lock screen: a system prompt is left at once (its
+    /// wait goes, and the OS prompt with it); a passcode check still runs
+    /// and its answer is dropped, which `Cancelled` records.
+    pub(crate) fn cancel(&mut self) {
+        match self {
+            Self::Running {
+                kind: JobKind::SystemPrompt,
+                ..
+            } => *self = Self::Idle,
+            Self::Running { fate, .. } => *fate = JobFate::Cancelled,
+            Self::Idle => {}
         }
     }
 }

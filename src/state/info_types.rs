@@ -508,9 +508,14 @@ pub enum AdminListFetch {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollVotersFetch {
     /// The first page is out as this request; only its answer or error
-    /// leaves the stage (an update of the poll drops the entry, and the
-    /// late answer with it).
+    /// leaves the stage (an update of the poll makes the entry `Stale`, and
+    /// the late answer is dropped with it).
     Loading(RequestId),
+    /// The poll changed (`updatePoll`: counts or options moved) after this
+    /// list was asked or loaded: what it held is dropped, and the dialog
+    /// that shows it asks again. A send that cannot go ends in `Failed`, so
+    /// nothing asks forever.
+    Stale,
     Loaded {
         voters: Vec<MessageSender>,
         total_count: i32,
@@ -936,6 +941,10 @@ pub enum DeepLinkState {
     ChatReady {
         chat_id: ChatId,
         action: DeepLinkAction,
+        /// The follow-up request that answered: what the open carries, so
+        /// work queued by one flow (the Premium `/start`) is never done for
+        /// another flow's chat.
+        request: RequestId,
     },
     /// Info or error text for the UI to show in a dialog, consumed once.
     ShowText(String),

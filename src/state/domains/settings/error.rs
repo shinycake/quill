@@ -109,24 +109,25 @@ impl Session {
                     self.settings.read_date.request_failed(pending.id);
                 }
             }
-            Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
-                generation,
-                ..
-            })) => {
-                // A page of an older list failing says nothing about this one.
-                if generation == self.settings.blocked_generation {
-                    self.settings
-                        .blocked_senders
-                        .fail(sessions_error_line("load the blocked users", err));
-                }
+            Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { .. })) => {
+                // A page that no longer waits (replaced by a newer ask)
+                // says nothing about the list.
+                self.settings.blocked_senders.failed(
+                    pending.map(|p| p.id),
+                    sessions_error_line("load the blocked users", err),
+                    false,
+                );
             }
-            Some(RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { .. })) => {
-                // Drop the optimistic list; the next fetch
-                // restores the truth.
-                self.settings.restart_blocked_list();
-                self.settings
-                    .blocked_senders
-                    .fail_dropping_data(sessions_error_line("change the block list", err));
+            Some(RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
+                user_id,
+                block,
+            })) => {
+                self.settings.block_change_refused(
+                    pending.map(|p| p.id),
+                    user_id,
+                    block,
+                    sessions_error_line("change the block list", err),
+                );
             }
             // Phase S2: a failed `getStorageStatistics` clears the
             // in-flight flag so the overlay shows "No storage data
@@ -153,9 +154,10 @@ impl Session {
                         .settle(asked.id, crate::auth::DeviceLoginResult::Failed);
                 }
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .sessions
-                    .fail(sessions_error_line("link the device", err));
+                self.settings.sessions_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("link the device", err),
+                );
             }
             Some(
                 purpose @ (RequestPurpose::GetProxies
@@ -198,9 +200,10 @@ impl Session {
                 | RequestPurpose::TerminateAllOtherSessions,
             ) => {
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .sessions
-                    .fail(sessions_error_line("terminate the session", err));
+                self.settings.sessions_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("terminate the session", err),
+                );
             }
             // Slice A4: a refused session toggle surfaces an honest
             // classified error and leaves the list untouched (the
@@ -210,9 +213,10 @@ impl Session {
                 | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. }),
             ) => {
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .sessions
-                    .fail(sessions_error_line("change the session setting", err));
+                self.settings.sessions_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("change the session setting", err),
+                );
             }
             // Slice A7: a refused account-lifecycle op (TTL fetch
             // or set, account deletion) clears the in-flight
@@ -242,16 +246,21 @@ impl Session {
                 );
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })) => {
-                self.settings.account_ttl.failed(
+                self.settings
+                    .account_write
+                    .refused(extra, sessions_error_line("update the account", err));
+            }
+            Some(RequestPurpose::GetSupportUser) => {
+                self.settings.support_user.failed(
                     extra,
-                    sessions_error_line("update the account", err),
+                    sessions_error_line("reach support", err),
                     false,
                 );
             }
             Some(RequestPurpose::DeleteAccount) => {
                 self.settings
-                    .account_delete
-                    .fail(sessions_error_line("update the account", err));
+                    .account_write
+                    .refused(extra, sessions_error_line("update the account", err));
             }
             // A refused saved-sound list is not asked for again by itself;
             // the next change of the list does.
@@ -283,9 +292,10 @@ impl Session {
                 | RequestPurpose::DisconnectAllWebsites,
             ) => {
                 self.settings.websites_op.failed(pending.map(|p| p.id));
-                self.settings
-                    .connected_websites
-                    .fail(sessions_error_line("disconnect the website", err));
+                self.settings.websites_note.refused(
+                    pending.map(|p| p.id),
+                    sessions_error_line("disconnect the website", err),
+                );
             }
             _ => {}
         }

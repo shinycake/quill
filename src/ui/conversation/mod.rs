@@ -23,7 +23,7 @@ use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::poll::chat_allows_polls;
 use quill::state::{
-    ChatSearchJump, ChatSummary, HistoryMessage, InfoPanelTarget, OutboxReceipt, Session,
+    ChatSearchJump, ChatSummary, HistoryMessage, InfoPanelTarget, OutboxReceiptView, Session,
 };
 use quill::subsection_tabs::SubsectionTabsMode;
 use quill::telegram::client::copy_and_parse;

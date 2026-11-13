@@ -16,7 +16,7 @@ use quill::state::RedrawNeed;
 
 pub(super) fn ended_note(progress: &AccountProgress) -> String {
     match &progress.stage {
-        AccountStage::Finished(summary) => tr_with(
+        Some(AccountStage::Finished(summary)) => tr_with(
             keys::Q_OPS_YOUR_DATA_WAS_EXPORTED_TO,
             &[("display", &(summary.folder.display()).to_string())],
         ),
@@ -87,7 +87,7 @@ impl QuillApp {
         if let Some(detail) = progress.detail() {
             body = body.child(div().text_xs().text_color(muted).child(detail));
         }
-        if let AccountStage::Finished(summary) = &progress.stage {
+        if let Some(AccountStage::Finished(summary)) = &progress.stage {
             let mut notes = Vec::new();
             if summary.protected_chats > 0 {
                 notes.push(tr_with(
@@ -123,7 +123,7 @@ impl QuillApp {
         }
         let mut footer = div().flex().justify_end().gap_2();
         if settled {
-            if matches!(progress.stage, AccountStage::Finished(_)) {
+            if matches!(progress.stage, Some(AccountStage::Finished(_))) {
                 footer = footer.child(
                     Button::new("account-export-show")
                         .label(tr(keys::EXPORT_DONE))

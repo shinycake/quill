@@ -126,35 +126,87 @@ pub(crate) enum Driver {
         id: u64,
         _task: gpui_kit::Task<()>,
         waiting: std::collections::VecDeque<quill::agent::ui_driver::bridge::Pending>,
+        /// A send the composer handed to the agent path while this command
+        /// injected input (`agent_driver_send`), until the command's task
+        /// takes it. It carries the screen it was built on: the command
+        /// takes it only while that screen is still its own (07-026). The
+        /// next command's stage starts with none.
+        sent: Option<HeldSend>,
     },
 }
+
+/// A send built under the driver, with the screen it was built on. Boxed:
+/// `QuillApp` is held by value on the main thread's stack.
+pub(super) type HeldSend = Box<(
+    super::on_screen::ScreenEpoch,
+    quill::agent::ui_driver::bridge::UiSend,
+)>;
 
 /// The app's side of agent access: the task that wakes the UI for agent
 /// state and requests (agents drive whichever account is on screen), a
 /// send handed to the agent path, and the input commands in line. A
 /// `QuillApp` field (`agent_bridge`).
 pub(crate) struct AgentBridge {
-    /// A send the composer handed to the agent path while the UI driver
-    /// injected input (`agent_driver_send`), until the task picks it up.
-    /// The send carries the screen it was built on: a command takes it
-    /// only while that screen is still its own (07-026).
-    /// Boxed: `QuillApp` is held by value on the main thread's stack.
-    pub(super) ui_send: Option<
-        Box<(
-            super::on_screen::ScreenEpoch,
-            quill::agent::ui_driver::bridge::UiSend,
-        )>,
-    >,
     /// The input command that runs, and those waiting behind it.
     pub(super) driver: Driver,
+    /// The read commands (a tree, a screenshot) in flight.
+    pub(super) reads: Reads,
+    /// The task that wakes the UI for agent state; dropping the bridge
+    /// (the app going away) ends it.
+    _wake: gpui_kit::Task<()>,
+}
+
+/// The read commands in flight, each under its request id. A read holds no
+/// stage of its own, so its task lives here until it has answered (or the
+/// app goes away and drops them with their agents' tool calls).
+#[derive(Default)]
+pub(crate) struct Reads(std::collections::HashMap<u64, gpui_kit::Task<()>>);
+
+impl Reads {
+    /// The read `id` runs as `task`.
+    pub(super) fn hold(&mut self, id: u64, task: gpui_kit::Task<()>) {
+        self.0.insert(id, task);
+    }
+
+    /// The read `id` answered: its task goes.
+    pub(super) fn answered(&mut self, id: u64) {
+        self.0.remove(&id);
+    }
+
+    /// The reads in flight.
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 impl AgentBridge {
+    /// The composer handed a send to the agent path: it waits in the
+    /// command that is running, and only there. `false` when no command
+    /// runs (nothing could take it).
+    pub(super) fn hand_over_send(&mut self, send: HeldSend) -> bool {
+        match &mut self.driver {
+            Driver::Running { sent, .. } => {
+                *sent = Some(send);
+                true
+            }
+            Driver::Idle => false,
+        }
+    }
+
+    /// The running command takes the send handed over since it last looked.
+    pub(super) fn take_send(&mut self) -> Option<HeldSend> {
+        match &mut self.driver {
+            Driver::Running { sent, .. } => sent.take(),
+            Driver::Idle => None,
+        }
+    }
+
     /// Starts the task that wakes the UI when agent state changes and
     /// raises the window for a new request.
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         // screen-scope: the task wakes the UI for agent requests, and agents drive whichever account is on screen.
-        QuillApp::spawn_app_in(window, cx, async move |app, cx| {
+        let wake = QuillApp::spawn_app_in(window, cx, async move |app, cx| {
             let mut announced = 0u64;
             let mut seen = quill::wake::AGENT.epoch();
             // Shorter while the UI driver forces the element tree, so it
@@ -198,11 +250,11 @@ impl AgentBridge {
                     break;
                 }
             }
-        })
-        .detach();
+        });
         Self {
-            ui_send: None,
             driver: Driver::Idle,
+            reads: Reads::default(),
+            _wake: wake,
         }
     }
 }

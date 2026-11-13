@@ -115,7 +115,7 @@ impl Session {
                             self.payments
                                 .giveaway
                                 .launches
-                                .set(chat_id, GiveawayLaunch::Verifying);
+                                .set(chat_id, GiveawayLaunch::NeedsVerification);
                         }
                         self.payments.verification_url = Some(PaymentVerification {
                             url: result.verification_url,
@@ -138,11 +138,10 @@ impl Session {
                 }
             }
             PaymentsPayload::MarketplaceGift(quote) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMarketplaceGift)
+                if let Some(p) = pending.filter(|p| p.purpose == RequestPurpose::GetMarketplaceGift)
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
-                    && pending.is_some_and(|p| gift.waits_for(p.id))
                 {
-                    gift.accept_quote(quote);
+                    gift.accept_quote(p.id, quote);
                 }
             }
             PaymentsPayload::GiftTextLimit(limit) => {
@@ -156,11 +155,12 @@ impl Session {
                 self.apply_gift_market_purchase(result, pending.map(|p| p.id));
             }
             PaymentsPayload::GiftPurchaseResult(result) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMarketplaceGift)
+                if let Some(p) =
+                    pending.filter(|p| p.purpose == RequestPurpose::SendMarketplaceGift)
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
-                    && pending.is_some_and(|p| gift.waits_for(p.id))
+                    && let Some(answer) = gift.accept_result(p.id, result)
                 {
-                    gift.accept_result(result);
+                    self.payments.notices.push(boxless_notice(answer));
                 }
             }
             PaymentsPayload::PaymentReceipt(receipt) => {

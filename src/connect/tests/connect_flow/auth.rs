@@ -292,6 +292,11 @@ fn qr_recovery_accepts_supported_states_and_waits_for_pending_auth() {
     ] {
         driver.session.auth = state;
         let pending = driver.session.request(RequestPurpose::SetPhoneNumber, None);
+        driver.asked.sent(
+            &driver.session.requests,
+            RequestPurpose::SetPhoneNumber,
+            pending,
+        );
         let before = recorder.snapshot().len();
         assert_eq!(
             driver.request_qr_login(),
@@ -738,7 +743,7 @@ fn a_refused_logout_puts_the_session_back_to_running() {
         } else {
             assert!(driver.session.shutdown.is_running());
             assert!(driver.session.take_logout_refusal().is_some());
-            assert_eq!(driver.session.shutdown, ShutdownPhase::Running);
+            assert_eq!(driver.session.shutdown, ShutdownPhase::Active);
             assert!(driver.session.take_logout_refusal().is_none());
             assert!(matches!(driver.session.auth, AuthorizationState::Ready));
         }

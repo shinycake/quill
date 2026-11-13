@@ -13,9 +13,20 @@ use std::collections::HashMap;
 /// pages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ScrollGoal {
-    /// The open thread's first row, its root post: due once the older
-    /// replies are all loaded ("jump to root").
-    ThreadRoot,
+    /// The first row of the thread `thread_id`, its root post: due once
+    /// the older replies are all loaded ("jump to root"). Another thread
+    /// open (or none) ends it.
+    ThreadRoot { thread_id: i64 },
+}
+
+impl ScrollGoal {
+    /// Whether the goal is the open thread's to page for: a goal another
+    /// thread set (or no thread open) is not.
+    pub(super) fn belongs_to(self, open_thread: Option<i64>) -> bool {
+        match self {
+            Self::ThreadRoot { thread_id } => open_thread == Some(thread_id),
+        }
+    }
 }
 
 /// Where the open history is being taken: nothing, a goal the reader asked

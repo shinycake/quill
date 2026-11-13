@@ -16,7 +16,7 @@ pub enum SearchConfirm {
 
 /// Global search (official sidebar field): recents, then `searchChats` + `searchMessages`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchStatus {
+pub enum SearchStateView {
     Closed,
     Idle,
     Searching,
@@ -82,7 +82,7 @@ impl SearchMessageHit {
             is_outgoing: self.is_outgoing,
             date: self.date,
             content: self.content,
-            send: crate::state::SendState::Sent,
+            send: crate::state::SendState::Delivered,
             reply_to: self.reply_to,
             forward_info: self.forward_info,
             extras: self.extras,
@@ -189,7 +189,9 @@ pub struct SearchState {
     /// the status: the server answer is a supplement, not a requirement.
     pub server_chats: crate::state::fetch::Fetch<Vec<ChatId>>,
     /// "Frequent contacts" (`getTopChats` users), shown on an empty search.
-    pub top_chats: Vec<ChatId>,
+    /// Only the answer of the `getTopChats` the strip waits for fills it; a
+    /// failed one is not asked again until the search is closed.
+    pub top_chats: crate::state::fetch::Fetch<Vec<ChatId>>,
     /// TDLib option `disable_top_chats` (tdesktop "Suggest frequent
     /// contacts" off): the strip is hidden and nothing is fetched.
     pub top_chats_disabled: bool,
@@ -224,7 +226,7 @@ impl Default for SearchState {
             community_filter: None,
             filters: crate::search_filters::GlobalSearchFilters::default(),
             server_chats: Default::default(),
-            top_chats: Vec::new(),
+            top_chats: Default::default(),
             top_chats_disabled: false,
             confirm: None,
             top_view: Default::default(),
@@ -265,8 +267,7 @@ impl SearchState {
             | RequestPurpose::SearchPublicMessagesByTag => &mut self.messages_leg,
             RequestPurpose::SearchPublicChats => &mut self.public,
             RequestPurpose::SearchChatsOnServer => {
-                self.server_chats.begin();
-                self.server_chats.sent(request);
+                self.server_chats.begin_with(request);
                 return;
             }
             _ => return,
@@ -301,8 +302,15 @@ impl SearchState {
         self.filters = Default::default();
         self.confirm = None;
         self.top_view = Default::default();
+        // A failed frequent-contacts fetch is tried again at the next open.
+        self.top_chats.clear_error();
         self.bump_epoch();
         self.clear_results();
+    }
+
+    /// The frequent contacts held, in `getTopChats` order.
+    pub fn top_chat_ids(&self) -> &[ChatId] {
+        self.top_chats.items()
     }
 
     pub fn clear_query(&mut self) {
@@ -318,30 +326,30 @@ impl SearchState {
 
     /// What the search panel shows, from what is open, which requests are
     /// out or answered, and whether anything was found.
-    pub fn status(&self) -> SearchStatus {
+    pub fn status(&self) -> SearchStateView {
         if !self.is_open() {
-            return SearchStatus::Closed;
+            return SearchStateView::Closed;
         }
         let legs = [self.chats, self.messages_leg, self.public];
         // A typed query waits out its quiet window (`typed`) before its
         // requests go out: the panel already searches.
         if self.typed.armed().is_some() || legs.iter().any(|leg| leg.waiting()) {
-            return SearchStatus::Searching;
+            return SearchStateView::Searching;
         }
         let any = !self.chat_ids.is_empty()
             || !self.server_chats.items().is_empty()
             || !self.messages.is_empty()
             || !self.public_chat_ids.is_empty();
         if any {
-            SearchStatus::Ready
+            SearchStateView::Ready
         } else if legs.contains(&Leg::Idle) {
-            SearchStatus::Idle
+            SearchStateView::Idle
         } else if legs.contains(&Leg::Failed) {
-            SearchStatus::Failed
+            SearchStateView::Failed
         } else if self.is_recents() {
-            SearchStatus::Idle
+            SearchStateView::Idle
         } else {
-            SearchStatus::Empty
+            SearchStateView::Empty
         }
     }
 
@@ -542,18 +550,23 @@ impl SearchState {
 
     /// Put a frequent contact back (the server refused `removeTopChat`).
     pub fn restore_top_chat(&mut self, chat_id: ChatId, index: usize) {
-        if self.top_chats_disabled || self.top_chats.contains(&chat_id) {
+        if self.top_chats_disabled || self.top_chat_ids().contains(&chat_id) {
             return;
         }
-        self.top_chats
-            .insert(index.min(self.top_chats.len()), chat_id);
+        self.top_chats.insert_data_if_missing(Vec::new);
+        if let Some(list) = self.top_chats.data_mut() {
+            list.insert(index.min(list.len()), chat_id);
+        }
     }
 
     /// Drop one frequent contact (`removeTopChat`).
     pub fn remove_top_chat(&mut self, chat_id: ChatId) -> bool {
-        let before = self.top_chats.len();
-        self.top_chats.retain(|id| *id != chat_id);
-        self.top_chats.len() != before
+        let Some(list) = self.top_chats.data_mut() else {
+            return false;
+        };
+        let before = list.len();
+        list.retain(|id| *id != chat_id);
+        list.len() != before
     }
 }
 
@@ -653,9 +666,10 @@ pub enum ChatSearchJumpNeed {
 pub enum OlderEnd {
     #[default]
     Open,
-    /// A Saved Messages page request is out (sublist or tag filter): only
-    /// its answer extends the list, and an answer to any other (a view left
-    /// and entered again) is dropped. Leaves with the answer, its error, or
+    /// An older page request is out (a Saved Messages sublist or tag
+    /// filter, a forum topic or a comment thread): only its answer extends
+    /// the list, and an answer to any other (a view left and entered
+    /// again) is dropped. Leaves with the answer, its error, or
     /// the window being replaced.
     Asking(RequestId),
     Failed,

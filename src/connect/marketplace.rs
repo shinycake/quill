@@ -14,12 +14,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             || !valid_gift_name(name)
             || self
                 .session
-                .requests
-                .has_purpose(RequestPurpose::GetMarketplaceGift)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::SendMarketplaceGift)
+                .payments
+                .marketplace_gift
+                .as_ref()
+                .is_some_and(|gift| gift.is_busy())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -53,26 +51,38 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             &crate::telegram::requests_payments::get_marketplace_gift(extra, name),
         );
-        if result.is_err()
+        if let Err(err) = &result
             && let Some(gift) = self.session.payments.marketplace_gift.as_mut()
         {
-            gift.fail("Could not load the gift. Retry.".into());
+            gift.fail(extra, err.stage_line());
         }
         result
     }
 
     /// `getOption gift_text_length_max` unless it is known or on its way.
-    fn ask_gift_text_limit(&mut self) {
+    pub(super) fn ask_gift_text_limit(&mut self) {
+        let purpose = RequestPurpose::GetGiftTextLimit;
         if self.session.payments.gift_text_length_max.is_some()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetGiftTextLimit)
+            || self.asked.is_out(&self.session.requests, purpose)
         {
             return;
         }
-        let extra = self.session.request(RequestPurpose::GetGiftTextLimit, None);
+        let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         let _ = self.send_json_request(extra, &serde_json::json!({"@type":"getOption","@extra":extra.as_extra(),"name":"gift_text_length_max"}).to_string());
+    }
+
+    /// A refused purchase says so in the purchase's note, the one error line
+    /// the box draws for it (the reasons that have their own line set it
+    /// first).
+    fn refuse_purchase(&mut self) -> ConnectSendError {
+        if let Some(gift) = self.session.payments.marketplace_gift.as_mut() {
+            gift.set_note(
+                crate::lang::tr(crate::lang::keys::Q_OPS_PURCHASE_REFUSED_REVIEW_THE_QUOTE)
+                    .to_string(),
+            );
+        }
+        ConnectSendError::InvalidRequest
     }
 
     /// The supplied price must equal the server quote shown at confirmation.
@@ -82,14 +92,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         comment: &str,
         private: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active()
-            || !price.valid()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::SendMarketplaceGift)
-        {
-            return Err(ConnectSendError::InvalidRequest);
+        if !self.chats_path_active() || !price.valid() {
+            return Err(self.refuse_purchase());
         }
         let max = self.session.payments.gift_text_length_max;
         if !comment.is_empty() && max.is_none_or(|limit| comment.chars().count() > limit) {
@@ -120,7 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         if gift.price() != Some(price) || !quote.allows(price) {
-            return Err(ConnectSendError::InvalidRequest);
+            return Err(self.refuse_purchase());
         }
         let quote = quote.clone();
         let json_fields = (gift.requested_name.clone(), gift.recipient, gift.chat_id);
@@ -147,7 +151,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         request,
                     };
                 }
-                Err(_) => gift.set_note("Could not submit the purchase. Review and retry.".into()),
+                Err(err) => gift.set_note(err.stage_line()),
             }
         }
         result

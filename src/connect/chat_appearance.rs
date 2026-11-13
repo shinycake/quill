@@ -48,17 +48,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let _ = self.load_group_sticker_choices(chat_id);
         self.load_background_emoji_icons()?;
         self.session.stickers.emoji.status_picker = crate::emoji::StatusPicker::ChatAppearance;
-        let purpose = RequestPurpose::GetDefaultChatEmojiStatuses;
         if self
             .session
             .stickers
             .emoji
-            .chat_default_status_ids
-            .is_empty()
-            && !self.session.requests.has_purpose(purpose)
+            .lists
+            .chat_default_statuses
+            .can_ask()
         {
-            let extra = self.session.request(purpose, None);
-            self.send_json_request(extra, &get_default_chat_emoji_statuses(extra))?;
+            self.emoji_set_request(
+                RequestPurpose::GetDefaultChatEmojiStatuses,
+                get_default_chat_emoji_statuses,
+            )?;
         }
         Ok(())
     }
@@ -186,12 +187,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Download the thumbnails of the status choices that are resolved but
-    /// not local yet.
-    pub fn download_chat_status_choices(&mut self) {
+    /// The files of the icon and status choices that are resolved: what the
+    /// Appearance box draws (the downloads follow [`Self::download_thumbnails`]).
+    pub fn chat_appearance_files(&self) -> Vec<FileId> {
         let emoji = &self.session.stickers.emoji;
-        let files: Vec<FileId> = emoji
-            .chat_default_status_ids
+        let icons = self
+            .session
+            .users_state
+            .background_emoji_icons
+            .items()
+            .iter()
+            .filter_map(|sticker| sticker.display_file_id());
+        let statuses = emoji
+            .chat_default_status_ids()
             .iter()
             .filter_map(|id| {
                 emoji
@@ -199,10 +207,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .iter()
                     .find(|sticker| sticker.custom_emoji_id == Some(*id))
             })
-            .filter_map(|sticker| sticker.display_file_id())
-            .collect();
-        for file in files {
-            let _ = self.download_file(file, THUMB_DOWNLOAD_PRIORITY);
-        }
+            .filter_map(|sticker| sticker.display_file_id());
+        icons.chain(statuses).collect()
+    }
+
+    /// Asks for the thumbnails of `files`. The ones whose request went out
+    /// are returned: the caller counts those as asked, never one whose
+    /// send failed.
+    pub fn download_thumbnails(&mut self, files: &[FileId]) -> Vec<FileId> {
+        files
+            .iter()
+            .copied()
+            .filter(|file| self.download_file(*file, THUMB_DOWNLOAD_PRIORITY).is_ok())
+            .collect()
     }
 }

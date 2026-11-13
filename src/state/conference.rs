@@ -98,14 +98,32 @@ pub struct ConferenceCall {
     pub stage: ConferenceStage,
 }
 
+/// The `getGroupCall` a handover waits on for the call's link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoverFetch {
+    /// In the fetch queue ([`CallsState::group_call_fetch_queue`]); not sent yet.
+    Unsent,
+    /// Sent as this request: only its answer, error or loss decides.
+    Asked(RequestId),
+}
+
 /// Where a conference call is in taking over a 1:1 call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConferenceStage {
     /// Joined or created without a 1:1 call to take over.
-    Running,
+    Standalone,
     /// Created from a 1:1 call: it ends and the people are invited once
-    /// the conference has its link.
-    Upgrading(ConferenceUpgrade),
+    /// the conference has its link (`upgrade` holds who and what). The
+    /// stage leaves when the link is known, or into `HandoverFailed` when
+    /// the `getGroupCall` that should bring it fails, is lost, or answers
+    /// with no link.
+    Handover {
+        upgrade: ConferenceUpgrade,
+        fetch: HandoverFetch,
+    },
+    /// The link will not come: the driver ends the 1:1 call and counts the
+    /// invites as failed, then the stage becomes `Upgraded`.
+    HandoverFailed(ConferenceUpgrade),
     /// Took over the 1:1 call `from`: its end shows no end screen
     /// (tdesktop moves the call panel into the conference).
     Upgraded { from: i32 },
@@ -119,7 +137,15 @@ impl ConferenceCall {
     /// The 1:1 call still to end and the people still to invite.
     pub fn upgrade(&self) -> Option<&ConferenceUpgrade> {
         match &self.stage {
-            ConferenceStage::Upgrading(upgrade) => Some(upgrade),
+            ConferenceStage::Handover { upgrade, .. } => Some(upgrade),
+            _ => None,
+        }
+    }
+
+    /// The handover whose link will not come.
+    pub fn failed_upgrade(&self) -> Option<&ConferenceUpgrade> {
+        match &self.stage {
+            ConferenceStage::HandoverFailed(upgrade) => Some(upgrade),
             _ => None,
         }
     }
@@ -203,8 +229,11 @@ impl Session {
                 stage: match pending.origin {
                     ConferenceOrigin::Create {
                         upgrade: Some(upgrade),
-                    } => ConferenceStage::Upgrading(upgrade),
-                    _ => ConferenceStage::Running,
+                    } => ConferenceStage::Handover {
+                        upgrade,
+                        fetch: HandoverFetch::Unsent,
+                    },
+                    _ => ConferenceStage::Standalone,
                 },
             });
         }
@@ -213,6 +242,42 @@ impl Session {
         }
         self.set_group_call_join_payload(group_call_id, extra, join_payload);
         self.calls.group_call_error = None;
+    }
+
+    /// `getGroupCall` for `group_call_id` went out as `request`: a handover
+    /// of that call waits for it.
+    pub fn note_group_call_fetch_sent(&mut self, group_call_id: i32, request: RequestId) {
+        if let Some(call) = self.calls.active_group_call.as_mut()
+            && call.id == group_call_id
+            && let Some(conference) = call.conference.as_mut()
+            && let ConferenceStage::Handover { fetch, .. } = &mut conference.stage
+            && *fetch == HandoverFetch::Unsent
+        {
+            *fetch = HandoverFetch::Asked(request);
+        }
+    }
+
+    /// `request`, a `getGroupCall`, ended: with an error or a loss
+    /// (`linked` false), or an answer that has the call's link or not. A
+    /// handover waiting for exactly that request leaves into
+    /// `HandoverFailed` unless the call has its link.
+    pub(crate) fn group_call_fetch_ended(&mut self, request: RequestId, linked: bool) {
+        if linked {
+            return;
+        }
+        if let Some(conference) = self
+            .calls
+            .active_group_call
+            .as_mut()
+            .and_then(|call| call.conference.as_mut())
+            && let ConferenceStage::Handover {
+                upgrade,
+                fetch: HandoverFetch::Asked(asked),
+            } = &conference.stage
+            && *asked == request
+        {
+            conference.stage = ConferenceStage::HandoverFailed(upgrade.clone());
+        }
     }
 
     /// The 1:1 call ended by being taken into a conference call

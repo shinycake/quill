@@ -577,7 +577,11 @@ fn a_full_export_follows_tdesktops_layout() {
     assert_eq!(summary.messages, 3 + 1 + 1 + 2 + 1);
     assert!(!root.join(".spool").exists());
     // Progress walked through every step and ended on the last chat.
-    let stages: Vec<&AccountStage> = run.reports.iter().map(|p| &p.stage).collect();
+    let stages: Vec<&AccountStage> = run
+        .reports
+        .iter()
+        .filter_map(|p| p.stage.as_ref())
+        .collect();
     let walked = |wanted: fn(&AccountStage) -> bool| stages.iter().any(|s| wanted(s));
     assert!(walked(|s| matches!(s, AccountStage::ChatsList { .. })));
     assert!(walked(|s| matches!(s, AccountStage::PersonalInfo)));
@@ -591,11 +595,11 @@ fn a_full_export_follows_tdesktops_layout() {
     // previous chat's writing counts under the next chat's name.
     let mut last_writing = None;
     for report in &run.reports {
-        if let AccountStage::Chats { index, chat, .. } = &report.stage {
-            if matches!(chat.stage, crate::export::Stage::Starting) {
+        if let Some(AccountStage::Chats { index, chat, .. }) = &report.stage {
+            if matches!(chat.stage, crate::export::Stage::Collecting { read: 0 }) {
                 assert_ne!(last_writing, Some(*index), "stale writing counts");
             }
-            if matches!(chat.stage, crate::export::Stage::Writing { .. }) {
+            if matches!(chat.stage, crate::export::Stage::Written { .. }) {
                 last_writing = Some(*index);
             }
         }
@@ -748,12 +752,12 @@ fn an_error_after_some_messages_were_saved_is_a_partial_chat() {
         ChatOutcome::Failed { reason: "x".into() },
         "nothing was written yet"
     );
-    progress.stage = Stage::Writing { done: 0, total: 9 };
+    progress.stage = Stage::Written { done: 0, total: 9 };
     assert!(matches!(
         ChatOutcome::after_error(&progress, "x".into()),
         ChatOutcome::Failed { .. }
     ));
-    progress.stage = Stage::Writing { done: 7, total: 9 };
+    progress.stage = Stage::Written { done: 7, total: 9 };
     let partial = ChatOutcome::after_error(&progress, "x".into());
     assert_eq!(
         partial,
@@ -787,7 +791,7 @@ fn progress_labels_and_fraction() {
     let mut p = AccountProgress::starting();
     assert_eq!(p.label(), "Initializing…");
     assert_eq!(p.fraction(), None);
-    p.stage = AccountStage::ChatsList { found: 12 };
+    p.stage = Some(AccountStage::ChatsList { found: 12 });
     assert_eq!(p.label(), "Processing chats… 12");
     let mut chat = crate::export::Progress::starting();
     let on_chat = |chat: &crate::export::Progress| AccountStage::Chats {
@@ -796,15 +800,15 @@ fn progress_labels_and_fraction() {
         name: "Team".into(),
         chat: chat.clone(),
     };
-    p.stage = on_chat(&chat);
+    p.stage = Some(on_chat(&chat));
     assert_eq!(p.label(), "Chats: 2 of 4 · Team");
     assert_eq!(p.fraction(), Some(0.25));
-    chat.stage = crate::export::Stage::Writing { done: 5, total: 10 };
-    p.stage = on_chat(&chat);
+    chat.stage = crate::export::Stage::Written { done: 5, total: 10 };
+    p.stage = Some(on_chat(&chat));
     assert_eq!(p.fraction(), Some(0.375));
     assert_eq!(p.detail().unwrap(), "Saving messages… 5 of 10 · 0 files");
     assert!(!p.is_settled());
-    p.stage = AccountStage::Cancelled;
+    p.stage = Some(AccountStage::Cancelled);
     assert!(p.is_settled());
 }
 

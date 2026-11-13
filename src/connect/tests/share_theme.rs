@@ -409,7 +409,7 @@ fn a_failed_refetch_keeps_the_gifts_already_listed() {
 }
 
 #[test]
-fn a_failed_first_page_shows_an_empty_list() {
+fn a_failed_first_page_offers_retry_not_an_empty_list() {
     let mut rig = Rig::new();
     rig.driver
         .fetch_share_theme_gifts(QrPeer::User(ME), false, NOW)
@@ -418,7 +418,8 @@ fn a_failed_first_page_shows_an_empty_list() {
     gifts_error(&mut rig, &first);
     let gifts = &rig.driver.session.users_state.peer_qr.gifts;
     assert!(gifts.list.is_empty());
-    assert_eq!(gifts.stage, GiftsStage::Listed(GiftsRest::Complete));
+    assert_eq!(gifts.stage, GiftsStage::FirstFailed);
+    assert!(!gifts.wants_more(NOW + 1_000), "Retry is the user's");
 }
 
 #[test]

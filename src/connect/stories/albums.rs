@@ -234,7 +234,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_chat_archived_stories(extra, chat_id, from_story_id, limit);
-        self.send_story_page(purpose, extra, &json).map(Some)
+        let sent = self.send_story_page(purpose, extra, &json).map(Some);
+        if sent.is_ok() {
+            self.session
+                .stories
+                .archived_stories
+                .entry(chat_id.0)
+                .or_default()
+                .ask(extra, from_story_id);
+        }
+        sent
     }
 
     /// Phase 9.7: `getChatPostedToChatPageStories` (schema 1.8.67, line
@@ -278,9 +287,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The stories page does not ask again while its own page is out (the
         // gallery's tab keeps track of its own requests).
         if gallery.is_none()
-            && self.session.requests.pending.values().any(|p| {
-                p.purpose == purpose && p.chat_id == Some(chat_id) && !p.is_gallery_tab_page()
-            })
+            && self
+                .session
+                .stories
+                .page_asks
+                .any(|chat| *chat == chat_id.0)
         {
             return Ok(None);
         }
@@ -300,13 +311,23 @@ impl<S: JsonSender> ConnectDriver<S> {
             .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_chat_posted_to_chat_page_stories(extra, chat_id, from_story_id, limit);
         let sent = self.send_story_page(purpose, extra, &json).map(Some);
-        // Phase 9.7: a fresh first page restarts the list — the server only
-        // sends `pinned_story_ids` on the first page (schema 1.8.67, line
-        // 6747), so stale pins must not survive a refetch. Restart only once
-        // the request actually left: a transport failure must not wipe the
-        // already-loaded list.
-        if sent.is_ok() && from_story_id == 0 {
-            self.session.stories.chat_page_stories.remove(&chat_id.0);
+        // The stories page's own ask is held until it settles, so the page
+        // does not ask again meanwhile (the gallery's tab keeps its own).
+        if sent.is_ok() && gallery.is_none() {
+            self.session.stories.page_asks.begin(extra, chat_id.0);
+        }
+        // The list waits for this page: its answer lands only while it is
+        // the page asked last, and a first page restarts the list then (the
+        // server only sends `pinned_story_ids` on the first page, schema
+        // 1.8.67, line 6747, so stale pins must not survive a refetch). A
+        // transport failure leaves the loaded list as it was.
+        if sent.is_ok() {
+            self.session
+                .stories
+                .chat_page_stories
+                .entry(chat_id.0)
+                .or_default()
+                .ask(extra, from_story_id);
         }
         sent
     }

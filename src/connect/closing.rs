@@ -44,9 +44,12 @@ pub const CLOSE_DRAIN_BUDGET: Duration = Duration::from_millis(4);
 /// `leaveGroupCall` can cut them off before they reach the server.
 pub const HANG_UP_HOLD: Duration = Duration::from_millis(500);
 
-/// Where one closing client stands after a drain.
+/// How long a `close` the sender refused waits before it is sent again.
+pub const CLOSE_RETRY_BACKOFF: Duration = Duration::from_millis(250);
+
+/// What one drain of a closing client found (a return value, never stored).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CloseProgress {
+pub enum CloseOutcome {
     /// Closed not seen yet; more may arrive.
     Pending,
     /// TDLib confirmed `authorizationStateClosed`.
@@ -68,7 +71,7 @@ pub trait Closable {
     fn begin_close(&mut self);
     /// Apply what has arrived, without waiting for more and for at most
     /// `budget`.
-    fn drain(&mut self, budget: Duration) -> CloseProgress;
+    fn drain(&mut self, budget: Duration) -> CloseOutcome;
     /// Stop receiving (remove the route, join the receive thread). Called
     /// once, after Closed, Lost or the quit deadline.
     fn finish(&mut self);
@@ -93,17 +96,34 @@ pub(crate) fn begin_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
             until: deadline_after(HANG_UP_HOLD),
         };
     } else {
-        let _ = driver.request_close();
+        send_close(driver);
+    }
+}
+
+/// Send `close`. A close TDLib's client could not take (the send failed, the
+/// session still runs) is sent again after a backoff ([`release_close`]):
+/// the client would otherwise wait for a Closed nothing asked for.
+fn send_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
+    if let Err(error) = driver.request_close()
+        && error != ConnectSendError::InvalidRequest
+    {
+        driver.session.shutdown = ShutdownPhase::CloseRefused {
+            retry_at: deadline_after(CLOSE_RETRY_BACKOFF),
+        };
     }
 }
 
 pub(crate) fn release_close<S: JsonSender>(driver: &mut ConnectDriver<S>, now: Instant) {
-    let ShutdownPhase::HoldingClose { until } = driver.session.shutdown else {
-        return;
-    };
-    if now >= until || !driver.hang_up_pending() {
-        driver.session.shutdown = ShutdownPhase::Running;
-        let _ = driver.request_close();
+    match driver.session.shutdown {
+        ShutdownPhase::HoldingClose { until } if now >= until || !driver.hang_up_pending() => {
+            driver.session.shutdown = ShutdownPhase::Active;
+            send_close(driver);
+        }
+        ShutdownPhase::CloseRefused { retry_at } if now >= retry_at => {
+            driver.session.shutdown = ShutdownPhase::Active;
+            send_close(driver);
+        }
+        _ => {}
     }
 }
 
@@ -152,18 +172,18 @@ pub(crate) fn begin_close_bridged<S: JsonSender>(
 }
 
 /// [`Closable::drain`] for a driver fed by a receive bridge. A receive
-/// loop that died is [`CloseProgress::Lost`] once what it queued is
+/// loop that died is [`CloseOutcome::Lost`] once what it queued is
 /// drained, never Closed: TDLib may still be closing the database.
 pub(crate) fn drain_bridged<S: JsonSender>(
     driver: &mut ConnectDriver<S>,
     bridge: &ReceiveBridge,
     budget: Duration,
-) -> CloseProgress {
+) -> CloseOutcome {
     if matches!(driver.session.auth, AuthorizationState::Closed) {
-        return CloseProgress::Closed;
+        return CloseOutcome::Closed;
     }
     if bridge.is_joined() {
-        return CloseProgress::Lost;
+        return CloseOutcome::Lost;
     }
     // Read before draining: what was queued before the loop died is still
     // applied, and a dry channel then means nothing more can come.
@@ -171,9 +191,9 @@ pub(crate) fn drain_bridged<S: JsonSender>(
     let drained = drain_until_closed(driver, || bridge.next_timeout(Duration::ZERO), budget);
     release_close(driver, Instant::now());
     match drained {
-        Drained::Closed => CloseProgress::Closed,
-        Drained::Dry if stopped => CloseProgress::Lost,
-        Drained::Dry | Drained::Budget => CloseProgress::Pending,
+        Drained::Closed => CloseOutcome::Closed,
+        Drained::Dry if stopped => CloseOutcome::Lost,
+        Drained::Dry | Drained::Budget => CloseOutcome::Pending,
     }
 }
 
@@ -357,9 +377,9 @@ impl ClosingSet {
                 continue;
             };
             let confirmed = match entry.client.drain(CLOSE_DRAIN_BUDGET) {
-                CloseProgress::Closed => true,
-                CloseProgress::Lost => false,
-                CloseProgress::Pending => {
+                CloseOutcome::Closed => true,
+                CloseOutcome::Lost => false,
+                CloseOutcome::Pending => {
                     if let CloseWait::Since(since) = entry.wait
                         && now.saturating_duration_since(since) >= CLOSE_GRACE
                     {

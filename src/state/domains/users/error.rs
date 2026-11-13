@@ -36,9 +36,11 @@ impl Session {
                     })
                 });
                 if let Some(user) = user {
-                    self.users_state
-                        .user_full_infos
-                        .fail(user, error_reason(err));
+                    self.users_state.user_full_infos.failed_request(
+                        user,
+                        pending.map(|p| p.id),
+                        error_reason(err),
+                    );
                 }
             }
             // One filter's count failed: its count stays unknown (or the

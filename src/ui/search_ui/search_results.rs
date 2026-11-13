@@ -16,7 +16,7 @@ impl QuillApp {
         let session = self.session();
         let status = session
             .map(|s| s.search.search.status())
-            .unwrap_or(SearchStatus::Closed);
+            .unwrap_or(SearchStateView::Closed);
         let recents = session.is_some_and(|s| s.search.search.is_recents());
         let query = session
             .map(|s| s.search.search.query.clone())
@@ -115,43 +115,45 @@ impl QuillApp {
         let hint = match status {
             _ if apps_scope || channels_idle || tab == SearchTab::Downloads => String::new(),
             _ if tab == SearchTab::Posts && query.trim().is_empty() => tab.idle_hint().to_string(),
-            SearchStatus::Idle if tab != SearchTab::Chats => tab.idle_hint().to_string(),
-            SearchStatus::Idle if recents && has_results => String::new(),
-            SearchStatus::Idle if query.trim().is_empty() => tab.idle_hint().to_string(),
+            SearchStateView::Idle if tab != SearchTab::Chats => tab.idle_hint().to_string(),
+            SearchStateView::Idle if recents && has_results => String::new(),
+            SearchStateView::Idle if query.trim().is_empty() => tab.idle_hint().to_string(),
             // Typed, waiting for the debounce: the search is on its way.
-            SearchStatus::Idle if has_results => String::new(),
-            SearchStatus::Idle => {
+            SearchStateView::Idle if has_results => String::new(),
+            SearchStateView::Idle => {
                 tr_with(keys::Q_CHAT_SEARCHING_3, &[("query", &query.to_string())])
             }
-            SearchStatus::Searching if has_results => String::new(),
-            SearchStatus::Searching if recents => tr(keys::Q_CHAT_LOADING_RECENT_CHATS).to_string(),
-            SearchStatus::Searching if browsing_media => tr(keys::Q_CHAT_LOADING_2).to_string(),
-            SearchStatus::Searching => {
+            SearchStateView::Searching if has_results => String::new(),
+            SearchStateView::Searching if recents => {
+                tr(keys::Q_CHAT_LOADING_RECENT_CHATS).to_string()
+            }
+            SearchStateView::Searching if browsing_media => tr(keys::Q_CHAT_LOADING_2).to_string(),
+            SearchStateView::Searching => {
                 tr_with(keys::Q_CHAT_SEARCHING_3, &[("query", &query.to_string())])
             }
-            SearchStatus::Empty if browsing_media => tab.idle_hint().to_string(),
-            SearchStatus::Empty if tab == SearchTab::Channels => tr_with(
+            SearchStateView::Empty if browsing_media => tab.idle_hint().to_string(),
+            SearchStateView::Empty if tab == SearchTab::Channels => tr_with(
                 keys::Q_CHAT_NO_CHANNELS_MATCH,
                 &[("query", &query.to_string())],
             ),
-            SearchStatus::Empty if tab.is_media() => tr_with(
+            SearchStateView::Empty if tab.is_media() => tr_with(
                 keys::Q_CHAT_NOTHING_MATCHES,
                 &[("query", &query.to_string())],
             ),
-            SearchStatus::Ready => String::new(),
-            SearchStatus::Empty if public_scope && limits_exceeded => {
+            SearchStateView::Ready => String::new(),
+            SearchStateView::Empty if public_scope && limits_exceeded => {
                 tr(keys::Q_CHAT_THE_FREE_DAILY_LIMIT_FOR).to_string()
             }
-            SearchStatus::Empty if public_scope => tr_with(
+            SearchStateView::Empty if public_scope => tr_with(
                 keys::Q_CHAT_NO_PUBLIC_POSTS_MATCH,
                 &[("query", &query.to_string())],
             ),
-            SearchStatus::Empty => tr_with(
+            SearchStateView::Empty => tr_with(
                 keys::Q_CHAT_NO_CHATS_OR_MESSAGES_MATCH,
                 &[("query", &query.to_string())],
             ),
-            SearchStatus::Failed => tr(keys::Q_CHAT_SEARCH_FAILED).to_string(),
-            SearchStatus::Closed => String::new(),
+            SearchStateView::Failed => tr(keys::Q_CHAT_SEARCH_FAILED).to_string(),
+            SearchStateView::Closed => String::new(),
         };
         let chat_heading = if recents {
             tr(keys::Q_CHAT_RECENT)
@@ -167,8 +169,8 @@ impl QuillApp {
         let messages_empty = messages.is_empty();
         // A new query, tab or filter starts the list from its top.
         if let Some(search) = session.map(|s| &s.search.search) {
-            if self.search_ui.seen_generation.get() != search.epoch {
-                self.search_ui.seen_generation.set(search.epoch);
+            if self.search_ui.seen_epoch.get() != search.epoch {
+                self.search_ui.seen_epoch.set(search.epoch);
                 self.search_ui
                     .results_scroll
                     .set_offset(point(px(0.), px(0.)));

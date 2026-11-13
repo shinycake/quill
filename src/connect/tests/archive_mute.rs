@@ -24,10 +24,9 @@ fn answer_settings(f: &mut Fixture, on: bool) {
 
 fn due(f: &Fixture) -> bool {
     let chat_list = &f.1.session.chat_list;
-    chat_list.archive_mute.suggestion_due(
-        &chat_list.suggestions.actions,
-        chat_list.archive_settings.data(),
-    )
+    chat_list
+        .archive_mute
+        .suggestion_due(&chat_list.suggestions.actions, &chat_list.archive_settings)
 }
 
 #[test]

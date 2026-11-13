@@ -59,6 +59,16 @@ fn masks_dialog_requests_mask_lists_and_serializes_changes() {
         .unwrap();
     assert_eq!(driver.session.stickers.masks.archived_sets().len(), 1);
 
+    // The installed list is being fetched again: no reorder goes out on it.
+    driver
+        .session
+        .stickers
+        .masks
+        .installed
+        .begin_with(crate::ids::RequestId(9_999));
+    assert_eq!(driver.reorder_mask_set(12, 11).unwrap(), None);
+    assert_eq!(count_sent(&recorder, "reorderInstalledStickerSets"), 0);
+    driver.session.stickers.masks.installed.cancel();
     let reorder = driver.reorder_mask_set(12, 11).unwrap().unwrap();
     let sent = sent_request(&recorder, "reorderInstalledStickerSets");
     assert_eq!(sent["sticker_type"]["@type"], "stickerTypeMask");

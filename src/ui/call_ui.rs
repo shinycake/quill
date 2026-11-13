@@ -194,7 +194,7 @@ impl QuillApp {
                         )],
                     ),
                     Some(TransportState::Closed) => tr(keys::Q_OPS_AUDIO_DISCONNECTED).to_string(),
-                    None | Some(TransportState::Connecting) => {
+                    None | Some(TransportState::Establishing) => {
                         tr(keys::Q_OPS_CONNECTING_AUDIO).to_string()
                     }
                 };
@@ -642,7 +642,7 @@ impl QuillApp {
                     })),
             );
         }
-        if summary.debug_information == CallUpload::Sent {
+        if summary.debug_information == CallUpload::Uploaded {
             card = card.child(
                 div()
                     .text_xs()
@@ -667,7 +667,7 @@ impl QuillApp {
                     })),
             );
         }
-        if summary.log == CallUpload::Sent {
+        if summary.log == CallUpload::Uploaded {
             card = card.child(
                 div()
                     .text_xs()

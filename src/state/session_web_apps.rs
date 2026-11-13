@@ -7,13 +7,7 @@ impl Session {
     /// its answer is reported when it lands, so the mini-app poll keeps
     /// running after the window that sent it has closed.
     pub fn web_app_answer_due(&self) -> bool {
-        self.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::SendWebAppData
-                    | RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { .. })
-            )
-        })
+        !self.bots.web_apps.answers_due.is_empty()
     }
 
     /// A mini-app payload (`webAppInfo`, `webAppUrl`, `mainWebApp`,
@@ -81,7 +75,7 @@ impl Session {
                 if let Some(p) = pending
                     && p.purpose == RequestPurpose::SendWebAppCustomRequest
                     && let Some((launch_id, req_id)) =
-                        self.bots.web_apps.custom_requests.remove(&p.id.0)
+                        self.bots.web_apps.custom_requests.remove(&p.id)
                 {
                     self.bots.web_apps.custom_replies.push(CustomRequestReply {
                         launch_id,
@@ -102,9 +96,9 @@ impl Session {
         url: String,
     ) {
         let pending = self.take_web_app_pending(request);
-        let Some((chat_id, source)) = pending
+        let Some((chat_id, source, window)) = pending
             .filter(|p| p.bot_user_id == bot_user_id)
-            .map(|p| (p.chat_id, p.source))
+            .map(|p| (p.chat_id, p.source, p.window))
         else {
             // The launch was dropped (an account switch): nothing opens,
             // and an app TDLib started is closed by the driver.
@@ -113,34 +107,26 @@ impl Session {
             }
             return;
         };
-        self.bots
-            .web_apps
-            .replace_open_result(Some(if url.is_empty() {
-                WebAppOpenResult::Failed {
-                    bot_user_id,
-                    message: crate::lang::tr(crate::lang::keys::Q_WEB_APP_NO_ADDRESS).to_string(),
-                }
-            } else {
-                WebAppOpenResult::Opened {
-                    bot_user_id,
-                    chat_id,
-                    source,
-                    launch_id,
-                    url,
-                }
-            }));
+        self.bots.web_apps.answer_launch(if url.is_empty() {
+            WebAppOpenResult::Failed {
+                bot_user_id,
+                message: crate::lang::tr(crate::lang::keys::Q_WEB_APP_NO_ADDRESS).to_string(),
+            }
+        } else {
+            WebAppOpenResult::Opened {
+                bot_user_id,
+                chat_id,
+                source,
+                window,
+                launch_id,
+                url,
+            }
+        });
     }
 
     /// The context of the open call that `request` answers.
     fn take_web_app_pending(&mut self, request: Option<&PendingRequest>) -> Option<WebAppPending> {
-        let id = request?.id;
-        match self.bots.web_apps.opening.take() {
-            Some(opening) if opening.request == id => Some(opening),
-            other => {
-                self.bots.web_apps.opening = other;
-                None
-            }
-        }
+        self.bots.web_apps.settle_launch(request?.id)
     }
 
     /// `getGrossingWebAppBots` returns `foundUsers`, which the envelope
@@ -228,12 +214,10 @@ impl Session {
             | RequestPurpose::Bots(BotsPurpose::GetWebAppLinkUrl { bot_user_id }) => {
                 // A dropped launch's failure is nobody's to report.
                 if self.take_web_app_pending(pending).is_some() {
-                    self.bots
-                        .web_apps
-                        .replace_open_result(Some(WebAppOpenResult::Failed {
-                            bot_user_id,
-                            message: web_app_error_text(err),
-                        }));
+                    self.bots.web_apps.answer_launch(WebAppOpenResult::Failed {
+                        bot_user_id,
+                        message: web_app_error_text(err),
+                    });
                 }
             }
             RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. }) => {
@@ -307,8 +291,7 @@ impl Session {
                 );
             }
             RequestPurpose::SendWebAppCustomRequest => {
-                if let Some((launch_id, req_id)) =
-                    self.bots.web_apps.custom_requests.remove(&p.id.0)
+                if let Some((launch_id, req_id)) = self.bots.web_apps.custom_requests.remove(&p.id)
                 {
                     self.bots.web_apps.custom_replies.push(CustomRequestReply {
                         launch_id,

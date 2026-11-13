@@ -214,12 +214,11 @@ mod tests {
             started_at: std::time::Instant::now(),
             action: quill::state::CallAction::Idle,
             transport: transport.map_or_else(Default::default, |state| {
-                CallTransport::reported(state, Default::default()).unwrap_or(
-                    CallTransport::Failed {
+                CallTransport::reported(state, Default::default(), std::time::Instant::now())
+                    .unwrap_or(CallTransport::Failed {
                         reason: String::new(),
                         link: None,
-                    },
-                )
+                    })
             }),
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
@@ -242,7 +241,7 @@ mod tests {
         };
         assert_eq!(ready(Some(Connected), Some(3)), Some(3));
         assert_eq!(ready(Some(Reconnecting), Some(0)), Some(0));
-        assert_eq!(ready(Some(Connecting), Some(2)), None);
+        assert_eq!(ready(Some(Establishing), Some(2)), None);
         assert_eq!(ready(Some(Failed), Some(2)), None);
         assert_eq!(ready(Some(Connected), None), None, "nothing reported yet");
         let hanging = call(CallState::HangingUp, Some(Connected), Some(4));

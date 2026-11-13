@@ -22,33 +22,26 @@ impl QuillApp {
     /// Poll the helper and the session's mini-app answers while something
     /// is going on; stops by itself when nothing is left.
     pub(in crate::ui) fn ensure_mini_app_poll(&mut self, cx: &mut Context<Self>) {
-        if let Some(window) = self.asking_window() {
-            self.mini_apps.from_window = window;
-        }
         if self.mini_apps.poll.is_some() {
             return;
         }
-        self.mini_apps.generation += 1;
-        let generation = self.mini_apps.generation;
         // window-scope: the mini app is the screen's; a step aimed at a chat names its chat.
         let task = self.spawn_screen(cx, async move |this, cx| {
             let executor = cx.background_executor().clone();
             let hold = backlog_hold(&executor);
             run_poll_loop(executor, &quill::wake::MINI_APPS, POLL_PACE, hold, || {
                 this.update(cx, |this, cx| {
-                    let keep = this.mini_apps.generation == generation
-                        && this.as_asked_by(this.mini_apps.from_window, |this| {
-                            this.poll_mini_apps(cx)
-                        });
+                    let from = this.mini_app_asker();
+                    let keep = this.as_asked_by(from, |this| this.poll_mini_apps(cx));
                     if keep {
                         return Some(PassEnd {
                             work_left: false,
                             due: this.mini_app_watch_due(),
                         });
                     }
-                    if this.mini_apps.generation == generation {
-                        this.mini_apps.poll = None;
-                    }
+                    // Nothing is left to wait for: the task held here ends
+                    // with this pass, and a later start makes a new one.
+                    this.mini_apps.poll = None;
                     None
                 })
                 .ok()
@@ -59,9 +52,21 @@ impl QuillApp {
         self.mini_apps.poll = Some(task);
     }
 
+    /// The window the open app's flow started in: its answers and events
+    /// open their boxes and links there (`None`: the main window, also
+    /// while no app is open).
+    fn mini_app_asker(&self) -> Option<quill::ids::ChatId> {
+        self.mini_apps
+            .window
+            .as_ref()
+            .and_then(|window| window.launch_window)
+    }
+
     /// One poll step; `true` while there is still something to wait for.
     pub(super) fn poll_mini_apps(&mut self, cx: &mut Context<Self>) -> bool {
-        self.poll_mini_app_session(cx);
+        // The helper's queued events first: a popup the poll side shows
+        // replaces the one the helper shows, and a `PopupClosed` already
+        // queued for that one is its real answer, not a dismissal.
         let events: Vec<HelperEvent> = match self.mini_apps.window.as_ref() {
             Some(window) => window.events.try_iter().collect(),
             None => Vec::new(),
@@ -69,6 +74,8 @@ impl QuillApp {
         for event in events {
             self.handle_helper_event(event, cx);
         }
+        self.poll_mini_app_session(cx);
+        self.end_lost_data_sends(cx);
         let overdue = self.mini_apps.window.as_ref().is_some_and(|window| {
             window.helper.start_due_in(std::time::Instant::now()) == Some(Duration::ZERO)
         });
@@ -82,8 +89,9 @@ impl QuillApp {
         }
         self.mini_apps.window.is_some()
             || self.mini_apps.flow.is_waiting()
+            || !self.mini_apps.data_sends.is_empty()
             || self.session().is_some_and(|session| {
-                session.bots.web_apps.opening.is_some() || session.web_app_answer_due()
+                session.bots.web_apps.opening().is_some() || session.web_app_answer_due()
             })
     }
 
@@ -94,9 +102,11 @@ impl QuillApp {
         if let Some(due) = window.helper.start_due_in(std::time::Instant::now()) {
             return Some(due.max(WATCH_TICK));
         }
-        let watching = window.emoji.is_active()
-            || window.phone != phone::PhoneFlow::Idle
-            || window.invoice.is_some();
-        watching.then_some(WATCH_TICK)
+        let tick =
+            (window.phone.waiting_on().is_some() || window.invoice.is_some()).then_some(WATCH_TICK);
+        match (window.emoji.resolve_due_in(), tick) {
+            (Some(deadline), Some(tick)) => Some(deadline.min(tick)),
+            (deadline, tick) => deadline.or(tick),
+        }
     }
 }

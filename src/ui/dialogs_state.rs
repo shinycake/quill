@@ -7,6 +7,8 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 
 pub(crate) struct DialogUi {
+    /// The statistics page's "Export to File…" (`ui/statistics_export.rs`).
+    pub(super) statistics_export: super::statistics_export::StatsExport,
     /// Profile layer opened from a sender avatar (tdesktop's
     /// `Info::LayerWidget`); presents `session.users_state.open_info_panel`.
     pub(super) profile_modal: Option<super::profile_modal::ProfileModal>,
@@ -93,6 +95,9 @@ impl crate::ui::on_screen::Farewell for DialogUi {
     ) {
         let _ = app.close_business_saving(false, window, cx);
         app.dismiss_profile_modal();
+        // A shortcut change in flight is nobody's answer once the account
+        // goes.
+        app.close_quick_replies(cx);
         // The New Contact box's import opens no chat once the box is gone.
         if let Some(live) = app.live.as_mut() {
             live.driver.forget_new_contact();
@@ -100,6 +105,9 @@ impl crate::ui::on_screen::Farewell for DialogUi {
         // The appearance box's status choices are resolved while the
         // session's `status_picker` is `ChatAppearance`.
         app.close_chat_appearance_dialog(cx);
+        // The color box's Apply waits on answers that are the old account's:
+        // closing forgets them, or they sit in the acks for good.
+        app.close_peer_color_dialog(cx);
         if app
             .session()
             .is_some_and(|session| session.groups.private_sharing.request_box_chat().is_some())
@@ -119,6 +127,7 @@ impl DialogUi {
                 .submit_on_enter(false)
         });
         Self {
+            statistics_export: Default::default(),
             profile_modal: None,
             profile_dialog: None,
             bot_verify_dialog: None,

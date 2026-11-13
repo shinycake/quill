@@ -1,5 +1,6 @@
 //! Where a chat list's paging stands (`loadChats` for the main list and the
 //! archive).
+use crate::ids::RequestId;
 use std::time::{Duration, Instant};
 
 /// The stage of one chat list's paging, one value instead of an
@@ -11,9 +12,16 @@ use std::time::{Duration, Instant};
 /// authorization or a log-out).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ListPaging {
-    /// Pages remain; none is waiting out a failure.
+    /// Pages remain; none is out and none is waiting out a failure.
     #[default]
     More,
+    /// A page is out as `request`; `after` is the wait of the failure before
+    /// it, so the next failure doubles it. The answer or the error of that
+    /// request leaves the stage; no other does.
+    Loading {
+        request: RequestId,
+        after: Option<Duration>,
+    },
     /// A page failed (not a 404): no page before `at`, and `wait` is the
     /// wait that was applied, which doubles per failure. The driver's tick
     /// asks again then (`ConnectDriver::chat_list_tick`).
@@ -30,6 +38,11 @@ impl ListPaging {
         matches!(self, Self::Exhausted)
     }
 
+    /// A page is out.
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
     /// The wait after a failed page, while there is one.
     pub fn retry(&self) -> Option<(Instant, Duration)> {
         match self {
@@ -43,25 +56,56 @@ impl ListPaging {
         self.retry().is_some_and(|(at, _)| now >= at)
     }
 
-    /// A page went through: an earlier failure's wait is over.
-    pub fn page_ok(&mut self) {
+    /// A page went out as `request` (a list that ended stays ended).
+    pub fn begin(&mut self, request: RequestId) {
+        *self = match *self {
+            Self::More => Self::Loading {
+                request,
+                after: None,
+            },
+            Self::Retrying { wait, .. } => Self::Loading {
+                request,
+                after: Some(wait),
+            },
+            Self::Loading { after, .. } => Self::Loading { request, after },
+            Self::Exhausted => Self::Exhausted,
+        };
+    }
+
+    /// `request` is the page this list waits for.
+    pub fn waits_for(&self, asked: Option<RequestId>) -> bool {
+        matches!(self, Self::Loading { request, .. } if Some(*request) == asked)
+    }
+
+    /// `request` went through: an earlier failure's wait is over.
+    pub fn page_ok(&mut self, asked: Option<RequestId>) {
+        if self.waits_for(asked) {
+            *self = Self::More;
+        }
+    }
+
+    /// The user left the list: a retry waiting out a failed page stops.
+    pub fn cancel_retry(&mut self) {
         if matches!(self, Self::Retrying { .. }) {
             *self = Self::More;
         }
     }
 
-    /// A page failed with `code`: a 404 ends the list, anything else (a
+    /// `request` failed with `code`: a 404 ends the list, anything else (a
     /// timeout, a 500) waits one second, doubling per failure up to five
-    /// minutes, and asks again.
-    pub fn page_failed(&mut self, code: i32, now: Instant) {
-        if *self == Self::Exhausted {
+    /// minutes, and asks again. Only the page the list waits for counts.
+    pub fn page_failed(&mut self, code: i32, now: Instant, asked: Option<RequestId>) {
+        let Self::Loading { after, .. } = *self else {
+            return;
+        };
+        if !self.waits_for(asked) {
             return;
         }
         if code == 404 {
             *self = Self::Exhausted;
             return;
         }
-        let wait = self.retry().map_or(Self::FIRST_WAIT, |(_, wait)| {
+        let wait = after.map_or(Self::FIRST_WAIT, |wait| {
             wait.saturating_mul(2).min(Self::MAX_WAIT)
         });
         *self = Self::Retrying {
@@ -75,23 +119,32 @@ impl ListPaging {
 mod tests {
     use super::*;
 
+    fn out(paging: &mut ListPaging, id: u64) -> Option<RequestId> {
+        let request = RequestId(id);
+        paging.begin(request);
+        Some(request)
+    }
+
     #[test]
     fn a_failed_page_waits_longer_each_time_and_a_page_ends_the_wait() {
         let now = Instant::now();
         let mut paging = ListPaging::More;
-        paging.page_failed(500, now);
+        let asked = out(&mut paging, 1);
+        paging.page_failed(500, now, asked);
         assert_eq!(
             paging.retry().map(|(_, wait)| wait),
             Some(Duration::from_secs(1))
         );
         assert!(!paging.retry_due(now));
         assert!(paging.retry_due(now + Duration::from_secs(1)));
-        paging.page_failed(500, now);
+        let asked = out(&mut paging, 2);
+        paging.page_failed(500, now, asked);
         assert_eq!(
             paging.retry().map(|(_, wait)| wait),
             Some(Duration::from_secs(2))
         );
-        paging.page_ok();
+        let asked = out(&mut paging, 3);
+        paging.page_ok(asked);
         assert_eq!(paging, ListPaging::More);
     }
 
@@ -99,12 +152,15 @@ mod tests {
     fn a_404_ends_the_list_and_nothing_but_a_reset_reopens_it() {
         let now = Instant::now();
         let mut paging = ListPaging::More;
-        paging.page_failed(500, now);
-        paging.page_failed(404, now);
+        let asked = out(&mut paging, 1);
+        paging.page_failed(500, now, asked);
+        let asked = out(&mut paging, 2);
+        paging.page_failed(404, now, asked);
         assert!(paging.is_exhausted());
         assert!(paging.retry().is_none());
-        paging.page_failed(500, now);
-        paging.page_ok();
+        paging.begin(RequestId(3));
+        paging.page_failed(500, now, Some(RequestId(3)));
+        paging.page_ok(Some(RequestId(3)));
         assert!(paging.is_exhausted());
     }
 
@@ -112,12 +168,28 @@ mod tests {
     fn the_wait_stops_doubling_at_five_minutes() {
         let now = Instant::now();
         let mut paging = ListPaging::More;
-        for _ in 0..20 {
-            paging.page_failed(500, now);
+        for id in 0..20 {
+            let asked = out(&mut paging, id);
+            paging.page_failed(500, now, asked);
         }
         assert_eq!(
             paging.retry().map(|(_, wait)| wait),
             Some(Duration::from_secs(300))
         );
+    }
+
+    #[test]
+    fn only_the_page_the_list_waits_for_answers_it() {
+        let now = Instant::now();
+        let mut paging = ListPaging::More;
+        paging.begin(RequestId(2));
+        paging.page_failed(500, now, Some(RequestId(1)));
+        paging.page_ok(Some(RequestId(1)));
+        assert!(
+            paging.is_loading(),
+            "an older page's answer changes nothing"
+        );
+        paging.page_ok(Some(RequestId(2)));
+        assert_eq!(paging, ListPaging::More);
     }
 }

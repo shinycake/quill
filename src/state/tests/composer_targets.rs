@@ -290,3 +290,58 @@ fn a_reply_fetch_takes_only_its_own_requests_end() {
     session.reject_composer_reply_target(chat, message, RequestId(2), &TdError::from_code(404));
     assert!(session.message_deleted(chat, message));
 }
+
+/// Sweep r4-10: a forum topic's rows live in its own history, so what a
+/// selection picks from must be that page, not the chat's main history.
+#[test]
+fn the_shown_history_is_the_open_topics_page_not_the_main_one() {
+    let (mut session, _sink, _seq) = seeded();
+    let mut in_topic = session.histories[&7].messages[&50].clone();
+    in_topic.id = MessageId(60);
+    let mut topic = TopicHistory::default();
+    topic.messages.insert(60, in_topic);
+    session.threads.topic_histories.insert((7, 3), topic);
+    let ids = |session: &Session| -> Vec<i64> {
+        session
+            .shown_history(ChatId(7))
+            .map(|shown| shown.keys().copied().collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(ids(&session), vec![50], "no topic open: the main history");
+    session.select_topic(ChatId(7), 3);
+    assert_eq!(
+        ids(&session),
+        vec![60],
+        "the topic's rows, not the main ones"
+    );
+    assert!(session.shown_message(ChatId(7), MessageId(60)).is_some());
+    assert!(
+        session.shown_message(ChatId(7), MessageId(50)).is_none(),
+        "another topic's or the main history's message is not shown"
+    );
+    assert!(session.shown_history(ChatId(9)).is_none());
+}
+
+/// Sweep r4-10 round 4: an open comment thread draws its own replies (in
+/// the discussion group), so a selection picks from them, not the main
+/// history; a failed thread falls through to the main one.
+#[test]
+fn the_shown_history_is_the_open_threads_replies_not_the_main_one() {
+    let (mut session, _sink, _seq) = seeded();
+    let mut reply = session.histories[&7].messages[&50].clone();
+    reply.id = MessageId(70);
+    let mut thread = ThreadView::resolving(ChatId(7), MessageId(50), RequestId(1));
+    thread.thread_id = 50;
+    thread.status = ThreadStatus::Ready;
+    thread.history.messages.insert(70, reply);
+    session.threads.thread = Some(thread);
+    assert!(session.shown_message(ChatId(7), MessageId(70)).is_some());
+    assert!(
+        session.shown_message(ChatId(7), MessageId(50)).is_none(),
+        "a main-history id is not drawn in the thread"
+    );
+    if let Some(thread) = session.threads.thread.as_mut() {
+        thread.status = ThreadStatus::Failed(String::new());
+    }
+    assert!(session.shown_message(ChatId(7), MessageId(50)).is_some());
+}

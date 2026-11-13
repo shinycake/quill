@@ -94,8 +94,7 @@ impl QuillApp {
         self.message_ui.poll_voters_dialog = Some(PollVotersDialog {
             chat_id,
             message_id,
-            selected_option: None,
-            show_stats: false,
+            view: PollView::Voters { option: None },
         });
         self.select_poll_voters_option(0, cx);
     }
@@ -132,8 +131,7 @@ impl QuillApp {
         self.message_ui.poll_voters_dialog = Some(PollVotersDialog {
             chat_id,
             message_id,
-            selected_option: None,
-            show_stats: true,
+            view: PollView::Stats { option: None },
         });
         let can_get_voters = self
             .session()
@@ -145,6 +143,38 @@ impl QuillApp {
             });
         if can_get_voters {
             self.select_poll_voters_option(0, cx);
+        }
+        cx.notify();
+    }
+
+    /// Frame upkeep: the poll the dialog shows changed, which made the
+    /// list it shows `Stale`: ask for it again. The ask turns the stage
+    /// into `Loading`, or into `Failed` when it cannot go, so this asks once.
+    pub(in crate::ui) fn poll_voters_upkeep(&mut self) {
+        let Some(dialog) = self.message_ui.poll_voters_dialog.as_ref() else {
+            return;
+        };
+        let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
+        let option = dialog.view.option().unwrap_or(0);
+        if let Some(live) = self.live.as_mut() {
+            live.driver
+                .refresh_stale_poll_voters(chat_id, message_id, option);
+        }
+    }
+
+    /// The stats Retry: only the vote graph is asked again; the dialog
+    /// stays as it is, with the option the user chose.
+    fn retry_poll_stats(&mut self, chat_id: ChatId, message_id: MessageId, cx: &mut Context<Self>) {
+        let is_dark = super::chat_theme::is_dark_palette();
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .fetch_poll_vote_statistics(chat_id, message_id, is_dark)
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MEDIA_COULD_NOT_LOAD_POLL_STATS,
+            )));
         }
         cx.notify();
     }
@@ -163,7 +193,7 @@ impl QuillApp {
         let Some(dialog) = self.message_ui.poll_voters_dialog.as_mut() else {
             return;
         };
-        dialog.selected_option = Some(option_index);
+        dialog.select(option_index);
         let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
         if let Some(live) = self.live.as_mut()
             && live
@@ -182,7 +212,7 @@ impl QuillApp {
             return;
         };
         let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
-        let option_index = dialog.selected_option.unwrap_or(0);
+        let option_index = dialog.view.option().unwrap_or(0);
         if let Some(live) = self.live.as_mut()
             && live
                 .driver
@@ -225,7 +255,7 @@ impl QuillApp {
             return div().into_any_element();
         };
         let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
-        let selected = dialog.selected_option;
+        let selected = dialog.view.option();
         let poll = self
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))
@@ -235,7 +265,7 @@ impl QuillApp {
                 _ => None,
             });
         let mut body = div().flex().flex_col().gap_1();
-        if dialog.show_stats {
+        if dialog.view.shows_stats() {
             body = body.child(self.poll_stats_section(chat_id, message_id, cx));
         }
         if let Some(poll) = poll.as_ref().filter(|poll| poll.can_get_voters) {
@@ -276,7 +306,7 @@ impl QuillApp {
                     .text_color(text_muted())
                     .child(tr(keys::Q_MEDIA_SELECT_AN_OPTION_TO_SEE)),
             ),
-            Some(PollVotersFetch::Loading(_)) => body.child(
+            Some(PollVotersFetch::Loading(_) | PollVotersFetch::Stale) => body.child(
                 div()
                     .flex()
                     .items_center()
@@ -297,7 +327,7 @@ impl QuillApp {
                                 .message_ui
                                 .poll_voters_dialog
                                 .as_ref()
-                                .and_then(|dialog| dialog.selected_option)
+                                .and_then(|dialog| dialog.view.option())
                                 .unwrap_or(0);
                             this.select_poll_voters_option(index, cx);
                         })),
@@ -377,7 +407,7 @@ impl QuillApp {
                         .label(tr(keys::Q_MEDIA_RETRY))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_poll_stats_dialog(chat_id, message_id, cx);
+                            this.retry_poll_stats(chat_id, message_id, cx);
                         })),
                 ),
             Some(PollStatsFetch::Loaded(graph)) => {
@@ -461,15 +491,21 @@ impl QuillApp {
 
     /// Phase 4.2: open the poll creation dialog above the composer.
     pub(super) fn open_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_poll_dialog_locked(QuizLock::Free, window, cx);
+        self.open_poll_dialog_locked(QuizLock::Free, None, window, cx);
     }
 
     /// The poll box, with the type fixed when a bot's request-poll button
     /// asked for a quiz or a regular poll (tdesktop `kDefaultPollCreateFlags`
     /// with `disabled |= Quiz`).
+    ///
+    /// `dismiss_keyboard_on_send`: a bot's one-time keyboard whose Poll button
+    /// opened the box; it goes when the poll is sent. It is given to the box
+    /// as it is made, so a box that does not open (or another one already
+    /// open) never takes it.
     pub(super) fn open_poll_dialog_locked(
         &mut self,
         lock: QuizLock,
+        dismiss_keyboard_on_send: Option<(ChatId, MessageId)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -499,7 +535,13 @@ impl QuillApp {
             .session()
             .and_then(|s| s.open_chat_id().and_then(|id| s.chats.get(&id.0)))
             .is_some_and(|chat| chat.is_channel());
-        self.chat_ui.poll_dialog = Some(PollDialog::new(window, cx, in_channel, lock));
+        self.chat_ui.poll_dialog = Some(PollDialog::new(
+            window,
+            cx,
+            in_channel,
+            lock,
+            dismiss_keyboard_on_send,
+        ));
         cx.notify();
     }
 
@@ -551,7 +593,7 @@ impl QuillApp {
                         .message_ui
                         .poll_voters_dialog
                         .as_ref()
-                        .is_some_and(|dialog| dialog.show_stats)
+                        .is_some_and(|dialog| dialog.view.shows_stats())
                     {
                         tr(keys::POLLS_STATS_TITLE)
                     } else {
@@ -872,3 +914,6 @@ mod poll_settings;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod settings_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod stats_retry_tests;

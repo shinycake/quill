@@ -109,7 +109,7 @@ fn an_rtmp_time_request_answers_the_first_channels_time_offset() {
     feeder.on_time_request(engine_id(1), &mut port);
     assert_eq!(port.streams_requests, vec![555]);
     assert_eq!(feeder.state(), FeederState::Idle, "asking is not a state");
-    assert_eq!(feeder.stream_state(), StreamState::Connecting);
+    assert_eq!(feeder.stream_state(), StreamState::Joined);
     let channels = [
         StreamChannel {
             channel_id: 1,
@@ -131,7 +131,7 @@ fn an_rtmp_time_request_answers_the_first_channels_time_offset() {
     assert_eq!(outcome, ReplyOutcome::Handled);
     assert_eq!(port.time_answers(), vec![(1, 1_700_000_123_456)]);
     // A stream exists, but it is Live only from its first segment on.
-    assert_eq!(feeder.stream_state(), StreamState::Connecting);
+    assert_eq!(feeder.stream_state(), StreamState::Joined);
     assert_eq!(feeder.channels().len(), 2);
     assert_eq!(feeder.last_timestamp_ms(), 1_700_000_123_456);
 }
@@ -176,7 +176,7 @@ fn empty_stream_list_answers_zero_and_shows_no_stream() {
         Instant::now(),
         &mut port,
     );
-    assert_eq!(feeder.stream_state(), StreamState::Connecting);
+    assert_eq!(feeder.stream_state(), StreamState::Joined);
     assert_eq!(port.time_answers().last(), Some(&(2, 5_000)));
 }
 
@@ -442,7 +442,7 @@ fn the_first_successful_segment_makes_the_stream_live() {
         Instant::now(),
         &mut port,
     );
-    assert_eq!(feeder.stream_state(), StreamState::Connecting);
+    assert_eq!(feeder.stream_state(), StreamState::Joined);
     feeder.on_reply(second, StreamReply::Data("AQID"), Instant::now(), &mut port);
     assert_eq!(feeder.stream_state(), StreamState::Live);
 }

@@ -21,7 +21,7 @@ impl QuillApp {
         self.session().is_some_and(|s| {
             s.chat_list.archive_mute.suggestion_due(
                 &s.chat_list.suggestions.actions,
-                s.chat_list.archive_settings.data(),
+                &s.chat_list.archive_settings,
             )
         })
     }

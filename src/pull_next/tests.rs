@@ -1,7 +1,7 @@
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, UserId};
-use crate::state::{Session, placeholder_chat};
+use crate::state::{ListPosition, Session, placeholder_chat};
 use crate::telegram::envelope::ChatKind;
 use std::sync::Arc;
 
@@ -204,8 +204,8 @@ fn add(session: &mut Session, id: i64, kind: ChatKind, unread: i32, main: bool, 
     let mut chat = placeholder_chat(ChatId(id));
     chat.kind = kind;
     chat.unread_count = unread;
-    chat.in_main_list = main;
-    chat.in_archive = archive;
+    chat.main = main.then_some(ListPosition::default());
+    chat.archive = archive.then_some(ListPosition::default());
     session.chats.insert(id, chat);
     if main {
         session.main_order.push(ChatId(id));

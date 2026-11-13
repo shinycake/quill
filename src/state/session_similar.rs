@@ -95,7 +95,7 @@ impl HistoryMessage {
             is_outgoing: false,
             date,
             content,
-            send: crate::state::SendState::Sent,
+            send: crate::state::SendState::Delivered,
             reply_to: None,
             forward_info: None,
             extras: MessageExtras::default(),

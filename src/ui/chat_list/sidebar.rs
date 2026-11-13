@@ -269,7 +269,7 @@ impl QuillApp {
                 .iter()
                 .map(|chat| ListedChat {
                     chat_id: chat.id.0,
-                    pinned: chat.is_pinned,
+                    pinned: chat.is_pinned(),
                     date: chat.last_message().as_ref().map_or(0, |m| m.date),
                 })
                 .collect();
@@ -614,7 +614,7 @@ impl QuillApp {
                     Button::new("qr-login")
                         .label(tr(keys::Q_CHATLIST_SIGN_IN_WITH_QR_CODE))
                         .ghost()
-                        .disabled(self.session().is_some_and(|s| s.requests.has_auth_submit()))
+                        .disabled(self.auth_submit_busy())
                         .on_click(cx.listener(|this, _, _, cx| this.request_qr_login(cx))),
                 )
             },

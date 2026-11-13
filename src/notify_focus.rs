@@ -25,23 +25,38 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const FRESH_MS: u64 = 5_000;
 
 /// The Do Not Disturb probe: never asked, an answer and when it was read,
-/// or a read on a worker (the older answer stays meanwhile). A read leaves
-/// `Refreshing` by landing its answer or, when it dies, by putting back
-/// what was there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// or a read on a worker (the older answer stays meanwhile). The stage holds
+/// the worker, and a read leaves `Refreshing` by landing its answer or, when
+/// it dies, by putting back what was there (its [`RefreshGuard`]).
+#[derive(Debug)]
 enum Dnd {
     Unknown,
-    Known { on: bool, at_ms: u64 },
-    Refreshing { last: Option<(bool, u64)> },
+    Known {
+        on: bool,
+        at_ms: u64,
+    },
+    Refreshing {
+        last: Option<(bool, u64)>,
+        _worker: std::thread::JoinHandle<Option<()>>,
+    },
 }
 
 impl Dnd {
     /// The last answer; `false` until the first lands.
-    fn on(self) -> bool {
+    fn on(&self) -> bool {
         match self {
             Self::Unknown => false,
-            Self::Known { on, .. } => on,
-            Self::Refreshing { last } => last.is_some_and(|(on, _)| on),
+            Self::Known { on, .. } => *on,
+            Self::Refreshing { last, .. } => last.is_some_and(|(on, _)| on),
+        }
+    }
+
+    /// The older answer, if there was one.
+    fn last(&self) -> Option<(bool, u64)> {
+        match self {
+            Self::Unknown => None,
+            Self::Known { on, at_ms } => Some((*on, *at_ms)),
+            Self::Refreshing { last, .. } => *last,
         }
     }
 
@@ -90,49 +105,42 @@ impl Drop for RefreshGuard {
 /// thread; on macOS a stale answer is re-read in place (cheap, in-process).
 pub fn dnd_active() -> bool {
     let now = now_ms();
-    let (answer, start) = {
-        let mut state = DND.lock_or_recover();
-        let current = *state;
-        let stale = match current {
-            Dnd::Unknown => true,
-            Dnd::Known { at_ms, .. } => now.saturating_sub(at_ms) > FRESH_MS,
-            Dnd::Refreshing { .. } => false,
-        };
-        // macOS answers in-process from cfprefsd in well under a millisecond, and
-        // callers only ask when an alert is pending, so a stale answer (Focus
-        // toggled while Quill sat idle) is refreshed before it is used.
-        #[cfg(target_os = "macos")]
-        if stale {
-            drop(state);
-            let on = query_os_dnd();
-            *DND.lock_or_recover() = Dnd::Known {
-                on,
-                at_ms: now_ms(),
-            };
-            return on;
-        }
-        if stale {
-            let last = match current {
-                Dnd::Known { on, at_ms } => Some((on, at_ms)),
-                _ => None,
-            };
-            *state = Dnd::Refreshing { last };
-            (current.on(), Some(last))
-        } else {
-            (current.on(), None)
-        }
+    let mut state = DND.lock_or_recover();
+    let stale = match &*state {
+        Dnd::Unknown => true,
+        Dnd::Known { at_ms, .. } => now.saturating_sub(*at_ms) > FRESH_MS,
+        Dnd::Refreshing { .. } => false,
     };
-    if let Some(last) = start {
-        let spawned = crate::thread_guard::spawn_guarded("quill-dnd", move || {
-            let mut guard = RefreshGuard { last, landed: None };
-            guard.landed = Some(query_os_dnd());
-        });
-        if spawned.is_err() {
-            let mut state = DND.lock_or_recover();
-            if matches!(*state, Dnd::Refreshing { .. }) {
-                *state = Dnd::settled(last);
-            }
-        }
+    // macOS answers in-process from cfprefsd in well under a millisecond, and
+    // callers only ask when an alert is pending, so a stale answer (Focus
+    // toggled while Quill sat idle) is refreshed before it is used.
+    #[cfg(target_os = "macos")]
+    if stale {
+        drop(state);
+        let on = query_os_dnd();
+        *DND.lock_or_recover() = Dnd::Known {
+            on,
+            at_ms: now_ms(),
+        };
+        return on;
+    }
+    let answer = state.on();
+    if !stale {
+        return answer;
+    }
+    let last = state.last();
+    // The lock is held across the spawn, so a worker that ends at once waits
+    // in its guard until its handle is in the stage. A worker that could not
+    // start leaves the stage as it was, for the next ask to try again.
+    let spawned = crate::thread_guard::spawn_guarded("quill-dnd", move || {
+        let mut guard = RefreshGuard { last, landed: None };
+        guard.landed = Some(query_os_dnd());
+    });
+    if let Ok(worker) = spawned {
+        *state = Dnd::Refreshing {
+            last,
+            _worker: worker,
+        };
     }
     answer
 }

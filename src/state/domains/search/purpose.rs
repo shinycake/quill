@@ -21,7 +21,8 @@ pub enum SearchPurpose {
     SearchPublicMessagesByTag,
     /// The next page of the open global search (`searchMessages` or
     /// `searchPublicMessagesByTag` with the saved `next_offset`; appended to
-    /// the hits, carries the search generation).
+    /// the hits; matched by its request id to the page the search waits
+    /// for).
     SearchMessagesMore,
     /// The next page of `searchPublicPosts`.
     SearchPublicPostsMore,
@@ -41,17 +42,15 @@ pub enum SearchPurpose {
     SetTopChatsDisabled,
     SearchChatMessages,
     /// The next older page of the open in-chat search (appended to the
-    /// hits; carries the search generation).
+    /// hits; matched by its request id to the page the search waits for).
     SearchChatMessagesMore,
     /// `searchChatMembers` behind the in-chat "From:" picker.
     SearchFromMembers,
     /// `getChatMessageByDate` of a jump to date.
     GetChatMessageByDate,
-    /// `getChatMessageCalendar` page of the calendar box (the box's
-    /// generation drops late answers).
-    GetChatMessageCalendar {
-        generation: u64,
-    },
+    /// `getChatMessageCalendar` page of the calendar box (the box waits
+    /// for the `RequestId` of its page).
+    GetChatMessageCalendar,
     /// `viewSponsoredChat`. Response is `ok`.
     ViewSponsoredChat,
 }

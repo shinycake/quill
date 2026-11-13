@@ -47,7 +47,7 @@ impl QuillApp {
                 .aria_label(english)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.ai_compose_update(window, cx, |ai| ai.set_translate_to(code));
-                    this.set_ai_compose_view(AiComposeView::Card, cx);
+                    this.set_ai_compose_view(AiComposeView::card(), cx);
                 }))
                 .child(div().w(px(18.)).flex_none().when(selected, |slot| {
                     slot.child(Icon::new(IconName::Check).size(px(16.)).text_color(primary))
@@ -145,7 +145,7 @@ impl QuillApp {
                         .ghost()
                         .label(tr(keys::CANCEL))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.set_ai_compose_view(AiComposeView::Card, cx);
+                            this.set_ai_compose_view(AiComposeView::card(), cx);
                         })),
                 ),
             )
@@ -159,6 +159,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.ai_compose_update(window, cx, |ai| ai.select_translate_style(choice));
-        self.set_ai_compose_view(AiComposeView::Card, cx);
+        self.set_ai_compose_view(AiComposeView::card(), cx);
     }
 }

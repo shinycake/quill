@@ -57,6 +57,9 @@ pub struct StickersState {
     pub interactions: crate::emoji_interaction::EmojiInteractions,
     /// The interaction effects pack, and which read emoji played one.
     pub animations: crate::emoji_animations::EmojiAnimations,
+    /// The set changes and reorders out (`manageStickerSet`, a reorder), by
+    /// their own requests: one at a time.
+    pub edits: crate::state::held::Holds<()>,
     /// Message effects: the available list and the ones looked up.
     pub effects: crate::message_effects::MessageEffects,
 }
@@ -64,6 +67,7 @@ pub struct StickersState {
 impl StickersState {
     pub(crate) fn new() -> Self {
         Self {
+            edits: Default::default(),
             message_reaction_options: MessageReactionBook::default(),
             active_reactions: Vec::new(),
             default_reaction: None,

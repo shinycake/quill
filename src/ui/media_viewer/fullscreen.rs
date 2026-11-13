@@ -22,8 +22,17 @@ pub(in crate::ui) enum VideoFullscreen {
     Active,
     /// On, over a window that was already full screen: it stays so.
     InFullscreenWindow,
-    /// Off; the window goes back to windowed on the next frame.
-    Leaving,
+    /// Off; the window goes back to windowed on the next frame (nothing is
+    /// in flight: the frame toggles it).
+    GoingBack,
+    /// Off; the window was asked to leave full screen and the OS is still
+    /// animating it out. Held until the window reports windowed or `until`
+    /// passes.
+    Exiting { until: Instant },
+    /// On again while the window is still on its way out: once it reports
+    /// windowed, it is asked to go full screen again (or, past `until`, it
+    /// is taken to have stayed there).
+    Reentering { until: Instant },
     /// Off before the window got there: once it reports full screen (until
     /// `until`), it goes back.
     Cancelling { until: Instant },
@@ -34,7 +43,7 @@ impl VideoFullscreen {
     pub(in crate::ui) fn is_on(self) -> bool {
         matches!(
             self,
-            Self::Entering | Self::Active | Self::InFullscreenWindow
+            Self::Entering | Self::Active | Self::InFullscreenWindow | Self::Reentering { .. }
         )
     }
 
@@ -43,12 +52,17 @@ impl VideoFullscreen {
     /// made full screen and has not given back yet stays Quill's.
     pub(in crate::ui) fn enter(self, window_fullscreen: bool) -> (Self, bool) {
         match self {
-            Self::Entering | Self::Active | Self::InFullscreenWindow => (self, false),
-            Self::Leaving | Self::Cancelling { .. } if window_fullscreen => (Self::Active, false),
+            Self::Entering | Self::Active | Self::InFullscreenWindow | Self::Reentering { .. } => {
+                (self, false)
+            }
+            Self::GoingBack | Self::Cancelling { .. } if window_fullscreen => (Self::Active, false),
+            // The window is still leaving: ask for it again once it has.
+            Self::Exiting { until } if window_fullscreen => (Self::Reentering { until }, false),
+            Self::Exiting { .. } => (Self::Entering, true),
             // The OS may still be on its way there.
             Self::Cancelling { .. } => (Self::Entering, false),
-            Self::Off | Self::Leaving if window_fullscreen => (Self::InFullscreenWindow, false),
-            Self::Off | Self::Leaving => (Self::Entering, true),
+            Self::Off | Self::GoingBack if window_fullscreen => (Self::InFullscreenWindow, false),
+            Self::Off | Self::GoingBack => (Self::Entering, true),
         }
     }
 
@@ -58,9 +72,10 @@ impl VideoFullscreen {
             Self::Entering => Self::Cancelling {
                 until: now + CANCEL_WAIT,
             },
-            Self::Active => Self::Leaving,
+            Self::Active => Self::GoingBack,
             Self::InFullscreenWindow => Self::Off,
-            Self::Off | Self::Leaving | Self::Cancelling { .. } => self,
+            Self::Reentering { until } => Self::Exiting { until },
+            Self::Off | Self::GoingBack | Self::Exiting { .. } | Self::Cancelling { .. } => self,
         }
     }
 
@@ -73,9 +88,27 @@ impl VideoFullscreen {
     ) -> (Self, bool) {
         match self {
             Self::Off => (Self::Off, false),
-            Self::Leaving => (Self::Off, window_fullscreen),
+            Self::GoingBack if window_fullscreen => (
+                Self::Exiting {
+                    until: now + CANCEL_WAIT,
+                },
+                true,
+            ),
+            Self::GoingBack => (Self::Off, false),
+            Self::Exiting { until } if window_fullscreen && now < until => (self, false),
+            Self::Exiting { .. } => (Self::Off, false),
+            Self::Reentering { until } if window_fullscreen && now >= until => {
+                (Self::Active, false)
+            }
+            Self::Reentering { .. } if window_fullscreen => (self, false),
+            Self::Reentering { .. } => (Self::Entering, true),
             Self::Cancelling { until } if now >= until => (Self::Off, false),
-            Self::Cancelling { .. } if window_fullscreen => (Self::Off, true),
+            Self::Cancelling { .. } if window_fullscreen => (
+                Self::Exiting {
+                    until: now + CANCEL_WAIT,
+                },
+                true,
+            ),
             Self::Cancelling { .. } => (self, false),
             Self::Entering if window_fullscreen => (Self::Active, false),
             Self::Entering => (Self::Entering, false),
@@ -102,7 +135,62 @@ mod tests {
         assert_eq!(mode, VideoFullscreen::Active);
         let mode = mode.leave(now);
         assert!(!mode.is_on());
-        assert_eq!(mode.follow_window(true, now), (VideoFullscreen::Off, true));
+        let (mode, toggle) = mode.follow_window(true, now);
+        assert!(toggle, "the frame asks the window to leave");
+        assert_eq!(
+            mode,
+            VideoFullscreen::Exiting {
+                until: now + CANCEL_WAIT
+            }
+        );
+        // The OS animates out; the window then reports windowed.
+        assert_eq!(mode.follow_window(true, now), (mode, false));
+        assert_eq!(
+            mode.follow_window(false, now),
+            (VideoFullscreen::Off, false)
+        );
+    }
+
+    #[test]
+    fn entering_during_the_exit_animation_asks_again_once_windowed() {
+        let now = Instant::now();
+        let (leaving, toggle) = VideoFullscreen::Active.leave(now).follow_window(true, now);
+        assert!(toggle);
+        // F pressed while the window still reports full screen.
+        let (mode, ask) = leaving.enter(true);
+        assert!(!ask, "not yet: the window is still leaving");
+        assert!(mode.is_on());
+        assert_eq!(
+            mode.follow_window(true, now),
+            (mode, false),
+            "still leaving"
+        );
+        let (mode, toggle) = mode.follow_window(false, now);
+        assert_eq!((mode, toggle), (VideoFullscreen::Entering, true));
+        // A window that never left within the wait stays Quill's.
+        let (stayed, _) = leaving.enter(true);
+        assert_eq!(
+            stayed.follow_window(true, now + CANCEL_WAIT),
+            (VideoFullscreen::Active, false)
+        );
+        // Windowed already when F comes: ask at once.
+        assert_eq!(leaving.enter(false), (VideoFullscreen::Entering, true));
+        // Leaving again during the wait goes back to waiting out the exit.
+        let (again, _) = leaving.enter(true);
+        assert!(matches!(again.leave(now), VideoFullscreen::Exiting { .. }));
+        // Esc while the window enters: the window reports full screen, is
+        // toggled out, and F during that exit animation asks again once
+        // the window is windowed.
+        let cancelling = VideoFullscreen::Entering.leave(now);
+        let (exiting, toggle) = cancelling.follow_window(true, now);
+        assert!(toggle);
+        assert!(matches!(exiting, VideoFullscreen::Exiting { .. }));
+        let (mode, ask) = exiting.enter(true);
+        assert!(!ask, "the window is still leaving");
+        assert_eq!(
+            mode.follow_window(false, now),
+            (VideoFullscreen::Entering, true)
+        );
     }
 
     #[test]
@@ -135,7 +223,12 @@ mod tests {
         let later = now + Duration::from_millis(400);
         assert_eq!(
             mode.follow_window(true, later),
-            (VideoFullscreen::Off, true)
+            (
+                VideoFullscreen::Exiting {
+                    until: later + CANCEL_WAIT
+                },
+                true
+            )
         );
     }
 
@@ -160,10 +253,7 @@ mod tests {
         let leaving = VideoFullscreen::Active.leave(now);
         assert_eq!(leaving.enter(true), (VideoFullscreen::Active, false));
         let (mode, _) = leaving.enter(true);
-        assert_eq!(
-            mode.leave(now).follow_window(true, now),
-            (VideoFullscreen::Off, true)
-        );
+        assert!(mode.leave(now).follow_window(true, now).1);
         let cancelling = VideoFullscreen::Entering.leave(now);
         assert_eq!(cancelling.enter(true), (VideoFullscreen::Active, false));
         assert_eq!(cancelling.enter(false), (VideoFullscreen::Entering, false));

@@ -50,9 +50,8 @@ fn sweeping_an_in_chat_search_page_clears_its_loading_flag() {
     let mut session = ready_session();
     let chat = ChatId(5);
     session.search.chat_search.open_for(chat);
-    let generation = session.search.chat_search.generation;
-    session.search.chat_search.begin_more(MessageId(9));
-    session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat, generation);
+    let request = session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat);
+    session.search.chat_search.begin_more(MessageId(9), request);
 
     assert!(sweep(&mut session));
 
@@ -103,8 +102,8 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
 #[test]
 fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     let mut session = ready_session();
-    session.settings.privacy_data.network.begin();
-    session.request(RequestPurpose::GetNetworkStatistics, None);
+    let network = session.request(RequestPurpose::GetNetworkStatistics, None);
+    session.settings.privacy_data.network.begin_with(network);
     let subscriptions = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
@@ -228,8 +227,8 @@ fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
 #[test]
 fn sweeping_lost_recommended_channels_clears_their_loading_flag() {
     let mut session = ready_session();
-    session.search.search.tabs.recommended.begin();
-    session.request(RequestPurpose::GetRecommendedChats, None);
+    let request = session.request(RequestPurpose::GetRecommendedChats, None);
+    session.search.search.tabs.recommended.begin_with(request);
 
     assert!(sweep(&mut session));
 
@@ -448,5 +447,31 @@ fn a_swept_request_settles_the_box_waiting_on_it() {
     assert!(
         matches!(session.acks.take(request), Some(Answer::Failed(_))),
         "the sweep refuses it, so the dialog returns to editing"
+    );
+}
+
+/// Sweep 07-007: a swept `getWebPageInstantView` leaves no ask behind and
+/// the link opens in the browser, as after a refusal.
+#[test]
+fn a_swept_instant_view_request_falls_back_to_the_browser() {
+    let mut session = ready_session();
+    let request = session.request(RequestPurpose::GetWebPageInstantView, None);
+    session.messages.instant_view_requests.insert(
+        request,
+        InstantViewAsk {
+            url: "https://example.com/a".into(),
+            from_agent: false,
+        },
+    );
+    let pending = session.requests.take(request).expect("registered");
+    session.settle_lost_request(pending);
+    assert!(session.messages.instant_view_requests.is_empty());
+    assert_eq!(
+        session.messages.instant_view_fallbacks,
+        vec![InstantViewFallback {
+            window: None,
+            url: "https://example.com/a".into(),
+            from_agent: false,
+        }]
     );
 }

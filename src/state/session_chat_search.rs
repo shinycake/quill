@@ -54,7 +54,7 @@ impl Session {
             self.search.chat_search.clear_query();
             return;
         }
-        let _ = self.search.chat_search.begin_query(trimmed);
+        self.search.chat_search.begin_query(trimmed);
         let needle = trimmed.to_lowercase();
         let hits: Vec<SearchMessageHit> = self
             .histories
@@ -169,7 +169,7 @@ impl Session {
             return None;
         };
         let err = err.clone();
-        self.shutdown = ShutdownPhase::Running;
+        self.shutdown = ShutdownPhase::Active;
         Some(err)
     }
 
@@ -203,9 +203,9 @@ pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryM
     use crate::telegram::envelope::MessageSendState;
     let send = match message.send_state {
         MessageSendState::Failed { can_retry } => SendState::Failed { can_retry },
-        MessageSendState::Pending => SendState::Sending,
-        MessageSendState::Sent if pending => SendState::Sending,
-        MessageSendState::Sent => SendState::Sent,
+        MessageSendState::Pending => SendState::Unconfirmed,
+        MessageSendState::Sent if pending => SendState::Unconfirmed,
+        MessageSendState::Sent => SendState::Delivered,
     };
     HistoryMessage {
         sender: message.sender,

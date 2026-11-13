@@ -2,6 +2,7 @@
 //! Never logs api_hash, phone numbers, or codes.
 #![deny(clippy::indexing_slicing)]
 mod account_hygiene;
+mod asked;
 mod auth;
 mod backgrounds;
 mod bot_verification;

@@ -14,8 +14,7 @@ fn asked(session: &mut Session, request: RequestId) {
         .kicked
         .entry((CHANNEL.0, USER))
         .or_default();
-    status.begin();
-    status.sent(request);
+    status.begin_with(request);
 }
 
 #[test]

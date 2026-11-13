@@ -20,8 +20,17 @@ impl QuillApp {
     /// cannot be sent ends the box in the error, not in "Checking link...".
     pub(in crate::ui) fn open_folder_invite(&mut self, link: String, cx: &mut Context<Self>) {
         // An add in flight keeps its box: its answer is the only word on
-        // whether that folder was added. Another link waits for it.
-        if let Some(InviteStage::Adding { .. }) = self.folders.invite.as_ref().map(|d| &d.stage) {
+        // whether that folder was added. Another link waits for it in the
+        // stage and is checked when the add settles.
+        if let Some(dialog) = self.folders.invite.as_mut()
+            && let InviteStage::Adding { next, .. } = &mut dialog.stage
+        {
+            // The link being added again (a double click) queues nothing:
+            // a second box would open for the folder just added.
+            if link != dialog.link {
+                *next = Some(link);
+            }
+            // box-host: re-raises the box the add already shows, where it is.
             self.open_box(DialogKind::FolderInvite);
             cx.notify();
             return;
@@ -39,22 +48,32 @@ impl QuillApp {
             None => InviteStage::Failed(tr(keys::Q_NOTES_NO_CONNECTION).to_string()),
         };
         self.folders.invite = Some(FolderInviteDialog::new(link, stage));
+        // box-host: the folder box is the account's one, drawn where it was
+        // already shown.
         self.open_box(DialogKind::FolderInvite);
         cx.notify();
     }
 
     /// Closing the box while the add is out hands that request to
-    /// `closed_asks`: its answer still says whether the folder was added.
+    /// `closed_asks`: its answer still says whether the folder was added,
+    /// and a link queued behind the add is checked when that answer comes
+    /// (`settle_closed_folder_asks`), not from this close, which a caller
+    /// may repeat until the box is gone.
     pub(in crate::ui) fn close_folder_invite(&mut self, cx: &mut Context<Self>) {
         self.drop_folder_invite_check();
         if let Some(dialog) = self.folders.invite.take()
-            && let InviteStage::Adding { request, info } = dialog.stage
+            && let InviteStage::Adding {
+                request,
+                info,
+                next: queued,
+            } = dialog.stage
         {
             self.folders.closed_asks.insert(
                 request,
                 ClosedAsk::FolderAdded {
                     folder: info.folder.name.to_string(),
                     joined: dialog.selected.len(),
+                    next: queued,
                 },
             );
         }
@@ -93,7 +112,14 @@ impl QuillApp {
                 .and_then(|session| session.chat_list.dialog_answers.take(request));
             if let Some(answer) = answer {
                 changed = true;
-                if self.settle_folder_invite(answer) {
+                let (over, next) = self.settle_folder_invite(answer);
+                // A link that came while the add was out is checked now. The
+                // box it replaces may hold the add's refusal: that was told
+                // in a toast first (`settle_folder_invite`).
+                if let Some(link) = next {
+                    self.open_folder_invite(link, cx);
+                }
+                if over {
                     cx.notify();
                     return true;
                 }
@@ -127,45 +153,53 @@ impl QuillApp {
     }
 
     /// The answer to the check or the add. `true` when the box is over
-    /// (the folder was added).
-    fn settle_folder_invite(&mut self, answer: DialogAnswer) -> bool {
+    /// (the folder was added), and the link that waited behind an add.
+    fn settle_folder_invite(&mut self, answer: DialogAnswer) -> (bool, Option<String>) {
         let Some(dialog) = self.folders.invite.as_mut() else {
-            return false;
+            return (false, None);
         };
         let stage = std::mem::replace(&mut dialog.stage, InviteStage::Failed(String::new()));
         match (stage, answer) {
             (InviteStage::Checking(_), DialogAnswer::Checked(info)) => {
                 dialog.selected = info.missing_chat_ids.iter().copied().collect();
                 dialog.stage = InviteStage::Ready { info, error: None };
-                false
+                (false, None)
             }
             (InviteStage::Checking(_), DialogAnswer::Failed(line)) => {
                 dialog.stage = InviteStage::Failed(line);
-                false
+                (false, None)
             }
-            (InviteStage::Adding { info, .. }, DialogAnswer::Failed(line)) => {
+            (InviteStage::Adding { info, next, .. }, DialogAnswer::Failed(line)) => {
                 dialog.stage = InviteStage::Ready {
                     info,
-                    error: Some(line),
+                    error: Some(line.clone()),
                 };
-                false
+                // The queued link replaces this form, and the form was the
+                // only place the refusal showed.
+                if next.is_some() {
+                    self.set_note(StatusNote::error(line));
+                }
+                (false, next)
             }
-            (InviteStage::Adding { info, .. }, DialogAnswer::LimitHit) => {
+            (InviteStage::Adding { info, next, .. }, DialogAnswer::LimitHit) => {
                 // The limit box is up; the form stays as it was.
                 dialog.stage = InviteStage::Ready { info, error: None };
-                false
+                (false, next)
             }
-            (InviteStage::Adding { info, .. }, DialogAnswer::Done | DialogAnswer::Checked(_)) => {
+            (
+                InviteStage::Adding { info, next, .. },
+                DialogAnswer::Done | DialogAnswer::Checked(_),
+            ) => {
                 let joined = dialog.selected.len();
                 let name = info.folder.name.clone();
                 self.folders.invite = None;
                 self.set_note(folder_added_note(&name.to_string(), joined));
-                true
+                (true, next)
             }
             // An answer that is not for this stage changes nothing.
             (stage, _) => {
                 dialog.stage = stage;
-                false
+                (false, None)
             }
         }
     }
@@ -197,7 +231,11 @@ impl QuillApp {
         if let Some(dialog) = self.folders.invite.as_mut() {
             let info = Box::new(info);
             dialog.stage = match sent {
-                Ok(request) => InviteStage::Adding { request, info },
+                Ok(request) => InviteStage::Adding {
+                    request,
+                    info,
+                    next: None,
+                },
                 Err(err) => InviteStage::Ready {
                     info,
                     error: Some(user_error_for(keys::Q_NOTES_FAILED_ADD_FOLDER, &err)),

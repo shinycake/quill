@@ -132,9 +132,9 @@ pub fn save_current(app_root: &Path, id: EmojiSetId) -> std::io::Result<()> {
         })
 }
 
-/// A row's state (tdesktop `SetState`).
+/// A row's view, rebuilt each frame (tdesktop `SetState`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SetState {
+pub enum SetRowView {
     /// The set in use.
     Active,
     /// Downloaded, not in use.
@@ -147,7 +147,7 @@ pub enum SetState {
     Failed(String),
 }
 
-impl SetState {
+impl SetRowView {
     /// tdesktop `ComputeState` with Quill's download and failure on top.
     pub fn of(
         id: EmojiSetId,
@@ -266,44 +266,47 @@ mod tests {
     #[test]
     fn state_follows_tdesktop() {
         use EmojiSetId::*;
-        assert_eq!(SetState::of(Noto, Noto, true, None, None), SetState::Active);
         assert_eq!(
-            SetState::of(System, Noto, false, None, None),
-            SetState::Ready
+            SetRowView::of(Noto, Noto, true, None, None),
+            SetRowView::Active
         );
         assert_eq!(
-            SetState::of(Noto, System, true, None, None),
-            SetState::Ready
+            SetRowView::of(System, Noto, false, None, None),
+            SetRowView::Ready
         );
         assert_eq!(
-            SetState::of(Twemoji, System, false, None, None),
-            SetState::Available(Twemoji.bytes())
+            SetRowView::of(Noto, System, true, None, None),
+            SetRowView::Ready
         );
         assert_eq!(
-            SetState::of(Twemoji, System, false, Some((Twemoji, 10)), None),
-            SetState::Loading {
+            SetRowView::of(Twemoji, System, false, None, None),
+            SetRowView::Available(Twemoji.bytes())
+        );
+        assert_eq!(
+            SetRowView::of(Twemoji, System, false, Some((Twemoji, 10)), None),
+            SetRowView::Loading {
                 done: 10,
                 total: Twemoji.bytes()
             }
         );
         assert_eq!(
-            SetState::of(Twemoji, System, false, None, Some((Twemoji, "Nope."))),
-            SetState::Failed("Nope.".into())
+            SetRowView::of(Twemoji, System, false, None, Some((Twemoji, "Nope."))),
+            SetRowView::Failed("Nope.".into())
         );
-        assert!(!SetState::Active.clickable());
-        assert!(SetState::Ready.clickable());
+        assert!(!SetRowView::Active.clickable());
+        assert!(SetRowView::Ready.clickable());
     }
 
     #[test]
     fn descriptions_match_tdesktop_strings() {
-        assert_eq!(SetState::Active.description(), "Current set");
-        assert_eq!(SetState::Ready.description(), "Downloaded");
+        assert_eq!(SetRowView::Active.description(), "Current set");
+        assert_eq!(SetRowView::Ready.description(), "Downloaded");
         assert_eq!(
-            SetState::Available(3 * 1024 * 1024).description(),
+            SetRowView::Available(3 * 1024 * 1024).description(),
             "Download 3.0 MB"
         );
         assert_eq!(
-            SetState::Loading {
+            SetRowView::Loading {
                 done: 1024 * 1024,
                 total: 4 * 1024 * 1024
             }

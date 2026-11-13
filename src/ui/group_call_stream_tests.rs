@@ -196,7 +196,7 @@ fn track_unjoined(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             is_rtmp_stream: true,
             media: quill::state::GroupMedia::Stream {
                 mode: quill::calls::engine::GroupCallMode::Rtmp,
-                state: StreamState::Connecting,
+                state: StreamState::Joined,
             },
             ..ActiveGroupCall::fresh(CALL)
         });
@@ -447,7 +447,7 @@ fn the_first_frame_replaces_the_blurred_photo(cx: &mut TestAppContext) {
         .read_with(call, |app, _| app.group_call.stream.player.clone())
         .expect("the stream has a player");
     assert!(!player.has_live_frame());
-    assert_eq!(player.state(), crate::ui::video_player::PlayState::Opening);
+    assert_eq!(player.state(), crate::ui::video_player::PlayState::NotOpen);
     source.push(black_frame(1, 640, 360));
     frames(call);
     assert!(player.has_live_frame());
@@ -495,7 +495,11 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
     // The timer runs out with the call still unjoined.
     app.update(&mut call, |app, cx| {
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
         );
         app.stream_join_ended(CALL, cx);
     });
@@ -512,7 +516,11 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
             active.transport.fail("connect failed");
         }
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
         );
         app.sync_group_call_window(cx);
     });
@@ -521,6 +529,47 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
         app.group_call_screen.joining_call().is_none()
     }));
     assert!(error(&app, &mut call).is_some());
+}
+
+/// The join waits on its own request: when the call's transport waits on
+/// another request, this join has ended, without a failure of its own.
+#[gpui_kit::test]
+fn a_join_whose_request_was_replaced_stops_waiting_without_a_failure(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_stream(cx, StreamState::Live);
+    app.update(&mut main, |app, cx| {
+        app.leave_active_group_call(cx);
+        app.sync_group_call_window(cx);
+    });
+    track_unjoined(&app, &mut main);
+    let window = app
+        .read_with(&main, |app, _| app.group_call.window.handle())
+        .expect("the unjoined stream's window");
+    let mut call = VisualTestContext::from_window(window, cx);
+    app.update(&mut call, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo");
+        session.calls.group_call_error = None;
+        if let Some(active) = session.calls.active_group_call.as_mut() {
+            active.transport.begin_join(quill::ids::RequestId(9));
+        }
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Request(quill::ids::RequestId(5)),
+                Task::ready(()),
+            ),
+        );
+        app.sync_group_call_window(cx);
+    });
+    frames(&mut call);
+    assert!(app.read_with(&call, |app, _| {
+        app.group_call_screen.joining_call().is_none()
+    }));
+    assert!(
+        app.read_with(&call, |app, _| app
+            .session()
+            .is_some_and(|s| s.calls.group_call_error.is_none())),
+        "no failure is said"
+    );
 }
 
 /// Asking for another stream while a join is on its way keeps that join:
@@ -535,7 +584,11 @@ fn a_new_wish_keeps_the_join_on_its_way(cx: &mut TestAppContext) {
     track_unjoined(&app, &mut main);
     app.update(&mut main, |app, _| {
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
         );
         app.note_stream_join_intent(StreamJoinIntent::Call(999));
     });
@@ -575,10 +628,15 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().expect("demo");
         if let Some(active) = session.calls.active_group_call.as_mut() {
             active.screen_share.fail("screen share failed".into());
+            active.transport.begin_join(quill::ids::RequestId(5));
         }
         // Join was pressed; TDLib has not answered yet.
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
-            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
         );
         app.sync_group_call_window(cx);
     });
@@ -592,6 +650,56 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
         })
     };
     assert_eq!(state(&app, &mut call), (Some(CALL), None), "still joining");
+}
+
+/// An error of something else in the call does not end the join on its
+/// way: only the join's own stage does (sweep 16-008).
+#[gpui_kit::test]
+fn an_unrelated_call_error_does_not_end_the_join(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_stream(cx, StreamState::Live);
+    app.update(&mut main, |app, cx| {
+        app.leave_active_group_call(cx);
+        app.sync_group_call_window(cx);
+    });
+    track_unjoined(&app, &mut main);
+    let window = app
+        .read_with(&main, |app, _| app.group_call.window.handle())
+        .expect("the unjoined stream's window");
+    let mut call = VisualTestContext::from_window(window, cx);
+    app.update(&mut call, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo");
+        if let Some(active) = session.calls.active_group_call.as_mut() {
+            active.transport.begin_join(quill::ids::RequestId(5));
+        }
+        session.calls.group_call_error = Some("something else failed".into());
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(
+                CALL,
+                crate::ui::group_call_state::JoinSent::Demo,
+                Task::ready(()),
+            ),
+        );
+        app.sync_group_call_window(cx);
+    });
+    frames(&mut call);
+    assert_eq!(
+        app.read_with(&call, |app, _| app.group_call_screen.joining_call()),
+        Some(CALL),
+        "the join is still out"
+    );
+    // The join's own request fails: its stage ends and so does the wait.
+    app.update(&mut call, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo");
+        if let Some(active) = session.calls.active_group_call.as_mut() {
+            active.transport.join_failed(quill::ids::RequestId(5));
+        }
+        app.sync_group_call_window(cx);
+    });
+    frames(&mut call);
+    assert_eq!(
+        app.read_with(&call, |app, _| app.group_call_screen.joining_call()),
+        None
+    );
 }
 
 /// The row id the stream window's live controller and overlays use.

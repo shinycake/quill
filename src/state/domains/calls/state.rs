@@ -4,6 +4,9 @@
 use crate::state::*;
 
 pub struct CallsState {
+    /// The `createCall` asks out: one at a time, until the answer, the
+    /// error or the loss of its own request.
+    pub creates: crate::state::held::Holds<()>,
     /// Phase C1: the tracked live call, if any. **Signaling only** —
     /// TDLib transports no audio/video (official clients use
     /// libtgvoip); real media transport is the C2 spike.
@@ -106,9 +109,6 @@ pub struct CallsState {
     /// `searchChatsOnServer` answer, `server` the `searchPublicChats` one
     /// (`crate::state::conference_add_people`).
     pub add_people_search: ShareSearch,
-    /// The invitations "Add People" sent into the new conference, until
-    /// their toast is dismissed (`crate::state::conference_add_people`).
-    pub invite_results: Option<ConferenceInviteResults>,
 }
 
 impl CallsState {
@@ -133,6 +133,22 @@ impl CallsState {
             .into_iter()
             .flatten()
             .find(|call| call.id == id)
+    }
+
+    /// The invitations "Add People" sent into the current conference.
+    pub fn invite_results(&self) -> Option<&ConferenceInviteResults> {
+        self.active_group_call.as_ref()?.invite_results.as_ref()
+    }
+
+    pub fn invite_results_mut(&mut self) -> Option<&mut ConferenceInviteResults> {
+        self.active_group_call.as_mut()?.invite_results.as_mut()
+    }
+
+    /// The toast of the current conference's invitations is dismissed.
+    pub fn clear_invite_results(&mut self) {
+        if let Some(call) = self.active_group_call.as_mut() {
+            call.invite_results = None;
+        }
     }
 
     /// The group call `id` was just left (`leaveGroupCall`) and TDLib has
@@ -172,6 +188,12 @@ impl CallsState {
         }
     }
 
+    /// Whether the fetch of `group_call_id` failed and the mark still
+    /// stands (nothing took it).
+    pub fn group_call_fetch_failed(&self, group_call_id: i32) -> bool {
+        self.group_call_fetch_failures.contains(&group_call_id)
+    }
+
     /// Whether the fetch of `group_call_id` failed since it was last taken
     /// or asked again; taking it clears the mark.
     pub fn take_group_call_fetch_failure(&mut self, group_call_id: i32) -> bool {
@@ -183,6 +205,7 @@ impl CallsState {
 
     pub(crate) fn new() -> Self {
         Self {
+            creates: Default::default(),
             active_call: None,
             summary: None,
             error: None,
@@ -209,7 +232,6 @@ impl CallsState {
             conference_invite: None,
             conference_invite_declines: Vec::new(),
             add_people_search: ShareSearch::default(),
-            invite_results: None,
         }
     }
 }

@@ -77,17 +77,70 @@ impl QuillApp {
         false
     }
 
+    /// The session update path (every poll pass, whatever is drawn): the
+    /// chosen file's download ended. With the file, the pick moves on to
+    /// its window's frame ([`Self::sticker_box_window_upkeep`]); without
+    /// it, the wait ends with a note instead of holding the pick for good.
+    /// Returns whether the wait moved.
+    pub(in crate::ui) fn settle_sticker_pick_download(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(pending) = self.sticker_box.editing.downloading() else {
+            return false;
+        };
+        let (file_id, host) = (pending.file_id, pending.window);
+        // The box closed, or the window it was chosen in: nobody wants it.
+        if self.sticker_box.host != super::state::SetBoxHost::In(host)
+            || host.is_some_and(|chat| !self.windows.has(chat))
+        {
+            self.sticker_box.editing.end_wait();
+            return true;
+        }
+        if let Some(path) = self.local_media_path(file_id) {
+            self.sticker_box.editing.file_landed(path);
+            cx.notify();
+            return true;
+        }
+        // The transfer ended without the file, or `downloadFile` sent
+        // nothing (the file cannot be downloaded, a cancel is settling, or
+        // TDLib's own transfer of it is not ours to track) and none of ours
+        // is out: nothing will arrive.
+        let failed = self.session().is_some_and(|session| {
+            let id = file_id.0;
+            let active = session
+                .media
+                .files
+                .get(&id)
+                .is_some_and(|file| file.local.is_downloading_active());
+            session
+                .media
+                .downloads
+                .ended_without_file(id, &session.media.files)
+                || (!active
+                    && !session.media.downloads.is_requested(id)
+                    && !session.requests.has_download(file_id))
+        });
+        if !failed {
+            return false;
+        }
+        self.sticker_box.editing.end_wait();
+        self.set_note(StatusNote::error(tr(
+            keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
+        )));
+        cx.notify();
+        true
+    }
+
     /// Each window's frame (`per_window_upkeep`): the chosen video's
-    /// download finished, so the editor opens on it in the window the pick
-    /// was made in, in that window's own frame (the poll has no window to
-    /// do this, and a minimized main window draws none). A pick whose chat
-    /// window closed, or whose box closed there, is dropped with it.
+    /// download finished (`settle_sticker_pick_download`), so the editor
+    /// opens on it in the window the pick was made in, in that window's own
+    /// frame (the poll has no window to do this, and a minimized main window
+    /// draws none). A pick whose chat window closed, or whose box closed
+    /// there, is dropped with it.
     pub(in crate::ui) fn sticker_box_window_upkeep(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pending) = self.sticker_box.editing.downloading() else {
+        let Some(pending) = self.sticker_box.editing.downloaded() else {
             return;
         };
         let host = pending.window;
@@ -102,26 +155,7 @@ impl QuillApp {
             self.sticker_box.editing.end_wait();
             return;
         }
-        let Some(path) = self.local_media_path(pending.file_id) else {
-            // The download ended without a file: the wait ends with a note
-            // instead of holding the pick for good.
-            let ended = pending.file_id;
-            let failed = self.session().is_some_and(|session| {
-                session
-                    .media
-                    .downloads
-                    .ended_without_file(ended.0, &session.media.files)
-            });
-            if failed {
-                self.sticker_box.editing.end_wait();
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
-                )));
-                cx.notify();
-            }
-            return;
-        };
-        let Some(pending) = self.sticker_box.editing.take_downloading() else {
+        let Some((pending, path)) = self.sticker_box.editing.take_downloaded() else {
             return;
         };
         let super::state::PendingVideo {

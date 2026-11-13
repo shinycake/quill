@@ -177,7 +177,7 @@ fn revoking_a_link_frees_the_limit() {
     rig.driver.session.payments.hub.limit_notice =
         Some(crate::premium_hub::limit_notice::LimitNotice::Box {
             kind: PremiumLimitKind::PublicLinks,
-            extra: 0,
+            over: 0,
             toast: None,
         });
     rig.driver.revoke_public_link(ChatId(13)).unwrap().unwrap();
@@ -386,6 +386,34 @@ fn queued_edits_without_an_upgraded_chat_are_reported() {
         kind: Vec::new(),
     };
     rig.driver.run_edit_after_upgrade(edit, true);
+    assert_eq!(
+        rig.driver.session.chats_state.chat_action_error.last(),
+        Some(crate::lang::tr(
+            crate::lang::keys::Q_GROUP_UPGRADED_LINK_NOT_SAVED
+        ))
+    );
+}
+
+/// r4-02: an upgrade that is lost (or out at logout) takes its waiting save
+/// with it, and the box gets its failure note.
+#[test]
+fn a_lost_upgrade_drops_the_save_that_waited_on_it() {
+    let mut rig = Rig::new();
+    let sent = rig
+        .driver
+        .save_group_type(ChatId(30), &[GroupTypeEdit::Upgrade], &[])
+        .unwrap();
+    assert_eq!(rig.driver.session.groups.group_type.after_upgrade.len(), 1);
+    let pending = rig.driver.session.requests.take(sent[0]).unwrap();
+    rig.driver.session.settle_lost_request(pending);
+    assert!(
+        rig.driver
+            .session
+            .groups
+            .group_type
+            .after_upgrade
+            .is_empty()
+    );
     assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
 }
 

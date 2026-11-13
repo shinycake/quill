@@ -1,6 +1,7 @@
 use super::super::{ConnectDriver, RecordingSender};
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
+use crate::ids::FileId;
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
 use serde_json::json;
@@ -56,6 +57,59 @@ fn colors_need_premium_and_icons_load_once() {
     assert!(driver.load_background_emoji_icons().unwrap().is_none());
     driver.download_background_emoji_icons();
     assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 302);
+    // Asked once per file: the same list is not asked again, a replaced
+    // list of the same length is.
+    let mut asked = std::collections::HashSet::new();
+    assert!(driver.download_background_emoji_icons_once(&mut asked));
+    assert!(!driver.download_background_emoji_icons_once(&mut asked));
+    asked.remove(&crate::ids::FileId(302));
+    assert!(driver.download_background_emoji_icons_once(&mut asked));
+}
+
+/// The Appearance box asks for files, not for list lengths: a list that is
+/// replaced by another of the same length has other files to ask for, and a
+/// download whose send failed is not counted as asked.
+#[test]
+fn appearance_files_follow_the_files_not_the_list_length() {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: serde_json::Value| {
+        driver
+            .ingest(copy_and_parse(&payload.to_string(), &seq, &sink).unwrap())
+            .unwrap();
+    };
+    driver.session.my_user_id = Some(7);
+    ingest(
+        &mut driver,
+        json!({"@type":"updateUser","user":{"@type":"user","id":7,"first_name":"T","last_name":"","phone_number":"","is_premium":true,"type":{"@type":"userTypeRegular"}}}),
+    );
+    let request = driver.load_background_emoji_icons().unwrap().unwrap();
+    ingest(
+        &mut driver,
+        json!({"@type":"stickers","@extra":request.as_extra(),"stickers":[sticker(41, 301), sticker(42, 302)]}),
+    );
+    let files = driver.chat_appearance_files();
+    assert_eq!(files, vec![FileId(301), FileId(302)]);
+    // A refused send is not an ask.
+    recorder.refuse_sends(true);
+    assert!(driver.download_thumbnails(&files).is_empty());
+    recorder.refuse_sends(false);
+    assert_eq!(driver.download_thumbnails(&files), files);
+    // The list is replaced by another of the same length.
+    driver.session.users_state.background_emoji_icons = crate::state::fetch::Fetch::Idle;
+    let request = driver.load_background_emoji_icons().unwrap().unwrap();
+    ingest(
+        &mut driver,
+        json!({"@type":"stickers","@extra":request.as_extra(),"stickers":[sticker(43, 303), sticker(44, 304)]}),
+    );
+    assert_eq!(
+        driver.chat_appearance_files(),
+        vec![FileId(303), FileId(304)],
+        "the same length, other files"
+    );
 }
 
 #[test]

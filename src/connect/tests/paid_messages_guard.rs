@@ -75,6 +75,48 @@ fn a_menu_command_into_a_paid_chat_waits_for_the_confirmation() {
     cleanup(f);
 }
 
+/// The `Ok` of a send into a paid chat only says the guard took it:
+/// `paid_send_is_held` says it waits for the confirmation (a free chat's
+/// send is not held).
+#[test]
+fn a_send_says_whether_the_guard_holds_it() {
+    use crate::composer::ComposerSnapshot;
+    let mut f = fixture();
+    paid_chat(&mut f, 25);
+    let view = f.1.session.view_generation;
+    let snap = ComposerSnapshot::capture(ChatId(600), view, "/cmd");
+    let request = f.1.send_snapshot(&snap).unwrap();
+    assert!(f.1.paid_send_is_held(request), "waits for Pay");
+    f.1.discard_paid_send();
+    assert!(!f.1.paid_send_is_held(request), "cancelled: not held");
+    cleanup(f);
+}
+
+/// The asker of a held send learns how the hold ended: released or
+/// discarded, read once.
+#[test]
+fn a_held_send_reports_how_its_hold_ended() {
+    use crate::composer::ComposerSnapshot;
+    use crate::paid_messages_guard::PaidOutcome;
+    let mut f = fixture();
+    paid_chat(&mut f, 25);
+    let view = f.1.session.view_generation;
+    let snap = ComposerSnapshot::capture(ChatId(600), view, "/cmd");
+    let released = f.1.send_snapshot(&snap).unwrap();
+    assert_eq!(f.1.paid_send_outcome(released), PaidOutcome::Held);
+    f.1.release_paid_send(false).unwrap();
+    assert_eq!(f.1.paid_send_outcome(released), PaidOutcome::Released);
+    assert_eq!(
+        f.1.paid_send_outcome(released),
+        PaidOutcome::Unknown,
+        "read once"
+    );
+    let discarded = f.1.send_snapshot(&snap).unwrap();
+    f.1.discard_paid_send();
+    assert_eq!(f.1.paid_send_outcome(discarded), PaidOutcome::Discarded);
+    cleanup(f);
+}
+
 #[test]
 fn forwards_carry_price_times_messages() {
     let mut f = fixture();
@@ -111,6 +153,37 @@ fn a_remembered_price_is_stored_and_lets_sends_through() {
         .record_answer(600, CanSend::Ok, 1, false);
     f.1.sync_paid_guard();
     assert!(read().entries().is_empty());
+    cleanup(f);
+}
+
+#[test]
+fn a_trusted_price_whose_write_failed_is_written_again_after_the_wait() {
+    use crate::paid_messages::TRUST_RETRY_MS;
+    let mut f = fixture();
+    paid_chat(&mut f, 10);
+    let now = 1_000;
+    // A directory where the file goes: the write fails.
+    let file = f.1.paths.root.join("paid_trust.json");
+    std::fs::create_dir_all(&file).unwrap();
+    f.1.session.payments.paid_messages.remember_trust(600, 10);
+    f.1.paid_trust_tick(now);
+    let failed = |f: &Fixture| {
+        f.1.session
+            .payments
+            .paid_messages
+            .trust_save_error()
+            .is_some()
+    };
+    assert!(failed(&f), "the write failed");
+    // Not before the wait is over.
+    f.1.paid_trust_tick(now + TRUST_RETRY_MS - 1);
+    assert!(failed(&f), "not before the wait");
+    // The disk is fine again: the next tick after the wait writes it.
+    std::fs::remove_dir_all(&file).unwrap();
+    f.1.paid_trust_tick(now + TRUST_RETRY_MS);
+    assert!(!failed(&f), "written after the wait");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(PaidTrust::from_json(&text).is_trusted(600, 10));
     cleanup(f);
 }
 
@@ -173,5 +246,32 @@ fn the_direct_messages_price_is_fetched_when_unknown() {
     // Known now: no further request.
     f.1.fetch_direct_messages_price(ChatId(-1001)).unwrap();
     assert_eq!(requests(&f, "getSupergroup").len(), 1);
+    cleanup(f);
+}
+
+/// Sweep r4-04: a trusted prices file that cannot be read (here a directory,
+/// so the read fails with something other than "not found") is not "no
+/// file": nothing is written over it and it is read again only after the
+/// wait.
+#[test]
+fn an_unreadable_trust_file_is_not_written_over_and_is_read_after_the_wait() {
+    use crate::paid_messages::TRUST_RETRY_MS;
+    let mut f = fixture();
+    let file = f.1.paths.root.join("paid_trust.json");
+    std::fs::create_dir_all(&file).unwrap();
+    let now = 1_000;
+    f.1.paid_trust_tick(now);
+    f.1.session.payments.paid_messages.remember_trust(600, 10);
+    f.1.paid_trust_tick(now + 1);
+    assert!(file.is_dir(), "nothing was written over it");
+    let paid = &f.1.session.payments.paid_messages;
+    assert!(
+        !paid.trust_read_due(now + TRUST_RETRY_MS - 1),
+        "not read again before the wait"
+    );
+    assert!(paid.trust_read_due(now + TRUST_RETRY_MS));
+    assert!(paid.trust_save_error().is_none(), "no write was tried");
+    f.1.paid_trust_tick(now + 1);
+    assert!(file.is_dir(), "a tick inside the wait changes nothing");
     cleanup(f);
 }

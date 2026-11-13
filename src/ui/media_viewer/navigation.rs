@@ -43,7 +43,6 @@ impl QuillApp {
             .and_then(quill::media_viewer::timed_viewer_item);
         if let Some(item) = timed {
             self.viewer.state = MediaViewer::open(vec![item], 0);
-            self.viewer.open_gen += 1;
             self.mark_timed_media_read(chat_id, message_id);
             self.viewer_note_activity(cx);
             self.reset_viewer_item_state(cx);
@@ -80,7 +79,6 @@ impl QuillApp {
             return;
         };
         self.viewer.state = MediaViewer::open(items, index);
-        self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
@@ -94,7 +92,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.viewer.state = MediaViewer::open_poll(item);
-        self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
@@ -145,7 +142,6 @@ impl QuillApp {
         self.viewer.state = MediaViewer::open_shared(items, index, total);
         self.viewer.extra.shared_tab = tab;
         self.viewer.extra.shared_seen = loaded;
-        self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         self.sync_shared_media_viewer(cx);
@@ -304,14 +300,24 @@ impl QuillApp {
         self.viewer.pointer = Pointer::Panning(pos);
     }
 
+    /// The message the viewer shows, to tell a step that moved from one that
+    /// did not (the first item's Left, the last item's Right).
+    pub(in crate::ui) fn viewer_item_key(&self) -> Option<quill::ids::ChatMessage> {
+        let item = self.viewer.state.current()?;
+        Some(quill::ids::ChatMessage::new(item.chat_id, item.message_id))
+    }
+
     pub(in crate::ui) fn step_media_viewer(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let before = self.viewer_item_key();
         if delta < 0 {
             self.viewer.state.prev();
         } else {
             self.viewer.state.next();
         }
         self.viewer_note_activity(cx);
-        self.reset_viewer_item_state(cx);
+        if self.viewer_item_key() != before {
+            self.reset_viewer_item_state(cx);
+        }
         cx.notify();
     }
 

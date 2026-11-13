@@ -12,7 +12,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Motion follows the OS reduce-motion preference and the "Interface
 /// animations" power-saving switch.
@@ -39,7 +39,7 @@ impl QuillApp {
         let hidden = !self.frame.sidebar.hidden();
         self.frame
             .sidebar
-            .set_hidden(hidden, animate(), Instant::now());
+            .set_hidden(hidden, animate(), self.frame.sidebar.now());
         if hidden {
             self.release_sidebar_focus(window, cx);
         }
@@ -55,7 +55,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.frame.sidebar.dismiss(animate(), Instant::now()) {
+        if self
+            .frame
+            .sidebar
+            .dismiss(animate(), self.frame.sidebar.now())
+        {
             self.release_sidebar_focus(window, cx);
             cx.notify();
         }
@@ -90,7 +94,7 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let now = Instant::now();
+        let now = self.frame.sidebar.now();
         if self.sidebar_hideable(layout) {
             let held = self.sidebar_peek_held(window, cx);
             self.frame.sidebar.settle(held, animate(), now);
@@ -107,7 +111,7 @@ impl QuillApp {
         if self
             .frame
             .sidebar
-            .pointer_entered(animate(), Instant::now())
+            .pointer_entered(animate(), self.frame.sidebar.now())
         {
             cx.notify();
         }
@@ -116,17 +120,16 @@ impl QuillApp {
     /// The pointer moved over the window outside the peeking column (which
     /// blocks the mouse from what is under it): start the grace period.
     pub(super) fn sidebar_pointer_moved_away(&mut self, cx: &mut Context<Self>) {
-        if !self.frame.sidebar.pointer_left(Instant::now()) {
-            return;
-        }
         // The wake is held by the `Leaving` stage: dropped with it.
-        let wake = cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(LEAVE_GRACE + Duration::from_millis(10))
-                .await;
-            let _ = this.update(cx, |_, cx| cx.notify());
+        let now = self.frame.sidebar.now();
+        self.frame.sidebar.pointer_left(now, || {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(LEAVE_GRACE + Duration::from_millis(10))
+                    .await;
+                let _ = this.update(cx, |_, cx| cx.notify());
+            })
         });
-        self.frame.sidebar.hold_wake(wake);
     }
 
     /// The chat list column in the layout: whole, narrowed while it slides
@@ -174,7 +177,7 @@ impl QuillApp {
         }
         let full = layout.list? + self.folder_rail_width();
         let pointer = self.frame.sidebar.pointer();
-        let shown = self.frame.sidebar.peek(Instant::now());
+        let shown = self.frame.sidebar.peek(self.frame.sidebar.now());
         if pointer == Peek::Off && shown <= 0. {
             return Some(
                 div()

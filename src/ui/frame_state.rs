@@ -65,9 +65,10 @@ pub(crate) struct FrameUi {
     /// ticks for it, not for the app. Not `windows.scope`, which input in a
     /// chat window leaves in place for any window to draw under.
     pub(super) tick_view: std::cell::Cell<Option<EntityId>>,
-    /// The frame clock's loop. It holds the task while the clock runs, and
-    /// the loop puts `Stopped` back when it ends (or the app goes and drops
-    /// it), so a stopped clock can never read as running.
+    /// The frame clock's loop, one beat per task: it holds the task of the
+    /// beat that will run next, and each beat hands the next one to this
+    /// cell (or leaves `Stopped` when the clock stops, or the app goes and
+    /// drops it), so a stopped clock can never read as running.
     pub(super) frame_clock: std::cell::Cell<ClockLoop>,
     /// The main window's display and frame lead, for the frame clock's
     /// content grid (`frame_clock::ClockTiming`).
@@ -108,7 +109,8 @@ pub(crate) struct FrameUi {
     pub(super) draft_timer: super::draft_timer::DraftTimer,
 }
 
-/// Whether the frame clock's loop is going; the stage owns the task.
+/// Whether the frame clock's loop is going; the stage owns the task of the
+/// beat that runs next.
 pub(super) enum ClockLoop {
     Stopped,
     Running { _task: gpui_kit::Task<()> },
@@ -135,7 +137,7 @@ impl FrameUi {
     /// handed to the old one went with it, so the next render hands it
     /// over again. Every per-native-window cache resets here.
     pub(super) fn forget_native_window(&mut self) {
-        self.window_title_shown.borrow_mut().clear();
+        self.window_title_shown.get_mut().clear();
         self.capture_blocked = false;
         // The timer ran in the window that is gone; the next move asks again.
         self.window_state_save = StateSaveTimer::Idle;

@@ -22,8 +22,9 @@ const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 pub(super) enum PhoneFlow {
     #[default]
     Idle,
-    /// The confirmation popup is up.
-    Asking,
+    /// The confirmation popup with this id is up; only its answer moves
+    /// the flow.
+    Asking { popup: PopupId },
     /// "Share" was pressed and the bot is being unblocked by `request`; its
     /// answer moves the flow on, its error ends it.
     Unblocking { since: Instant, request: RequestId },
@@ -41,13 +42,21 @@ pub(super) enum PhoneStep {
 }
 
 impl PhoneFlow {
+    /// The confirmation popup the flow waits on, if it is up.
+    pub(super) fn popup(self) -> Option<PopupId> {
+        match self {
+            PhoneFlow::Asking { popup } => Some(popup),
+            PhoneFlow::Idle | PhoneFlow::Unblocking { .. } | PhoneFlow::Sending { .. } => None,
+        }
+    }
+
     /// The request the flow waits on, if any.
     pub(super) fn waiting_on(self) -> Option<RequestId> {
         match self {
             PhoneFlow::Unblocking { request, .. } | PhoneFlow::Sending { request, .. } => {
                 Some(request)
             }
-            PhoneFlow::Idle | PhoneFlow::Asking => None,
+            PhoneFlow::Idle | PhoneFlow::Asking { .. } => None,
         }
     }
 
@@ -61,7 +70,7 @@ impl PhoneFlow {
         sent: Option<bool>,
     ) -> PhoneStep {
         match self {
-            PhoneFlow::Idle | PhoneFlow::Asking => PhoneStep::Wait,
+            PhoneFlow::Idle | PhoneFlow::Asking { .. } => PhoneStep::Wait,
             PhoneFlow::Unblocking { since, .. } => match unblocked {
                 Some(true) => PhoneStep::Send,
                 Some(false) => PhoneStep::Finish(false),
@@ -94,7 +103,7 @@ fn phone_popup() -> Popup {
 
 impl QuillApp {
     /// `web_app_request_phone`: ask first.
-    pub(super) fn request_mini_app_phone(&mut self) {
+    pub(super) fn request_mini_app_phone(&mut self, cx: &mut Context<Self>) {
         let idle = self
             .mini_apps
             .window
@@ -104,14 +113,27 @@ impl QuillApp {
             self.with_window(|window| window.emit(BridgeReply::phone_requested(false)));
             return;
         }
-        self.with_window(|window| {
-            window.phone = PhoneFlow::Asking;
-            window.show_popup(PopupPurpose::Phone, phone_popup());
-        });
+        if let Some(popup) = self.show_mini_app_popup(None, phone_popup(), cx) {
+            self.with_window(|window| window.phone = PhoneFlow::Asking { popup });
+        }
     }
 
     /// The confirmation was answered.
-    pub(super) fn answer_phone_prompt(&mut self, button: &str, cx: &mut Context<Self>) {
+    pub(super) fn answer_phone_prompt(
+        &mut self,
+        popup: PopupId,
+        button: &str,
+        cx: &mut Context<Self>,
+    ) {
+        // Only the popup the flow opened answers it.
+        let asked = self
+            .mini_apps
+            .window
+            .as_ref()
+            .is_some_and(|window| window.phone == PhoneFlow::Asking { popup });
+        if !asked {
+            return;
+        }
         if button != "share" {
             self.finish_phone(false, cx);
             return;
@@ -223,7 +245,7 @@ impl QuillApp {
         else {
             return;
         };
-        if matches!(flow, PhoneFlow::Idle | PhoneFlow::Asking) {
+        if matches!(flow, PhoneFlow::Idle | PhoneFlow::Asking { .. }) {
             return;
         }
         let unblocked = match (flow, self.live.as_mut()) {
@@ -310,7 +332,10 @@ mod tests {
     fn an_unanswered_prompt_waits() {
         let start = Instant::now();
         assert_eq!(
-            PhoneFlow::Asking.step(start, None, Some(true)),
+            PhoneFlow::Asking {
+                popup: crate::ui::web_app_ui::PopupId::from_wire("p1").expect("an id"),
+            }
+            .step(start, None, Some(true)),
             PhoneStep::Wait
         );
         assert_eq!(

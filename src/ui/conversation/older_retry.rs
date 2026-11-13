@@ -2,6 +2,7 @@
 //! failed (`OlderEnd::Failed`): paging stops there instead of asking again
 //! on every render, and the strip is the way out.
 use crate::ui::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -117,24 +118,26 @@ pub(in crate::ui) fn with_older_retry(
 
 impl QuillApp {
     fn retry_older_page(&mut self, which: OlderRetryFor, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let _ = match which {
-                OlderRetryFor::Thread => live.driver.retry_thread_older(),
-                OlderRetryFor::Topic => live.driver.retry_topic_older(),
-                OlderRetryFor::Saved => live.driver.retry_saved_older(),
-                OlderRetryFor::Chat => live.driver.retry_history(),
-            };
+        let refused = self.live.as_mut().is_some_and(|live| match which {
+            OlderRetryFor::Thread => live.driver.retry_thread_older().is_err(),
+            OlderRetryFor::Topic => live.driver.retry_topic_older().is_err(),
+            OlderRetryFor::Saved => live.driver.retry_saved_older().is_err(),
+            OlderRetryFor::Chat => live.driver.retry_history().is_err(),
+        });
+        if refused {
+            self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY)));
         }
         cx.notify();
     }
 
     fn retry_newer_page(&mut self, which: NewerRetryFor, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let _ = match which {
-                NewerRetryFor::Chat => live.driver.retry_history_newer(),
-                NewerRetryFor::Thread => live.driver.retry_thread_newer(),
-                NewerRetryFor::Topic => live.driver.retry_topic_newer(),
-            };
+        let refused = self.live.as_mut().is_some_and(|live| match which {
+            NewerRetryFor::Chat => live.driver.retry_history_newer().is_err(),
+            NewerRetryFor::Thread => live.driver.retry_thread_newer().is_err(),
+            NewerRetryFor::Topic => live.driver.retry_topic_newer().is_err(),
+        });
+        if refused {
+            self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_LOAD_HISTORY)));
         }
         cx.notify();
     }

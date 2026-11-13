@@ -38,7 +38,7 @@ impl CallEngine for TgcallsEngine {
             P2pStage::Live { handle } => unsafe {
                 (api.qc_p2p_receive_signaling)(handle.as_ptr(), data.as_ptr(), data.len());
             },
-            P2pStage::Waiting { pending_signaling } => pending_signaling.push(data.to_vec()),
+            P2pStage::Unconnected { pending_signaling } => pending_signaling.push(data.to_vec()),
         }
         Ok(())
     }
@@ -124,7 +124,7 @@ impl CallEngine for TgcallsEngine {
         // SAFETY: a live call.
         unsafe { (api.qc_p2p_set_muted)(handle.as_ptr(), i32::from(call.muted)) };
         let pending = match waiting {
-            P2pStage::Waiting { pending_signaling } => pending_signaling,
+            P2pStage::Unconnected { pending_signaling } => pending_signaling,
             P2pStage::Live { .. } => Vec::new(),
         };
         for data in pending {

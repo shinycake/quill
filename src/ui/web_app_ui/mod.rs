@@ -25,6 +25,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use popups::{PopupId, PopupOwner, PopupPurpose, Shown};
 use quill::deep_link_types::is_telegram_link;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
@@ -116,25 +117,6 @@ pub(super) enum WebAppConfirm {
     RemoveFromMenu { bot_id: i64, name: String },
 }
 
-/// What a shell popup was for, so its answer can be acted on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PopupPurpose {
-    /// `web_app_open_popup`: the app gets `popup_closed`.
-    App,
-    /// "Allow messaging": yes calls `allowBotToSendMessages`.
-    WriteAccess,
-    /// "Paste from clipboard": yes reads the clipboard for the app.
-    Clipboard { req_id: String },
-    /// "Close anyway" after `web_app_setup_closing_behavior`.
-    CloseConfirm,
-    /// `web_app_request_emoji_status_access`: "Allow" grants it.
-    EmojiStatusAccess,
-    /// `web_app_set_emoji_status`: "Confirm" sets the status.
-    EmojiStatus,
-    /// `web_app_request_phone`: "Share" sends the contact card.
-    Phone,
-}
-
 /// Something only a render (with the `Window`) can do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RenderAction {
@@ -159,92 +141,19 @@ pub(super) struct MiniAppWindow {
     /// The app asked to confirm before it closes (`setup_closing_behavior`).
     closing_confirmation: bool,
     settings_button: bool,
-    popups: HashMap<String, PopupPurpose>,
+    /// The popups no stage waits on, by what they were for. A stage's own
+    /// popup is not here: the stage holds the id.
+    popups: HashMap<PopupId, PopupPurpose>,
     popup_seq: u64,
+    /// The window (`None`: the main window) whose flow opened the app: the
+    /// poll's steps and the helper's events open their boxes and notes there.
+    launch_window: Option<ChatId>,
     write_access: launch_flow::WriteAccess,
     privacy_policy_url: Option<String>,
     in_attachment_menu: bool,
     emoji: emoji_status::EmojiStatusFlow,
     phone: phone::PhoneFlow,
     invoice: Option<invoice::InvoiceWatch>,
-}
-
-impl Drop for MiniAppWindow {
-    fn drop(&mut self) {
-        // Ask it to close, then reap on a detached thread: neither the
-        // queue nor the wait can hold up the UI thread.
-        let _ = self.writer.send(encode(&HostCommand::Close).into_bytes());
-        if let Some(child) = self.child.take() {
-            quill::child_reap::reap_after(child, Duration::from_millis(200));
-        }
-    }
-}
-
-impl MiniAppWindow {
-    /// Close it as `Drop` does, and hear when the helper is gone.
-    fn close_with_notice(mut self) -> Option<std::sync::mpsc::Receiver<()>> {
-        let _ = self.writer.send(encode(&HostCommand::Close).into_bytes());
-        let child = self.child.take()?;
-        Some(quill::child_reap::reap_after_notice(
-            child,
-            Duration::from_millis(200),
-        ))
-    }
-
-    fn send(&mut self, command: &HostCommand) {
-        if self.writer.send(encode(command).into_bytes()) == helper_pipe::Sent::Queued
-            || self.helper == launch_flow::HelperState::Wedged
-        {
-            return;
-        }
-        self.helper = launch_flow::HelperState::Wedged;
-        eprintln!("quill: the mini app helper stopped reading its input; closing it");
-        if let Some(child) = self.child.as_mut() {
-            let _ = child.kill();
-        }
-    }
-
-    fn emit(&mut self, reply: BridgeReply) {
-        self.send(&HostCommand::Emit {
-            event: reply.event,
-            data: reply.data,
-        });
-    }
-
-    fn show_popup(&mut self, purpose: PopupPurpose, popup_without_id: Popup) {
-        self.popup_seq += 1;
-        let id = format!("p{}", self.popup_seq);
-        self.popups.insert(id.clone(), purpose);
-        self.send(&HostCommand::ShowPopup {
-            popup: Popup {
-                id,
-                ..popup_without_id
-            },
-        });
-    }
-
-    fn menu(&self) -> Vec<MenuItem> {
-        menu_items(
-            self.settings_button,
-            self.privacy_policy_url.is_some(),
-            self.in_attachment_menu,
-        )
-        .into_iter()
-        .map(|(id, label, attention)| MenuItem {
-            id: id.to_string(),
-            label: label.to_string(),
-            attention,
-        })
-        .collect()
-    }
-
-    /// `#rrggbb` for a bridge color, or the theme's color for a key.
-    fn resolve_color(&self, spec: &ColorSpec) -> String {
-        match spec {
-            ColorSpec::Rgb(hex) => hex.clone(),
-            ColorSpec::Key(key) => self.theme.key_color(*key).hex(),
-        }
-    }
 }
 
 /// Everything mini-app related on [`QuillApp`].
@@ -284,25 +193,25 @@ pub(super) struct MiniApps {
     data_sends: Vec<quill::ids::RequestId>,
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,
-    /// The window the last mini-app flow was started in (`None`: the main
-    /// window): the poll's answers and the helper's events open their
-    /// boxes and links there, not in the main window the poll runs in.
-    from_window: Option<quill::ids::ChatId>,
-    generation: u64,
 }
 
 impl QuillApp {
     /// The window the mini-app flow runs for (`None`: the main window).
     #[cfg(test)]
     pub(in crate::ui) fn mini_app_window(&self) -> Option<quill::ids::ChatId> {
-        self.mini_apps.from_window
+        self.mini_apps
+            .window
+            .as_ref()
+            .and_then(|window| window.launch_window)
     }
 
     /// The chat window `chat` closed: a mini-app flow started there goes
     /// on as the main window's (its boxes and toasts show there).
     pub(in crate::ui) fn mini_app_window_closed(&mut self, chat: quill::ids::ChatId) {
-        if self.mini_apps.from_window == Some(chat) {
-            self.mini_apps.from_window = None;
+        if let Some(window) = self.mini_apps.window.as_mut()
+            && window.launch_window == Some(chat)
+        {
+            window.launch_window = None;
         }
     }
 
@@ -670,11 +579,20 @@ impl QuillApp {
         self.request_web_app(open, false, cx);
     }
 
+    /// The window a launch pressed now opens its app in: the chat window
+    /// of the press (`None`: the main window).
+    fn launch_window(&self) -> Option<quill::ids::ChatId> {
+        self.asking_window().flatten()
+    }
+
     /// The TDLib call for a launch.
     fn request_web_app(&mut self, open: PendingOpen, allow_write: bool, cx: &mut Context<Self>) {
         // One app at a time: a new launch replaces the open window.
         self.close_mini_app_window(cx);
         let theme = theme_params(cx);
+        // The window the person pressed in: it rides with the request, so
+        // the app opens there whatever pass lands the answer.
+        let window = self.launch_window();
         let sent = self.live.as_mut().map(|live| match &open {
             PendingOpen::Open {
                 chat_id,
@@ -683,8 +601,7 @@ impl QuillApp {
                 source,
             } => live
                 .driver
-                .open_web_app(*chat_id, *bot_id, url, source.clone(), &theme)
-                .map(|_| ()),
+                .open_web_app(*chat_id, *bot_id, url, source.clone(), &theme, window),
             PendingOpen::Simple {
                 chat_id,
                 bot_id,
@@ -692,43 +609,41 @@ impl QuillApp {
                 button_text,
             } => live
                 .driver
-                .get_web_app_url(*chat_id, *bot_id, url, button_text, &theme)
-                .map(|_| ()),
+                .get_web_app_url(*chat_id, *bot_id, url, button_text, &theme, window),
             PendingOpen::Main {
                 chat_id,
                 bot_id,
                 start_parameter,
-            } => live
-                .driver
-                .get_main_web_app(
-                    chat_id.unwrap_or(ChatId(0)),
-                    *bot_id,
-                    start_parameter,
-                    &theme,
-                )
-                .map(|_| ()),
+            } => live.driver.get_main_web_app(
+                chat_id.unwrap_or(ChatId(0)),
+                *bot_id,
+                start_parameter,
+                &theme,
+                window,
+            ),
             PendingOpen::Link {
                 chat_id,
                 bot_id,
                 short_name,
                 start_parameter,
-            } => live
-                .driver
-                .get_web_app_link_url(
-                    chat_id.unwrap_or(ChatId(0)),
-                    *bot_id,
-                    short_name,
-                    start_parameter,
-                    allow_write,
-                    &theme,
-                )
-                .map(|_| ()),
-            PendingOpen::Attach { chat_id, bot_id } => live
-                .driver
-                .open_web_app(*chat_id, *bot_id, "", LaunchSource::AttachmentMenu, &theme)
-                .map(|_| ()),
+            } => live.driver.get_web_app_link_url(
+                chat_id.unwrap_or(ChatId(0)),
+                *bot_id,
+                (short_name, start_parameter),
+                allow_write,
+                &theme,
+                window,
+            ),
+            PendingOpen::Attach { chat_id, bot_id } => live.driver.open_web_app(
+                *chat_id,
+                *bot_id,
+                "",
+                LaunchSource::AttachmentMenu,
+                &theme,
+                window,
+            ),
         });
-        if matches!(sent, Some(Ok(()))) {
+        if let Some(Ok(_)) = sent {
             self.set_status_note(
                 StatusNote::silent(tr(keys::Q_MEDIA_OPENING_THE_MINI_APP)),
                 cx,
@@ -982,7 +897,9 @@ mod invoice;
 mod launch_flow;
 mod mini_app_poll;
 mod phone;
+mod popups;
 mod spawn_mini_app_window;
+mod window;
 
 crate::ui::shell::register_dialogs! {
     /// Mini apps: the first-open terms box / add to the attachment menu.

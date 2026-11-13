@@ -183,10 +183,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             if state.query().is_empty()
                 && matches!(
                     state.status(),
-                    SearchStatus::Searching
-                        | SearchStatus::Ready
-                        | SearchStatus::Empty
-                        | SearchStatus::Failed
+                    SearchStateView::Searching
+                        | SearchStateView::Ready
+                        | SearchStateView::Empty
+                        | SearchStateView::Failed
                 )
             {
                 return Ok(ChatSearchQueryOutcome::Unchanged);
@@ -198,7 +198,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             if self.session.search.chat_search.query().is_empty()
                 && matches!(
                     self.session.search.chat_search.status(),
-                    SearchStatus::Idle | SearchStatus::Closed
+                    SearchStateView::Idle | SearchStateView::Closed
                 )
             {
                 return Ok(ChatSearchQueryOutcome::Unchanged);
@@ -221,15 +221,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             && self.session.search.chat_search.query() == trimmed
             && matches!(
                 self.session.search.chat_search.status(),
-                SearchStatus::Searching
-                    | SearchStatus::Ready
-                    | SearchStatus::Empty
-                    | SearchStatus::Failed
+                SearchStateView::Searching
+                    | SearchStateView::Ready
+                    | SearchStateView::Empty
+                    | SearchStateView::Failed
             )
         {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
-        let _search_gen = self.session.search.chat_search.begin_query(trimmed);
+        self.session.search.chat_search.begin_query(trimmed);
         let token = self
             .session
             .search
@@ -245,7 +245,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         query: &str,
     ) -> Result<ChatSearchQueryOutcome, ConnectSendError> {
         self.clear_chat_search_debounce();
-        let _ = self.session.search.chat_search.begin_query(query);
+        self.session.search.chat_search.begin_query(query);
         Ok(match self.send_chat_search(query)? {
             Some(flight) => ChatSearchQueryOutcome::Sent(flight),
             None => ChatSearchQueryOutcome::Unchanged,
@@ -330,8 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|open| open.from_picker.as_mut())
         {
             picker.query = query.to_string();
-            picker.members.begin();
-            picker.members.sent(extra);
+            picker.members.begin_with(extra);
         }
         match self.sender.send_json(&search_chat_members(
             extra,
@@ -376,18 +375,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         let state = &self.session.search.chat_search;
-        let (search_gen, query, sender, media) = (
-            state.generation,
-            state.query().to_owned(),
-            state.sender(),
-            state.media(),
-        );
-        let extra = self.session.request_chat_search(
-            RequestPurpose::SearchChatMessagesMore,
-            chat_id,
-            search_gen,
-        );
-        self.session.search.chat_search.begin_more(from);
+        let (query, sender, media) = (state.query().to_owned(), state.sender(), state.media());
+        let extra = self
+            .session
+            .request_chat_search(RequestPurpose::SearchChatMessagesMore, chat_id);
         match self.sender.send_json(&search_chat_messages_from(
             extra,
             chat_id,
@@ -399,10 +390,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             CHAT_SEARCH_LIMIT,
             media.constructor().map(search_messages_filter_json),
         )) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                // Only a page that went out is waited for.
+                self.session.search.chat_search.begin_more(from, extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.search.chat_search.fail_more();
+                self.session.search.chat_search.more_unsent(from);
                 Err(err)
             }
         }
@@ -439,29 +434,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(constructor) = calendar.media.constructor() else {
             return Ok(());
         };
-        let (chat_id, generation, from) = (
-            calendar.chat_id,
-            calendar.generation,
-            calendar.oldest_loaded,
-        );
+        let (chat_id, from) = (calendar.chat_id, calendar.oldest_loaded);
         let extra = self.session.request(
-            RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation }),
+            RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar),
             Some(chat_id),
         );
-        if let Some(calendar) = self.session.search.history_calendar.as_mut() {
-            calendar.begin_page();
-        }
         match self.sender.send_json(&get_chat_message_calendar(
             extra,
             chat_id,
             constructor,
             from,
         )) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                // Only a page that went out is waited for.
+                if let Some(calendar) = self.session.search.history_calendar.as_mut() {
+                    calendar.begin_page(extra);
+                }
+                Ok(())
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 if let Some(calendar) = self.session.search.history_calendar.as_mut() {
-                    calendar.fail();
+                    calendar.unsent();
                 }
                 Err(err)
             }
@@ -486,14 +480,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .and_then(|c| c.shared_tab)
         {
-            self.session.search.clear_date_jump_note();
+            let window = self.session.view_in_place();
+            self.session.search.clear_date_jump_note_for(window);
             self.jump_shared_media_to_day(tab, day_number)?;
             return Ok(None);
         }
         let Some(calendar) = self.session.search.history_calendar.take() else {
             return Ok(None);
         };
-        self.session.search.clear_date_jump_note();
+        let window = self.session.view_in_place();
+        self.session.search.clear_date_jump_note_for(window);
         // The jump runs in the view in place: it must be the chat the box
         // was opened for (a box left over from a view that is gone has
         // nothing to jump in).
@@ -512,10 +508,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id,
             crate::search_filters::before_day_date(day_number),
         )) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.begin_jump_ask(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.fail_date_jump(false, None);
                 Err(err)
             }
         }
@@ -548,12 +546,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let search_gen = self.session.search.chat_search.generation;
-        let extra = self.session.request_chat_search(
-            RequestPurpose::SearchChatMessages,
-            chat_id,
-            search_gen,
-        );
+        let extra = self
+            .session
+            .request_chat_search(RequestPurpose::SearchChatMessages, chat_id);
         let (sender, media) = (
             self.session.search.chat_search.sender(),
             self.session.search.chat_search.media(),
@@ -569,7 +564,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             CHAT_SEARCH_LIMIT,
             media.constructor().map(search_messages_filter_json),
         )) {
-            Ok(()) => Ok(Some(ChatSearchFlight::Query(extra))),
+            Ok(()) => {
+                self.session.search.chat_search.searching(extra);
+                Ok(Some(ChatSearchFlight::Query(extra)))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session

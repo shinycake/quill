@@ -1,4 +1,5 @@
 //! The settings domain: settings: privacy, notifications, sessions, storage, proxy and the account.
+mod account_write;
 mod apply;
 mod business;
 mod business_extra;
@@ -14,6 +15,7 @@ mod state;
 mod storage_save;
 mod tone_upload;
 
+pub use account_write::AccountWrite;
 pub use business::*;
 pub use business_extra::*;
 pub use export_files::ExportFiles;

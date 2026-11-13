@@ -65,7 +65,7 @@ fn a_device_link_answer_after_its_screen_went_away_lands_nowhere() {
         ),
     );
     assert_eq!(
-        session.settings.device_login.take_result_for(id),
+        session.settings.device_login.take_result(),
         Some(crate::auth::DeviceLoginResult::Failed)
     );
 }
@@ -141,8 +141,7 @@ fn an_older_star_pack_failure_leaves_the_newer_options() {
     let seq = AtomicU64::new(0);
     let old = session.request(RequestPurpose::GetStarPackOptions, None);
     let new = session.request(RequestPurpose::GetStarPackOptions, None);
-    session.payments.star_packs.options.begin();
-    session.payments.star_packs.options.sent(new);
+    session.payments.star_packs.options.begin_with(new);
     apply_json(
         &mut session,
         &seq,
@@ -202,8 +201,7 @@ fn an_older_sticker_list_answer_does_not_replace_the_newer_one() {
     let old = session.request(RequestPurpose::GetFavoriteStickers, None);
     let new = session.request(RequestPurpose::GetFavoriteStickers, None);
     let list = &mut session.stickers.stickers.lists.favorites;
-    list.begin();
-    list.sent(new);
+    list.begin_with(new);
     apply_json(&mut session, &seq, &sink, &answer(old, 1));
     assert!(session.stickers.stickers.favorites.is_empty());
     assert!(session.stickers.stickers.lists.favorites.is_loading());
@@ -481,4 +479,24 @@ fn a_premium_lapse_shows_ads_again() {
     assert!(session.sponsored_hidden());
     apply_json(&mut session, &seq, &sink, &own_user_json(false));
     assert!(!session.sponsored_hidden());
+}
+
+/// Sweep r4-08 (15-005): the screen holds no copy of the device-link request;
+/// the one stage says if a link is out and gives its result once.
+#[test]
+fn the_device_login_stage_alone_says_busy_and_gives_its_result_once() {
+    let mut login = DeviceLogin::default();
+    assert!(!login.is_active());
+    let request = crate::ids::RequestId(7);
+    login = DeviceLogin::Waiting { request };
+    assert!(login.is_active() && login.is_waiting());
+    assert_eq!(login.take_result(), None, "not answered yet");
+    assert!(login.settle(request, crate::auth::DeviceLoginResult::Linked));
+    assert!(login.is_active() && !login.is_waiting());
+    assert_eq!(
+        login.take_result(),
+        Some(crate::auth::DeviceLoginResult::Linked)
+    );
+    assert!(!login.is_active());
+    assert_eq!(login.take_result(), None, "taken once");
 }

@@ -220,7 +220,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_gift_transfer(window, cx);
-        self.recover_cloud_password(cx);
+        self.recover_cloud_password(window, cx);
     }
 
     /// "Set password" in the security check.

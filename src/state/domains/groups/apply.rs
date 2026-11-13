@@ -231,11 +231,7 @@ impl Session {
                 }
                 let asked = pending.map(|p| p.id);
                 self.groups.boosts_per_gift.answered(asked, boosts_per_gift);
-                self.ton_wallet.explorer.answered(asked, ());
-                // Any app-config answer carries the current explorer.
-                if ton_explorer_url.is_some() {
-                    self.ton_wallet.explorer_url = ton_explorer_url;
-                }
+                self.ton_wallet.explorer_answered(asked, ton_explorer_url);
                 if ton_usd_rate.is_some() {
                     self.ton_wallet.ton_usd_rate = ton_usd_rate;
                 }
@@ -631,17 +627,28 @@ impl Session {
                         // Slice G1: the bulk `addChatMembers` answer is a
                         // single response — it replaces the count.
                         Some(RequestPurpose::AddChatMembers) => {
-                            self.groups
-                                .add_members_failed
-                                .insert(chat_id.0, failed_count);
+                            if let Some(pending) = pending {
+                                self.groups.add_members_failed_by(
+                                    chat_id.0,
+                                    pending.id,
+                                    failed_count,
+                                    true,
+                                );
+                            }
                         }
                         // Slice G1 fix-up: basic groups send one
                         // `addChatMember` per user and each answers
                         // `failedToAddMembers` — accumulate, or the last
                         // response would overwrite the earlier ones.
                         Some(RequestPurpose::AddChatMember) => {
-                            *self.groups.add_members_failed.entry(chat_id.0).or_insert(0) +=
-                                failed_count;
+                            if let Some(pending) = pending {
+                                self.groups.add_members_failed_by(
+                                    chat_id.0,
+                                    pending.id,
+                                    failed_count,
+                                    false,
+                                );
+                            }
                         }
                         _ => {}
                     }
@@ -911,9 +918,11 @@ impl Session {
                     && slot == request
                 {
                     self.chats_state.enter_deep_link_stage(match result {
-                        ChatJoinResult::Success { chat_id } => {
-                            DeepLinkState::ChatReady { chat_id, action }
-                        }
+                        ChatJoinResult::Success { chat_id } => DeepLinkState::ChatReady {
+                            chat_id,
+                            action,
+                            request,
+                        },
                         ChatJoinResult::RequestSent => DeepLinkState::ShowText(
                             "Join request sent — the admins need to approve it.".into(),
                         ),

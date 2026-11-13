@@ -18,7 +18,7 @@ impl QuillApp {
         }
         let Some(spec) = self
             .session()
-            .and_then(|s| s.chat_list.recommended_folders.as_ref())
+            .and_then(|s| s.chat_list.recommended_folders.data())
             .and_then(|list| list.iter().find(|r| r.spec.name == name))
             .map(|r| r.spec.clone())
         else {
@@ -183,12 +183,8 @@ impl QuillApp {
             .ok_or_else(|| line(quill::connect::ConnectSendError::Native))?;
         let sent = live.driver.fetch_chat_folder(folder_id).map_err(line)?;
         sent.or_else(|| {
-            self.session().and_then(|s| {
-                s.requests.pending_extra_for_folder(
-                    quill::state::RequestPurpose::GetChatFolder,
-                    folder_id,
-                )
-            })
+            self.session()
+                .and_then(|s| s.chat_list.folder_specs.request(folder_id))
         })
         .ok_or_else(|| line(quill::connect::ConnectSendError::InvalidRequest))
     }

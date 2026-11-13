@@ -168,3 +168,21 @@ fn a_finished_reaction_fly_leaves_the_slot(cx: &mut TestAppContext) {
         assert!(app.history.reaction_fly.take().is_none(), "the run ended");
     });
 }
+
+/// Sweep r4-10: a wheel sends no mouse move, so a link tooltip shown over a
+/// row that scrolled away would stay at its old spot over other messages.
+#[gpui_kit::test]
+fn scrolling_the_history_ends_a_link_tooltip(cx: &mut TestAppContext) {
+    let (app, mut vcx) = opened(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.set_link_tooltip(
+            Some((point(px(100.), px(100.)), "https://x.test".into())),
+            cx,
+        );
+        assert!(app.chat_ui.link_tooltip.is_some());
+    });
+    scroll_to(&app, &mut vcx, 40);
+    app.read_with(&vcx, |app, _| {
+        assert!(app.chat_ui.link_tooltip.is_none(), "the tooltip went");
+    });
+}

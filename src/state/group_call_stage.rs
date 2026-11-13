@@ -41,6 +41,20 @@ impl GroupTransport {
         }
     }
 
+    /// No transport and no join on its way: after a join press this is the
+    /// join having ended without an answer (its error, or never sent).
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::NoTransport)
+    }
+
+    /// The `joinVideoChat` request this transport waits on.
+    pub fn join_request(&self) -> Option<RequestId> {
+        match self {
+            Self::Joining { request } => Some(*request),
+            _ => None,
+        }
+    }
+
     /// A join press was taken and its request is out.
     pub fn joining(&self) -> bool {
         matches!(self, Self::Joining { .. })
@@ -164,7 +178,7 @@ impl GroupMedia {
         if mode.is_stream() {
             Self::Stream {
                 mode,
-                state: StreamState::Connecting,
+                state: StreamState::Joined,
             }
         } else {
             Self::Rtc
@@ -182,10 +196,10 @@ impl GroupMedia {
         matches!(self, Self::Stream { .. })
     }
 
-    /// The stream's state; a call without a stream reads `Connecting`.
+    /// The stream's state; a call without a stream reads `Joined`.
     pub fn stream_state(&self) -> StreamState {
         match self {
-            Self::Rtc => StreamState::Connecting,
+            Self::Rtc => StreamState::Joined,
             Self::Stream { state, .. } => *state,
         }
     }

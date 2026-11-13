@@ -143,6 +143,7 @@ impl Session {
                 .enter_deep_link_stage(DeepLinkState::ChatReady {
                     chat_id,
                     action: action.clone(),
+                    request: p.id,
                 });
         }
         if let ChatKind::Supergroup { supergroup_id, .. } = kind {
@@ -150,6 +151,10 @@ impl Session {
                 .supergroup_chat_ids
                 .insert(supergroup_id, chat_id.0);
         }
+        // A `chat` object asked before a notification save and answered after
+        // it carries the old settings: while a save is out, the save's own
+        // answer settles what shows.
+        let saving = self.settings.chat_saves.is_saving(&chat_id);
         let chat = self
             .chats
             .entry(chat_id.0)
@@ -159,7 +164,9 @@ impl Session {
         chat.unread_count = unread_count;
         chat.last_read_inbox_message_id = last_read_inbox_message_id;
         chat.last_read_outbox_message_id = last_read_outbox_message_id;
-        chat.notification_settings = notification_settings;
+        if !saving {
+            chat.notification_settings = notification_settings;
+        }
         let old_photo_file_id = std::mem::replace(&mut chat.photo_file_id, photo_file_id);
         // Slice G1: full default permissions block for the editor.
         chat.permissions = permissions;
@@ -606,11 +613,10 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
-            // Asked now that it answered: a request that never left is
-            // asked again, one that answered waits out the update period.
+            // The poll that is out for this request ends: the next waits out
+            // the update period.
             self.chat_list
-                .folder_new_chats_asked
-                .insert(folder_id, std::time::Instant::now());
+                .new_chats_settled(folder_id, pending.map(|p| p.id));
             let ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
             if ids.is_empty() {
                 self.chat_list.folder_new_chats.remove(&folder_id);
@@ -679,16 +685,21 @@ impl Session {
         {
             self.calls.add_people_search.accept(pending.id, &chat_ids);
         }
-        // `getTopChats`: not tied to a query generation, only to the strip.
+        // `getTopChats`: tied to the strip's ask, not to a query.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopChats) {
-            if !self.search.search.top_chats_disabled {
-                self.search.search.top_chats = chat_ids;
+            let search = &mut self.search.search;
+            if search.top_chats_disabled {
+                search.top_chats = Default::default();
+            } else {
+                search.top_chats.answered(pending.map(|p| p.id), chat_ids);
             }
             return;
         }
         // `getRecommendedChats`: the Channels tab's list, not a query answer.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecommendedChats) {
-            self.search.search.accept_recommended(chat_ids);
+            self.search
+                .search
+                .accept_recommended(pending.map(|p| p.id), chat_ids);
             return;
         }
         if self.search.search.awaits(pending) {

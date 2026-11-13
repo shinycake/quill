@@ -277,6 +277,7 @@ fn load_chats_404_marks_exhaustion() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::LoadChats, None);
+    session.chat_list.main_paging.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -306,6 +307,11 @@ fn chat_list_paging_restarts_after_logout_and_login() {
         apply_json(&mut session, &seq, &sink, &auth("authorizationStateReady"));
         for purpose in [RequestPurpose::LoadChats, RequestPurpose::LoadArchiveChats] {
             let extra = session.request(purpose, None);
+            if purpose == RequestPurpose::LoadChats {
+                session.chat_list.main_paging.begin(extra);
+            } else {
+                session.chat_list.archive_paging.begin(extra);
+            }
             apply_json(
                 &mut session,
                 &seq,
@@ -385,8 +391,7 @@ fn storage_statistics_answer_cached_by_purpose() {
     let (mut without_purpose, sink2) = session();
     let seq = AtomicU64::new(0);
     let extra = with_purpose.request(RequestPurpose::GetStorageStatistics, None);
-    with_purpose.settings.storage_stats.begin();
-    with_purpose.settings.storage_stats.sent(extra);
+    with_purpose.settings.storage_stats.begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -427,8 +432,7 @@ fn storage_statistics_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetStorageStatistics, None);
-    session.settings.storage_stats.begin();
-    session.settings.storage_stats.sent(extra);
+    session.settings.storage_stats.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -478,14 +482,14 @@ fn chat_title_and_unread_updates() {
     assert_eq!(chat.title, "new title");
     assert_eq!(chat.unread_count, 7);
     assert_eq!(chat.last_read_inbox_message_id.0, 1);
-    assert!(chat.in_main_list);
+    assert!(chat.in_main_list());
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"updateChatPosition","chat_id":4,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"0","is_pinned":false}}"#,
     );
-    assert!(!session.chats.get(&4).unwrap().in_main_list);
+    assert!(!session.chats.get(&4).unwrap().in_main_list());
 }
 
 #[test]
@@ -780,8 +784,7 @@ fn cl_chat_preview_cached_for_unopened_chat() {
         .chat_preview_fetch
         .entry(ChatId(12))
         .or_default();
-    peek.begin();
-    peek.sent(extra);
+    peek.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -811,8 +814,7 @@ fn cl_chat_preview_cached_for_unopened_chat() {
         .chat_preview_fetch
         .entry(ChatId(12))
         .or_default();
-    peek.begin();
-    peek.sent(extra);
+    peek.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -841,15 +843,13 @@ fn a_late_preview_answer_for_another_chat_keeps_the_one_on_screen() {
         .chat_preview_fetch
         .entry(ChatId(11))
         .or_default();
-    peek.begin();
-    peek.sent(a);
+    peek.begin_with(a);
     let peek = session
         .chat_list
         .chat_preview_fetch
         .entry(ChatId(12))
         .or_default();
-    peek.begin();
-    peek.sent(b);
+    peek.begin_with(b);
     apply_json(
         &mut session,
         &seq,

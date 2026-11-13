@@ -25,7 +25,6 @@ use quill::proxy::{
     parse_proxy_link, proxy_link_from_text,
 };
 use quill::telegram::envelope::ConnectionState;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 /// All proxy-related UI state, in one field of [`QuillApp`].
@@ -215,7 +214,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_proxy_editor(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn close_proxy_editor(&mut self, cx: &mut Context<Self>) {
         self.forget_proxy_saving();
         self.settings.proxy.editor = None;
         cx.notify();
@@ -857,7 +856,7 @@ impl QuillApp {
             for entry in state.entries() {
                 let ping = state.pings.get(&entry.id).copied();
                 let web = (entry.proxy.kind == ProxyKind::Web).then(|| {
-                    quill::proxy_web::WebRowState::for_entry(
+                    quill::proxy_web::WebRowView::for_entry(
                         entry.is_enabled,
                         connected,
                         state.carriers.failed_for(entry.id) || !state.can_enable(entry.proxy.kind),

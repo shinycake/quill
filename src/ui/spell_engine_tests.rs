@@ -105,7 +105,7 @@ fn slow_engine_build_does_not_block_and_swaps_in(cx: &mut TestAppContext) {
     // gate, with the old engine in place.
     assert!(!gate.build_finished());
     app.update_in(&mut vcx, |app, _, _| {
-        assert!(app.spell.engine_task.is_some());
+        assert!(app.spell.engine_build.is_building());
         assert!(Arc::ptr_eq(&app.spell.checker, &old));
         assert_eq!(app.spell.info.chosen, vec!["xx".to_string()]);
     });
@@ -114,7 +114,7 @@ fn slow_engine_build_does_not_block_and_swaps_in(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     assert!(gate.build_finished());
     app.update_in(&mut vcx, |app, _, _| {
-        assert!(app.spell.engine_task.is_none());
+        assert!(!app.spell.engine_build.is_building());
         assert!(!Arc::ptr_eq(&app.spell.checker, &old));
         assert_eq!(app.spell.info.active, vec!["xx".to_string()]);
     });

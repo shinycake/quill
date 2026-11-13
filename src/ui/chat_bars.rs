@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::bar_report::{BarKind, BarWork, BlockPlan};
 use super::chat_row::chat_avatar;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
@@ -312,36 +313,24 @@ impl QuillApp {
     }
 
     fn bar_dismiss(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            if live.driver.dismiss_chat_action_bar(chat_id).is_err() {
-                self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_HIDE_THE_BAR)));
-            }
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.set_chat_action_bar(chat_id.0, None);
-        }
-        cx.notify();
+        self.start_bar_work(
+            chat_id,
+            BarKind::Hide,
+            |driver| BarWork::start_hide(driver, chat_id),
+            cx,
+        );
     }
 
     /// "Unarchive": back to the main list with default notifications
-    /// (`addChatToList` + `setChatNotificationSettings`, schema line 3668).
+    /// (`addChatToList` + `setChatNotificationSettings`, schema line 3668);
+    /// the bar goes when both are answered.
     fn bar_unarchive(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let moved = live.driver.unarchive_chat(chat_id).is_ok();
-            let reset = live
-                .driver
-                .reset_chat_notification_settings(chat_id)
-                .is_ok();
-            if moved && reset {
-                let _ = live.driver.dismiss_chat_action_bar(chat_id);
-            } else {
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_CHAT_COULD_NOT_UNARCHIVE_THE_CHAT,
-                )));
-            }
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.set_chat_action_bar(chat_id.0, None);
-        }
-        cx.notify();
+        self.start_bar_work(
+            chat_id,
+            BarKind::Unarchive,
+            |driver| BarWork::start_unarchive(driver, chat_id),
+            cx,
+        );
     }
 
     fn bar_share_phone(
@@ -359,13 +348,15 @@ impl QuillApp {
             .filter(|p| !p.is_empty())
             .map(|p| format!("+{}", p.trim_start_matches('+')))
             .unwrap_or_else(|| tr(keys::Q_CHAT_YOUR_NUMBER).to_string());
-        let app = cx.entity().downgrade();
         let text = tr_with(
             keys::NEW_CONTACT_SHARE_SURE,
             &[("phone", &phone.to_string()), ("user", &name.to_string())],
         );
+        // The box is the account's and the window's: pressing OK after a
+        // switch does nothing (the chat id is the old account's).
+        let scoped = self.scoped_app(cx);
         window.open_alert_dialog(cx, move |alert, _, _| {
-            let app = app.clone();
+            let scoped = scoped.clone();
             alert
                 .title(tr(keys::NEW_CONTACT_SHARE))
                 .description(text.clone())
@@ -373,37 +364,43 @@ impl QuillApp {
                 .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
-                    let _ = app.update(cx, |this, cx| {
-                        if let Some(live) = this.live.as_mut() {
-                            if live.driver.share_phone_number(chat_id, user_id).is_err() {
-                                this.set_note(StatusNote::error(tr(
-                                    keys::Q_CHAT_COULD_NOT_SHARE_YOUR_PHONE,
-                                )));
-                            }
-                        } else if let Some(session) = this.demo_session.as_mut() {
-                            session.set_chat_action_bar(chat_id.0, None);
-                        }
-                        cx.notify();
+                    let _ = scoped.update(cx, |this, cx| {
+                        this.submit_bar_share_phone(chat_id, user_id, cx);
                     });
                     true
                 })
         });
     }
 
-    /// "Report spam (and leave)": confirm, `reportChat`, then `leaveChat`.
+    fn submit_bar_share_phone(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            if live.driver.share_phone_number(chat_id, user_id).is_err() {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_CHAT_COULD_NOT_SHARE_YOUR_PHONE,
+                )));
+            }
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.set_chat_action_bar(chat_id.0, None);
+        }
+        cx.notify();
+    }
+
+    /// "Report spam (and leave)": confirm, `reportChat`, then `leaveChat`
+    /// for a group or a channel. The box is the window's: OK reports from
+    /// the chat that window shows.
     fn bar_report_spam(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
-        let channel = self
+        let kind = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
-            .is_some_and(|c| c.kind.is_channel());
-        let text = if channel {
-            tr(keys::REPORT_SPAM_SURE_CHANNEL)
-        } else {
-            tr(keys::REPORT_SPAM_SURE_GROUP)
+            .map(|c| &c.kind);
+        let text = match kind {
+            Some(kind) if kind.is_channel() => tr(keys::REPORT_SPAM_SURE_CHANNEL),
+            Some(kind) if kind.can_be_left() => tr(keys::REPORT_SPAM_SURE_GROUP),
+            _ => tr(keys::Q_CHAT_REPORT_SPAM_SURE_USER),
         };
-        let app = cx.entity().downgrade();
+        let scoped = self.scoped_app(cx);
         window.open_alert_dialog(cx, move |alert, _, _| {
-            let app = app.clone();
+            let scoped = scoped.clone();
             alert
                 .title(tr(keys::Q_CHAT_REPORT_SPAM))
                 .description(text)
@@ -411,25 +408,25 @@ impl QuillApp {
                 .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
-                    let _ = app.update(cx, |this, cx| this.submit_bar_report(chat_id, cx));
+                    let _ = scoped.update(cx, |this, cx| {
+                        this.submit_bar_report(chat_id, cx);
+                    });
                     true
                 })
         });
     }
 
     fn submit_bar_report(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let reported = live.driver.report_chat(chat_id);
-            let left = live.driver.leave_channel(chat_id);
-            self.set_note(if reported.is_ok() && left.is_ok() {
-                StatusNote::info(tr(keys::REPORT_SPAM_DONE))
-            } else {
-                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_REPORT_THE_CHAT))
-            });
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.set_chat_action_bar(chat_id.0, None);
-        }
-        cx.notify();
+        let leave = self
+            .session()
+            .and_then(|s| s.chats.get(&chat_id.0))
+            .is_some_and(|chat| chat.kind.can_be_left());
+        self.start_bar_work(
+            chat_id,
+            BarKind::Report,
+            |driver| BarWork::start_report(driver, chat_id, leave),
+            cx,
+        );
     }
 
     fn open_block_bar_dialog(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
@@ -453,29 +450,19 @@ impl QuillApp {
         let Some(dialog) = self.dialogs.block_bar_dialog.take() else {
             return;
         };
-        if let Some(live) = self.live.as_mut() {
-            let mut ok = live.driver.block_sender(dialog.user_id).is_ok();
-            if dialog.report {
-                ok &= live.driver.report_chat(dialog.chat_id).is_ok();
-            }
-            if dialog.delete_chat {
-                ok &= live.driver.remove_chat_from_list(dialog.chat_id).is_ok();
-            }
-            self.set_note(if ok {
-                StatusNote::silent(tr_with(
-                    keys::Q_CHAT_IS_NOW_BLOCKED,
-                    &[(
-                        "user_id",
-                        &(self.contact_display_name(dialog.user_id)).to_string(),
-                    )],
-                ))
-            } else {
-                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_BLOCK_THE_USER))
-            });
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.set_chat_action_bar(dialog.chat_id.0, None);
-        }
-        cx.notify();
+        let plan = BlockPlan {
+            user_id: dialog.user_id,
+            report: dialog.report,
+            delete_chat: dialog.delete_chat,
+        };
+        self.start_bar_work(
+            dialog.chat_id,
+            BarKind::Block {
+                user_id: plan.user_id,
+            },
+            |driver| BarWork::start_block(driver, dialog.chat_id, plan),
+            cx,
+        );
     }
 
     /// kit dialog: "Block {name}" with Report spam / Delete this chat.

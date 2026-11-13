@@ -132,7 +132,7 @@ impl QuillApp {
             (
                 pinned,
                 chat.is_some_and(|chat| chat.is_muted()),
-                chat.is_some_and(|chat| chat.in_archive),
+                chat.is_some_and(|chat| chat.in_archive()),
             )
         }))
     }

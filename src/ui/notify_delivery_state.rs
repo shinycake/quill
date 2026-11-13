@@ -34,8 +34,10 @@ pub(crate) struct NotifyDelivery {
     /// by the account they are for and the chat. A newer notification for
     /// the chat, or its dismissal, removes the entry and the wait ends
     /// without showing.
-    pub(super) preview_waits: std::collections::HashMap<(quill::ids::AccountKey, ChatId), u64>,
-    pub(super) next_preview_wait: u64,
+    pub(super) preview_waits: std::collections::HashMap<
+        (quill::ids::AccountKey, ChatId),
+        super::notifications::PreviewWait,
+    >,
     /// Avatar decodes in flight, by photo path, each holding its task and
     /// the notifications waiting on it (`notifications::avatar_icon`).
     pub(super) avatar_decodes:
@@ -67,7 +69,6 @@ impl NotifyDelivery {
             reply_targets: std::collections::HashMap::new(),
             unsent_replies: std::collections::HashMap::new(),
             preview_waits: std::collections::HashMap::new(),
-            next_preview_wait: 0,
             avatar_decodes: std::collections::HashMap::new(),
             notification_sounds: super::audio::NotificationSounds::new(audio_output.clone()),
             polled_redraw: super::notifications::PolledRedraw::new(std::time::Instant::now()),

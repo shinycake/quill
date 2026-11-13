@@ -63,7 +63,7 @@ impl QuillApp {
         if self.refused_while_locked() {
             return;
         }
-        self.tick_media_seek(std::time::Instant::now(), cx);
+        self.tick_media_seek(cx);
         // A link clicked in an account that left the screen goes with it:
         // it names that account's chats, bots and posts.
         let on_screen = self.session().map(|session| session.account.clone());
@@ -115,9 +115,19 @@ impl QuillApp {
             }
             // A new flow gives way to an invite box still up.
             self.screen.links.invite_box.take();
-            let _ = live
+            // A link whose send fails and enters no flow leaves a note: it was
+            // taken from its slot, and nothing else would say it did not go
+            // out. A send that failed into the flow's own "Couldn't reach
+            // Telegram" box already said it.
+            let sent = live
                 .driver
                 .request_deep_link_info_from(&queued.link, queued.by_agent);
+            if sent.is_err() && live.driver.session.chats_state.deep_link_stage().is_none() {
+                self.screen.connection.set_note_for(
+                    &self.screen.windows,
+                    StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK)),
+                );
+            }
             live.driver
                 .session
                 .chats_state
@@ -193,13 +203,18 @@ impl QuillApp {
                 self.screen.links.invite_box.show(request);
                 self.cancel_inline_opening();
             }
-            DeepLinkState::ChatReady { chat_id, action } => {
+            DeepLinkState::ChatReady {
+                chat_id,
+                action,
+                request,
+            } => {
                 self.cancel_inline_opening_unless_chat(chat_id);
                 self.hold_resolved_link(
                     ResolvedStep::Open(PendingOpen {
                         chat_id,
                         action,
                         from_agent,
+                        flow: Some(request),
                     }),
                     from_window,
                     cx,
@@ -370,10 +385,11 @@ impl QuillApp {
             chat_id,
             action,
             from_agent,
+            flow,
         } = open;
         self.agent_step(from_agent, |this| {
             if !from_agent || this.agent_may_open(chat_id) {
-                this.open_deep_link_chat_now(chat_id, &action, window, cx);
+                this.open_deep_link_chat_now(chat_id, &action, flow, window, cx);
             }
         });
     }
@@ -382,6 +398,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         action: &DeepLinkAction,
+        flow: Option<RequestId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -427,7 +444,7 @@ impl QuillApp {
         // A chat in a window of its own opens there, with what the link
         // asks for.
         if self.windows.has_window(chat_id) {
-            let premium = self.take_premium_auto_start(chat_id, action, cx);
+            let premium = self.take_premium_auto_start(chat_id, action, flow, cx);
             let mut routed =
                 super::chat_window::ChatOpen::new(chat_id).with_inline_return(inline_return);
             if let Some(message_id) = jump_to {
@@ -508,7 +525,7 @@ impl QuillApp {
         // pressed it); a link's `start=` only prefills `/start <param>`,
         // the user confirms.
         let started = self.take_inline_start(chat_id, cx)
-            || self.take_premium_auto_start(chat_id, action, cx);
+            || self.take_premium_auto_start(chat_id, action, flow, cx);
         if !started
             && let DeepLinkAction::OpenUsername {
                 start_param: Some(param),
@@ -531,6 +548,38 @@ impl QuillApp {
                 quill::story_viewer::StoryOpenScope::Link,
                 cx,
             );
+        }
+        cx.notify();
+    }
+
+    /// Join from the invite box. Join starts its own flow, from the window of
+    /// this box: the joined chat and the request-sent or error box go there,
+    /// a "Couldn't reach Telegram" too, so the window is set whatever the
+    /// send returns. A send refused before the flow changed (the client is
+    /// not ready) leaves the invite as it was: it is dropped with a note.
+    fn join_deep_link_invite(&mut self, cx: &mut Context<Self>) {
+        let Some(request) = self.links.invite_box.take() else {
+            cx.notify();
+            return;
+        };
+        let from = self.asking_window().flatten();
+        let mut refused = false;
+        if let Some(live) = self.live.as_mut() {
+            refused = live.driver.confirm_deep_link_invite(request).is_err()
+                && matches!(
+                    live.driver.session.chats_state.deep_link_stage(),
+                    Some(DeepLinkState::InvitePreview { request: shown, .. }) if *shown == request
+                );
+            if refused {
+                live.driver
+                    .session
+                    .chats_state
+                    .cancel_deep_link_invite(request);
+            }
+            live.driver.session.chats_state.set_deep_link_window(from);
+        }
+        if refused {
+            self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK)));
         }
         cx.notify();
     }
@@ -611,19 +660,7 @@ impl QuillApp {
                         .label(tr(keys::Q_MISC_JOIN))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            if let Some(request) = this.links.invite_box.take() {
-                                // Join starts its own flow, from the window
-                                // of this box: the joined chat and the
-                                // request-sent or error box go there, a
-                                // "Couldn't reach Telegram" too, so the
-                                // window is set whatever the send returns.
-                                let from = this.asking_window().flatten();
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.confirm_deep_link_invite(request);
-                                    live.driver.session.chats_state.set_deep_link_window(from);
-                                }
-                            }
-                            cx.notify();
+                            this.join_deep_link_invite(cx);
                             this.close_kit_dialog_if_done(DialogKind::DeepLinkInvite, window, cx);
                         })),
                 );

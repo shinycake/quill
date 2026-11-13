@@ -65,6 +65,7 @@ fn open_on(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, path: &Path) {
     let path = path.to_path_buf();
     app.update_in(vcx, |app, _, cx| {
         let picked = vec![ComposerAttachment {
+            id: Default::default(),
             file_name: "pic.png".into(),
             path,
             kind: AttachmentKind::Photo,
@@ -141,8 +142,7 @@ fn pending_turns_render_the_same_pixels_and_preview() {
     let steps = [true, false, true, true, false];
     let mut editor = PhotoEditor::new(
         EditorPurpose::MessageEdit {
-            chat: quill::ids::ChatId(1),
-            message: quill::ids::MessageId(2),
+            edit: crate::ui::chat_ui_state::EditId::next(),
         },
         picture.clone(),
     );
@@ -251,6 +251,7 @@ fn the_latest_done_wins_and_the_other_png_is_deleted(cx: &mut TestAppContext) {
 
 fn attachment(path: &Path) -> ComposerAttachment {
     ComposerAttachment {
+        id: Default::default(),
         file_name: "pic.png".into(),
         path: path.to_path_buf(),
         kind: AttachmentKind::Photo,

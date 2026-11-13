@@ -2,6 +2,11 @@
 use super::*;
 
 impl Session {
+    /// The newest request this session registered so far.
+    pub fn newest_request(&self) -> RequestId {
+        self.requests.newest()
+    }
+
     pub fn request(&mut self, purpose: RequestPurpose, chat_id: Option<ChatId>) -> RequestId {
         let view = if matches!(
             purpose,
@@ -48,6 +53,12 @@ impl Session {
             .and_then(PendingRequest::around_message_id);
         self.requests
             .correlate(id, Correlation::HistoryPage { window_epoch, from });
+    }
+
+    /// A page of a paged list (the archived or trending sticker sets): the
+    /// request carries the offset it starts at.
+    pub fn request_for_page(&mut self, purpose: RequestPurpose, from: i64) -> RequestId {
+        self.request_correlated(purpose, None, Correlation::PageFrom(from))
     }
 
     /// Slice bots-games: like `request`, but also records the message id for

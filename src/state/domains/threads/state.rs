@@ -25,7 +25,7 @@ pub struct ThreadsState {
     /// forum shown as topics, Saved Messages shown as chats.
     pub chat_view_as_topics: HashMap<i64, bool>,
     /// `getForumTopicDefaultIcons`: the custom emoji a topic may use.
-    pub forum_topic_icons: Vec<StickerItem>,
+    pub forum_topic_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// Saved Messages sublists, tags and the open sublist / tag filter.
     pub saved: SavedMessagesState,
     /// Subsection tabs: supergroup ids with `supergroup.has_forum_tabs`
@@ -52,7 +52,7 @@ impl ThreadsState {
             forum_topics: ForumTopicsMap::default(),
             topic_histories: HashMap::new(),
             chat_view_as_topics: HashMap::new(),
-            forum_topic_icons: Vec::new(),
+            forum_topic_icons: crate::state::fetch::Fetch::Idle,
             saved: SavedMessagesState::default(),
             forum_tabs_supergroups: HashSet::new(),
             forum_sidebar_supergroups: HashSet::new(),

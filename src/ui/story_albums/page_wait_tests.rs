@@ -34,12 +34,11 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, VisualTestContext::from_window(handle.into(), cx))
 }
 
-fn set_op(app: &mut QuillApp, request: RequestId, state: StoryPageOpState) {
+fn set_op(app: &mut QuillApp, state: StoryPageOpState) {
     if let Some(session) = app.demo_session.as_deref_mut() {
         session.stories.page_ops.begin(StoryPageOp {
             kind: quill::story_page::StoryPageOpKind::CreateAlbum,
             state,
-            request,
             chat_id: Some(CHAT),
         });
     }
@@ -61,12 +60,18 @@ fn a_failed_create_keeps_the_picker_and_the_name(cx: &mut TestAppContext) {
         if let Some(page) = app.stories.page.as_mut() {
             page.wait = PageWait::Creating(request);
         }
-        set_op(app, request, StoryPageOpState::Sending);
+        set_op(app, StoryPageOpState::Sending { request });
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
         assert_eq!(page.wait, PageWait::Creating(request), "still waiting");
         assert!(page.picker.is_some());
-        set_op(app, request, StoryPageOpState::Failed("FLOOD".into()));
+        set_op(
+            app,
+            StoryPageOpState::Failed {
+                request,
+                reason: "FLOOD".into(),
+            },
+        );
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
         assert_eq!(page.wait, PageWait::Idle, "a failure ends the wait");
@@ -92,7 +97,7 @@ fn a_created_album_closes_the_picker_and_clears_the_name(cx: &mut TestAppContext
         if let Some(page) = app.stories.page.as_mut() {
             page.wait = PageWait::Creating(request);
         }
-        set_op(app, request, StoryPageOpState::Succeeded);
+        set_op(app, StoryPageOpState::Succeeded { request });
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
         assert_eq!(page.wait, PageWait::Idle);
@@ -110,15 +115,14 @@ fn the_album_view_leaves_only_on_a_deleted_answer(cx: &mut TestAppContext) {
         let mut page = StoryPage::new(CHAT, window, cx);
         page.view = AlbumView::album(3);
         app.stories.page = Some(page);
-        for (request, state, leaves) in [
-            (RequestId(710), StoryPageOpState::Failed("NO".into()), false),
-            (RequestId(711), StoryPageOpState::Succeeded, true),
-        ] {
+        for (request, answered, leaves) in
+            [(RequestId(710), false, false), (RequestId(711), true, true)]
+        {
             if let Some(page) = app.stories.page.as_mut() {
                 page.view = AlbumView::album(3);
                 page.view.delete_sent(request);
             }
-            set_op(app, request, StoryPageOpState::Sending);
+            set_op(app, StoryPageOpState::Sending { request });
             app.story_page_upkeep(window, cx);
             let open = app
                 .stories
@@ -126,7 +130,17 @@ fn the_album_view_leaves_only_on_a_deleted_answer(cx: &mut TestAppContext) {
                 .as_ref()
                 .and_then(|page| page.view.deleting());
             assert_eq!(open, Some(request), "in flight keeps the view and its call");
-            set_op(app, request, state);
+            set_op(
+                app,
+                if answered {
+                    StoryPageOpState::Succeeded { request }
+                } else {
+                    StoryPageOpState::Failed {
+                        request,
+                        reason: "NO".into(),
+                    }
+                },
+            );
             app.story_page_upkeep(window, cx);
             let open = app
                 .stories
@@ -175,7 +189,12 @@ fn a_second_mutation_waits_for_the_first(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.stories.page = Some(StoryPage::new(CHAT, window, cx));
-        set_op(app, RequestId(720), StoryPageOpState::Sending);
+        set_op(
+            app,
+            StoryPageOpState::Sending {
+                request: RequestId(720),
+            },
+        );
         let mut called = false;
         let sent = app.story_page_mutate(
             "pin",
@@ -203,7 +222,12 @@ fn a_deleted_answer_leaves_another_album_in_view(cx: &mut TestAppContext) {
         // delete's stage goes with the view it was part of.
         page.view = AlbumView::album(4);
         app.stories.page = Some(page);
-        set_op(app, RequestId(730), StoryPageOpState::Succeeded);
+        set_op(
+            app,
+            StoryPageOpState::Succeeded {
+                request: RequestId(730),
+            },
+        );
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
         assert_eq!(page.wait, PageWait::Idle);
@@ -222,7 +246,12 @@ fn a_created_answer_keeps_another_picker_open(cx: &mut TestAppContext) {
         if let Some(page) = app.stories.page.as_mut() {
             page.wait = PageWait::Creating(RequestId(740));
         }
-        set_op(app, RequestId(740), StoryPageOpState::Succeeded);
+        set_op(
+            app,
+            StoryPageOpState::Succeeded {
+                request: RequestId(740),
+            },
+        );
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
         assert!(page.picker.is_some());
@@ -246,7 +275,12 @@ fn a_partly_sent_save_keeps_the_picker_and_drops_the_sent_adds(cx: &mut TestAppC
                 added: vec![11],
             };
         }
-        set_op(app, RequestId(750), StoryPageOpState::Succeeded);
+        set_op(
+            app,
+            StoryPageOpState::Succeeded {
+                request: RequestId(750),
+            },
+        );
         app.story_page_upkeep(window, cx);
         let page = app.stories.page.as_ref().expect("the page");
         assert_eq!(page.wait, PageWait::Idle);
@@ -254,4 +288,43 @@ fn a_partly_sent_save_keeps_the_picker_and_drops_the_sent_adds(cx: &mut TestAppC
         assert!(picker.added().is_empty());
         assert!(picker.is_selected(11));
     });
+}
+
+/// A frame with a call still out asks for no redraw: the answer's own wake
+/// does, so the upkeep must not keep the frame loop running meanwhile.
+#[gpui_kit::test]
+fn a_frame_with_the_call_still_out_does_not_ask_for_another(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let request = RequestId(730);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let mut page = StoryPage::new(CHAT, window, cx);
+        page.view = AlbumView::album(3);
+        page.view.delete_sent(request);
+        page.wait = PageWait::Creating(RequestId(731));
+        app.stories.page = Some(page);
+    });
+    app.update(&mut vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            for request in [request, RequestId(731)] {
+                session.stories.page_ops.begin(StoryPageOp {
+                    kind: quill::story_page::StoryPageOpKind::CreateAlbum,
+                    state: StoryPageOpState::Sending { request },
+                    chat_id: Some(CHAT),
+                });
+            }
+        }
+    });
+    vcx.run_until_parked();
+    let notified = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+    let counted = notified.clone();
+    let _watch = vcx.update(|_, cx| cx.observe(&app, move |_, _| counted.set(counted.get() + 1)));
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.story_page_upkeep(window, cx)
+    });
+    assert_eq!(notified.get(), 0, "no redraw while both calls are out");
+    app.update_in(&mut vcx, |app, window, cx| {
+        set_op(app, StoryPageOpState::Succeeded { request });
+        app.story_page_upkeep(window, cx);
+    });
+    assert_eq!(notified.get(), 1, "the answer redraws once");
 }

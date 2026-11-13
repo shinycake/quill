@@ -19,7 +19,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, Sizable, h_flex};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::state::{AddPeopleEmpty, AddPeopleRow, AddPeopleView};
+use quill::state::{AddPeopleEmpty, AddPeopleRow, AddPeopleView, ContactsView};
 use quill::telegram::envelope::CallState;
 
 /// A row's userpic (tdesktop `groupCallInviteMembersList` 42 px items
@@ -42,7 +42,7 @@ pub(super) struct AddPeopleBox {
 /// shows there (the field needs that window), so the box starts without it.
 enum SearchField {
     /// Not built yet; it starts with this text.
-    Opening {
+    Unbuilt {
         initial: String,
     },
     Open(Entity<InputState>),
@@ -55,7 +55,7 @@ impl AddPeopleBox {
             call_id,
             picked: Vec::new(),
             promoted: Vec::new(),
-            field: SearchField::Opening {
+            field: SearchField::Unbuilt {
                 initial: String::new(),
             },
         }
@@ -65,7 +65,7 @@ impl AddPeopleBox {
     #[cfg(feature = "demo-capture")]
     pub(super) fn with_query(call_id: i32, query: String) -> Self {
         Self {
-            field: SearchField::Opening { initial: query },
+            field: SearchField::Unbuilt { initial: query },
             ..Self::new(call_id)
         }
     }
@@ -93,6 +93,15 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.session.users_state.contacts.data().is_none()
         {
+            let _ = live.driver.fetch_contacts();
+        }
+        cx.notify();
+    }
+
+    /// Retry of a failed contacts fetch: the failure is forgotten by the
+    /// fetch's own ask.
+    fn retry_call_add_people_contacts(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_contacts();
         }
         cx.notify();
@@ -141,7 +150,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|open| match &open.field {
                 SearchField::Open(input) => Some(input),
-                SearchField::Opening { .. } => None,
+                SearchField::Unbuilt { .. } => None,
             })
             .map(|input| input.read(cx).value().to_string())
             .unwrap_or_default()
@@ -226,7 +235,7 @@ impl QuillApp {
         let open = self.call_boxes.add_people.as_ref()?;
         let initial = match &open.field {
             SearchField::Open(input) => return Some(input.clone()),
-            SearchField::Opening { initial } => initial.clone(),
+            SearchField::Unbuilt { initial } => initial.clone(),
         };
         let input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -342,21 +351,38 @@ impl QuillApp {
         for row in &view.global {
             rows = rows.child(self.call_add_people_row(row, true, cx));
         }
-        if let Some(empty) = view.empty {
+        let status = match (view.empty, view.contacts) {
+            (Some(AddPeopleEmpty::SearchLoading), _) | (None, ContactsView::Loading) => {
+                Some(keys::CONTACTS_LOADING)
+            }
+            (None, ContactsView::Failed) => Some(keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS),
+            (Some(AddPeopleEmpty::NoContacts), _) => Some(keys::CONTACTS_NOT_FOUND),
+            (Some(AddPeopleEmpty::NoResults), _) => Some(keys::BLOCKED_LIST_NOT_FOUND),
+            (None, ContactsView::Ready) => None,
+        };
+        if let Some(message) = status.map(tr) {
+            let retry = (view.contacts == ContactsView::Failed).then(|| {
+                Button::new("call-add-people-retry")
+                    .debug_selector(|| "call-add-people-retry".into())
+                    .label(tr(keys::Q_MONEY_RETRY))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.retry_call_add_people_contacts(cx);
+                    }))
+            });
             rows = rows.child(
                 div()
                     .id("call-add-people-empty")
                     .debug_selector(|| "call-add-people-empty".into())
                     .py_2()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap_1()
                     .text_sm()
                     .text_color(muted)
-                    .child(tr(match empty {
-                        AddPeopleEmpty::ContactsLoading | AddPeopleEmpty::SearchLoading => {
-                            keys::CONTACTS_LOADING
-                        }
-                        AddPeopleEmpty::NoContacts => keys::CONTACTS_NOT_FOUND,
-                        AddPeopleEmpty::NoResults => keys::BLOCKED_LIST_NOT_FOUND,
-                    })),
+                    .child(message)
+                    .children(retry),
             );
         }
         let field = Input::new(&search)

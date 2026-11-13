@@ -125,6 +125,7 @@ impl Session {
                     Some(existing) => *existing = info,
                     None => self.chat_list.chat_folders.push(info),
                 }
+                self.chat_list.folder_write_settled(pending);
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
                     self.chat_list.mark_spec_stale(folder_id);
                 }
@@ -134,7 +135,8 @@ impl Session {
                 // spec for the edit dialog prefill / remove-from-folder
                 // chain (correlated via `PendingRequest::folder_id`).
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
-                    self.chat_list.store_spec(folder_id, spec);
+                    self.chat_list
+                        .store_spec(folder_id, pending.map(|p| p.id), spec);
                 }
             }
             ChatListPayload::ChatFolderInviteLink(link) => {
@@ -191,7 +193,9 @@ impl Session {
                 );
             }
             ChatListPayload::RecommendedChatFolders(folders) => {
-                self.chat_list.recommended_folders = Some(folders);
+                self.chat_list
+                    .recommended_folders
+                    .answered(pending.map(|p| p.id), folders);
             }
             // The answer to the "Add folder" box's check goes to the box
             // (`DialogAnswers`), keyed by its request.
@@ -205,7 +209,7 @@ impl Session {
                         .chat_lists_for_add
                         .entry(chat_id.0)
                         .or_default()
-                        .succeed(lists);
+                        .answered(pending.map(|p| p.id), lists);
                 }
             }
             ChatListPayload::Chats {
@@ -224,9 +228,7 @@ impl Session {
                         .archive_settings
                         .answered(pending.map(|p| p.id), settings)
                 {
-                    self.chat_list
-                        .archive_mute
-                        .note_settings(pending.map(|p| p.id), &settings);
+                    self.chat_list.archive_mute.note_settings(&settings);
                 }
             }
         }

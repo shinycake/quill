@@ -263,7 +263,7 @@ fn long_chats_split_into_numbered_files_oldest_first() {
     // The last report is the final write; the thread's wrapper marks it done.
     assert_eq!(
         run.last.stage,
-        Stage::Writing {
+        Stage::Written {
             done: summary.messages,
             total: summary.messages
         }
@@ -499,7 +499,7 @@ fn progress_labels_and_fraction() {
     assert_eq!(p.fraction(), None);
     p.stage = Stage::Collecting { read: 120 };
     assert_eq!(p.label(), "Reading messages… 120");
-    p.stage = Stage::Writing {
+    p.stage = Stage::Written {
         done: 50,
         total: 200,
     };

@@ -112,14 +112,14 @@ impl QuillApp {
             return (rows, sections);
         }
         let recent: Vec<i64> = emoji
-            .recent_statuses
+            .recent_statuses()
             .iter()
             .map(|status| status.custom_emoji_id)
             .collect();
         let slots = status_slots(
-            &emoji.themed_status_ids,
+            emoji.themed_status_ids(),
             &recent,
-            &emoji.default_status_ids,
+            emoji.default_status_ids(),
             self.current_status_id(),
         );
         let cells: Vec<PanelCell> = slots
@@ -136,7 +136,7 @@ impl QuillApp {
         });
         push_grid(&mut rows, cells, EMOJI_COLS, false);
         let collectibles: Vec<PanelCell> = emoji
-            .upgraded_gift_statuses
+            .upgraded_gift_statuses()
             .iter()
             .filter_map(|status| status.gift.as_ref())
             .filter_map(|gift| self.status_cell(gift.model_custom_emoji_id))

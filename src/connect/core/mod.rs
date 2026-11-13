@@ -3,6 +3,7 @@ use super::composer::ai_rich_draft_note;
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
+use crate::state::fetch::Fetch;
 use crate::state::{AiAnswer, AiResult};
 use crate::state::{GroupsPurpose, MessagesPurpose, StickersPurpose, ThreadsPurpose};
 use crate::state::{InstantViewPage, RequestPurpose, Session};
@@ -77,7 +78,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|_| ok)
             .and_then(crate::state::story_list_of);
         let main_was_exhausted = self.session.chat_list.main_paging.is_exhausted();
-        let had_topic_icons = !self.session.threads.forum_topic_icons.is_empty();
+        let had_topic_icons = !self.session.threads.forum_topic_icons.items().is_empty();
         // Parity slice: a folder `loadChats` page completing with ok pages
         // on (until a 404 marks the folder exhausted in the reducer).
         // Captured before `apply` takes the pending request.
@@ -465,12 +466,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         // A pin in a chat on screen refetches its pinned list (the pinned
         // message may not be loaded); a confirmed unpin-all empties it.
-        let pins_changed: Option<ChatId> = match &owned.envelope.payload {
+        let pins_changed: Option<(ChatId, bool)> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::UpdateMessageIsPinned {
                 chat_id,
-                is_pinned: true,
+                is_pinned,
                 ..
-            }) => Some(*chat_id),
+            }) => Some((*chat_id, *is_pinned)),
             _ => None,
         };
         let unpinned_all: Option<ChatId> = match &owned.envelope.payload {
@@ -612,7 +613,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = unpinned_all {
             self.session.messages.pins_cleared(chat_id.0);
         }
-        if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
+        // An unpin leaves the list by itself; it asks again only when it
+        // outdated a fetch that was in flight.
+        if let Some((chat_id, _)) = pins_changed.filter(|(chat, is_pinned)| {
+            self.session.chat_is_shown(*chat)
+                && (*is_pinned
+                    || self
+                        .session
+                        .messages
+                        .pinned_messages
+                        .get(&chat.0)
+                        .is_some_and(Fetch::is_outdated))
+        }) {
             let _ = self.fetch_pinned_messages(chat_id);
         }
         // A refused send here is returned at the end: the one-shot work below
@@ -704,7 +716,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_finish_folder_removals()?;
         self.maybe_finish_leave_deletes()?;
         // The topic icon picker's thumbnails come once, when the list lands.
-        if !had_topic_icons && !self.session.threads.forum_topic_icons.is_empty() {
+        if !had_topic_icons && !self.session.threads.forum_topic_icons.items().is_empty() {
             self.download_forum_topic_icons();
         }
         if became_ready {
@@ -757,11 +769,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Corner "@" / heart buttons and jump to date: run in the window
         // that asked, for its chat. A failed jump (closed chat) drops it.
-        let unread = self.session.messages.unread_jump.take();
-        for jump in [unread, self.session.search.take_date_jump()]
-            .into_iter()
-            .flatten()
-        {
+        for jump in self.session.search.jump_lookups.take_resolved() {
             let _ = self.run_view_jump(jump);
         }
         // M1 fix-up: "Share link" gate — chain to `getMessageLink` only
@@ -860,8 +868,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 && self.session.stickers.stickers.tab == crate::state::StickerTab::Archived
             {
                 self.drop_in_flight(RequestPurpose::GetStickerSet);
-                self.session.stickers.stickers.selection.stage =
-                    crate::state::StickerSetStage::Idle;
+                self.session.stickers.stickers.selection.reselect();
                 self.fetch_archived_stickers(false)?;
             }
         }
@@ -890,6 +897,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_load_selected_sticker_set()?;
         self.maybe_refresh_saved_animations()?;
         self.refresh_stale_panels()?;
+        self.refetch_blocked_senders()?;
         self.open_attached_sticker_set()?;
         if chat_search_hits {
             // Unigram ChatSearchViewModel: first hit → LoadMessageSliceAsync.
@@ -920,6 +928,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.asked
+            .sent(&self.session.requests, RequestPurpose::SetParameters, extra);
         self.send_language_options()
     }
 }

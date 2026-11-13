@@ -25,6 +25,10 @@ pub(super) struct DraftClear {
 /// id and never another send's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ClearStage {
+    /// The send is under way but no request is out yet (a recording whose
+    /// file is being finished): the tap took the slot, so a newer send
+    /// replaces it, and only the recording's own `Reservation` can arm it.
+    Reserved(Reservation),
     /// The send named no request (a menu command): only a slot match finds it.
     Unasked,
     /// The send's messages wait for their answers and acks; the first ack
@@ -35,6 +39,26 @@ enum ClearStage {
     /// list is empty.
     Spent(Vec<SentMessage>),
 }
+
+/// The claim a recording makes on its slot's draft clear when Send is tapped.
+/// Told apart by identity: the recording and its held clear share one
+/// allocation, and no other claim does.
+#[derive(Clone, Debug)]
+pub(super) struct Reservation(std::rc::Rc<()>);
+
+impl Reservation {
+    pub(super) fn new() -> Self {
+        Self(std::rc::Rc::new(()))
+    }
+}
+
+impl PartialEq for Reservation {
+    fn eq(&self, other: &Self) -> bool {
+        std::rc::Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Reservation {}
 
 /// One message of a send: asked for under a request, then made by it.
 /// A request that sends an album is answered once per message.
@@ -50,14 +74,14 @@ enum SentMessage {
 impl ClearStage {
     fn messages_mut(&mut self) -> Option<&mut Vec<SentMessage>> {
         match self {
-            Self::Unasked => None,
+            Self::Unasked | Self::Reserved(_) => None,
             Self::Armed(messages) | Self::Spent(messages) => Some(messages),
         }
     }
 
     fn messages(&self) -> &[SentMessage] {
         match self {
-            Self::Unasked => &[],
+            Self::Unasked | Self::Reserved(_) => &[],
             Self::Armed(messages) | Self::Spent(messages) => messages,
         }
     }
@@ -65,7 +89,7 @@ impl ClearStage {
     /// `message` left the send, acked or failed; the stage is `Spent`.
     fn spend(&mut self, message: MessageId) {
         let mut messages = match std::mem::replace(self, Self::Unasked) {
-            Self::Unasked => Vec::new(),
+            Self::Unasked | Self::Reserved(_) => Vec::new(),
             Self::Armed(messages) | Self::Spent(messages) => messages,
         };
         messages.retain(|m| !matches!(m, SentMessage::Made { message: id, .. } if *id == message));
@@ -88,6 +112,29 @@ impl DraftClear {
             sent,
             stage: ClearStage::Unasked,
         }
+    }
+
+    /// The whole composer's clear, held for a recording until its file is
+    /// ready and its send goes out.
+    pub(super) fn reserved(chat_id: ChatId, claim: Reservation) -> Self {
+        let mut clear = Self::new(chat_id, None);
+        clear.stage = ClearStage::Reserved(claim);
+        clear
+    }
+
+    /// Whether this is the clear `claim` reserved.
+    pub(super) fn is_reserved_by(&self, claim: &Reservation) -> bool {
+        matches!(&self.stage, ClearStage::Reserved(held) if held == claim)
+    }
+
+    /// The recording that reserved this clear sent as `request`: it waits
+    /// for its ack now. False when `claim` no longer holds it.
+    pub(super) fn arm(&mut self, claim: &Reservation, request: RequestId) -> bool {
+        let held = self.is_reserved_by(claim);
+        if held {
+            self.stage = ClearStage::Armed(vec![SentMessage::Asked(request)]);
+        }
+        held
     }
 
     /// The send went out as `requests`.
@@ -151,9 +198,29 @@ impl DraftClear {
         self.stage.spend(message);
     }
 
-    /// Every message of the send has acked or failed.
+    /// A send stops waiting for messages that can no longer answer: a made
+    /// message that left the history (deleted while it uploaded), an asked
+    /// one whose request is gone (refused before any answer). Settled when
+    /// none is left: for a send that acked nothing, that is the send over
+    /// with its draft kept.
+    pub(super) fn forget_lost(
+        &mut self,
+        message_exists: impl Fn(ChatId, MessageId) -> bool,
+        request_waits: impl Fn(RequestId) -> bool,
+    ) -> bool {
+        let chat = self.chat_id;
+        if let Some(messages) = self.stage.messages_mut() {
+            messages.retain(|m| match *m {
+                SentMessage::Made { message, .. } => message_exists(chat, message),
+                SentMessage::Asked(request) => request_waits(request),
+            });
+        }
+        self.is_settled()
+    }
+
+    /// Every message of the send has acked, failed or been lost.
     pub(super) fn is_settled(&self) -> bool {
-        matches!(&self.stage, ClearStage::Spent(messages) if messages.is_empty())
+        matches!(&self.stage, ClearStage::Armed(messages) | ClearStage::Spent(messages) if messages.is_empty())
     }
 
     /// Whether the ack for `chat_id` may clear its draft, given the
@@ -238,25 +305,6 @@ impl DraftLoad {
     }
 }
 
-/// The slow-mode countdown's tick task: none, or running for a chat. The
-/// task is owned here: a tick for another chat replaces it, and dropping
-/// the composer stops it. It ends by itself when the gate lifts or the
-/// open chat changes, and the next gated frame starts a new one.
-pub(crate) enum SlowModeTick {
-    Idle,
-    Ticking {
-        chat: ChatId,
-        _task: gpui_kit::Task<()>,
-    },
-}
-
-impl SlowModeTick {
-    /// Whether a tick task for `chat_id` was started and has not ended.
-    pub(super) fn ticks_for(&self, chat_id: ChatId) -> bool {
-        matches!(self, Self::Ticking { chat, .. } if *chat == chat_id)
-    }
-}
-
 pub(crate) struct ComposerUi {
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
@@ -302,9 +350,6 @@ pub(crate) struct ComposerUi {
     pub(super) file_drag: super::drop_zones::FileDrag,
     /// The folder being zipped for "Send as archive" (`drop_zones`).
     pub(super) archive: super::drop_zones::ArchiveJob,
-    /// Phase A1: the slow-mode countdown's 1s tick task, for the open chat
-    /// it ticks for. Mirrors `voice_tick`.
-    pub(super) slow_mode_tick: SlowModeTick,
     /// The attachment tray's file checks, price box and video editor.
     pub(super) send_box: super::send_box_state::SendBoxUi,
     pub(super) text_limit: super::composer_ui::TextLimitMemo,
@@ -330,7 +375,6 @@ impl ComposerUi {
             placeholder_shown: None,
             file_drag: super::drop_zones::FileDrag::Idle,
             archive: Default::default(),
-            slow_mode_tick: SlowModeTick::Idle,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),
             spelling: Default::default(),
@@ -348,5 +392,53 @@ impl super::on_screen::Farewell for ComposerUi {
         cx: &mut gpui_kit::Context<super::app::QuillApp>,
     ) {
         app.close_video_editor(cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DraftClear;
+    use quill::ids::{ChatId, MessageId, RequestId};
+
+    /// An album whose second part is deleted while it uploads never acks it:
+    /// once the first has acked and the second left the history, the clear
+    /// is settled instead of living until a newer send replaces it.
+    #[test]
+    fn a_clear_stops_waiting_for_an_album_part_that_left_the_history() {
+        let chat = ChatId(5);
+        let mut clear = DraftClear::whole_composer(chat).asked([RequestId(1)]);
+        clear.answered(RequestId(1), MessageId(-10));
+        clear.answered(RequestId(1), MessageId(-11));
+        assert!(clear.ack(MessageId(-10)), "the first ack clears the draft");
+        let there = |_: ChatId, message: MessageId| message == MessageId(-11);
+        let waits = |_: RequestId| false;
+        assert!(!clear.forget_lost(there, waits), "the part is still there");
+        let gone = |_: ChatId, _: MessageId| false;
+        assert!(clear.forget_lost(gone, waits), "the part left the history");
+    }
+
+    /// A send that acked nothing: its message deleted while uploading, or
+    /// its request refused before any answer, ends the clear too (the
+    /// draft stays), instead of living until a newer send replaces it.
+    #[test]
+    fn an_armed_clear_settles_when_nothing_can_answer() {
+        let chat = ChatId(5);
+        let exists = |_: ChatId, message: MessageId| message == MessageId(-10);
+        let waits = |request: RequestId| request == RequestId(2);
+        // Refused before any answer: the request is gone.
+        let mut refused = DraftClear::whole_composer(chat).asked([RequestId(1)]);
+        assert!(!refused.forget_lost(exists, |_| true), "still waiting");
+        assert!(refused.forget_lost(exists, waits), "its request is gone");
+        // Deleted while uploading: the made message left the history.
+        let mut deleted = DraftClear::whole_composer(chat).asked([RequestId(2)]);
+        deleted.answered(RequestId(2), MessageId(-11));
+        assert!(deleted.forget_lost(exists, waits), "the message is gone");
+        // One of two lost: the other still waits.
+        let mut album = DraftClear::whole_composer(chat).asked([RequestId(1), RequestId(2)]);
+        assert!(!album.forget_lost(exists, waits));
+        assert!(
+            album.ack(MessageId(-99)),
+            "the draft clears on the first ack"
+        );
     }
 }

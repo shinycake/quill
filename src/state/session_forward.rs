@@ -42,12 +42,14 @@ impl Session {
                 .insert(poll.id, touched.iter().copied().collect());
         }
         // N2: an open voter dialog goes stale when the poll updates
-        // (counts/options change) — drop cached pages for touched
-        // messages so the next open refetches.
-        if !touched.is_empty() {
-            self.messages
-                .poll_voters
-                .retain(|(chat_id, message_id, _), _| !touched.contains(&(*chat_id, *message_id)));
+        // (counts/options change): the pages of touched messages are
+        // marked `Stale` (a page in flight is dropped with its request), so
+        // the dialog that shows one asks again and the others refetch on
+        // their next open.
+        for ((chat_id, message_id, _), fetch) in self.messages.poll_voters.iter_mut() {
+            if touched.contains(&(*chat_id, *message_id)) {
+                *fetch = PollVotersFetch::Stale;
+            }
         }
         touched.len()
     }

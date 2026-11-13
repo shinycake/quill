@@ -356,6 +356,7 @@ impl Session {
         let DiskSearch::Asked {
             request: asked_as,
             keys: asked,
+            ..
         } = self.media.disk_search.clone()
         else {
             return;
@@ -379,14 +380,17 @@ impl Session {
                 self.apply_download_added(download);
                 if low {
                     held.insert(key);
-                    self.media.disk_paused.insert(id);
+                    self.media.disk_paused.hold(id);
                 } else {
                     self.media.disk_resume_due.push(id);
                 }
             }
         }
-        let saved = &mut self.settings.data_storage.disk_paused;
-        saved.retain(|key| !asked.contains(key) || held.contains(key));
+        self.media.disk_paused.forget_unheld(
+            &mut self.settings.data_storage.disk_paused,
+            &asked,
+            &held,
+        );
     }
 
     /// The download left the list (removed here or on another device).

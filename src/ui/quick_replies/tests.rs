@@ -477,3 +477,42 @@ fn the_delete_question_is_dropped_by_another_action(cx: &mut TestAppContext) {
         Some(super::PaneStage::Editing { editing: Some(7) })
     ));
 }
+
+/// Sweep r4-10 round 4: an account switch closes the box, and a save it
+/// waited on is nobody's answer afterwards.
+#[gpui_kit::test]
+fn an_account_switch_closes_the_box_and_forgets_its_save(cx: &mut TestAppContext) {
+    use crate::ui::on_screen::Farewell;
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    open(&app, vcx);
+    let id = RequestId(41);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let poll = app.quick_replies_poll(window, cx);
+            if let Some(session) = app.session_mut() {
+                session.acks.expect(id);
+            }
+            if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+                dialog.pane.stage = super::PaneStage::Saving {
+                    request: id,
+                    text: "hi".into(),
+                    editing: None,
+                    _poll: poll,
+                };
+            }
+            crate::ui::dialogs_state::DialogUi::farewell(app, window, cx);
+        });
+    });
+    app.update(vcx, |app, _| {
+        assert!(app.dialogs.quick_replies_dialog.is_none());
+        let Some(session) = app.session_mut() else {
+            return;
+        };
+        session.acks.settle(id, Answer::Done);
+        assert!(session.acks.take(id).is_none(), "nobody waits for it");
+    });
+}

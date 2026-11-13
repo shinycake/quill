@@ -436,7 +436,7 @@ impl QuillApp {
             if let Some(session) = self.demo_session.as_mut()
                 && let Some(summary) = session.calls.summary.as_mut()
             {
-                summary.rating = quill::state::CallRating::Sent;
+                summary.rating = quill::state::CallRating::Rated;
             }
         }
         cx.notify();
@@ -456,7 +456,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.summary.as_mut())
         {
-            summary.debug_information = quill::state::CallUpload::Sent;
+            summary.debug_information = quill::state::CallUpload::Uploaded;
             self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_DIAGNOSTICS_UPLOAD_NO_LIVE,
             )));
@@ -480,7 +480,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.summary.as_mut())
         {
-            summary.log = quill::state::CallUpload::Sent;
+            summary.log = quill::state::CallUpload::Uploaded;
             self.set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_LOG_UPLOAD_NO)));
         }
         cx.notify();
@@ -552,41 +552,40 @@ impl QuillApp {
     }
 
     /// Phase C1: 1s tick while `call_tick_wanted`, keeping the overlay's
-    /// ringing / connected clock fresh and the ringtones looping. Mirrors
-    /// the Phase A1 slow-mode tick (at most one task; exits when unwanted).
+    /// ringing / connected clock fresh and the ringtones looping: at most
+    /// one pending beat, none when unwanted.
     pub(super) fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
         if !self.call_tick_wanted() || self.calls.tick.is_running() {
             return;
         }
+        self.arm_call_beat(cx);
+    }
+
+    /// The next beat, a second away. The stage holds it, so the beat that
+    /// finds the tick unwanted (or a new owner) ends the clock.
+    fn arm_call_beat(&mut self, cx: &mut Context<Self>) {
         // window-scope: the clock redraws every window's conversation (`notify_conversations`).
         // screen-scope: the call tick reads the current screen and the background accounts' rings on every beat, and must keep running across a switch.
-        let tick = cx.spawn(async move |this, cx| {
-            loop {
-                // Frames wake their own pictures (`call_video`).
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-                let cont = this
-                    .update(cx, |this, cx| {
-                        if this.call_on_screen() {
-                            this.notify_call_clock(cx);
-                        }
-                        if this.call_tick_wanted() {
-                            this.sync_call_sounds();
-                            true
-                        } else {
-                            this.calls.tick = CallTick::Idle;
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
-                if !cont {
-                    break;
-                }
-            }
-            let _ = this.update(cx, |this, _| {
-                this.calls.tick = CallTick::Idle;
-            });
+        let beat = cx.spawn(async move |this, cx| {
+            // Frames wake their own pictures (`call_video`).
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            let _ = this.update(cx, |this, cx| this.call_beat(cx));
         });
-        self.calls.tick = CallTick::Running { _task: tick };
+        self.calls.tick = CallTick::Running { _task: beat };
+    }
+
+    /// One beat of the call clock: redraw it, loop the ringtones, and arm
+    /// the next while the tick is still wanted.
+    fn call_beat(&mut self, cx: &mut Context<Self>) {
+        if self.call_on_screen() {
+            self.notify_call_clock(cx);
+        }
+        if self.call_tick_wanted() {
+            self.sync_call_sounds();
+            self.arm_call_beat(cx);
+        } else {
+            self.calls.tick = CallTick::Idle;
+        }
     }
 
     /// Phase C2e: the local camera actually contributes a feed — the

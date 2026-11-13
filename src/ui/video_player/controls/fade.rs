@@ -189,6 +189,14 @@ impl ControlsFade {
         }
     }
 
+    /// Replace the running full-screen deadline's wake-up task with a new one
+    /// (the deadline moved while the old one slept).
+    pub(crate) fn rearm_timer(&mut self, spawn: impl FnOnce() -> Task<()>) {
+        if let Mode::Full(Reveal::Shown { timer, .. }) = &mut self.mode {
+            *timer = Some(spawn());
+        }
+    }
+
     /// Run the full-screen timer: hides the controls once it is due.
     pub(crate) fn tick(&mut self, now: Instant) {
         if let Some(at) = self.hide_at()

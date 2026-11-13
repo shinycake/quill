@@ -267,6 +267,37 @@ fn esc_clears_the_search_before_leaving_settings(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn closing_settings_drops_the_search_text_for_the_next_open(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx, 1100.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.open_settings(Some(Page::Calls), cx);
+        cx.notify();
+    });
+    frames(vcx);
+    vcx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-f"
+    } else {
+        "ctrl-f"
+    });
+    vcx.simulate_input("notif");
+    frames(vcx);
+    assert_eq!(query(&app, vcx), "notif");
+    app.update(vcx, |app, cx| {
+        app.close_settings();
+        cx.notify();
+    });
+    frames(vcx);
+    app.update(vcx, |app, cx| {
+        app.open_settings(None, cx);
+        cx.notify();
+    });
+    frames(vcx);
+    assert_eq!(query(&app, vcx), "");
+    assert!(shown(vcx, "settings-sidebar"));
+}
+
+#[gpui_kit::test]
 fn a_narrow_window_shows_results_in_place_of_the_list(cx: &mut TestAppContext) {
     let (app, _, mut vcx) = new_app(cx, 600.);
     let vcx = &mut vcx;

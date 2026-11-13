@@ -87,21 +87,36 @@ impl QuillApp {
         self.privacy.layer.close_all();
     }
 
+    /// The Privacy page is left: its layers close, and the refusal line of
+    /// a block goes with the page.
+    pub(crate) fn leave_privacy(&mut self) {
+        self.close_privacy_layers();
+        if let Some(session) = self.session_mut() {
+            session.settings.leave_blocked_list();
+        }
+    }
+
     /// Live: all privacy rules, the read-date setting, the first blocked
     /// page, new-chat and archive settings, unguarded (always fresh). Demo:
     /// the `ReadyPrivacy` fixture seeds state directly.
     pub(crate) fn fetch_privacy(&mut self) {
+        let mut refreshed = false;
         if let Some(live) = self.live.as_mut() {
             for key in PrivacySettingKey::all() {
                 let _ = live.driver.fetch_privacy_rules(key);
             }
             let _ = live.driver.fetch_read_date_privacy();
-            let _ = live.driver.fetch_blocked_senders();
+            refreshed = live.driver.fetch_blocked_senders().is_ok();
             let _ = live.driver.fetch_new_chat_privacy();
             let _ = live.driver.fetch_archive_chat_list_settings();
             if let Some(me) = live.driver.session.my_user_id {
                 let _ = live.driver.fetch_user_full_info(me);
             }
+        }
+        if refreshed {
+            // The first page refills the list: the next page is asked for
+            // again at the length it reaches.
+            self.privacy.blocked_asked.reset();
         }
     }
 
@@ -268,9 +283,9 @@ impl QuillApp {
     /// "Block…" contact picker, and paging.
     pub(crate) fn privacy_blocked_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let total = session.map(|s| s.settings.blocked_total).unwrap_or(0);
+        let total = session.map(|s| s.settings.blocked_total()).unwrap_or(0);
         let list: Vec<i64> = session
-            .and_then(|s| s.settings.blocked_senders.data().cloned())
+            .map(|s| s.settings.blocked_ids().to_vec())
             .unwrap_or_default();
         let loading = session.is_some_and(|s| s.settings.blocked_senders.is_loading());
         let error = session.is_some_and(|s| s.settings.blocked_senders.error().is_some());
@@ -318,6 +333,16 @@ impl QuillApp {
                 cx,
             ),
         );
+        if let Some(line) = session.and_then(|s| s.settings.block_note.line()) {
+            section = section.child(
+                div()
+                    .id("privacy-block-error")
+                    .text_xs()
+                    .text_color(super::danger())
+                    .px_2()
+                    .child(line.to_string()),
+            );
+        }
         if error && list.is_empty() {
             section = section.child(
                 div()
@@ -376,9 +401,9 @@ impl QuillApp {
         let Some(settings) = self.session().map(|s| &s.settings) else {
             return;
         };
-        let loaded = settings.blocked_senders.data().map_or(0, Vec::len);
+        let loaded = settings.blocked_ids().len();
         let has_more = settings.blocked_senders.data().is_some()
-            && (settings.blocked_total.max(0) as usize) > loaded;
+            && (settings.blocked_total().max(0) as usize) > loaded;
         if (settings.blocked_senders.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.privacy.blocked_scroll),
@@ -390,7 +415,7 @@ impl QuillApp {
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_blocked_senders();
+            let _ = live.driver.fetch_more_blocked_senders();
         }
         cx.notify();
     }
@@ -502,7 +527,10 @@ impl QuillApp {
     fn block_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
         self.privacy.layer.close_block_picker();
         if let Some(live) = self.live.as_mut() {
-            let result = { live.driver.block_sender(user_id) };
+            let result = {
+                live.driver
+                    .block_sender(user_id, quill::state::BlockOrigin::PrivacyPage)
+            };
             if let Err(err) = result {
                 self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_BLOCK,
@@ -511,14 +539,7 @@ impl QuillApp {
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings
-                .blocked_senders
-                .insert_data_if_missing(Vec::new);
-            if let Some(list) = demo.settings.blocked_senders.data_mut()
-                && !list.contains(&user_id)
-            {
-                list.push(user_id);
-                demo.settings.blocked_total = demo.settings.blocked_total.saturating_add(1);
-            }
+                .block_change_sent(quill::ids::RequestId(0), user_id, true);
         }
         cx.notify();
     }
@@ -535,11 +556,9 @@ impl QuillApp {
                     &err,
                 )));
             }
-        } else if let Some(demo) = self.demo_session.as_mut()
-            && let Some(list) = demo.settings.blocked_senders.data_mut()
-        {
-            list.retain(|id| *id != user_id);
-            demo.settings.blocked_total = demo.settings.blocked_total.saturating_sub(1);
+        } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.settings
+                .block_change_sent(quill::ids::RequestId(0), user_id, false);
         }
         cx.notify();
     }

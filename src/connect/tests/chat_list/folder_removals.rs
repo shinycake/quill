@@ -326,3 +326,93 @@ fn a_failed_folder_page_waits_and_asks_again_and_a_404_ends_it() {
             .is_exhausted()
     );
 }
+
+#[test]
+fn a_spec_fetched_before_a_change_does_not_land_after_it() {
+    let mut rig = Rig::new();
+    rig.driver.fetch_chat_folder(5).unwrap();
+    assert!(rig.driver.session.chat_list.folder_specs.is_loading(5));
+    // The folder changes (another device) while the fetch is out.
+    rig.ingest(FOLDERS);
+    assert!(!rig.driver.session.chat_list.folder_specs.is_loading(5));
+    rig.answer_spec(&[7, 8]);
+    assert!(
+        rig.driver.session.chat_list.folder_specs.get(&5).is_none(),
+        "the answer predates the change"
+    );
+    // A removal asks again instead of editing from it.
+    rig.driver.remove_chat_from_folder(ChatId(7), 5).unwrap();
+    assert!(rig.sent("editChatFolder").is_empty());
+    assert_eq!(rig.sent("getChatFolder").len(), 2);
+    rig.answer_spec(&[7, 8]);
+    assert_eq!(rig.last_edit_included(), serde_json::json!([8]));
+}
+
+#[test]
+fn a_spec_fetch_is_busy_until_it_answers_and_a_failed_send_ends_in_an_error() {
+    let mut rig = Rig::new();
+    assert!(rig.driver.fetch_chat_folder(5).unwrap().is_some());
+    assert!(rig.driver.fetch_chat_folder(5).unwrap().is_none());
+    assert_eq!(rig.sent("getChatFolder").len(), 1);
+    // An older request's error does not fail the fetch that replaced it.
+    rig.ingest(FOLDERS);
+    assert!(rig.driver.fetch_chat_folder(5).unwrap().is_some());
+    let older = Rig::extra_of(&rig.sent("getChatFolder")[0]);
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        older.0
+    ));
+    assert!(rig.driver.session.chat_list.folder_specs.is_loading(5));
+}
+
+#[test]
+fn a_removal_waits_while_an_edit_of_the_folder_is_out() {
+    let mut rig = Rig::new();
+    rig.driver.fetch_chat_folder(5).unwrap();
+    rig.answer_spec(&[7]);
+    let spec = rig
+        .driver
+        .session
+        .chat_list
+        .folder_specs
+        .get(&5)
+        .cloned()
+        .unwrap();
+    let fetches = rig.sent("getChatFolder").len();
+    let edit = rig.driver.edit_chat_folder(5, &spec).unwrap();
+    assert!(rig.driver.session.chat_list.folder_write_out(5));
+    rig.driver.remove_chat_from_folder(ChatId(7), 5).unwrap();
+    assert_eq!(rig.sent("getChatFolder").len(), fetches, "nothing yet");
+    assert_eq!(rig.sent("editChatFolder").len(), 1);
+    rig.ingest(&format!(
+        r#"{{"@type":"chatFolderInfo","@extra":"{}","id":5,"name":{{"@type":"chatFolderName","text":{{"@type":"formattedText","text":"Work","entities":[]}}}},"icon":null,"color_id":-1,"is_shareable":false}}"#,
+        edit.0
+    ));
+    assert!(!rig.driver.session.chat_list.folder_write_out(5));
+    assert_eq!(
+        rig.sent("getChatFolder").len(),
+        fetches + 1,
+        "the edit's answer frees it"
+    );
+}
+
+#[test]
+fn a_failed_edit_frees_the_folder_for_the_next_removal() {
+    let mut rig = Rig::new();
+    rig.driver.fetch_chat_folder(5).unwrap();
+    rig.answer_spec(&[7]);
+    let spec = rig
+        .driver
+        .session
+        .chat_list
+        .folder_specs
+        .get(&5)
+        .cloned()
+        .unwrap();
+    let edit = rig.driver.edit_chat_folder(5, &spec).unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"FOLDER_INVALID"}}"#,
+        edit.0
+    ));
+    assert!(!rig.driver.session.chat_list.folder_write_out(5));
+}

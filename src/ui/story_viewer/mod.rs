@@ -10,7 +10,7 @@ use super::pressable::PressableDiv;
 use super::search_ui::chat_search_jump_note;
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::stories_state::{PanelKind, StoryTick, ViewerPanel};
+use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
@@ -26,7 +26,7 @@ use quill::telegram::envelope::{
     StoryChosenExtraReaction, StoryOriginView,
 };
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 impl QuillApp {
     /// Phase 9.2: the viewer story's freshest `ParsedStory` (reaction
@@ -104,7 +104,7 @@ impl QuillApp {
                 Ok(request) => self
                     .stories
                     .live
-                    .start_watching((chat_id, story_id), Some(request)),
+                    .start_watching((chat_id, story_id), request),
                 // A join already waiting on its request goes on; anything
                 // else that was refused shows "Join live", not a spinner
                 // (or a failed stream's Retry) nothing will end.
@@ -203,7 +203,7 @@ impl QuillApp {
     /// Phase 9.2+: custom-emoji ids the viewer still needs stickers for —
     /// the picker's custom options plus the current story's chosen
     /// custom-emoji reaction. The viewer tick feeds these to the driver.
-    fn story_custom_emoji_fetch_ids(&self) -> Vec<i64> {
+    pub(super) fn story_custom_emoji_fetch_ids(&self) -> Vec<i64> {
         let Some(session) = self.session() else {
             return Vec::new();
         };
@@ -789,63 +789,23 @@ impl QuillApp {
             || self.stories.composer.is_open()
     }
 
-    /// Phase 9.6: 100ms tick while the story viewer is open (mirrors
-    /// Telegram Desktop's `kPhotoProgressInterval`,
-    /// `media_stories_controller.cpp:70`), at most one task — the same
-    /// pattern as `ensure_call_tick`. Each wake updates the pause state,
-    /// auto-advances when the current story's duration elapses, and closes
-    /// the viewer at the end of the sequence (Telegram Desktop:
-    /// `updatePlayback` → `subjumpFor(1)` else `storiesClose()`,
-    /// `media_stories_controller.cpp:1235-1240`).
+    /// Phase 9.6: the story viewer's clock, 10 frames a second while the
+    /// viewer is open (Telegram Desktop's `kPhotoProgressInterval`,
+    /// `media_stories_controller.cpp:70`). It is the frame clock, not a
+    /// timer: it ticks only while the window is shown, and stops when the
+    /// story is held and nothing is waited on (`tick_rest`). Each frame's
+    /// upkeep (`story_viewer_upkeep`) updates the pause state, advances when
+    /// the current story's duration elapses, and closes the viewer at the
+    /// end of the sequence (Telegram Desktop: `updatePlayback` →
+    /// `subjumpFor(1)` else `storiesClose()`,
+    /// `media_stories_controller.cpp:1235-1240`). What resumes a held story
+    /// asks again.
     pub(super) fn ensure_story_tick(&mut self, cx: &mut Context<Self>) {
-        if !self.stories.viewer.is_open() || self.stories.tick.is_running() {
+        if !self.stories.viewer.is_open() {
             return;
         }
-        // window-scope: only the main window draws the story viewer (`hand_to_main_window`).
-        let task = self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(100))
-                    .await;
-                let cont = this
-                    .update(cx, |this, cx| {
-                        if !this.stories.viewer.is_open() {
-                            this.stories.playback.stop();
-                            this.stories.tick.finish();
-                            this.stories.emoji_warm = None;
-                            return false;
-                        }
-                        let now = Instant::now();
-                        // B14: the native player drives video stories;
-                        // the duration clock stays frozen meanwhile.
-                        this.sync_story_video(cx);
-                        let user_paused = this.story_playback_paused();
-                        let video_driven = this.story_video_driven();
-                        this.stories
-                            .playback
-                            .set_paused(user_paused || video_driven, now);
-                        this.apply_story_native_pause(user_paused);
-                        this.tick_close_friends(cx);
-                        this.live_story_tick(cx);
-                        if this.story_segment_finished(now) {
-                            this.step_story_viewer(1, cx);
-                        }
-                        // Phase 9.2+: keep custom-emoji reaction stickers
-                        // warm while the viewer is open (picker options +
-                        // the chosen-reaction badge), once per story and
-                        // per change of what they need.
-                        this.warm_story_custom_emoji();
-                        // Only the overlay shows what a tick advances.
-                        this.notify_story(cx);
-                        true
-                    })
-                    .unwrap_or(false);
-                if !cont {
-                    break;
-                }
-            }
-        });
-        self.stories.tick = StoryTick::Running(task);
+        self.request_app_tick(tick_rest::STORY_TICK_FPS, cx);
+        cx.notify();
     }
 }
 
@@ -903,6 +863,10 @@ mod story_viewer_overlay;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tick_notify_tests;
+mod tick_rest;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tick_rest_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod video_wait_tests;

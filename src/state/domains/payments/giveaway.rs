@@ -99,15 +99,14 @@ impl GiveawayOptions {
         self.stars.data().map_or(&[], Vec::as_slice)
     }
 
-    /// Both lists are asked for `boosted_chat_id`. The Premium prices of
-    /// another chat are dropped at once, not kept under the spinner.
-    pub fn begin(&mut self, boosted_chat_id: i64) {
+    /// Both lists are about to be asked for `boosted_chat_id`. The Premium
+    /// prices of another chat are dropped at once, not kept under the
+    /// spinner. The caller begins each list and records its request.
+    pub fn retarget(&mut self, boosted_chat_id: i64) {
         if self.for_chat != boosted_chat_id {
             self.for_chat = boosted_chat_id;
             self.premium = Fetch::Idle;
         }
-        self.premium.begin();
-        self.stars.begin();
     }
 }
 
@@ -126,13 +125,13 @@ pub enum GiveawayLaunch {
     /// A new giveaway was paid for. Its form is done: Start must not buy the
     /// same giveaway again.
     Paid,
-    /// The payment of a new giveaway waits on the provider's verification
-    /// page (3-D Secure). The form stays done: Start must not buy a second
-    /// one while that is pending, so closing and reopening the form keeps
-    /// it. It ends when the user says the verification is over
+    /// The payment of a new giveaway needs the provider's verification page
+    /// (3-D Secure), which sends Quill no answer. The form stays done: Start
+    /// must not buy a second one meanwhile, so closing and reopening the
+    /// form keeps it. It ends when the user says the verification is over
     /// ([`GiveawayLaunches::end_verification`], "Start over" on the form) or
     /// with the session.
-    Verifying,
+    NeedsVerification,
     /// The launch failed, with the line its form shows.
     Failed { reason: String },
 }
@@ -162,7 +161,7 @@ impl GiveawayLaunches {
     pub fn is_done_for(&self, chat_id: i64) -> bool {
         matches!(
             self.stage(chat_id),
-            GiveawayLaunch::Launched | GiveawayLaunch::Paid | GiveawayLaunch::Verifying
+            GiveawayLaunch::Launched | GiveawayLaunch::Paid | GiveawayLaunch::NeedsVerification
         )
     }
 
@@ -195,7 +194,7 @@ impl GiveawayLaunches {
     pub fn for_form(&mut self, chat_id: i64) {
         if !matches!(
             self.stage(chat_id),
-            GiveawayLaunch::Launching { .. } | GiveawayLaunch::Verifying
+            GiveawayLaunch::Launching { .. } | GiveawayLaunch::NeedsVerification
         ) {
             self.0.remove(&chat_id);
         }
@@ -203,7 +202,7 @@ impl GiveawayLaunches {
 
     /// Whether `chat_id`'s payment waits on its verification page.
     pub fn is_verifying_for(&self, chat_id: i64) -> bool {
-        matches!(self.stage(chat_id), GiveawayLaunch::Verifying)
+        matches!(self.stage(chat_id), GiveawayLaunch::NeedsVerification)
     }
 
     /// The user says `chat_id`'s verification is over (finished elsewhere or

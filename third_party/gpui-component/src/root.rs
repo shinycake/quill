@@ -413,12 +413,20 @@ impl WindowState {
     /// `closing`, until [`WindowState::dialog_layer`] unmounts it once the
     /// transition ends. Without one, it is removed as before.
     fn close_dialog_internal(&mut self, window: &mut Window, cx: &mut App) -> Option<FocusHandle> {
-        self.focused_input = None;
-
         let ix = self
             .active_dialogs
             .iter()
             .rposition(|dialog| !dialog.closing)?;
+        self.close_dialog_at(ix, window, cx)
+    }
+
+    fn close_dialog_at(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<FocusHandle> {
+        self.focused_input = None;
         let previous_focused_handle = self.active_dialogs[ix]
             .previous_focused_handle
             .clone()
@@ -442,6 +450,52 @@ impl WindowState {
         if dialog.focus_handle.contains_focused(window, cx) {
             window.blur(cx);
         }
+    }
+
+    /// The id of the newest dialog that is not closing.
+    pub fn last_dialog_id(&self) -> Option<usize> {
+        self.active_dialogs
+            .iter()
+            .rev()
+            .find(|dialog| !dialog.closing)
+            .map(|dialog| dialog.id)
+    }
+
+    /// Closes the dialog `id` named (`last_dialog_id` after it opened), and
+    /// no other. Returns whether it was still open.
+    pub fn close_dialog_by_id(
+        &mut self,
+        id: usize,
+        window: &mut Window,
+        cx: &mut Context<'_, WindowState>,
+    ) -> bool {
+        let Some(ix) = self
+            .active_dialogs
+            .iter()
+            .position(|dialog| dialog.id == id && !dialog.closing)
+        else {
+            return false;
+        };
+        // A dialog under another one has no focus to give back: the dialog
+        // above keeps it, and takes over the handle this one saved, so its
+        // own close restores what was focused before both.
+        let saved = self.active_dialogs[ix].previous_focused_handle.clone();
+        let above = self
+            .active_dialogs
+            .iter_mut()
+            .skip(ix + 1)
+            .find(|dialog| !dialog.closing);
+        let was_newest = above.is_none();
+        if let Some(above) = above {
+            above.previous_focused_handle = saved;
+        }
+        let restored = self.close_dialog_at(ix, window, cx);
+        if let Some(handle) = restored.filter(|_| was_newest) {
+            window.focus(&handle, cx);
+        }
+        gpui_base::TextSelection::clear(window, cx);
+        cx.notify();
+        true
     }
 
     pub fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, WindowState>) {

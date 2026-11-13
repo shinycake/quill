@@ -745,3 +745,49 @@ fn a_refused_ads_link_is_drawn_failed_and_asks_again_only_from_its_retry() {
     p.0.retry_earn_ad_account_url(EarnPeer::User(BOT)).unwrap();
     assert_eq!(count(&p.1, "getStarAdAccountUrl"), 2);
 }
+
+#[test]
+fn a_refused_recipient_list_send_returns_the_senders_error() {
+    let mut p = parts();
+    channel(&mut p, CHANNEL, ChannelMemberStatus::Creator);
+    p.0.open_starref_join(EarnPeer::User(ME)).unwrap();
+    answer(&mut p, "searchAffiliatePrograms", found(&[BOT]));
+    p.1.refuse(Some("getOwnedBots"));
+    let err = p.0.open_affiliate_program(BOT, false).unwrap_err();
+    assert_ne!(
+        err,
+        ConnectSendError::InvalidRequest,
+        "the stage line names the sender's error"
+    );
+    assert!(p.0.session.payments.earn.recipients.list().is_none());
+}
+
+#[test]
+fn the_pages_own_stats_failure_leaves_the_probes_button_and_a_failed_probe_asks_again() {
+    let mut p = parts();
+    p.0.probe_self_star_stats().unwrap();
+    answer(&mut p, "getStarRevenueStatistics", star_stats(10));
+    assert!(p.0.session.payments.earn.self_stats.data().is_some());
+    // The own revenue page asks again; its failure is not the probe's.
+    p.0.open_earn_page(EarnPeer::User(ME), EarnScreen::Stars, false)
+        .unwrap();
+    error(&mut p, "getStarRevenueStatistics", "BROKEN");
+    assert!(p.0.session.payments.earn.self_stats.data().is_some());
+    // And the probe's own stage is untouched: not failed, still answered.
+    assert!(p.0.session.payments.earn.self_stats.error().is_none());
+    assert!(matches!(
+        p.0.session.payments.earn.self_stats,
+        crate::state::fetch::Fetch::Ready(_)
+    ));
+
+    // A failed probe is asked again on the next open.
+    let mut q = parts();
+    q.0.probe_self_star_stats().unwrap();
+    error(&mut q, "getStarRevenueStatistics", "BROKEN");
+    assert!(q.0.session.payments.earn.self_stats.error().is_some());
+    let before = count(&q.1, "getStarRevenueStatistics");
+    q.0.probe_self_star_stats().unwrap();
+    assert_eq!(count(&q.1, "getStarRevenueStatistics"), before + 1);
+    answer(&mut q, "getStarRevenueStatistics", star_stats(10));
+    assert!(q.0.session.payments.earn.self_stats.data().is_some());
+}

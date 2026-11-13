@@ -30,6 +30,7 @@ use crate::locks::LockExt;
 #[cfg(any(test, target_os = "macos"))]
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 /// Who handles `tg:` links right now.
@@ -44,10 +45,6 @@ pub enum LinkHandlerState {
     /// This build cannot manage the handler (unbundled dev run, missing
     /// `xdg-mime`, unsupported OS). The text says why.
     Unavailable(String),
-    /// The first read of the handler is still running (see [`state`]). Not a
-    /// failure: the page shows it as checking and draws again when the
-    /// answer lands.
-    Checking,
 }
 
 /// How the setting is presented.
@@ -68,8 +65,13 @@ pub const fn control_kind() -> ControlKind {
     }
 }
 
-/// Status line under the control.
-pub fn status_text(state: &LinkHandlerState) -> String {
+/// Status line under the control. `None` is the first read still running
+/// (see [`state`]): not a failure, the page shows it as checking and draws
+/// again when the answer lands.
+pub fn status_text(state: Option<&LinkHandlerState>) -> String {
+    let Some(state) = state else {
+        return tr(keys::Q_PREFS_CHECKING_THE_DEFAULT_APP).into();
+    };
     match state {
         LinkHandlerState::Ours => tr(keys::Q_PREFS_DEFAULT_APP_OURS).into(),
         LinkHandlerState::Other(name) => {
@@ -77,7 +79,6 @@ pub fn status_text(state: &LinkHandlerState) -> String {
         }
         LinkHandlerState::Unset => tr(keys::Q_PREFS_DEFAULT_APP_UNSET).into(),
         LinkHandlerState::Unavailable(why) => why.clone(),
-        LinkHandlerState::Checking => tr(keys::Q_PREFS_CHECKING_THE_DEFAULT_APP).into(),
     }
 }
 
@@ -420,11 +421,10 @@ fn query_state() -> LinkHandlerState {
 
 const CACHE_TTL: Duration = Duration::from_secs(2);
 
-/// The last answer, when it was read and which generation it belongs to.
+/// The last answer: when it landed and what it said.
 struct Cached {
     at: Instant,
     state: LinkHandlerState,
-    generation: u64,
 }
 
 /// Called once when a background read lands (or dies).
@@ -433,104 +433,153 @@ type Waker = Box<dyn FnOnce() + Send>;
 /// Where the handler read stands: nothing yet, an answer, or a read on its
 /// own thread (the older answer stays to show meanwhile). The read leaves
 /// `Reading` by landing its answer or, when it dies, by putting back what
-/// was there as just read (or "could not read" when there was nothing).
+/// was there as just read (or "could not read" when there was nothing). The
+/// stage owns the thread it waits for.
 enum Stage {
     Empty,
-    Known(Cached),
+    /// `stale`: [`invalidate`] was called since this answer was read.
+    Known {
+        cached: Cached,
+        stale: bool,
+    },
     Reading {
         last: Option<Cached>,
         /// The one watcher to wake when the read ends.
         waker: Option<Waker>,
+        /// [`invalidate`] was called while the OS was asked: the answer
+        /// that lands is stale at once, whatever its age.
+        invalidated: bool,
+        _thread: JoinHandle<Option<()>>,
     },
 }
 
 struct Cell {
-    /// Bumped by [`invalidate`]: an answer from an earlier generation is
-    /// stale, whatever its age (right after boot an `Instant` cannot even be
-    /// moved back by the TTL).
-    generation: u64,
     stage: Stage,
 }
 
 impl Cell {
     const fn new() -> Self {
         Self {
-            generation: 0,
             stage: Stage::Empty,
         }
     }
 
-    fn last(&self) -> Option<&Cached> {
-        match &self.stage {
-            Stage::Empty => None,
-            Stage::Known(cached) => Some(cached),
-            Stage::Reading { last, .. } => last.as_ref(),
+    fn reading(&self) -> bool {
+        matches!(self.stage, Stage::Reading { .. })
+    }
+
+    /// Takes the answer a new read replaces; `None` when a read already runs
+    /// (the stage is left alone) or nothing was known.
+    fn take_for_read(&mut self) -> Option<Option<Cached>> {
+        match std::mem::replace(&mut self.stage, Stage::Empty) {
+            Stage::Reading {
+                last,
+                waker,
+                invalidated,
+                _thread,
+            } => {
+                self.stage = Stage::Reading {
+                    last,
+                    waker,
+                    invalidated,
+                    _thread,
+                };
+                None
+            }
+            Stage::Known { cached, .. } => Some(Some(cached)),
+            Stage::Empty => Some(None),
         }
     }
 
-    /// Starts a background read; `None` when one already runs.
-    fn begin_read(&mut self) -> Option<u64> {
-        let last = match std::mem::replace(&mut self.stage, Stage::Empty) {
-            Stage::Reading { last, waker } => {
-                self.stage = Stage::Reading { last, waker };
-                return None;
-            }
-            Stage::Known(cached) => Some(cached),
-            Stage::Empty => None,
+    /// The read of `thread` replaces `last`.
+    fn reading_on(&mut self, last: Option<Cached>, thread: JoinHandle<Option<()>>) {
+        self.stage = Stage::Reading {
+            last,
+            waker: None,
+            invalidated: false,
+            _thread: thread,
         };
-        self.stage = Stage::Reading { last, waker: None };
-        Some(self.generation)
     }
 
-    /// The read started at `generation` ended with `fresh` (`None`: it
-    /// died); returns the watcher to wake.
-    fn settle(&mut self, generation: u64, fresh: Option<LinkHandlerState>) -> Option<Waker> {
-        let (last, waker) = match std::mem::replace(&mut self.stage, Stage::Empty) {
-            Stage::Reading { last, waker } => (last, waker),
+    /// The read ended at `now` with `fresh` (`None`: it died, or never
+    /// started); returns the watcher to wake.
+    fn settle(
+        &mut self,
+        last_if_idle: Option<Cached>,
+        fresh: Option<LinkHandlerState>,
+        now: Instant,
+    ) -> Option<Waker> {
+        let (last, waker, stale) = match std::mem::replace(&mut self.stage, Stage::Empty) {
+            Stage::Reading {
+                last,
+                waker,
+                invalidated,
+                ..
+            } => (last, waker, invalidated),
+            // No read runs (it never started): the answer taken for it.
+            Stage::Empty => (last_if_idle, None, false),
             other => {
                 self.stage = other;
                 return None;
             }
         };
-        self.stage = match (fresh, last) {
-            (Some(state), _) => Stage::Known(Cached {
-                at: Instant::now(),
-                state,
-                generation,
-            }),
+        let state = match (fresh, last) {
+            (Some(state), _) => state,
             // A read that died is a read that ended: what was known stays,
             // stamped now so the page does not start another read at its
             // next draw, but after the TTL like any other answer (and an
             // `invalidate` since still makes it stale).
-            (None, Some(last)) => Stage::Known(Cached {
-                at: Instant::now(),
-                generation: self.generation,
-                state: last.state,
-            }),
-            (None, None) => Stage::Known(Cached {
-                at: Instant::now(),
-                generation: self.generation,
-                state: LinkHandlerState::Unavailable(
-                    tr(keys::Q_PREFS_DEFAULT_APP_TOOL_FAILED).into(),
-                ),
-            }),
+            (None, Some(last)) => last.state,
+            (None, None) => {
+                LinkHandlerState::Unavailable(tr(keys::Q_PREFS_DEFAULT_APP_TOOL_FAILED).into())
+            }
+        };
+        self.stage = Stage::Known {
+            cached: Cached { at: now, state },
+            stale,
         };
         waker
+    }
+
+    /// The answer `state` was read on the caller's thread at `now` (macOS):
+    /// it is as fresh as any, so it replaces what was known and settles a
+    /// read in flight (which is let go), and every earlier [`invalidate`]
+    /// is answered by it. Returns the watcher to wake.
+    fn answered(&mut self, state: LinkHandlerState, now: Instant) -> Option<Waker> {
+        let waker = match std::mem::replace(&mut self.stage, Stage::Empty) {
+            Stage::Reading { waker, .. } => waker,
+            Stage::Known { .. } | Stage::Empty => None,
+        };
+        self.stage = Stage::Known {
+            cached: Cached { at: now, state },
+            stale: false,
+        };
+        waker
+    }
+
+    /// Marks the answer, or the read in flight, stale.
+    fn invalidate(&mut self) {
+        match &mut self.stage {
+            Stage::Empty => {}
+            Stage::Known { stale, .. } => *stale = true,
+            Stage::Reading { invalidated, .. } => *invalidated = true,
+        }
+    }
+
+    /// The cached answer (if any) and whether it must be read again.
+    fn lookup(&self) -> (Option<LinkHandlerState>, bool) {
+        match &self.stage {
+            Stage::Empty => (None, true),
+            Stage::Known { cached, stale } => (
+                Some(cached.state.clone()),
+                *stale || cached.at.elapsed() >= CACHE_TTL,
+            ),
+            Stage::Reading { last, .. } => (last.as_ref().map(|last| last.state.clone()), false),
+        }
     }
 }
 
 static CELL: Mutex<Cell> = Mutex::new(Cell::new());
-
-/// The cached answer (if any) and whether it must be read again.
-fn lookup(cache: Option<&Cached>, generation: u64) -> (Option<LinkHandlerState>, bool) {
-    match cache {
-        Some(cached) => (
-            Some(cached.state.clone()),
-            cached.generation != generation || cached.at.elapsed() >= CACHE_TTL,
-        ),
-        None => (None, true),
-    }
-}
 
 /// Whether the OS read must run on the thread that asks (the UI thread).
 /// macOS: `NSWorkspace` is AppKit, and Apple documents no thread-safety for
@@ -545,38 +594,37 @@ const READ_ON_CALLER: bool = cfg!(target_os = "macos");
 /// Windows. So there the last answer comes back at once and a stale one is
 /// read again on a thread of its own ([`refreshing`] says when the new answer
 /// is in); the first call has no answer yet and returns
-/// [`LinkHandlerState::Checking`]. On macOS a stale answer is kept until
+/// `None`. On macOS a stale answer is kept until
 /// [`read_now`] (the System page opening, the re-reads after "Make default");
 /// only a missing one is read here, once, so the row is never left checking.
-pub fn state() -> LinkHandlerState {
-    if let Some(pinned) = lock_demo_pin().clone() {
-        return pinned;
+pub fn state() -> Option<LinkHandlerState> {
+    match lock_demo_pin().clone() {
+        DemoPin::Off => {}
+        DemoPin::Unread => return None,
+        DemoPin::Is(pinned) => return Some(pinned),
     }
-    let (generation, cached, stale) = {
-        let cell = CELL.lock_or_recover();
-        let (cached, stale) = lookup(cell.last(), cell.generation);
-        (cell.generation, cached, stale)
-    };
+    let (cached, stale) = CELL.lock_or_recover().lookup();
     match cached {
-        None if READ_ON_CALLER => read_on_caller(generation),
+        None if READ_ON_CALLER => Some(read_on_caller()),
         cached => {
             if stale && !READ_ON_CALLER {
                 start_refresh();
             }
-            cached.unwrap_or(LinkHandlerState::Checking)
+            cached
         }
     }
 }
 
 /// Asks the OS on this thread and caches the answer (macOS only, see
 /// [`READ_ON_CALLER`]).
-fn read_on_caller(generation: u64) -> LinkHandlerState {
+fn read_on_caller() -> LinkHandlerState {
     let fresh = query_state();
-    CELL.lock_or_recover().stage = Stage::Known(Cached {
-        at: Instant::now(),
-        state: fresh.clone(),
-        generation,
-    });
+    let waker = CELL
+        .lock_or_recover()
+        .answered(fresh.clone(), Instant::now());
+    if let Some(wake) = waker {
+        wake();
+    }
     fresh
 }
 
@@ -585,33 +633,51 @@ fn read_on_caller(generation: u64) -> LinkHandlerState {
 /// System page opening, or a re-read after "Make default". Elsewhere it
 /// starts a background read.
 pub fn read_now() {
-    if lock_demo_pin().is_some() {
+    if !matches!(*lock_demo_pin(), DemoPin::Off) {
         return;
     }
     if READ_ON_CALLER {
-        let generation = CELL.lock_or_recover().generation;
-        read_on_caller(generation);
+        read_on_caller();
     } else {
         invalidate();
         start_refresh();
     }
 }
 
-/// Screenshot demos: show this state instead of reading the OS (`None` goes
-/// back to the real read).
-pub fn demo_pin(state: Option<LinkHandlerState>) {
-    *lock_demo_pin() = state;
+/// What a screenshot demo shows in place of the OS read.
+#[derive(Clone)]
+pub enum DemoPin {
+    /// The real read.
+    Off,
+    /// The first read still running.
+    Unread,
+    /// This answer.
+    Is(LinkHandlerState),
 }
 
-static DEMO_PIN: Mutex<Option<LinkHandlerState>> = Mutex::new(None);
+/// Screenshot demos: show `pin` instead of reading the OS.
+pub fn demo_pin(pin: impl Into<DemoPin>) {
+    *lock_demo_pin() = pin.into();
+}
 
-fn lock_demo_pin() -> std::sync::MutexGuard<'static, Option<LinkHandlerState>> {
+impl From<Option<LinkHandlerState>> for DemoPin {
+    fn from(pin: Option<LinkHandlerState>) -> Self {
+        match pin {
+            Some(state) => DemoPin::Is(state),
+            None => DemoPin::Off,
+        }
+    }
+}
+
+static DEMO_PIN: Mutex<DemoPin> = Mutex::new(DemoPin::Off);
+
+fn lock_demo_pin() -> std::sync::MutexGuard<'static, DemoPin> {
     DEMO_PIN.lock_or_recover()
 }
 
 /// A background read of the handler is running.
 pub fn refreshing() -> bool {
-    matches!(CELL.lock_or_recover().stage, Stage::Reading { .. })
+    CELL.lock_or_recover().reading()
 }
 
 /// Asks to be woken once when the background read ends (the answer landed,
@@ -629,22 +695,24 @@ pub fn wake_when_read(wake: impl FnOnce() + Send + 'static) -> bool {
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn start_refresh() {
-    // An `invalidate` while the OS is asked leaves this answer stale: the
-    // generation is the one the read started at.
-    let Some(generation) = CELL.lock_or_recover().begin_read() else {
+    // The thread is spawned while the lock is held, so its answer cannot
+    // land before the stage owns it. An `invalidate` while the OS is asked
+    // marks the stage, so the answer lands stale.
+    let mut cell = CELL.lock_or_recover();
+    let Some(last) = cell.take_for_read() else {
         return;
     };
     let spawned = crate::thread_guard::spawn_guarded("link-handler", move || {
         let fresh = std::panic::catch_unwind(query_state).ok();
-        let waker = CELL.lock_or_recover().settle(generation, fresh);
+        let waker = CELL.lock_or_recover().settle(None, fresh, Instant::now());
         if let Some(wake) = waker {
             wake();
         }
     });
-    if spawned.is_err() {
-        let waker = CELL.lock_or_recover().settle(generation, None);
-        if let Some(wake) = waker {
-            wake();
+    match spawned {
+        Ok(thread) => cell.reading_on(last, thread),
+        Err(_) => {
+            cell.settle(last, None, Instant::now());
         }
     }
 }
@@ -653,8 +721,7 @@ fn start_refresh() {
 /// (macOS: [`state`] never asks; [`read_now`] replaces the answer).
 /// The old answer stays to show meanwhile.
 pub fn invalidate() {
-    let mut cell = CELL.lock_or_recover();
-    cell.generation = cell.generation.wrapping_add(1);
+    CELL.lock_or_recover().invalidate();
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]
@@ -730,71 +797,108 @@ pub fn release() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cached, LinkHandlerState, WINDOWS_COMMAND_KEY, app_bundle_of_exe,
-        ensure_linux_desktop_entry, is_quill_command, linux_application_dirs, linux_desktop_entry,
-        linux_launch_target, linux_query_args, linux_set_args, lookup, macos_state,
-        parse_xdg_default, status_text, windows_scheme_entries, windows_state,
+        LinkHandlerState, WINDOWS_COMMAND_KEY, app_bundle_of_exe, ensure_linux_desktop_entry,
+        is_quill_command, linux_application_dirs, linux_desktop_entry, linux_launch_target,
+        linux_query_args, linux_set_args, macos_state, parse_xdg_default, status_text,
+        windows_scheme_entries, windows_state,
     };
     use std::path::Path;
     use std::time::Instant;
+
+    fn finished_thread() -> std::thread::JoinHandle<Option<()>> {
+        std::thread::spawn(|| Some(()))
+    }
 
     /// r2-05 (03-C001): a read that died is not read again at the next draw.
     #[test]
     fn a_dead_read_is_not_stale_until_its_ttl() {
         let mut cell = super::Cell::new();
-        let generation = cell.begin_read().expect("the first read starts");
-        assert_eq!(cell.begin_read(), None, "one at a time");
-        cell.settle(generation, None);
-        let (answer, stale) = lookup(cell.last(), cell.generation);
+        let now = Instant::now();
+        let last = cell.take_for_read().expect("the first read starts");
+        cell.reading_on(last, finished_thread());
+        assert!(cell.take_for_read().is_none(), "one at a time");
+        cell.settle(None, None, now);
+        let (answer, stale) = cell.lookup();
         assert!(matches!(answer, Some(LinkHandlerState::Unavailable(_))));
         assert!(!stale, "not re-read from the next render");
         // With an older answer, a dead read keeps it.
-        let generation = {
-            cell.generation += 1;
-            cell.begin_read().expect("read again after invalidate")
-        };
-        cell.settle(generation, Some(LinkHandlerState::Ours));
-        let generation = {
-            cell.generation += 1;
-            cell.begin_read().expect("another read")
-        };
-        cell.settle(generation, None);
-        let (answer, stale) = lookup(cell.last(), cell.generation);
+        cell.invalidate();
+        let last = cell.take_for_read().expect("read again after invalidate");
+        cell.reading_on(last, finished_thread());
+        cell.settle(None, Some(LinkHandlerState::Ours), now);
+        let last = cell.take_for_read().expect("another read");
+        cell.reading_on(last, finished_thread());
+        cell.settle(None, None, now);
+        let (answer, stale) = cell.lookup();
         assert_eq!(answer, Some(LinkHandlerState::Ours));
         assert!(!stale);
     }
 
+    /// Sweep r4-04 fix 3: an answer read on the caller's thread goes through
+    /// the cell's transitions: it settles a read in flight and wakes its
+    /// watcher, and answers an earlier invalidate.
     #[test]
-    fn nothing_cached_is_stale_and_has_no_answer() {
-        assert_eq!(lookup(None, 0), (None, true));
+    fn an_answer_read_on_the_caller_settles_a_read_in_flight() {
+        let mut cell = super::Cell::new();
+        let last = cell.take_for_read().expect("a read starts");
+        cell.reading_on(last, finished_thread());
+        let woken = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = woken.clone();
+        if let super::Stage::Reading { waker, .. } = &mut cell.stage {
+            *waker = Some(Box::new(move || {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst)
+            }));
+        }
+        cell.invalidate();
+        let wake = cell.answered(LinkHandlerState::Ours, Instant::now());
+        assert!(!cell.reading(), "the read in flight is settled");
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Ours), false));
+        wake.expect("its watcher is handed back")();
+        assert!(woken.load(std::sync::atomic::Ordering::SeqCst));
+        // Over a known answer marked stale: fresh again.
+        cell.invalidate();
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Ours), true));
+        assert!(
+            cell.answered(LinkHandlerState::Unset, Instant::now())
+                .is_none()
+        );
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Unset), false));
     }
 
     #[test]
-    fn a_fresh_answer_is_kept_until_invalidated() {
-        let cached = Cached {
-            at: Instant::now(),
-            state: LinkHandlerState::Unset,
-            generation: 3,
-        };
-        assert_eq!(
-            lookup(Some(&cached), 3),
-            (Some(LinkHandlerState::Unset), false)
-        );
-        // `invalidate` bumps the generation: stale at once, even right after
-        // boot, and the old answer is still there to show.
-        assert_eq!(
-            lookup(Some(&cached), 4),
-            (Some(LinkHandlerState::Unset), true)
-        );
+    fn nothing_cached_is_stale_and_has_no_answer() {
+        assert_eq!(super::Cell::new().lookup(), (None, true));
+    }
+
+    #[test]
+    fn an_invalidate_makes_the_answer_and_the_read_in_flight_stale() {
+        let mut cell = super::Cell::new();
+        let last = cell.take_for_read().expect("a read starts");
+        cell.reading_on(last, finished_thread());
+        cell.settle(None, Some(LinkHandlerState::Unset), Instant::now());
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Unset), false));
+        cell.invalidate();
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Unset), true));
+        // An invalidate while the OS is asked: the answer lands stale, and
+        // the next one, read after it, is not.
+        let last = cell.take_for_read().expect("a read starts");
+        cell.reading_on(last, finished_thread());
+        cell.invalidate();
+        cell.settle(None, Some(LinkHandlerState::Ours), Instant::now());
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Ours), true));
+        let last = cell.take_for_read().expect("read again");
+        cell.reading_on(last, finished_thread());
+        cell.settle(None, Some(LinkHandlerState::Ours), Instant::now());
+        assert_eq!(cell.lookup(), (Some(LinkHandlerState::Ours), false));
     }
 
     #[test]
     fn the_first_read_is_checking_not_a_failure() {
-        let text = status_text(&LinkHandlerState::Checking);
+        let text = status_text(None);
         assert!(!text.is_empty());
         assert_ne!(
-            LinkHandlerState::Checking,
-            LinkHandlerState::Unavailable(text)
+            status_text(None),
+            status_text(Some(&LinkHandlerState::Unavailable(String::new())))
         );
     }
 
@@ -895,8 +999,10 @@ mod tests {
 
     #[test]
     fn status_text_names_the_current_handler() {
-        assert!(status_text(&LinkHandlerState::Ours).contains("Quill is the default"));
-        assert!(status_text(&LinkHandlerState::Other("Telegram".into())).contains("Telegram"));
+        assert!(status_text(Some(&LinkHandlerState::Ours)).contains("Quill is the default"));
+        assert!(
+            status_text(Some(&LinkHandlerState::Other("Telegram".into()))).contains("Telegram")
+        );
     }
 
     #[test]

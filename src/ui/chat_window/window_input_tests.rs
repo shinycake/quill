@@ -202,3 +202,87 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
         "never a reply thread's id"
     );
 }
+
+/// Sweep r4-03 round 2 (item 12): the quiet-window timer of a typed in-chat
+/// query belongs to its window. Typing in the main window's bar replaces the
+/// main window's timer and leaves a chat window's alone, so the chat
+/// window's query still commits.
+#[gpui_kit::test]
+fn each_window_owns_the_timer_of_its_typed_chat_search(cx: &mut TestAppContext) {
+    struct Dropped(std::rc::Rc<std::cell::Cell<bool>>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.settle(cx);
+    let cancelled = std::rc::Rc::new(std::cell::Cell::new(false));
+    let flag = cancelled.clone();
+    scoped(&h, Some(OTHER), cx, |app, cx| {
+        app.search_ui.debounce.chat = cx.spawn(async move |_, _| {
+            let _held = Dropped(flag);
+            std::future::pending::<()>().await;
+        });
+    });
+    cx.run_until_parked();
+    scoped(&h, None, cx, |app, _| {
+        app.search_ui.debounce.chat = gpui_kit::Task::ready(());
+    });
+    assert!(
+        !cancelled.get(),
+        "typing in the main window leaves the chat window's timer running"
+    );
+    scoped(&h, Some(OTHER), cx, |app, _| {
+        app.search_ui.debounce.chat = gpui_kit::Task::ready(());
+    });
+    cx.run_until_parked();
+    assert!(cancelled.get(), "the window's own next query replaces it");
+}
+
+/// Sweep r4-10 round 4: a selection in a Saved Messages sublist picks from
+/// the sublist's own rows, not the main Saved history.
+#[gpui_kit::test]
+fn a_saved_sublist_selection_reads_the_sublists_rows(cx: &mut TestAppContext) {
+    use quill::ids::MessageId;
+    use quill::state::{SavedSublistView, TopicHistory};
+    let h = new_app(cx);
+    let (shown, selectable, sending, main_shown) = h.app.update(cx, |app, _| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return (false, Vec::new(), true, false);
+        };
+        let Some(chat) = session.open_chat_id() else {
+            return (false, Vec::new(), true, false);
+        };
+        session.my_user_id = Some(chat.0);
+        let Some(main) = session
+            .histories
+            .get(&chat.0)
+            .and_then(|history| history.messages.values().next().cloned())
+        else {
+            return (false, Vec::new(), true, false);
+        };
+        let main_id = main.id;
+        let mut row = main;
+        row.id = MessageId(900_001);
+        let mut history = TopicHistory::default();
+        history.messages.insert(row.id.0, row);
+        session.threads.saved.sublist = Some(SavedSublistView {
+            topic_id: 5,
+            history,
+        });
+        (
+            app.shown_history(chat)
+                .is_some_and(|rows| rows.contains_key(&900_001)),
+            app.loaded_selectable_ids(chat),
+            app.message_still_sending(chat, MessageId(900_001)),
+            app.shown_history(chat)
+                .is_some_and(|rows| rows.contains_key(&main_id.0)),
+        )
+    });
+    assert!(shown, "the sublist's row is the shown one");
+    assert!(!main_shown, "a main Saved row is not drawn in the sublist");
+    assert!(selectable.iter().all(|id| id.0 == 900_001));
+    assert!(!sending, "a sent row of the sublist is not 'still sending'");
+}

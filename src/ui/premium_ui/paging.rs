@@ -74,8 +74,8 @@ impl QuillApp {
         let Some(grams) = self.session().map(|s| &s.payments.hub.grams) else {
             return;
         };
-        if !grams.open
-            || grams.selected.is_some()
+        if !grams.is_open()
+            || grams.selected().is_some()
             || (grams.load.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.grams_scroll),

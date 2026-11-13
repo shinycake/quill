@@ -75,7 +75,10 @@ impl TonWalletTransfer {
 /// `TonConnectRequestState` (td_api.tl:2379-2385).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TonConnectRequestState {
-    Pending { expiration_date: i32 },
+    /// Nobody answered it yet, and it expires at `expiration_date`.
+    Unanswered {
+        expiration_date: i32,
+    },
     Accepted,
     Rejected,
 }
@@ -97,7 +100,7 @@ impl TonConnectRequest {
         let state = match state.and_then(|s| s.get("@type")).and_then(Value::as_str) {
             Some("tonConnectRequestStateAccepted") => TonConnectRequestState::Accepted,
             Some("tonConnectRequestStateRejected") => TonConnectRequestState::Rejected,
-            _ => TonConnectRequestState::Pending {
+            _ => TonConnectRequestState::Unanswered {
                 expiration_date: state
                     .map_or(0, |s| int(s, "expiration_date"))
                     .clamp(0, i64::from(i32::MAX)) as i32,
@@ -122,7 +125,7 @@ impl TonConnectRequest {
             format!("Wallet request from {name}")
         };
         match self.state {
-            TonConnectRequestState::Pending { .. } => base,
+            TonConnectRequestState::Unanswered { .. } => base,
             TonConnectRequestState::Accepted => format!("{base} accepted"),
             TonConnectRequestState::Rejected => format!("{base} declined"),
         }

@@ -27,34 +27,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         // asked for again when the panel opens next, not left blank until
         // restart.
         self.session.media.media_library.forget_failures();
-        if !self.session.stickers.stickers.installed_loaded()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetInstalledStickerSets)
-        {
+        if !self.session.stickers.stickers.installed_loaded() {
             self.sticker_request(
                 RequestPurpose::GetInstalledStickerSets,
                 get_installed_sticker_sets,
             )?;
         }
-        if self.session.stickers.emoji.installed_sets.is_empty()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetInstalledEmojiSets)
-        {
+        let installed = &self.session.stickers.emoji.lists.installed;
+        if installed.can_ask() || installed.is_outdated() {
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,
             )?;
         }
-        if self.session.stickers.stickers.recent.is_empty()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetRecentStickers)
-        {
+        if self.session.stickers.stickers.recent.is_empty() {
             self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
                 get_recent_stickers(id, false)
             })?;
@@ -120,14 +106,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        // Already asked: the entry waits for a request still in flight (one
-        // that was lost asks again).
+        // Already asked: the entry holds the request it waits for, and its
+        // error path (a lost request included) takes the entry out.
         if self
             .session
             .stickers
             .message_reaction_options
             .loading_request(chat_id, message_id)
-            .is_some_and(|request| self.session.requests.get(request).is_some())
+            .is_some()
         {
             return Ok(None);
         }
@@ -208,7 +194,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&crate::telegram::requests::get_message_properties(
                 extra, chat_id, message_id,
             )) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                // Only this ask's answer or error lands on the message.
+                self.session
+                    .messages
+                    .menu_actions
+                    .asked(chat_id, message_id, extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

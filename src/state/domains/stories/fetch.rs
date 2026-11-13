@@ -1,6 +1,7 @@
 //! Where each story's `getStory` stands: one value per story instead of a
 //! set of asked stories, a set of gone stories and a map of retry clocks
 //! kept in step by hand.
+use crate::ids::RequestId;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -10,7 +11,7 @@ pub const STORIES_RETRY_FIRST: Duration = Duration::from_secs(5);
 pub const STORIES_RETRY_MAX: Duration = Duration::from_secs(5 * 60);
 
 /// The retry clock after one more failure at `now`.
-pub(super) fn next_retry(
+pub(crate) fn next_retry(
     previous: Option<(Instant, Duration)>,
     now: Instant,
 ) -> (Instant, Duration) {
@@ -24,10 +25,13 @@ pub(super) fn next_retry(
 /// is no entry: the story cache holds it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoryFetch {
-    /// `getStory` was sent for a reply strip or a story card, so a refresh
-    /// does not send it again. `wait` is the wait of the failure this ask
-    /// follows, so the next failure doubles it.
-    Asked { wait: Option<Duration> },
+    /// `getStory` is out as `request`, so a refresh does not send it again;
+    /// only its failure acts on the entry. `wait` is the wait of the failure
+    /// this ask follows, so the next failure doubles it.
+    Asked {
+        request: RequestId,
+        wait: Option<Duration>,
+    },
     /// TDLib answered 400 or 404: the story is gone or not reachable.
     Gone,
     /// `getStory` failed with an error that may pass (a timeout,
@@ -45,17 +49,17 @@ impl StoryFetches {
         self.0.get(&story)
     }
 
-    /// `getStory` was sent for `story`: it is asked now, and the wait of an
-    /// earlier failure rides along so the next failure doubles it. A story
-    /// known gone stays gone.
-    pub fn asked(&mut self, story: (i64, i32)) {
+    /// `getStory` was sent for `story` as `request`: it is asked now, and
+    /// the wait of an earlier failure rides along so the next failure
+    /// doubles it. A story known gone stays gone.
+    pub fn asked(&mut self, story: (i64, i32), request: RequestId) {
         let wait = match self.0.get(&story) {
             Some(StoryFetch::Gone) => return,
             Some(StoryFetch::Retry { wait, .. }) => Some(*wait),
-            Some(StoryFetch::Asked { wait }) => *wait,
+            Some(StoryFetch::Asked { wait, .. }) => *wait,
             None => None,
         };
-        self.0.insert(story, StoryFetch::Asked { wait });
+        self.0.insert(story, StoryFetch::Asked { request, wait });
     }
 
     pub fn is_asked(&self, story: (i64, i32)) -> bool {
@@ -71,11 +75,21 @@ impl StoryFetches {
         matches!(self.0.get(&story), Some(StoryFetch::Gone))
     }
 
-    /// `getStory` failed with an error that may pass.
-    pub fn failed(&mut self, story: (i64, i32), now: Instant) {
+    /// `getStory` failed with an error that may pass: `request` is the one
+    /// that failed, or `None` when it never left. An older ask's failure,
+    /// or a send that never left, while an ask is out, changes nothing: the
+    /// ask that is out ends with its own answer or error.
+    pub fn failed(&mut self, story: (i64, i32), request: Option<RequestId>, now: Instant) {
         let previous = match self.0.get(&story) {
+            Some(StoryFetch::Asked { request: out, .. })
+                if request.is_none_or(|failed| failed != *out) =>
+            {
+                return;
+            }
             Some(StoryFetch::Retry { until, wait }) => Some((*until, *wait)),
-            Some(StoryFetch::Asked { wait: Some(wait) }) => Some((now, *wait)),
+            Some(StoryFetch::Asked {
+                wait: Some(wait), ..
+            }) => Some((now, *wait)),
             _ => None,
         };
         let (until, wait) = next_retry(previous, now);
@@ -105,7 +119,7 @@ impl StoryFetches {
     /// Every wait ends (back online).
     pub fn forget_retries(&mut self) {
         self.0.retain(|_, fetch| {
-            if let StoryFetch::Asked { wait } = fetch {
+            if let StoryFetch::Asked { wait, .. } = fetch {
                 *wait = None;
             }
             !matches!(fetch, StoryFetch::Retry { .. })
@@ -127,7 +141,7 @@ impl StoryFetches {
     /// for stay asked.
     pub fn forget_outcomes(&mut self) {
         self.0.retain(|_, fetch| match fetch {
-            StoryFetch::Asked { wait } => {
+            StoryFetch::Asked { wait, .. } => {
                 *wait = None;
                 true
             }
@@ -157,23 +171,31 @@ mod tests {
         let mut fetches = StoryFetches::default();
         let story = (7, 3);
         let now = Instant::now();
-        fetches.failed(story, now);
+        fetches.failed(story, None, now);
         assert_eq!(
             fetches.retry(story).map(|(_, wait)| wait),
             Some(STORIES_RETRY_FIRST)
         );
         // The wait is over and the story is asked again: it is asked now.
-        fetches.asked(story);
+        fetches.asked(story, RequestId(1));
         assert!(fetches.is_asked(story));
         assert!(fetches.retry(story).is_none());
-        fetches.failed(story, now);
+        // An older request's failure leaves the ask that is out alone.
+        fetches.failed(story, Some(RequestId(0)), now);
+        assert!(fetches.is_asked(story));
+        fetches.failed(story, Some(RequestId(1)), now);
         assert_eq!(
             fetches.retry(story).map(|(_, wait)| wait),
             Some(STORIES_RETRY_FIRST * 2)
         );
+        // A send that never left does not end the ask that is out.
+        fetches.asked(story, RequestId(5));
+        fetches.failed(story, None, now);
+        assert!(fetches.is_asked(story));
+        fetches.failed(story, Some(RequestId(5)), now);
         // A story known gone is not asked again by a late ask.
         fetches.gone(story);
-        fetches.asked(story);
+        fetches.asked(story, RequestId(2));
         assert!(fetches.is_gone(story));
     }
 }

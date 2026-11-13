@@ -11,19 +11,19 @@ mod dialog;
 mod geolocation;
 mod map;
 pub(super) mod state;
-mod wait_budget;
 
 use super::app::QuillApp;
 use crate::ui::shell::DialogKind;
 use crate::ui::status_note::StatusNote;
+use geolocation::{PromptGate, Receiver};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::location_picker::{GeoOutcome, GeoPoint, LocationSharing, MapView, Venue, country};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Poll;
 use std::time::Duration;
-use wait_budget::WaitBudget;
 
 /// tdesktop's map `move_end` fires this long after the map stops.
 const SETTLE_DELAY: Duration = Duration::from_millis(500);
@@ -31,48 +31,80 @@ const SETTLE_DELAY: Duration = Duration::from_millis(500);
 const RESOLVE_ADDRESS_DELAY: Duration = Duration::from_secs(3);
 /// tdesktop `kSearchDebounceDelay`.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(900);
-const POLL: Duration = Duration::from_millis(100);
 const LOCATE_TIMEOUT: Duration = Duration::from_secs(30);
 const GEOCODE_TIMEOUT: Duration = Duration::from_secs(15);
 
-async fn poll_answer<T>(receiver: Receiver<T>, timeout: Duration, cx: &mut AsyncApp) -> Option<T> {
-    poll_answer_unless(&receiver, timeout, None, cx).await
-}
-
-/// [`poll_answer`] whose time limit does not run while `paused` is set
-/// (the system's permission prompt is open).
-async fn poll_answer_unless<T>(
-    receiver: &Receiver<T>,
+async fn poll_answer<T>(
+    mut receiver: Receiver<T>,
     timeout: Duration,
-    paused: Option<&AtomicBool>,
     cx: &mut AsyncApp,
 ) -> Option<T> {
-    let mut budget = WaitBudget::default();
+    match race_answer(&mut receiver, timeout, None, cx).await {
+        Raced::Answered(answer) => answer,
+        Raced::TimedOut | Raced::PromptClosed => None,
+    }
+}
+
+/// The wait for a lookup's answer: the answer, the end of `timeout`, or the
+/// permission prompt closing.
+enum Raced<T> {
+    Answered(Option<T>),
+    TimedOut,
+    PromptClosed,
+}
+
+/// Wait for the answer, which wakes this task when it comes, against one
+/// timer of `timeout` and, when there is a `prompt`, its closing (which
+/// wakes this task too).
+async fn race_answer<T>(
+    receiver: &mut Receiver<T>,
+    timeout: Duration,
+    prompt: Option<&PromptGate>,
+    cx: &mut AsyncApp,
+) -> Raced<T> {
+    let mut timer = cx.background_executor().timer(timeout);
+    let seen = prompt.map_or(0, PromptGate::closed);
+    std::future::poll_fn(|task| {
+        if let Poll::Ready(answer) = Pin::new(&mut *receiver).poll(task) {
+            return Poll::Ready(Raced::Answered(answer.ok()));
+        }
+        if prompt.is_some_and(|gate| gate.poll_closed(seen, task).is_ready()) {
+            return Poll::Ready(Raced::PromptClosed);
+        }
+        if Pin::new(&mut timer).poll(task).is_ready() {
+            return Poll::Ready(Raced::TimedOut);
+        }
+        Poll::Pending
+    })
+    .await
+}
+
+/// [`poll_answer`] whose time limit does not run while the system's
+/// permission prompt is open: the limit starts in full again when the prompt
+/// closes, and one that ends while the prompt is still open starts again,
+/// so the user's turn is not counted.
+async fn poll_answer_unless<T>(
+    receiver: &mut Receiver<T>,
+    timeout: Duration,
+    prompt: &PromptGate,
+    cx: &mut AsyncApp,
+) -> Option<T> {
     loop {
-        match receiver.try_recv() {
-            Ok(answer) => return Some(answer),
-            Err(TryRecvError::Disconnected) => return None,
-            Err(TryRecvError::Empty) => {
-                let paused = paused.is_some_and(|flag| flag.load(Ordering::SeqCst));
-                cx.background_executor().timer(POLL).await;
-                if budget.spent(POLL, paused, timeout) {
-                    return None;
-                }
-            }
+        match race_answer(receiver, timeout, Some(prompt), cx).await {
+            Raced::Answered(answer) => return answer,
+            Raced::PromptClosed => {}
+            Raced::TimedOut if prompt.is_open() => {}
+            Raced::TimedOut => return None,
         }
     }
 }
 
 /// Wait for a "where am I" answer; `Unavailable` when it never comes.
-async fn locate_outcome(locating: geolocation::Locating, cx: &mut AsyncApp) -> GeoOutcome {
-    poll_answer_unless(
-        &locating.answer,
-        LOCATE_TIMEOUT,
-        Some(&locating.permission_prompt),
-        cx,
-    )
-    .await
-    .unwrap_or(GeoOutcome::Unavailable)
+async fn locate_outcome(mut locating: geolocation::Locating, cx: &mut AsyncApp) -> GeoOutcome {
+    let prompt = locating.permission_prompt.clone();
+    poll_answer_unless(&mut locating.answer, LOCATE_TIMEOUT, &prompt, cx)
+        .await
+        .unwrap_or(GeoOutcome::Unavailable)
 }
 
 impl QuillApp {
@@ -230,7 +262,7 @@ impl QuillApp {
         let job = self
             .location_sharing_mut()
             .and_then(|sharing| sharing.picker_mut())
-            .and_then(|picker| picker.take_address_job());
+            .and_then(|picker| picker.address_job());
         if let Some(point) = job {
             self.resolve_address(point, cx);
         }
@@ -252,20 +284,24 @@ impl QuillApp {
             }
             return;
         };
-        self.location_ui.geocode =
-            state::Geocode::resolving(self.spawn_scoped(cx, async move |this, cx| {
-                let address = poll_answer(receiver, GEOCODE_TIMEOUT, cx).await.flatten();
-                let _ = this.update(cx, |this, cx| {
-                    this.location_ui.geocode = state::Geocode::Idle;
-                    if let Some(picker) = this
-                        .location_sharing_mut()
-                        .and_then(|sharing| sharing.picker_mut())
-                    {
-                        picker.address_resolved(point, address);
-                    }
-                    cx.notify();
-                });
-            }));
+        let task = self.spawn_scoped(cx, async move |this, cx| {
+            let address = poll_answer(receiver, GEOCODE_TIMEOUT, cx).await.flatten();
+            let _ = this.update(cx, |this, cx| {
+                if let Some(picker) = this
+                    .location_sharing_mut()
+                    .and_then(|sharing| sharing.picker_mut())
+                {
+                    picker.address_resolved(point, address);
+                }
+                cx.notify();
+            });
+        });
+        if let Some(picker) = self
+            .location_sharing_mut()
+            .and_then(|sharing| sharing.picker_mut())
+        {
+            picker.address_started(point, quill::task_hold::TaskHold::new(task));
+        }
     }
 
     /// The map moved to `view` (a drag step or a zoom step); it settles
@@ -490,3 +526,7 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.close_location_picker(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod wait_tests;

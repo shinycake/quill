@@ -78,7 +78,7 @@ pub(super) fn drive(
             return Ok(reply);
         }
     }
-    ticket.wait(Duration::from_millis(10))
+    ticket.give_up()
 }
 
 /// Access and the driver on, no grants.
@@ -102,10 +102,18 @@ pub(super) fn grant(chat_id: i64, scope: Scope) {
 }
 
 pub(super) fn read_tree(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> UiTree {
-    match drive(app, vcx, UiCommand::ReadTree) {
+    let tree = match drive(app, vcx, UiCommand::ReadTree) {
         Ok(UiReply::Tree(tree)) => tree,
         other => panic!("expected a tree, got {other:?}"),
-    }
+    };
+    // The read's task leaves the bridge once it has answered.
+    vcx.run_until_parked();
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.agent_bridge.reads.len()),
+        0,
+        "an answered read holds no task"
+    );
+    tree
 }
 
 pub(super) fn click(target: Target) -> UiCommand {
@@ -611,10 +619,7 @@ fn a_tool_that_gave_up_gets_nothing_injected(cx: &mut TestAppContext) {
         },
     )
     .unwrap_or_else(|_| panic!("posted"));
-    assert_eq!(
-        ticket.wait(Duration::from_millis(1)),
-        Err(BridgeError::Timeout)
-    );
+    assert_eq!(ticket.give_up(), Err(BridgeError::Timeout));
     // Withdrawn from the queue: nothing to start.
     pump(&app, vcx);
     // Taken, then cancelled: posted, taken by the tick, then given up on
@@ -631,10 +636,7 @@ fn a_tool_that_gave_up_gets_nothing_injected(cx: &mut TestAppContext) {
             app.agent_driver_tick(window, cx);
         })
     });
-    assert_eq!(
-        ticket.wait(Duration::from_millis(1)),
-        Err(BridgeError::Timeout)
-    );
+    assert_eq!(ticket.give_up(), Err(BridgeError::Timeout));
     settle(vcx);
     settle(vcx);
     let value = read_tree(&app, vcx)
@@ -890,6 +892,7 @@ fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppCont
                     chat_id: ChatId(chat),
                     action: start(param),
                     from_agent,
+                    flow: None,
                 },
                 None,
             ));
@@ -954,6 +957,7 @@ fn a_share_the_user_picks_replaces_an_agents_waiting_open(cx: &mut TestAppContex
                     story_id: None,
                 },
                 from_agent: true,
+                flow: None,
             },
             None,
         ));

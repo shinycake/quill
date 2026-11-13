@@ -34,10 +34,9 @@ fn the_lock_closes_the_invite_and_share_boxes(cx: &mut TestAppContext) {
     });
     for open in [
         CallBox::Invite,
-        CallBox::Share {
-            speaker: false,
-            copied: false,
-        },
+        CallBox::Share(crate::ui::group_call_state::ShareStage::Choosing(
+            crate::ui::group_call_state::ShareLink::Listener,
+        )),
     ] {
         app.update_in(&mut vcx, |app, _, cx| {
             assert!(app.open_call_box(open), "the call has a window to open it");

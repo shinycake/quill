@@ -16,6 +16,11 @@ pub struct AddChatRequestList {
     pub total_count: i32,
     /// The offset of the next page; `None` once the list is complete.
     pub next_offset: Option<String>,
+    /// Chats approved or declined while a page of this list was out: that
+    /// page may still list them and must not bring them back. It rides
+    /// with the list the page was asked for and goes when the page is
+    /// asked (`begin_add_requests_page`) or answers.
+    pub handled: HashSet<i64>,
 }
 
 /// Why a community request failed, as the screens tell it apart.
@@ -101,21 +106,53 @@ pub enum CommunityOutcome {
     },
 }
 
+/// The `createCommunity` in flight and the picture its identity box chose
+/// for the community it makes (uploaded once the community exists). One
+/// create with a picture goes at a time (the driver refuses a second while
+/// one is out); the answer,
+/// the refusal of that request, or the account going away ends it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CommunityCreate {
+    #[default]
+    Idle,
+    Creating {
+        request: RequestId,
+        photo: Option<String>,
+    },
+}
+
+impl CommunityCreate {
+    /// The create answered: its picture, once, for the request that asked.
+    pub fn answered(&mut self, answer: RequestId) -> Option<String> {
+        match std::mem::take(self) {
+            Self::Creating { request, photo } if request == answer => photo,
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// The create was refused or lost: the picture waiting for it goes.
+    pub fn failed(&mut self, request: Option<RequestId>) {
+        if matches!(self, Self::Creating { request: asked, .. } if Some(*asked) == request) {
+            *self = Self::Idle;
+        }
+    }
+}
+
 pub struct CommunitiesState {
     /// `getJoinedCommunities`.
     pub joined: Fetch<Vec<i64>>,
     /// `getOwnedBots`: the user ids of the bots the person owns.
     pub owned_bots: Fetch<Vec<i64>>,
-    /// The picture for the community our `createCommunity` (the request
-    /// id) is making; one create goes at a time, so a newer one replaces
-    /// it.
-    pub new_community_photo: Option<(RequestId, String)>,
+    /// See [`CommunityCreate`].
+    pub create: CommunityCreate,
     /// `getCommunityAddChatRequests`, by community id.
     pub add_chat_requests: HashMap<i64, Fetch<AddChatRequestList>>,
-    /// Add-chat requests approved or declined, by community, since the last
-    /// first page was asked: a page that was in flight meanwhile may still
-    /// list them, and must not bring them back.
-    pub handled_add_requests: HashMap<i64, HashSet<i64>>,
+    /// The community requests out (`send_communities_request`), each by its
+    /// own request with its community: what the screens read as in flight.
+    pub sent: crate::state::held::Holds<(i64, CommunitiesPurpose)>,
     /// `getCommunityMemberChats`, by community and member.
     pub member_chats: HashMap<(i64, CommunityMember), Fetch<CommunityMemberChats>>,
     /// The settings each in-flight `setCommunityNotificationSettings`
@@ -138,9 +175,9 @@ impl CommunitiesState {
         Self {
             joined: Fetch::Idle,
             owned_bots: Fetch::Idle,
-            new_community_photo: None,
+            create: CommunityCreate::Idle,
             add_chat_requests: HashMap::new(),
-            handled_add_requests: HashMap::new(),
+            sent: Default::default(),
             member_chats: HashMap::new(),
             notification_sends: HashMap::new(),
             outcomes: VecDeque::new(),
@@ -169,6 +206,27 @@ impl CommunitiesState {
     /// The next finished request for the UI to report.
     pub fn take_outcome(&mut self) -> Option<CommunityOutcome> {
         self.outcomes.pop_front()
+    }
+
+    /// A page of the add-chat requests goes out as `request`: what was
+    /// handled so far is behind it.
+    pub fn begin_add_requests_page(&mut self, community_id: i64, request: RequestId) {
+        let fetch = self.add_chat_requests.entry(community_id).or_default();
+        if let Some(list) = fetch.data_mut() {
+            list.handled.clear();
+        }
+        fetch.begin_with(request);
+    }
+
+    /// A request of the community was approved or declined: a page in
+    /// flight must not bring it back.
+    pub fn mark_add_request_handled(&mut self, community_id: i64, chat_id: i64) {
+        if let Some(fetch) = self.add_chat_requests.get_mut(&community_id)
+            && fetch.is_loading()
+            && let Some(list) = fetch.data_mut()
+        {
+            list.handled.insert(chat_id);
+        }
     }
 
     pub fn add_chat_requests(&self, community_id: i64) -> &Fetch<AddChatRequestList> {

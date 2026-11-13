@@ -98,12 +98,12 @@ fn collections_of_another_owner_are_dropped() {
         )
     };
     apply_json(&mut session, &seq, &sink, &list(first, 7));
-    assert!(session.payments.gifts_manage.collections.is_empty());
+    assert!(session.payments.gifts_manage.collections().is_empty());
     assert!(session.payments.gifts_manage.collections_fetch.is_loading());
     fail(&mut session, first, &sink);
     assert!(session.payments.gifts_manage.collections_fetch.is_loading());
     apply_json(&mut session, &seq, &sink, &list(second, 9));
-    assert_eq!(session.payments.gifts_manage.collections.len(), 1);
+    assert_eq!(session.payments.gifts_manage.collections().len(), 1);
     assert!(!session.payments.gifts_manage.collections_fetch.is_loading());
 }
 
@@ -203,10 +203,8 @@ fn acquired_gifts_and_preview_failures_say_so_and_can_be_asked_again() {
         None,
     );
     let market = &mut session.payments.gift_market;
-    market.acquired.entry(8).or_default().begin();
-    market.acquired.entry(8).or_default().sent(acquired);
-    market.previews.entry(8).or_default().begin();
-    market.previews.entry(8).or_default().sent(preview);
+    market.acquired.entry(8).or_default().begin_with(acquired);
+    market.previews.entry(8).or_default().begin_with(preview);
     fail(&mut session, acquired, &sink);
     fail(&mut session, preview, &sink);
     let market = &session.payments.gift_market;
@@ -250,7 +248,7 @@ fn a_giveaway_launch_in_flight_is_never_forgotten_by_a_form() {
 fn a_giveaway_waiting_on_verification_survives_the_form_closing() {
     use crate::state::{GiveawayLaunch, GiveawayLaunches};
     let mut launches = GiveawayLaunches::default();
-    launches.set(5, GiveawayLaunch::Verifying);
+    launches.set(5, GiveawayLaunch::NeedsVerification);
     launches.for_form(5);
     launches.for_form(5);
     assert!(launches.is_done_for(5) && launches.is_verifying_for(5));
@@ -354,8 +352,7 @@ fn an_older_acquired_gifts_failure_leaves_the_live_request_loading() {
     let old = session.request(purpose(), None);
     let live = session.request(purpose(), None);
     let fetch = session.payments.gift_market.acquired.entry(8).or_default();
-    fetch.begin();
-    fetch.sent(live);
+    fetch.begin_with(live);
     fail(&mut session, old, &sink);
     assert!(session.payments.gift_market.acquired[&8].is_loading());
     fail(&mut session, live, &sink);

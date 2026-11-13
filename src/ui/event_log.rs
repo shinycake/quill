@@ -4,7 +4,7 @@
 //! Earlier events load when the list is scrolled to its top.
 #![deny(clippy::indexing_slicing)]
 
-use super::admin_state::{EventLogPage, EventLogSearch};
+use super::admin_state::{EventLogAutoload, EventLogPage, EventLogPoll, EventLogSearch};
 use super::app::QuillApp;
 use super::dialogs::group_admin_settings::GroupSettingsView;
 use super::event_log_rows::{LogEntry, render_entry};
@@ -112,14 +112,20 @@ impl QuillApp {
         let typed = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DELAY).await;
             this.update(cx, |this, cx| {
-                if this.event_log_open_chat() == Some(chat_id) {
+                // The timer is spent: a page replaced meanwhile has none.
+                let waiting = this
+                    .admin
+                    .event_log_page
+                    .as_mut()
+                    .is_some_and(|page| page.chat == chat_id && page.typed.fire());
+                if waiting && this.event_log_open_chat() == Some(chat_id) {
                     this.apply_event_log_search(chat_id, cx);
                 }
             })
             .ok();
         });
         // Replacing the page's timer stops the one of the earlier edit.
-        self.event_log_page_for(chat_id).typed = Some(typed);
+        self.event_log_page_for(chat_id).typed.arm(typed);
     }
 
     /// The page of `chat_id`; the page of another chat is replaced (its
@@ -181,7 +187,8 @@ impl QuillApp {
         // Runs while the list holds its own state: it must not touch the
         // list, so the load starts after the scroll event is done.
         self.admin
-            .event_log_list
+            .event_log_rows
+            .list()
             .set_scroll_handler(move |event, _, cx| {
                 if event.visible_range.start == 0 {
                     let app = app.clone();
@@ -203,7 +210,9 @@ impl QuillApp {
     /// events are fetched and join the bottom of the list (the list keeps a
     /// reader who has scrolled up where they are).
     pub(super) fn start_event_log_poll(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.event_log_page_for(chat_id).autoload.set(None);
+        self.event_log_page_for(chat_id)
+            .autoload
+            .set(EventLogAutoload::Unasked);
         self.spawn_event_log_poll(chat_id, cx);
     }
 
@@ -217,7 +226,7 @@ impl QuillApp {
             .admin
             .event_log_page
             .as_ref()
-            .is_some_and(|page| page.chat == chat_id && page.poll.is_none());
+            .is_some_and(|page| page.chat == chat_id && !page.poll.is_running());
         if !stopped || !self.frame.window_active.get() {
             return;
         }
@@ -246,20 +255,43 @@ impl QuillApp {
                     break;
                 }
             }
+            // The loop ended by itself: the page no longer holds a poll.
+            let _ = this.update(cx, |this, _| this.event_log_poll_ended(chat_id));
         });
         // The page owns the timer; a poll already running for it is replaced.
-        self.event_log_page_for(chat_id).poll = Some(poll);
+        self.event_log_page_for(chat_id).poll = EventLogPoll::Running { _task: poll };
+    }
+
+    /// The poll of `chat_id` ended by itself (page closed, app inactive).
+    fn event_log_poll_ended(&mut self, chat_id: ChatId) {
+        if let Some(page) = self
+            .admin
+            .event_log_page
+            .as_mut()
+            .filter(|page| page.chat == chat_id)
+        {
+            page.poll = EventLogPoll::Stopped;
+        }
     }
 
     /// One poll step; `false` once the page is closed or the app is inactive.
     fn event_log_poll_tick(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
         if self.event_log_open_chat() != Some(chat_id) {
+            // The page closed: the task ends here, and the page (if it is
+            // still held for this chat) has no poll.
+            if let Some(page) = self
+                .admin
+                .event_log_page
+                .as_mut()
+                .filter(|page| page.chat == chat_id)
+            {
+                page.poll = EventLogPoll::Stopped;
+            }
             return false;
         }
         if !self.frame.window_active.get() {
             // Nothing to keep fresh for nobody: the timer stops here and
             // `resume_event_log_poll` starts it when a window wakes.
-            self.event_log_page_for(chat_id).poll = None;
             return false;
         }
         if !self.refused_while_locked()
@@ -479,12 +511,9 @@ impl QuillApp {
     /// Forget the rows the list was built for.
     pub(super) fn event_log_reset_list(&self) {
         if let Some(page) = self.admin.event_log_page.as_ref() {
-            page.autoload.set(None);
+            page.autoload.set(EventLogAutoload::Unasked);
         }
-        let was_shown = !self.admin.event_log_ids.take().is_empty();
-        if was_shown {
-            self.admin.event_log_list.reset(0);
-        }
+        self.admin.event_log_rows.forget();
     }
 
     /// The events, oldest first. The list is told what joined it (earlier
@@ -499,32 +528,14 @@ impl QuillApp {
         let chronological: Vec<_> = page.events.iter().rev().cloned().collect();
         let entries: Rc<Vec<LogEntry>> = Rc::new(self.event_log_entries(&chronological));
         let ids: Vec<i64> = entries.iter().map(|entry| entry.id).collect();
-        let state = self.admin.event_log_list.clone();
-        // The list is taken out of its cell before it is read, so nothing
-        // is held while the list is touched.
-        let shown = self.admin.event_log_ids.take();
-        let (plan, before) = (plan_sync(&shown, &ids), shown.len());
-        let count = ids.len();
-        self.admin.event_log_ids.set(ids);
-        match plan {
-            ListSync::Keep => {}
-            ListSync::Reset => state.reset(count),
-            ListSync::Grow { older, newer } => {
-                if older > 0 {
-                    state.splice(0..0, older);
-                    // The old first row may have lost its day label.
-                    state.remeasure_items(older..older.saturating_add(1));
-                }
-                if newer > 0 {
-                    let end = older.saturating_add(before);
-                    state.splice(end..end, newer);
-                }
-            }
-        }
+        let state = self.admin.event_log_rows.list().clone();
+        self.admin.event_log_rows.sync(ids);
         // Only once the list has been laid out: before that every offset is 0.
         let laid_out = state.viewport_bounds().size.height > px(0.);
         let at_top = laid_out && state.scroll_px_offset_for_scrollbar().y > px(-TOP_SLACK);
-        let asked = Some(page.events.len());
+        let asked = EventLogAutoload::AskedAt {
+            len: page.events.len(),
+        };
         let mark = self
             .admin
             .event_log_page
@@ -608,9 +619,63 @@ impl QuillApp {
     }
 }
 
-/// A fresh list for the open page: newest at the bottom.
-pub(super) fn new_event_log_list() -> ListState {
-    ListState::new(0, ListAlignment::Bottom, px(LIST_OVERDRAW))
+/// The recent-actions list and the event ids it was built for, in one owner
+/// that changes them together: rows and ids cannot get out of step. The
+/// list holds the events oldest first (the newest at the bottom); earlier
+/// events load when it is scrolled to its top.
+pub(super) struct EventLogRows {
+    list: ListState,
+    /// The event ids the list was last built for (`event_log_list::plan_sync`).
+    /// Taken out of its cell while read, so nothing is held while the list
+    /// is touched.
+    shown: std::cell::Cell<Vec<i64>>,
+}
+
+impl EventLogRows {
+    /// A fresh list for the open page: newest at the bottom.
+    pub(super) fn new() -> Self {
+        Self {
+            list: ListState::new(0, ListAlignment::Bottom, px(LIST_OVERDRAW)),
+            shown: std::cell::Cell::new(Vec::new()),
+        }
+    }
+
+    pub(super) fn list(&self) -> &ListState {
+        &self.list
+    }
+
+    /// The list now shows `ids` (oldest first): earlier events joined at the
+    /// top and polled ones at the bottom keep the reader's place, anything
+    /// else starts the list over.
+    pub(super) fn sync(&self, ids: Vec<i64>) {
+        let shown = self.shown.take();
+        let (plan, before) = (plan_sync(&shown, &ids), shown.len());
+        let count = ids.len();
+        self.shown.set(ids);
+        match plan {
+            ListSync::Keep => {}
+            ListSync::Reset => self.list.reset(count),
+            ListSync::Grow { older, newer } => {
+                if older > 0 {
+                    self.list.splice(0..0, older);
+                    // The old first row may have lost its day label.
+                    self.list.remeasure_items(older..older.saturating_add(1));
+                }
+                if newer > 0 {
+                    let end = older.saturating_add(before);
+                    self.list.splice(end..end, newer);
+                }
+            }
+        }
+    }
+
+    /// Forget the rows the list was built for.
+    pub(super) fn forget(&self) {
+        let was_shown = !self.shown.take().is_empty();
+        if was_shown {
+            self.list.reset(0);
+        }
+    }
 }
 
 #[cfg(test)]

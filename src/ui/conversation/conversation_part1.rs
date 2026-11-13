@@ -276,7 +276,7 @@ impl QuillApp {
                         // usable (typing is fine) but sends are blocked
                         // until the wait expires; the send button shows the
                         // remaining time (`composer_send_button`) and
-                        // `ensure_slow_mode_tick` re-renders every second.
+                        // the button asks the frame clock for a frame a second.
                         // Non-default send options as clearable chips; the
                         // schedule picker opens above the input.
                         // Pickers open directly above the input, next to the
@@ -463,7 +463,7 @@ impl QuillApp {
                     chat.id,
                     chat.is_muted(),
                     chat.notification_settings.is_muted_forever(),
-                    chat.in_archive,
+                    chat.in_archive(),
                 ))
             })
         });

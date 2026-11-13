@@ -1,5 +1,5 @@
 //! Connect gate: live TDLib connection bootstrap and shutdown.
-use super::closing::{Closable, CloseProgress, QUIT_CLOSE_DEADLINE};
+use super::closing::{Closable, CloseOutcome, QUIT_CLOSE_DEADLINE};
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::data_settings::load_data_storage_prefs;
@@ -63,6 +63,9 @@ pub fn wait_closed<S: JsonSender>(
 pub struct LiveConnect {
     pub driver: ConnectDriver<LiveSender>,
     pub bridge: ReceiveBridge,
+    /// When this client started: a hand-off to the background keeps the
+    /// give-up clock of a connect that is still going.
+    pub started: Instant,
     _live: LiveTdJson,
 }
 
@@ -101,7 +104,7 @@ impl Closable for LiveConnect {
         super::closing::begin_close_bridged(&mut self.driver, &self.bridge);
     }
 
-    fn drain(&mut self, budget: Duration) -> CloseProgress {
+    fn drain(&mut self, budget: Duration) -> CloseOutcome {
         super::closing::drain_bridged(&mut self.driver, &self.bridge, budget)
     }
 
@@ -266,9 +269,6 @@ fn open_prepared_client(
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).
     session.settings.data_storage = load_data_storage_prefs(&prepared.paths);
-    // What the file holds is what was saved: the first pause change is
-    // compared with it, not with an empty set.
-    session.media.disk_paused_persisted = session.settings.data_storage.disk_paused.clone();
     // `parity:data-proxy-web`: web proxy carriers run in the web view
     // helper next to Quill's executable, with this account's web view
     // files under its own folder.
@@ -287,6 +287,7 @@ fn open_prepared_client(
     Ok(LiveConnect {
         driver,
         bridge,
+        started: Instant::now(),
         _live: live,
     })
 }

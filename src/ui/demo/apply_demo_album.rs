@@ -662,9 +662,9 @@ impl QuillApp {
             .get(&chat_id.0)
             .map(|chat| {
                 if archive {
-                    chat.order.max(1)
+                    chat.order().max(1)
                 } else {
-                    chat.archive_order.max(1)
+                    chat.archive_order().max(1)
                 }
             })
             .unwrap_or(1);
@@ -730,9 +730,9 @@ impl QuillApp {
             .get(&chat_id.0)
             .map(|chat| {
                 if archived {
-                    chat.archive_order
+                    chat.archive_order()
                 } else {
-                    chat.order
+                    chat.order()
                 }
             })
             .unwrap_or(1)

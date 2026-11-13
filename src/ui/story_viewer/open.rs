@@ -4,8 +4,10 @@
 //! where it was opened from ([`StoryOpenScope`]).
 #![deny(clippy::indexing_slicing)]
 
+use super::story_open::StoryAsk;
 use super::*;
-use quill::state::StoryCardState;
+use quill::state::RequestPurpose;
+use quill::state::StoryCardView;
 use quill::story_repost::RepostGone;
 use quill::story_tray_walk::TrayWalk;
 use quill::story_viewer::{StoryOpenScope, collect_found_story_items, story_open_switch};
@@ -70,12 +72,13 @@ impl QuillApp {
             .map(|s| {
                 wanted
                     .into_iter()
-                    .filter(|id| s.story_card_state(chat_id.0, *id) == StoryCardState::Loading)
+                    .filter(|id| s.story_card_state(chat_id.0, *id) == StoryCardView::Loading)
                     .collect()
             })
             .unwrap_or_default();
         // The opened story is asked for at once, even while a failed ask
         // waits out its retry clock; the poster's others are prefetches.
+        let asks_story = fetch.contains(&story_id);
         if let Some(live) = self.live.as_mut() {
             for id in fetch {
                 let _ = if id == story_id {
@@ -91,6 +94,11 @@ impl QuillApp {
                     .story_fetch
                     .forget_retry((chat_id.0, story_id));
             }
+            // The demo has no connection: the ask the live app would send
+            // is recorded so the open waits on a request like a live one.
+            if asks_story && let Some(session) = self.demo_session.as_mut() {
+                session.request_for_story(RequestPurpose::GetStory, chat_id, story_id);
+            }
             if !fetch.is_empty() {
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE,
@@ -100,7 +108,17 @@ impl QuillApp {
         // A newer open replaces one still waiting.
         let rebuilt = self.rebuild_story_viewer(open, cx);
         if !rebuilt {
-            self.stories.viewer.wait(open);
+            let ask = self
+                .session()
+                .and_then(|session| {
+                    session.requests.request_for_story_in_flight(
+                        RequestPurpose::GetStory,
+                        chat_id,
+                        story_id,
+                    )
+                })
+                .map_or(StoryAsk::NoneOut, StoryAsk::Out);
+            self.stories.viewer.wait(open, ask);
         }
         cx.notify();
     }
@@ -134,27 +152,34 @@ impl QuillApp {
             .retry((open.chat_id, open.story_id))
             .is_some();
         let state = session.story_card_state(open.chat_id, open.story_id);
+        // The ask left flight without the story arriving or an error being
+        // recorded (the request was dropped): the open cannot be answered.
+        let failed = failed
+            || match self.stories.viewer.ask() {
+                Some(StoryAsk::Out(request)) => session.requests.get(request).is_none(),
+                Some(StoryAsk::NoneOut) | None => true,
+            };
         if let Some(gone) = open.if_gone
             && matches!(
                 (state, failed),
-                (StoryCardState::Expired, _) | (StoryCardState::Loading, true)
+                (StoryCardView::Expired, _) | (StoryCardView::Loading, true)
             )
         {
             self.stories.viewer.stop_waiting();
             return self.show_story_repost_gone(gone, window, cx);
         }
         match state {
-            StoryCardState::Ready => {
+            StoryCardView::Ready => {
                 self.stories.viewer.stop_waiting();
                 self.rebuild_story_viewer(open, cx);
             }
-            StoryCardState::Expired => {
+            StoryCardView::Expired => {
                 self.stories.viewer.stop_waiting();
                 if open.scope == StoryOpenScope::Link {
                     self.set_status_note(StatusNote::info(tr(keys::STORIES_LINK_INVALID)), cx);
                 }
             }
-            StoryCardState::Loading if failed => {
+            StoryCardView::Loading if failed => {
                 self.stories.viewer.stop_waiting();
                 let note = match open.scope {
                     StoryOpenScope::Link => keys::STORIES_LINK_INVALID,
@@ -164,7 +189,7 @@ impl QuillApp {
                 };
                 self.set_status_note(StatusNote::info(tr(note)), cx);
             }
-            StoryCardState::Loading => {}
+            StoryCardView::Loading => {}
         }
     }
 

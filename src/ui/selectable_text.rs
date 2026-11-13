@@ -20,15 +20,11 @@ thread_local! {
     /// Bounds of the scrolling region whose paint is in progress; see
     /// [`SelectionViewport`].
     static VIEWPORT: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
-    /// The message each painted text participant belongs to, by the
-    /// participant's entity id; see [`SelectableRichText::message`].
-    static OWNERS: Cell<std::collections::HashMap<EntityId, (i64, u64)>> =
-        Cell::new(std::collections::HashMap::new());
 }
 
 mod selection_record;
 mod selection_start;
-use selection_record::{WindowSelected, with_selected, with_taken};
+use selection_record::{WindowSelected, with_selected};
 pub(super) use selection_start::selected_occurrence;
 
 /// Called with the index of the clicked range.
@@ -599,21 +595,27 @@ impl Element for SelectableRichText {
             .with_rendered_element(handle, window, cx);
         handle.register(registration, window, cx);
         let layout = self.laid(bounds);
-        if let Some(message) = self.message {
-            with_taken(&OWNERS, |owners| {
-                // Entries are tiny; drop them all now and then rather than
-                // track every participant's lifetime. Painted text re-adds
-                // itself the same frame.
-                if owners.len() > 50_000 {
-                    owners.clear();
-                }
-                owners.insert(handle.entity_id(), message);
+        // The message of the text the selection started in is kept with the
+        // window's selection record (one entry, replaced by the next
+        // anchor), not in a table of every text ever painted.
+        let anchor_entity = handle
+            .snapshot(cx)
+            .and_then(|snapshot| snapshot.anchor().entity_id());
+        if let (Some(message), Some(anchor)) = (self.message, anchor_entity)
+            && anchor == handle.entity_id()
+        {
+            with_selected(window, cx, |selected| {
+                selected.anchor_owner = Some((anchor, message));
             });
         }
-        let anchor_message = handle
-            .snapshot(cx)
-            .and_then(|snapshot| snapshot.anchor().entity_id())
-            .and_then(|anchor| with_taken(&OWNERS, |owners| owners.get(&anchor).copied()));
+        let anchor_message = anchor_entity.and_then(|anchor| {
+            with_selected(window, cx, |selected| {
+                selected
+                    .anchor_owner
+                    .filter(|(owner, _)| *owner == anchor)
+                    .map(|(_, message)| message)
+            })
+        });
         let foreign =
             self.message.is_some() && anchor_message.is_some() && anchor_message != self.message;
         let runs = if foreign {
@@ -734,6 +736,14 @@ impl Element for SelectableRichText {
             let move_hitbox = hitbox.clone();
             let layout = layout.clone();
             let over: Rc<Cell<Option<usize>>> = retained_cell(global_id, window);
+            // The pointer left the text without a move over it (a wheel
+            // scrolled the text away, the list changed under it): the hover
+            // ends here, as a move off it would end it.
+            if over.get().is_some() && !hitbox.is_hovered(window) {
+                over.set(None);
+                let ended = handler.clone();
+                window.defer(cx, move |window, cx| ended(None, window, cx));
+            }
             if let Some(ix) = over.get()
                 && self.underline_on_hover.get(ix).copied().unwrap_or(false)
                 && let Some(range) = self.click_ranges.get(ix)
@@ -750,6 +760,15 @@ impl Element for SelectableRichText {
             }
             let hover_cell = over.clone();
             let view = window.current_view();
+            // The pointer left the window: no move arrives to end the hover.
+            let exit_cell = over.clone();
+            let exit_handler = handler.clone();
+            window.on_mouse_event(move |_: &MouseExitEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble && exit_cell.take().is_some() {
+                    exit_handler(None, window, cx);
+                    cx.notify(view);
+                }
+            });
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                 let over = &hover_cell;
                 if phase != DispatchPhase::Bubble {

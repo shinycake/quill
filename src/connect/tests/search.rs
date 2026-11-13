@@ -5,7 +5,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
-use crate::state::{SearchStatus, Session};
+use crate::state::{SearchStateView, Session};
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
 use std::sync::Arc;
@@ -112,7 +112,10 @@ fn driver_search_happy_empty_error_and_select() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStatus::Ready);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Ready
+    );
     assert_eq!(driver.session.search.search.chat_ids, vec![ChatId(7)]);
     driver
         .select_search_message(
@@ -123,7 +126,10 @@ fn driver_search_happy_empty_error_and_select() {
             0,
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStatus::Closed);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Closed
+    );
     assert_eq!(driver.session.open_chat_id(), Some(ChatId(7)));
     // The hit opens in context: a window loads around it (highlighted)
     // instead of the lone hit being spliced into the history.
@@ -176,7 +182,10 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStatus::Ready);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Ready
+    );
     assert!(driver.session.search.search.is_recents());
 
     let empty = commit_typed_search(&mut driver, "zzz");
@@ -212,7 +221,7 @@ fn driver_search_happy_empty_error_and_select() {
     // Phase 7.2: `Empty` only once the public search settles too.
     assert_eq!(
         driver.session.search.search.status(),
-        SearchStatus::Searching
+        SearchStateView::Searching
     );
     driver
         .ingest(
@@ -227,7 +236,10 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStatus::Empty);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Empty
+    );
 
     let fail = commit_typed_search(&mut driver, "nope");
     let SearchFlight::Query(fail_chats, fail_messages, fail_public) = fail else {
@@ -262,7 +274,7 @@ fn driver_search_happy_empty_error_and_select() {
     // Phase 7.2: the public request still in flight keeps `Searching`.
     assert_eq!(
         driver.session.search.search.status(),
-        SearchStatus::Searching
+        SearchStateView::Searching
     );
     driver
         .ingest(
@@ -277,9 +289,15 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status(), SearchStatus::Failed);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Failed
+    );
     driver.close_search();
-    assert_eq!(driver.session.search.search.status(), SearchStatus::Closed);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStateView::Closed
+    );
     assert!(!sink.rendered().contains("CANARY_DRV"));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -437,7 +455,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
             .unwrap();
     assert_eq!(
         driver.session.search.chat_search.status(),
-        SearchStatus::Ready
+        SearchStateView::Ready
     );
     assert_eq!(
         driver.session.search.chat_search.jump,
@@ -504,7 +522,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
             .unwrap();
     assert_eq!(
         driver.session.search.chat_search.status(),
-        SearchStatus::Empty
+        SearchStateView::Empty
     );
 
     // Jumping to 40 replaced the window (50 was newer and not adjacent to
@@ -515,7 +533,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
     driver.close_chat_search();
     assert_eq!(
         driver.session.search.chat_search.status(),
-        SearchStatus::Closed
+        SearchStateView::Closed
     );
     assert_eq!(driver.session.open_chat_id(), Some(ChatId(7)));
     assert!(
@@ -566,4 +584,38 @@ fn reopening_search_inside_the_debounce_still_sends_the_query() {
         "the query went out"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Leaving the account closes the bar through the driver: the typed query
+/// still waiting out its quiet window is cancelled with it, so the bar does
+/// not come back reading "Searching…" for a commit that never lands.
+#[test]
+fn closing_the_chat_search_cancels_a_query_in_its_quiet_window() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    assert!(driver.open_chat_search().unwrap());
+    let token = match driver.set_chat_search_query("hello").unwrap() {
+        ChatSearchQueryOutcome::Debounced { token } => token,
+        other => panic!("{other:?}"),
+    };
+    driver.close_chat_search();
+    assert!(!driver.session.search.chat_search.is_open());
+    assert!(
+        driver
+            .commit_debounced_chat_search(token)
+            .unwrap()
+            .is_none()
+    );
+    assert!(driver.open_chat_search().unwrap());
+    assert!(matches!(
+        driver.session.search.chat_search.status(),
+        SearchStateView::Idle
+    ));
 }

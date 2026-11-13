@@ -52,7 +52,7 @@ fn live(session: &Session) -> &LiveStoryState {
 fn begin_is_idempotent_and_other_calls_are_ignored() {
     let mut session = session();
     if let Some(l) = session.live_story_mut(42) {
-        l.streamer.begin();
+        l.streamer.begin_with(crate::ids::RequestId(7003));
     }
     session.begin_live_story(7, 6, 42);
     assert!(live(&session).streamer.is_loading());
@@ -213,8 +213,7 @@ fn a_donors_answer_older_than_a_commit_keeps_its_stars_in_the_total() {
     // The answer to a `getLiveStoryTopDonors` asked (id 4) before the
     // commit (id 5) does not count it.
     if let Some(l) = session.live_story_mut(42) {
-        l.donors.begin();
-        l.donors.sent(RequestId(4));
+        l.donors.begin_with(RequestId(4));
         l.set_donors(
             LiveStoryDonors {
                 total_star_count: 10,
@@ -226,8 +225,7 @@ fn a_donors_answer_older_than_a_commit_keeps_its_stars_in_the_total() {
     assert_eq!(live(&session).stars_total(), 13);
     // One asked after it does.
     if let Some(l) = session.live_story_mut(42) {
-        l.donors.begin();
-        l.donors.sent(RequestId(6));
+        l.donors.begin_with(RequestId(6));
         // The first request's late answer is not the one the list waits
         // for: dropped, the batch stays.
         l.set_donors(

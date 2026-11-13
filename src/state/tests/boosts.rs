@@ -37,8 +37,7 @@ fn boost_status_keeps_progress_details() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
     let fetch = session.groups.chat_boost_status.entry(13).or_default();
-    fetch.begin();
-    fetch.sent(extra);
+    fetch.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -67,8 +66,7 @@ fn a_boost_status_waits_for_its_own_request_and_keeps_the_old_level_on_a_failed_
     let seq = AtomicU64::new(0);
     let first = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
     let fetch = session.groups.chat_boost_status.entry(13).or_default();
-    fetch.begin();
-    fetch.sent(first);
+    fetch.begin_with(first);
     apply_json(&mut session, &seq, &sink, &boost_status_json(first, 1, 3));
     assert_eq!(session.groups.boost_level_and_count(13), Some((1, 3)));
 
@@ -76,8 +74,7 @@ fn a_boost_status_waits_for_its_own_request_and_keeps_the_old_level_on_a_failed_
     // request in flight asked before the change, so its answer is dropped.
     let stale = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
     if let Some(fetch) = session.groups.chat_boost_status.get_mut(&13) {
-        fetch.begin();
-        fetch.sent(stale);
+        fetch.begin_with(stale);
     }
     session.groups.outdate_boost_status(13);
     assert_eq!(session.groups.boost_level_and_count(13), Some((1, 3)));
@@ -91,8 +88,7 @@ fn a_boost_status_waits_for_its_own_request_and_keeps_the_old_level_on_a_failed_
     // The refetch fails: the old level stays, the fetch says why.
     let refetch = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
     if let Some(fetch) = session.groups.chat_boost_status.get_mut(&13) {
-        fetch.begin();
-        fetch.sent(refetch);
+        fetch.begin_with(refetch);
     }
     apply_json(
         &mut session,

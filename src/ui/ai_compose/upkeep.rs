@@ -13,6 +13,7 @@
 //! window's upkeep.
 
 use super::{MarkedLink, marked_link, session_mut};
+use crate::ui::ai_compose_state::AiComposeView;
 use crate::ui::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::notification::Notification;
@@ -145,7 +146,11 @@ impl QuillApp {
 
     /// A style list that changed under the open box (tdesktop
     /// `refreshTones`) drops a picked style the server no longer lists.
-    fn refresh_ai_compose_styles(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn refresh_ai_compose_styles(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.ai_compose.open.is_none() {
             return;
         }
@@ -157,6 +162,15 @@ impl QuillApp {
             return;
         }
         open.style_names = names;
+        // A style waiting to be selected on arrival is not coming when the
+        // list changed without it: drop the wait.
+        if let AiComposeView::Card { select_on_arrival } = &mut open.view
+            && select_on_arrival
+                .as_ref()
+                .is_some_and(|name| !open.style_names.contains(name))
+        {
+            *select_on_arrival = None;
+        }
         let styles = self
             .session()
             .map(|s| s.messages.ai_compose.styles.clone())

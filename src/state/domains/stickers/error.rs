@@ -2,6 +2,15 @@
 use crate::state::*;
 
 impl Session {
+    /// Whether a saved-GIF save or remove is out: the request the panel's
+    /// `save` stage holds is still in the table.
+    pub fn gif_save_in_flight(&self) -> bool {
+        match self.stickers.gifs.save {
+            crate::state::GifSave::Saving { request } => self.requests.get(request).is_some(),
+            crate::state::GifSave::Idle => false,
+        }
+    }
+
     /// Reacts to a failed stickers request; called by
     /// [`Session::apply_error`] after the shared handling.
     pub(crate) fn apply_stickers_error(
@@ -11,6 +20,9 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        if let Some(pending) = pending {
+            self.stickers.stickers.changes.settled(pending.id);
+        }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::EmojiAnimations) => self.stickers.animations.failed(),
             Some(RequestPurpose::GetStickerCategories) => {
@@ -39,7 +51,10 @@ impl Session {
             }
             Some(RequestPurpose::SearchEmojis) => {
                 if let Some(pending) = pending {
-                    self.stickers.emoji.keyword_lookups.failed(pending.id);
+                    self.stickers
+                        .emoji
+                        .keyword_lookups
+                        .failed(pending.id, self.connection == ConnectionState::Ready);
                 }
             }
             Some(RequestPurpose::Stickers(StickersPurpose::GetMessageEffect { effect_id })) => {
@@ -60,8 +75,10 @@ impl Session {
                     titles.remove(&set_id);
                 }
             }
-            Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
-                self.fail_sticker_set_view(set_id)
+            Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { .. })) => {
+                if let Some(pending) = pending {
+                    self.fail_sticker_set_view(pending.id);
+                }
             }
             Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack { .. })) => {
                 if let Some(pending) = pending {
@@ -78,12 +95,16 @@ impl Session {
                     .waits_for(pending.map(|p| p.id))
                 {
                     self.stickers.stickers.attached = AttachedSets::Idle;
-                    self.fail_sticker_set_view(0);
+                    if let Some(pending) = pending {
+                        self.fail_sticker_set_view(pending.id);
+                    }
                 }
             }
             // The lookup's ids are asked for again. A rate limit is no
             // failure: the connect layer holds lookups until it is over.
             Some(RequestPurpose::GetCustomEmojiStickers) => {
+                // A mini app's suggested-emoji lookup ends with this error.
+                crate::wake::MINI_APPS.poke();
                 let emoji = &mut self.stickers.emoji;
                 if let Some(pending) = pending {
                     if err.is_flood() {
@@ -157,14 +178,15 @@ impl Session {
             self.stickers.stickers.suggest_for = SuggestFor::Nothing;
         }
         let emoji_purpose = pending.map(|p| p.purpose);
-        if emoji_purpose == Some(RequestPurpose::SetEmojiStatus)
-            && matches!(
-                self.stickers.emoji.status_change,
-                crate::emoji::StatusChange::Setting { request, .. }
-                    if Some(request) == pending.map(|p| p.id)
-            )
-        {
-            self.stickers.emoji.status_change = crate::emoji::StatusChange::Idle;
+        self.stickers
+            .emoji
+            .status_change
+            .failed(pending.map(|p| p.id));
+        if emoji_purpose == Some(RequestPurpose::GetTrendingStickerSets) {
+            self.stickers
+                .stickers
+                .trending
+                .failed(pending.map(|p| p.id));
         }
         if emoji_purpose == Some(RequestPurpose::GetTrendingEmojiSets) {
             self.stickers.emoji.lists.trending.failed_request(
@@ -184,11 +206,12 @@ impl Session {
                 .animated
                 .failed_request(pending.map(|p| p.id));
         }
-        if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
-            list.failed(
+        if let Some(purpose) = emoji_purpose {
+            self.stickers.emoji.lists.request_failed(
+                purpose,
                 pending.map(|p| p.id),
-                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS),
-                false,
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS)
+                    .to_string(),
             );
         }
         if matches!(
@@ -239,9 +262,10 @@ impl Session {
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
             self.stickers.gifs.saved_mutation_failed();
+            self.stickers.gifs.save_settled(pending.map(|p| p.id));
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.saved_failed();
+        if let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetSavedAnimations) {
+            self.stickers.gifs.saved_failed(pending.id);
         }
     }
 }

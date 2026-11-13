@@ -12,7 +12,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// `st::textRevealGradient`: the soft edge of the revealed part.
@@ -95,7 +95,7 @@ pub(crate) struct RevealPaint {
 }
 
 thread_local! {
-    static CURRENT: RefCell<Option<RevealPaint>> = const { RefCell::new(None) };
+    static CURRENT: Cell<Option<RevealPaint>> = const { Cell::new(None) };
 }
 
 /// Build the text block in `f` with `paint` applying to its paragraphs.
@@ -128,7 +128,11 @@ pub(crate) fn revealing(
 
 /// The reveal of the text block being built, if any.
 pub(crate) fn current() -> Option<RevealPaint> {
-    CURRENT.with(|current| current.borrow().clone())
+    CURRENT.with(|current| {
+        let paint = current.take();
+        current.set(paint.clone());
+        paint
+    })
 }
 
 /// `child` (the text block) clipped to `height`, the bubble's open part,

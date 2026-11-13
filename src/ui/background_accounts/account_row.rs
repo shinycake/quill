@@ -11,6 +11,25 @@ use gpui_kit::component::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::notify_accounts::notify_from_all_setting_visible;
 
+/// What a background account's row shows beside its name.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RowBadge {
+    /// A status that needs saying ("Not signed in", "Signed out", why it
+    /// could not start); it hides the counter.
+    Status(String),
+    Unread(AccountUnread),
+    Nothing,
+}
+
+/// The row's badge for an account in `status` with `unread` messages.
+pub(super) fn row_badge(status: &BackgroundStatus, unread: AccountUnread) -> RowBadge {
+    match status.label() {
+        Some(label) => RowBadge::Status(label.to_string()),
+        None if unread.count > 0 => RowBadge::Unread(unread),
+        None => RowBadge::Nothing,
+    }
+}
+
 impl QuillApp {
     /// Unread counter (or a status such as "Not signed in") for a
     /// background account's row; `None` when there is nothing to show.
@@ -20,17 +39,19 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let client = self.background.client(key)?;
-        if let Some(label) = client.status.label() {
-            return Some(
+        match row_badge(&client.stage.status(), client.unread) {
+            RowBadge::Status(label) => Some(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(label.to_string())
+                    .child(label)
                     .into_any_element(),
-            );
+            ),
+            RowBadge::Unread(unread) => {
+                Some(counter_pill(&format!("account-unread-{key}"), unread, cx))
+            }
+            RowBadge::Nothing => None,
         }
-        (client.unread.count > 0)
-            .then(|| counter_pill(&format!("account-unread-{key}"), client.unread, cx))
     }
 
     /// Settings > Notifications: "Show notifications from: All accounts",
@@ -102,7 +123,7 @@ impl QuillApp {
         if !on {
             let mut shown: Vec<(AccountKey, ChatId)> = Vec::new();
             for client in self.background.clients_mut().iter_mut() {
-                if let Some(live) = client.live.as_mut() {
+                if let Some(live) = client.live_mut() {
                     let chats = live.driver.session.settings.notified.take_shown();
                     shown.extend(chats.into_iter().map(|chat| (client.key.clone(), chat)));
                 }
@@ -145,4 +166,39 @@ pub(super) fn counter_pill(id: &str, unread: AccountUnread, cx: &App) -> AnyElem
         .aria_label(format!("{} unread", unread.count))
         .child(label)
         .into_any_element()
+}
+
+#[cfg(test)]
+mod badge_tests {
+    use super::{AccountUnread, BackgroundStatus, RowBadge, row_badge};
+
+    fn unread(count: u32) -> AccountUnread {
+        AccountUnread {
+            count,
+            muted: false,
+        }
+    }
+
+    /// A running account shows its unread count, or nothing when all is
+    /// read; a status that needs saying replaces the count.
+    #[test]
+    fn a_row_shows_the_unread_count_or_the_status() {
+        assert_eq!(
+            row_badge(&BackgroundStatus::Ready, unread(0)),
+            RowBadge::Nothing
+        );
+        assert_eq!(
+            row_badge(
+                &BackgroundStatus::Connecting {
+                    since: std::time::Instant::now(),
+                },
+                unread(3),
+            ),
+            RowBadge::Unread(unread(3))
+        );
+        assert_eq!(
+            row_badge(&BackgroundStatus::NeedsSignIn, unread(3)),
+            RowBadge::Status("Not signed in".into())
+        );
+    }
 }

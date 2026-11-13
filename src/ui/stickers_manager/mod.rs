@@ -20,7 +20,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::state::{MasksTab, StickerTab, StickersPurpose};
+use quill::state::{MasksTab, StickerTab};
 use quill::stickers_manager::ManagerEdits;
 use quill::telegram::envelope::StickerSetInfo;
 use rows::RowState;
@@ -57,13 +57,14 @@ struct ManagerView {
     installed: Vec<StickerSetInfo>,
     trending: Vec<StickerSetInfo>,
     archived: Vec<StickerSetInfo>,
-    status: ListStatus,
+    status: ListView,
     unread: usize,
 }
 
-/// Where the list on screen is: fetching, failed, or what it holds.
+/// What the list on screen shows, derived each frame from the session's
+/// fetches (it holds no request of its own): fetching, failed, or its sets.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ListStatus {
+enum ListView {
     Loading,
     Failed,
     Shown,
@@ -86,7 +87,7 @@ impl QuillApp {
                 installed: Vec::new(),
                 trending: Vec::new(),
                 archived: Vec::new(),
-                status: ListStatus::Shown,
+                status: ListView::Shown,
                 unread: 0,
             };
         };
@@ -109,8 +110,8 @@ impl QuillApp {
                 (
                     tab,
                     panel.sets.clone(),
-                    panel.trending.clone(),
-                    panel.archived.clone(),
+                    panel.trending.sets.clone(),
+                    panel.archived.sets.clone(),
                     loading,
                     panel.lists.tab_error(panel.tab).is_some(),
                 )
@@ -120,15 +121,10 @@ impl QuillApp {
                     MasksTab::Installed => ManagerTab::Installed,
                     MasksTab::Archived => ManagerTab::Archived,
                 };
-                let loading = session
-                    .requests
-                    .has_purpose(StickersPurpose::GetInstalledMaskSets.into())
-                    || session.requests.has_purpose(
-                        StickersPurpose::GetArchivedMaskSets { first_page: true }.into(),
-                    )
-                    || session.requests.has_purpose(
-                        StickersPurpose::GetArchivedMaskSets { first_page: false }.into(),
-                    )
+                // The lists hold their own requests: a list is loading while
+                // the fetch that asked for it is out.
+                let loading = masks.installed.is_loading()
+                    || masks.archived.is_loading()
                     || match tab {
                         ManagerTab::Installed => masks.installed.is_idle(),
                         _ => masks.archived.is_idle(),
@@ -139,7 +135,9 @@ impl QuillApp {
                     Vec::new(),
                     masks.archived_sets().to_vec(),
                     loading,
-                    masks.installed.error().is_some() || masks.archived.error().is_some(),
+                    masks.installed.error().is_some()
+                        || masks.archived.error().is_some()
+                        || masks.change_note.line().is_some(),
                 )
             }
         };
@@ -160,11 +158,11 @@ impl QuillApp {
             trending,
             archived,
             status: if failed {
-                ListStatus::Failed
+                ListView::Failed
             } else if loading {
-                ListStatus::Loading
+                ListView::Loading
             } else {
-                ListStatus::Shown
+                ListView::Shown
             },
             unread,
         }
@@ -201,7 +199,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.stickers.open = true;
             session.stickers.stickers.tab = StickerTab::Installed;
-            session.stickers.manager.open = true;
+            session.stickers.manager.covers.show();
         }
         cx.notify();
     }
@@ -269,7 +267,7 @@ impl QuillApp {
             }
             live.driver.set_sticker_manager_open(false);
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.manager.open = false;
+            session.stickers.manager.covers.hide();
             apply_demo_commit(session, kind, &removed, order.as_deref());
         }
         if sent {
@@ -381,13 +379,12 @@ impl QuillApp {
         let session = &live.driver.session;
         let result = match (kind, view.tab) {
             (Kind::Stickers, ManagerTab::Trending)
-                if session.stickers.stickers.trending_next_offset
-                    < session.stickers.stickers.trending_total =>
+                if session.stickers.stickers.trending.has_more() =>
             {
                 live.driver.fetch_trending_stickers(true).map(drop)
             }
             (Kind::Stickers, ManagerTab::Archived)
-                if session.stickers.stickers.archived_has_more =>
+                if session.stickers.stickers.archived.next_offset().is_some() =>
             {
                 live.driver.fetch_archived_stickers(true).map(drop)
             }
@@ -470,9 +467,9 @@ impl QuillApp {
                 cx,
             ))
         });
-        let status = if view.status == ListStatus::Failed {
+        let status = if view.status == ListView::Failed {
             Some(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN))
-        } else if view.status == ListStatus::Loading && sets.is_empty() {
+        } else if view.status == ListView::Loading && sets.is_empty() {
             Some(tr(keys::CONTACTS_LOADING))
         } else if sets.is_empty() {
             Some(match (view.tab, kind) {

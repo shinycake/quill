@@ -41,8 +41,7 @@ fn b2_similar_bots_users_response_lands_by_pending_user() {
     let seq = AtomicU64::new(0);
     let extra = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
     let fetch = session.bots.similar_bots.entry(21).or_default();
-    fetch.begin();
-    fetch.sent(extra);
+    fetch.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -252,12 +251,15 @@ fn b1_active_custom_keyboard_rules() {
     apply_json(&mut session, &seq, &sink, &show(401));
     apply_json(&mut session, &seq, &sink, &show(402));
     let messages = &session.histories.get(&21).expect("history").messages;
-    let none: HashSet<(i64, i64)> = HashSet::new();
+    let none: HashSet<crate::ids::ChatMessage> = HashSet::new();
     // Newest show-keyboard message wins.
     let active = active_custom_keyboard(messages, &none).expect("keyboard");
     assert_eq!(active.1, MessageId(402));
     // A dismissed one-time keyboard stays hidden.
-    let dismissed: HashSet<(i64, i64)> = [(21, 402)].into_iter().collect();
+    let dismissed: HashSet<crate::ids::ChatMessage> =
+        [crate::ids::ChatMessage::new(ChatId(21), MessageId(402))]
+            .into_iter()
+            .collect();
     assert!(active_custom_keyboard(messages, &dismissed).is_none());
     // A newer remove-keyboard clears everything.
     apply_json(&mut session, &seq, &sink, &remove(403));
@@ -489,7 +491,7 @@ fn bots_games_high_scores_answer_lands_in_panel() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: Some(extra),
+            request: extra,
         },
     );
     apply_json(
@@ -524,7 +526,7 @@ fn a_refused_game_scores_request_leaves_the_panel_failed_to_retry() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: Some(extra),
+            request: extra,
         },
     );
     apply_json(
@@ -557,7 +559,7 @@ fn a_game_scores_answer_of_an_older_request_is_ignored() {
         (7, 301),
         crate::state::fetch::Fetch::Loading {
             stale: None,
-            request: Some(new),
+            request: new,
         },
     );
     apply_json(
@@ -616,8 +618,7 @@ fn r2_similar_bots_older_request_neither_answers_nor_fails_the_newer() {
     let first = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
     let second = session.request_for_user(RequestPurpose::GetBotSimilarBots, 21);
     let fetch = session.bots.similar_bots.entry(21).or_default();
-    fetch.begin();
-    fetch.sent(second);
+    fetch.begin_with(second);
     apply_json(
         &mut session,
         &seq,
@@ -629,7 +630,7 @@ fn r2_similar_bots_older_request_neither_answers_nor_fails_the_newer() {
     );
     assert!(matches!(
         session.bots.similar_bots.get(&21),
-        Some(Fetch::Loading { request: Some(id), .. }) if *id == second
+        Some(Fetch::Loading { request: id, .. }) if *id == second
     ));
     apply_json(
         &mut session,

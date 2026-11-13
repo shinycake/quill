@@ -130,9 +130,13 @@ impl QuillApp {
             let loading = session.is_some_and(|s| s.settings.sessions.is_loading());
             let mutating = session.is_some_and(|s| s.settings.sessions_op.is_mutating());
             let stale = session.is_some_and(|s| s.settings.sessions_op.is_stale());
-            let error = session
-                .as_ref()
-                .and_then(|s| s.settings.sessions.error().map(str::to_string));
+            let error = session.as_ref().and_then(|s| {
+                s.settings
+                    .sessions
+                    .error()
+                    .or(s.settings.sessions_note.line())
+                    .map(str::to_string)
+            });
             let current = sessions.iter().find(|s| s.is_current());
             let mut incomplete: Vec<&ParsedSession> = sessions
                 .iter()
@@ -146,7 +150,7 @@ impl QuillApp {
             others.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
 
             let mut body = div().flex().flex_col().gap_4();
-            if let Some(notice) = this.privacy.device_link.notice() {
+            if let Some(notice) = this.device_link_notice() {
                 body = body.child(
                     div()
                         .id("device-link-notice")
@@ -210,7 +214,7 @@ impl QuillApp {
                         cx,
                     ),
                 );
-            } else if !this.privacy.device_link.is_busy() {
+            } else if !this.device_link_busy() {
                 // Cross-platform: paste the `tg://login?token=...` link that
                 // a QR reader shows for the other device's code.
                 let mut row = div().flex().flex_wrap().gap_2();
@@ -485,7 +489,7 @@ impl QuillApp {
             live.driver.refresh_storage_statistics();
             let _ = live.driver.maybe_fetch_storage_statistics();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.storage_stats.succeed(demo_storage_stats());
+            session.settings.storage_stats = Fetch::Ready(demo_storage_stats());
         }
         cx.notify();
     }
@@ -551,24 +555,7 @@ impl QuillApp {
     /// must not linger in the form after the dialog is gone.
     pub(super) fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.twofa_close();
-        self.twofa
-            .current_password
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .status_check_password
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .new_password
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .hint
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .email
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .code
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.clear_twofa_inputs(window, cx);
     }
 
     /// Leaving the Devices page stops a camera scan and drops a pending
@@ -576,6 +563,9 @@ impl QuillApp {
     pub(crate) fn leave_devices(&mut self) {
         self.leave_device_link();
         self.privacy.devices.close_all();
+        if let Some(session) = self.session_mut() {
+            session.settings.leave_sessions();
+        }
     }
 
     /// Something over the Devices list that Esc peels first.
@@ -603,54 +593,48 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Slice A2: one `setPassword` round-trip — enable (empty current),
-    /// change, or disable (empty new). A recovery email rides along only
-    /// on the enable form (TGX `PasswordController.java:1990`); on
-    /// change/disable a leftover email would put the request into
-    /// pending-confirmation and silently not apply (schema 1.8.67, line
-    /// 11434). The fields are cleared and the password strings zeroized
-    /// after the driver took the request; the status view shows TDLib's
-    /// authoritative answer when it arrives.
+    /// Slice A2: one `setPassword` round-trip for `form` (`PasswordForm`
+    /// decides which inputs it reads and what it refuses). A recovery email
+    /// rides along only on the enable form (TGX
+    /// `PasswordController.java:1990`); on change/disable a leftover email
+    /// would put the request into pending-confirmation and silently not
+    /// apply (schema 1.8.67, line 11434). The fields are cleared and the
+    /// password strings zeroized after the driver took the request; the
+    /// status view shows TDLib's authoritative answer when it arrives.
     pub(super) fn submit_twofa_password(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        include_email: bool,
+        form: PasswordForm,
     ) {
         let mut current = self.twofa.current_password.read(cx).value().to_string();
         let mut new = self.twofa.new_password.read(cx).value().to_string();
         let hint = self.twofa.hint.read(cx).value().to_string();
         let email = self.twofa.email.read(cx).value().trim().to_string();
-        // Slice A2 fixup: never fire a doomed request — the driver
-        // rejects it silently and the old code cleared the form first, so
-        // the submit vanished with no feedback.
-        let missing: Option<&str> = if include_email && new.is_empty() {
-            Some(tr(keys::Q_PREFS_ENTER_A_NEW_PASSWORD))
-        } else if !include_email && current.is_empty() {
-            Some(tr(keys::Q_PREFS_ENTER_YOUR_CURRENT_PASSWORD))
-        } else {
-            None
+        let inputs = FormInputs {
+            current: &current,
+            new: &new,
+            hint: &hint,
+            email: &email,
         };
-        if let Some(note) = missing {
-            self.twofa.set_notice(Some(note.to_string()));
-            current.zeroize();
-            new.zeroize();
-            cx.notify();
-            return;
-        }
+        // Never fire a doomed request: say so instead of clearing the form.
+        let request = match form.request(&inputs) {
+            Ok(request) => request,
+            Err(note) => {
+                self.twofa.set_notice(Some(note.to_string()));
+                current.zeroize();
+                new.zeroize();
+                cx.notify();
+                return;
+            }
+        };
         // The form stays until the driver took the request: one it refused
         // (not connected, shutting down) keeps what was typed and says so.
         let sent = match self.live.as_mut() {
-            Some(live) => {
-                let email_opt = if include_email && !email.is_empty() {
-                    Some(email.as_str())
-                } else {
-                    None
-                };
-                live.driver
-                    .set_two_step_password(&current, &new, &hint, email_opt)
-                    .is_ok()
-            }
+            Some(live) => live
+                .driver
+                .set_two_step_password(request.current, request.new, request.hint, request.email)
+                .is_ok(),
             None => true,
         };
         current.zeroize();
@@ -662,13 +646,19 @@ impl QuillApp {
             return;
         }
         self.twofa.set_notice(None);
-        self.clear_twofa_inputs(window, cx);
-        self.goto_twofa_view(TwofaView::Status);
+        self.goto_twofa_view(TwofaView::Status, window, cx);
         cx.notify();
     }
 
-    /// Empty every field of the two-step forms.
-    fn clear_twofa_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Empty every input of the two-step box: the forms, the code and the
+    /// status screen's check card.
+    pub(super) fn clear_twofa_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.twofa
+            .status_check_password
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa
+            .code
+            .update(cx, |input, cx| input.set_value("", window, cx));
         self.twofa
             .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -716,8 +706,7 @@ impl QuillApp {
             return;
         }
         self.twofa.set_notice(None);
-        self.clear_twofa_inputs(window, cx);
-        self.goto_twofa_view(TwofaView::Status);
+        self.goto_twofa_view(TwofaView::Status, window, cx);
         cx.notify();
     }
 
@@ -813,6 +802,8 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod passkey_ceremony;
+mod twofa_form;
+use twofa_form::{FormInputs, PasswordForm};
 mod passkey_login;
 pub(in crate::ui) mod passkeys;
 mod session_list;

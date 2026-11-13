@@ -127,6 +127,7 @@ impl QuillApp {
                     .session
                     .messages
                     .scheduled_messages
+                    .rows
                     .retain(|m| m.chat_id != chat_id || m.id != message_id);
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_CHAT_SCHEDULED_MESSAGE_DELETED,

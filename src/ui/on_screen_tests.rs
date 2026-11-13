@@ -265,3 +265,37 @@ fn a_switch_ends_the_link_flow_the_account_was_running(cx: &mut TestAppContext) 
         assert!(app.links.resolved.is_none());
     });
 }
+
+/// The in-chat search bar lives in the session, which stays alive in the
+/// background: a query still in its quiet window ends with the screen, so
+/// back on the account the bar does not read "Searching…" for a commit
+/// that never comes.
+#[gpui_kit::test]
+fn the_search_farewell_closes_a_chat_search_still_typing(cx: &mut TestAppContext) {
+    use quill::state::SearchStateView;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, _| {
+        let session = app.demo_session.as_mut().expect("a demo session");
+        let search = &mut session.search.chat_search;
+        search.open_for(quill::ids::ChatId(11));
+        search.begin_query("hello");
+        assert_eq!(
+            search.status(),
+            SearchStateView::Searching,
+            "in the quiet window"
+        );
+    });
+    // The screen's own farewell, not the chat's leave that a switch also
+    // runs, ends it.
+    app.update_in(&mut vcx, |app, window, cx| {
+        <crate::ui::search_state::SearchUi as crate::ui::on_screen::Farewell>::farewell(
+            app, window, cx,
+        );
+    });
+    app.read_with(&vcx, |app, _| {
+        let search = &app.session().expect("a session").search.chat_search;
+        assert!(!search.is_open(), "the bar closed with the screen");
+        assert_eq!(search.status(), SearchStateView::Closed);
+    });
+}

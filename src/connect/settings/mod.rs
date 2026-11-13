@@ -8,6 +8,7 @@ use crate::settings::{
     load_preferences, save_badge_prefs, save_call_prefs, save_device_prefs, save_language_prefs,
     save_preferences,
 };
+use crate::state::BlockOrigin;
 use crate::state::RequestPurpose;
 use crate::state::SettingsPurpose;
 use crate::telegram::envelope::{
@@ -31,7 +32,9 @@ use crate::telegram::requests_privacy::{
     PrivacySettingKey, get_blocked_message_senders, get_privacy_rules,
     get_read_date_privacy_settings, set_privacy_rules, set_read_date_privacy_settings,
 };
+pub(super) use note_send::NoteSlot;
 
+mod note_send;
 mod notifications;
 mod sessions;
 mod storage;
@@ -42,6 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`getUserPrivacySettingRules`, schema 1.8.67, :15620).
     pub fn fetch_privacy_rules(&mut self, key: PrivacySettingKey) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
+            self.session.settings.refuse_privacy_load(key);
             return Err(ConnectSendError::InvalidRequest);
         }
         let busy = self
@@ -150,32 +154,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// Slice S3: fetch the blocked-senders list
-    /// (`getBlockedMessageSenders`, schema 1.8.67, :14505). Pages of
-    /// 100; a later page continues from the loaded list length.
+    /// Slice S3: fetch the blocked-senders list from its first page
+    /// (`getBlockedMessageSenders`, schema 1.8.67, :14505). What the privacy
+    /// page does on every open: the loaded list stays on screen and the
+    /// first page replaces it when it arrives, so a user blocked on another
+    /// device shows up. Pages of 100.
     pub fn fetch_blocked_senders(&mut self) -> Result<(), ConnectSendError> {
+        self.ask_blocked_page(0)
+    }
+
+    /// The next page of the blocked-senders list, continuing from the
+    /// loaded length (the first page when nothing is loaded).
+    pub fn fetch_more_blocked_senders(&mut self) -> Result<(), ConnectSendError> {
+        let offset = self.session.settings.blocked_ids().len();
+        self.ask_blocked_page(offset)
+    }
+
+    fn ask_blocked_page(&mut self, offset: usize) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // One page at a time: the answer of the one out decides the next.
-        if self.session.settings.blocked_senders.is_loading() {
+        // A next page waits for the one out; a first page replaces it, so
+        // the page asked before no longer matches.
+        if offset > 0 && self.session.settings.blocked_senders.is_loading() {
             return Ok(());
         }
-        let offset = self
-            .session
-            .settings
-            .blocked_senders
-            .data()
-            .map(|list| list.len())
-            .unwrap_or(0);
-        if offset == 0 {
-            self.session.settings.restart_blocked_list();
-        }
-        self.session.settings.blocked_senders.begin();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                 offset: offset as i32,
-                generation: self.session.settings.blocked_generation,
             }),
             None,
         );
@@ -184,82 +190,74 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&get_blocked_message_senders(extra, offset as i32, 100))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .blocked_senders
-                .fail("The blocked users request was not sent.");
+            let blocked = &mut self.session.settings.blocked_senders;
+            if !blocked.is_loading() {
+                blocked.fail("The blocked users request was not sent.");
+            }
             return Err(err);
+        }
+        // Only a page that went out is waited for, under its own request.
+        self.session.settings.blocked_senders.begin_with(extra);
+        Ok(())
+    }
+
+    /// The first page again once a block or unblock that replaced a page in
+    /// flight has landed (the list is `Outdated`).
+    pub(crate) fn refetch_blocked_senders(&mut self) -> Result<(), ConnectSendError> {
+        if self.session.settings.blocked_senders.is_outdated() {
+            self.ask_blocked_page(0)?;
         }
         Ok(())
     }
 
     /// Slice S3: unblock a user (`setMessageSenderBlockList` with a null
     /// block list, schema 1.8.67, :14492 — TGX `Tdlib.unblockSender`).
-    /// Applied optimistically: the user leaves the list at send time.
+    /// Applied optimistically: the user leaves the list at send time. Only
+    /// the Privacy page unblocks, so its note waits for the answer.
     pub fn unblock_sender(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let extra = self.session.request(
-            RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
-                user_id,
-                block: false,
-            }),
-            None,
-        );
-        if let Err(err) = self
-            .sender
-            .send_json(&set_message_sender_block_list(extra, user_id, false))
-        {
-            self.session.requests.take(extra);
-            self.session
-                .settings
-                .blocked_senders
-                .fail("The unblock request was not sent.");
-            return Err(err);
-        }
-        if let Some(list) = self.session.settings.blocked_senders.data_mut() {
-            list.retain(|id| *id != user_id);
-            self.session.settings.blocked_total =
-                self.session.settings.blocked_total.saturating_sub(1);
-        }
-        Ok(extra)
+        self.change_block_list(user_id, false, BlockOrigin::PrivacyPage)
     }
 
     /// Slice S3: block a user (`setMessageSenderBlockList` with
     /// `blockListMain`, schema 1.8.67, :14492). Applied optimistically:
-    /// the user joins the list at send time.
-    pub fn block_sender(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
+    /// the user joins the list at send time. `origin` says who asked: only
+    /// the Privacy page's own block starts the block-list note's wait.
+    pub fn block_sender(
+        &mut self,
+        user_id: i64,
+        origin: BlockOrigin,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.change_block_list(user_id, true, origin)
+    }
+
+    fn change_block_list(
+        &mut self,
+        user_id: i64,
+        block: bool,
+        origin: BlockOrigin,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
-            RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
-                user_id,
-                block: true,
-            }),
+            RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { user_id, block }),
             None,
         );
-        if let Err(err) = self
-            .sender
-            .send_json(&set_message_sender_block_list(extra, user_id, true))
-        {
+        let json = set_message_sender_block_list(extra, user_id, block);
+        if origin == BlockOrigin::PrivacyPage {
+            let refusal = if block {
+                "The block request was not sent."
+            } else {
+                "The unblock request was not sent."
+            };
+            self.send_noted(NoteSlot::Block, extra, refusal, &json)?;
+        } else if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .blocked_senders
-                .fail("The block request was not sent.");
             return Err(err);
         }
-        let blocked = &mut self.session.settings.blocked_senders;
-        blocked.insert_data_if_missing(Vec::new);
-        if let Some(list) = blocked.data_mut()
-            && !list.contains(&user_id)
-        {
-            list.push(user_id);
-            self.session.settings.blocked_total =
-                self.session.settings.blocked_total.saturating_add(1);
-        }
+        self.session
+            .settings
+            .block_change_sent(extra, user_id, block);
         Ok(extra)
     }
 }

@@ -48,70 +48,78 @@ pub(crate) enum Peek {
     },
 }
 
+/// [`Peek`] with the redraw task of the leave grace inside `Leaving`, so
+/// the task is dropped with the stage.
+#[derive(Debug)]
+enum Pointer {
+    Off,
+    Hovering,
+    Leaving { since: Instant, _wake: Task<()> },
+}
+
+impl Pointer {
+    fn view(&self) -> Peek {
+        match self {
+            Pointer::Off => Peek::Off,
+            Pointer::Hovering => Peek::Hovering,
+            Pointer::Leaving { since, .. } => Peek::Leaving { since: *since },
+        }
+    }
+}
+
 /// The column's preference. The pointer only peeks at a hidden column, so
 /// the peek lives in the hidden variant: showing the column ends it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 enum Mode {
     Docked,
-    Hidden(Peek),
+    Hidden(Pointer),
 }
 
 #[derive(Debug)]
 pub(crate) struct SidebarReveal {
     mode: Mode,
-    /// The redraw after the leave grace. It lives only in `Leaving`: every
-    /// change of mode drops it.
-    wake: Wake,
     docked: Glide,
     peek: Glide,
-}
-
-#[derive(Default)]
-enum Wake {
-    #[default]
-    Idle,
-    Waiting {
-        _task: Task<()>,
-    },
-}
-
-impl std::fmt::Debug for Wake {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Wake::Idle => "Idle",
-            Wake::Waiting { .. } => "Waiting",
-        })
-    }
+    /// A test holds the clock still and moves it by hand, so a slow
+    /// machine cannot end a grace period or a slide early.
+    #[cfg(test)]
+    pinned: Option<Instant>,
 }
 
 impl SidebarReveal {
     pub(crate) fn new(hidden: bool, now: Instant) -> Self {
         Self {
-            wake: Wake::Idle,
             mode: if hidden {
-                Mode::Hidden(Peek::Off)
+                Mode::Hidden(Pointer::Off)
             } else {
                 Mode::Docked
             },
             docked: Glide::settled(if hidden { 0. } else { 1. }, now, ease_out_cubic),
             peek: Glide::settled(0., now, ease_out_cubic),
+            #[cfg(test)]
+            pinned: None,
         }
     }
 
-    /// The one place the mode changes: the grace wake belongs to the
-    /// `Leaving` it was made for, so it goes with any change.
-    fn set_mode(&mut self, mode: Mode) {
-        self.mode = mode;
-        self.wake = Wake::Idle;
+    /// The instant the column's motion is measured against: the wall
+    /// clock, or in a test the clock it holds.
+    pub(crate) fn now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some(pinned) = self.pinned {
+            return pinned;
+        }
+        Instant::now()
     }
 
-    /// Keep the redraw after the leave grace: it runs while the pointer is
-    /// away and is dropped with it (a pointer back, Escape, or the grace
-    /// over). A wake for a mode that is no longer `Leaving` is dropped.
-    pub(crate) fn hold_wake(&mut self, task: Task<()>) {
-        if matches!(self.mode, Mode::Hidden(Peek::Leaving { .. })) {
-            self.wake = Wake::Waiting { _task: task };
-        }
+    /// Hold the clock at now; it moves only through [`Self::advance`].
+    #[cfg(test)]
+    pub(crate) fn pin(&mut self) {
+        self.pinned = Some(Instant::now());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn advance(&mut self, by: Duration) {
+        self.pinned = self.pinned.map(|at| at + by);
     }
 
     /// The stored preference: the user hid the column.
@@ -125,11 +133,11 @@ impl SidebarReveal {
         if self.hidden() == hidden {
             return;
         }
-        self.set_mode(if hidden {
-            Mode::Hidden(Peek::Off)
+        self.mode = if hidden {
+            Mode::Hidden(Pointer::Off)
         } else {
             Mode::Docked
-        });
+        };
         if !hidden {
             let peeked = self.peek.value(now);
             if peeked > self.docked.value(now) {
@@ -144,38 +152,42 @@ impl SidebarReveal {
     /// The pointer reached the reveal edge or moved over the peeking
     /// column. Returns whether anything changed.
     pub(crate) fn pointer_entered(&mut self, animate: bool, now: Instant) -> bool {
-        let Mode::Hidden(pointer) = self.mode else {
+        let Mode::Hidden(pointer) = &self.mode else {
             return false;
         };
-        if pointer == Peek::Hovering {
-            return false;
-        }
-        if pointer == Peek::Off && self.docked.value(now) > 0. {
+        match pointer {
+            Pointer::Hovering => return false,
             // Still sliding out after Hide: no peek on top of it.
-            return false;
+            Pointer::Off if self.docked.value(now) > 0. => return false,
+            Pointer::Off | Pointer::Leaving { .. } => {}
         }
-        self.set_mode(Mode::Hidden(Peek::Hovering));
+        self.mode = Mode::Hidden(Pointer::Hovering);
         self.peek.go(1., SLIDE_DURATION, animate, now);
         true
     }
 
     /// The pointer moved off the peeking column. Returns whether the grace
-    /// period started (the caller redraws once it is over).
-    pub(crate) fn pointer_left(&mut self, now: Instant) -> bool {
-        if self.mode != Mode::Hidden(Peek::Hovering) {
+    /// period started: `wake` then makes the redraw for when it is over,
+    /// and the stage holds it (a pointer back, Escape or the grace over
+    /// drops it).
+    pub(crate) fn pointer_left(&mut self, now: Instant, wake: impl FnOnce() -> Task<()>) -> bool {
+        if !matches!(self.mode, Mode::Hidden(Pointer::Hovering)) {
             return false;
         }
-        self.set_mode(Mode::Hidden(Peek::Leaving { since: now }));
+        self.mode = Mode::Hidden(Pointer::Leaving {
+            since: now,
+            _wake: wake(),
+        });
         true
     }
 
     /// Escape: slide the peeking column out now. Returns whether it peeked.
     pub(crate) fn dismiss(&mut self, animate: bool, now: Instant) -> bool {
         match self.mode {
-            Mode::Hidden(Peek::Hovering | Peek::Leaving { .. }) => {}
-            Mode::Hidden(Peek::Off) | Mode::Docked => return false,
+            Mode::Hidden(Pointer::Hovering | Pointer::Leaving { .. }) => {}
+            Mode::Hidden(Pointer::Off) | Mode::Docked => return false,
         }
-        self.set_mode(Mode::Hidden(Peek::Off));
+        self.mode = Mode::Hidden(Pointer::Off);
         self.peek.go(0., SLIDE_DURATION, animate, now);
         true
     }
@@ -184,18 +196,18 @@ impl SidebarReveal {
     /// out, unless something opened from it still needs it (`held`: its
     /// context menu, or its search field has the keyboard).
     pub(crate) fn settle(&mut self, held: bool, animate: bool, now: Instant) {
-        if let Mode::Hidden(Peek::Leaving { since }) = self.mode
+        if let Mode::Hidden(Pointer::Leaving { since, .. }) = &self.mode
             && !held
-            && now.saturating_duration_since(since) >= LEAVE_GRACE
+            && now.saturating_duration_since(*since) >= LEAVE_GRACE
         {
-            self.set_mode(Mode::Hidden(Peek::Off));
+            self.mode = Mode::Hidden(Pointer::Off);
             self.peek.go(0., SLIDE_DURATION, animate, now);
         }
     }
 
     pub(crate) fn pointer(&self) -> Peek {
-        match self.mode {
-            Mode::Hidden(pointer) => pointer,
+        match &self.mode {
+            Mode::Hidden(pointer) => pointer.view(),
             Mode::Docked => Peek::Off,
         }
     }
@@ -219,6 +231,7 @@ impl SidebarReveal {
 #[cfg(test)]
 mod tests {
     use super::{LEAVE_GRACE, Peek, SLIDE_DURATION, SidebarReveal, ease_out_cubic};
+    use gpui_kit::Task;
     use std::time::{Duration, Instant};
 
     const HALF: Duration = Duration::from_millis(100);
@@ -285,8 +298,11 @@ mod tests {
         let mut reveal = SidebarReveal::new(true, t0);
         reveal.pointer_entered(true, t0);
         let t1 = t0 + SLIDE_DURATION;
-        assert!(reveal.pointer_left(t1));
-        assert!(!reveal.pointer_left(t1), "one grace per leave");
+        assert!(reveal.pointer_left(t1, || Task::ready(())));
+        assert!(
+            !reveal.pointer_left(t1, || Task::ready(())),
+            "one grace per leave"
+        );
         reveal.settle(false, true, t1 + LEAVE_GRACE / 2);
         assert_eq!(reveal.pointer(), Peek::Leaving { since: t1 });
         // Back over the column within the grace.
@@ -295,7 +311,7 @@ mod tests {
         assert_eq!(reveal.pointer(), Peek::Hovering);
         // Away for good.
         let t2 = t1 + LEAVE_GRACE * 2;
-        reveal.pointer_left(t2);
+        reveal.pointer_left(t2, || Task::ready(()));
         reveal.settle(false, true, t2 + LEAVE_GRACE);
         assert_eq!(reveal.pointer(), Peek::Off);
         assert_eq!(reveal.peek(t2 + LEAVE_GRACE + SLIDE_DURATION), 0.);
@@ -306,7 +322,7 @@ mod tests {
         let t0 = Instant::now();
         let mut reveal = SidebarReveal::new(true, t0);
         reveal.pointer_entered(false, t0);
-        reveal.pointer_left(t0);
+        reveal.pointer_left(t0, || Task::ready(()));
         let late = t0 + LEAVE_GRACE * 4;
         reveal.settle(true, false, late);
         assert_eq!(reveal.peek(late), 1.);

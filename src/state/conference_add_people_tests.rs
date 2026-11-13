@@ -166,7 +166,15 @@ fn the_empty_texts_follow_the_contacts_and_the_search() {
     let mut session = session();
     let empty =
         |session: &Session, query: &str| session.add_people_view(PEER, &[], &[], query).empty;
-    assert_eq!(empty(&session, ""), Some(AddPeopleEmpty::ContactsLoading));
+    let contacts = |session: &Session| session.add_people_view(PEER, &[], &[], "").contacts;
+    assert_eq!(empty(&session, ""), None);
+    assert_eq!(contacts(&session), ContactsView::Loading);
+    session
+        .users_state
+        .contacts
+        .fail_dropping_data("could not send the request");
+    assert_eq!(empty(&session, ""), None);
+    assert_eq!(contacts(&session), ContactsView::Failed);
     session.users_state.contacts = crate::state::fetch::Fetch::Ready(Vec::new());
     assert_eq!(empty(&session, ""), Some(AddPeopleEmpty::NoContacts));
     assert_eq!(empty(&session, "zed"), Some(AddPeopleEmpty::NoResults));
@@ -257,4 +265,36 @@ fn the_other_side_is_listed_already_in_even_when_not_a_contact() {
         ids(&session.add_people_view(PEER, &[], &[], "dan").rows),
         [51, 50]
     );
+}
+
+/// In a real call the other side is a row, so the box is never "empty",
+/// and the contacts' own state still shows under it.
+#[test]
+fn the_contacts_state_shows_under_the_peer_row() {
+    let mut session = session();
+    session.my_user_id = Some(1);
+    user(&mut session, PEER, "Noa", "Peretz", 800, "userTypeRegular");
+    let view = |session: &Session, query: &str| session.add_people_view(PEER, &[], &[], query);
+    let loading = view(&session, "");
+    assert_eq!(ids(&loading.rows), vec![PEER], "the peer is listed");
+    assert_eq!(loading.empty, None);
+    assert_eq!(loading.contacts, ContactsView::Loading);
+    session
+        .users_state
+        .contacts
+        .fail_dropping_data("could not send the request");
+    assert_eq!(view(&session, "").contacts, ContactsView::Failed);
+    assert_eq!(
+        view(&session, "noa").contacts,
+        ContactsView::Ready,
+        "a search is not the contacts' business"
+    );
+    // Retry: the ask leaves Failed.
+    session
+        .users_state
+        .contacts
+        .begin_with(crate::ids::RequestId(9_999));
+    assert_eq!(view(&session, "").contacts, ContactsView::Loading);
+    session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![PEER]);
+    assert_eq!(view(&session, "").contacts, ContactsView::Ready);
 }

@@ -23,7 +23,7 @@ fn parses_post_info_with_star_price() {
         Some(SuggestedPostInfo {
             price: Some(SuggestedPrice::Stars(250)),
             send_date: 1_800_000_000,
-            state: SuggestedPostState::Pending,
+            state: SuggestedPostState::Proposed,
             can_be_approved: true,
             can_be_declined: true,
         })

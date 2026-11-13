@@ -80,7 +80,7 @@ fn the_grid_has_more_while_the_archive_is_not_fully_loaded(cx: &mut TestAppConte
                 quill::story_page::ArchivedStories {
                     story_ids: vec![1, 2],
                     total_count: 5,
-                    next_from_story_id: Some(1),
+                    page: quill::story_page::StoryPaging::More { next: 1 },
                 },
             );
         }

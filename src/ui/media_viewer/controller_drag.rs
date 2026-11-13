@@ -98,6 +98,7 @@ impl QuillApp {
                     let _ = up_view.update(cx, |this, cx| {
                         if this.viewer.controller.release() {
                             this.notify_viewer_panel(cx);
+                            this.viewer_note_activity(cx);
                         }
                     });
                 });

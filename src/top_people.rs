@@ -74,7 +74,7 @@ pub fn top_people(session: &Session) -> Vec<TopPerson> {
         return Vec::new();
     }
     search
-        .top_chats
+        .top_chat_ids()
         .iter()
         .filter_map(|id| {
             let chat = session.chats.get(&id.0)?;

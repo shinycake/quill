@@ -169,9 +169,6 @@ pub enum SettingsPurpose {
     /// `messageSenders`.
     GetBlockedSenders {
         offset: i32,
-        /// The list this page extends (`SettingsState::blocked_generation`
-        /// when it was asked); a page of an older list is dropped.
-        generation: u32,
     },
     /// Slice S3: `setMessageSenderBlockList`. Response is `ok`; an
     /// unblock is applied optimistically at send time.
@@ -278,7 +275,6 @@ pub enum SettingsPurpose {
     /// The chatbot lookup: `searchPublicChat` (answer `chat`) or
     /// `searchChatsOnServer` / `searchPublicChats` (answer `chats`).
     LookupBusinessBot {
-        generation: u32,
         part: BotLookupPart,
     },
     /// `toggleHasSponsoredMessagesEnabled`. Response is `ok`; the value

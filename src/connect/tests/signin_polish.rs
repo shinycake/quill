@@ -136,6 +136,29 @@ fn countries_and_default_code_are_fetched_once_and_stored() {
     );
 }
 
+/// Sweep r4-08 (15-001): opening a country box asks through `retry_countries`,
+/// which only asks an idle or failed list, so a loaded list sends nothing.
+#[test]
+fn opening_a_country_box_does_not_ask_a_loaded_list_again() {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let countries = driver.fetch_countries().unwrap().unwrap();
+    ingest(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"countries","@extra":countries.as_extra(),"countries":[
+            {"@type":"countryInfo","country_code":"US","name":"United States","english_name":"United States","flag_emoji":"US","is_hidden":false,"calling_codes":["1"]}
+        ]}),
+    );
+    let sent = recorder.snapshot().len();
+    assert_eq!(driver.retry_countries().unwrap(), None, "loaded: no ask");
+    assert_eq!(recorder.snapshot().len(), sent, "and nothing went out");
+}
+
 #[test]
 fn a_failed_country_list_is_asked_again_only_when_the_picker_retries() {
     let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());

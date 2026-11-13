@@ -700,6 +700,7 @@ fn photo_in_tray(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     app.update(cx, |app, _| {
         app.update_pending_attachments(|tray| {
             tray.push(ComposerAttachment {
+                id: Default::default(),
                 path: std::env::temp_dir().join("sweep-tray.jpg"),
                 kind: AttachmentKind::Photo,
                 file_name: "sweep-tray.jpg".into(),
@@ -838,7 +839,8 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
         app.read_with(vcx, |app, _| app.chat_ui.sent_text.clone()),
         SentText::None
     );
-    // An accepted send lets the text go; text typed since is not replaced.
+    // An accepted send lets the text go; a refused one is put in front of
+    // text typed since, so neither is lost (Sweep r4 14-004).
     set_field(&app, vcx, "");
     sent(&app, vcx);
     vcx.update(|window, cx| {
@@ -854,7 +856,49 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
             app.apply_sent_text_answer(&Answer::Failed("FLOOD".into()), window, cx)
         })
     });
-    assert_eq!(field(&app, vcx), "typed meanwhile");
+    assert_eq!(field(&app, vcx), "# Title\nbody\ntyped meanwhile");
+}
+
+/// A rich send refused while another message is being edited goes in front
+/// of the draft set aside for the edit, so cancelling the edit gives the
+/// text back instead of losing it to the next keystroke.
+#[gpui_kit::test]
+fn a_refused_send_during_an_edit_returns_with_the_stashed_draft(cx: &mut TestAppContext) {
+    use crate::ui::composer::SentText;
+    use quill::composer::{ComposerEdit, ComposerEditKind};
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    app.update(vcx, |app, cx| {
+        let edit = ComposerEdit {
+            chat_id: GROUP,
+            message_id: MessageId(20),
+            kind: ComposerEditKind::Text,
+            scheduled: false,
+            caption_above: false,
+            media_edit: Default::default(),
+            link_preview: Default::default(),
+        };
+        app.chat_ui.enter_edit(edit, String::new(), None);
+        app.chat_ui.sent_text = SentText::Sent {
+            request: RequestId(9),
+            markup: "A".into(),
+            slot: None,
+        };
+        cx.notify();
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_sent_text_answer(&Answer::Failed("FLOOD".into()), window, cx)
+        })
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.chat_ui.stashed_draft(), Some("A"));
+    });
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.clear_edit(window, cx)));
+    assert_eq!(field(&app, vcx), "A", "cancelling the edit restores it");
 }
 
 /// Sweep 08-149/150: a refused rich send keeps no draft clear, so a later
@@ -1057,7 +1101,12 @@ fn a_one_time_keyboard_goes_only_when_its_text_went(cx: &mut TestAppContext) {
     open_chat(&app, vcx, GROUP);
     let dismissed = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId| {
         app.read_with(vcx, |app, _| {
-            app.message_ui.dismissed_keyboards.contains(&(chat.0, 1))
+            app.message_ui
+                .dismissed_keyboards
+                .contains(&quill::ids::ChatMessage::new(
+                    chat,
+                    quill::ids::MessageId(1),
+                ))
         })
     };
     // Held back by slow mode: the keyboard stays for another press.
@@ -1082,16 +1131,16 @@ fn a_one_time_keyboard_goes_only_when_its_text_went(cx: &mut TestAppContext) {
 /// keeps the typed token in the field; one that goes reports `Sent`.
 #[gpui_kit::test]
 fn a_menu_command_says_whether_it_went(cx: &mut TestAppContext) {
-    use crate::ui::composer::send_bot_command::MenuSend;
+    use crate::ui::composer::send_bot_command::MenuSendOutcome;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let slow = app.update(vcx, |app, _| waiting_group(app));
     open_chat(&app, vcx, slow);
     let refused = app.update(vcx, |app, cx| app.send_menu_command("/start", cx));
-    assert_eq!(refused, MenuSend::Refused, "slow mode holds it back");
+    assert_eq!(refused, MenuSendOutcome::Refused, "slow mode holds it back");
     open_chat(&app, vcx, GROUP);
     let sent = app.update(vcx, |app, cx| app.send_menu_command("/start", cx));
-    assert_eq!(sent, MenuSend::Sent);
+    assert_eq!(sent, MenuSendOutcome::Sent);
 }
 
 /// Sweep 09-112: a forced reply waits for the window that shows its chat.
@@ -1192,10 +1241,7 @@ fn a_stale_render_does_not_land_in_a_new_edit_of_the_same_message(cx: &mut TestA
     let vcx = &mut vcx;
     open_chat(&app, vcx, GROUP);
     begin_edit(&app, vcx);
-    let (chat, message) = app.read_with(vcx, |app, _| {
-        let edit = app.chat_ui.pending_edit().expect("editing");
-        (edit.chat_id, edit.message_id)
-    });
+    let edit = app.read_with(vcx, |app, _| app.chat_ui.edit_id().expect("editing"));
     let as_photo = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.update(vcx, |app, _| {
             if let Some(edit) = app.chat_ui.pending_edit_mut() {
@@ -1208,7 +1254,7 @@ fn a_stale_render_does_not_land_in_a_new_edit_of_the_same_message(cx: &mut TestA
         app.update(cx, |app, cx| {
             let pixels = image::RgbaImage::from_pixel(47, 13, image::Rgba([1, 2, 3, 255]));
             app.viewer.photo_editor.open(PhotoEditor::new(
-                EditorPurpose::MessageEdit { chat, message },
+                EditorPurpose::MessageEdit { edit },
                 pixels,
             ));
             app.save_photo_editor(window, cx);
@@ -1225,4 +1271,84 @@ fn a_stale_render_does_not_land_in_a_new_edit_of_the_same_message(cx: &mut TestA
             .map(|replacement| replacement.path.clone())
     });
     assert_eq!(staged, None, "the stale render is not the new edit's photo");
+}
+
+/// Sweep r4-08 round 3: Done of the editor opened for one edit does nothing
+/// once that edit ended and a new edit of the same message began.
+#[gpui_kit::test]
+fn the_editors_done_is_not_taken_by_a_later_edit_of_the_same_message(cx: &mut TestAppContext) {
+    use crate::ui::photo_editor::{EditorPurpose, PhotoEditor};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    begin_edit(&app, vcx);
+    let first = app.read_with(vcx, |app, _| app.chat_ui.edit_id().expect("editing"));
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.clear_edit(window, cx)));
+    begin_edit(&app, vcx);
+    app.update(vcx, |app, _| {
+        if let Some(edit) = app.chat_ui.pending_edit_mut() {
+            edit.media_edit.media = Some(quill::composer::EditableMedia::Photo);
+        }
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            let pixels = image::RgbaImage::from_pixel(47, 13, image::Rgba([1, 2, 3, 255]));
+            app.viewer.photo_editor.open(PhotoEditor::new(
+                EditorPurpose::MessageEdit { edit: first },
+                pixels,
+            ));
+            app.save_photo_editor(window, cx);
+        });
+    });
+    app.read_with(vcx, |app, _| {
+        let edit = app.chat_ui.pending_edit().expect("editing");
+        assert!(
+            matches!(edit.media_edit.render, quill::composer::EditRender::Idle),
+            "no render was started for the new edit"
+        );
+    });
+}
+
+/// A paid menu command that goes out after Pay clears the reply bar and
+/// the typed token, and closes the menu, as a free chat's send does. A
+/// reply the user changed meanwhile is not cleared.
+#[gpui_kit::test]
+fn a_released_menu_command_clears_its_reply_and_token(cx: &mut TestAppContext) {
+    use crate::ui::composer::send_bot_command::{MenuRelease, MenuToken};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    let release = |reply: ComposerReplyTo| MenuRelease {
+        reply: Some(reply),
+        token: Some(MenuToken {
+            range: 0..3,
+            text: "/st".into(),
+        }),
+    };
+    set_field(&app, vcx, "/st");
+    let reply = ComposerReplyTo::new(GROUP, MessageId(10));
+    app.update(vcx, |app, _| app.chat_ui.set_reply(Some(reply.clone())));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.chat_ui.command_menu = crate::ui::composer::CommandMenu::Typed { selected: 0 };
+            app.apply_menu_release(release(reply.clone()), window, cx)
+        })
+    });
+    app.read_with(vcx, |app, cx| {
+        assert!(app.chat_ui.reply().is_none(), "the reply bar goes");
+        assert!(app.composer.read(cx).value().is_empty(), "the token goes");
+        assert!(!app.chat_ui.command_menu.is_open(), "the menu closes");
+    });
+    // The reply is another message by the time Pay goes through: it stays.
+    set_field(&app, vcx, "/st");
+    let other = ComposerReplyTo::new(GROUP, MessageId(11));
+    app.update(vcx, |app, _| app.chat_ui.set_reply(Some(other.clone())));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_menu_release(release(reply.clone()), window, cx)
+        })
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.chat_ui.reply(), Some(&other));
+    });
 }

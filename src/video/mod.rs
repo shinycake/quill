@@ -379,36 +379,92 @@ pub struct ViewerFrames {
 
 /// A cancelable ffmpeg extraction, shared by the worker that runs it and
 /// the UI that may abandon it (viewer closed or stepped). One value under
-/// one lock, so a cancel never races the child's publication.
+/// one lock, so a cancel never races the child's publication. The worker
+/// owns the child and blocks waiting for it; cancel only needs its kill.
 #[derive(Default)]
-pub struct Extraction(std::sync::Mutex<ExtractionStage>);
+pub struct Extraction {
+    stage: std::sync::Mutex<ExtractionStage>,
+    /// Signalled when the child is published (tests wait on it).
+    published: std::sync::Condvar,
+}
 
 #[derive(Default)]
 enum ExtractionStage {
-    /// Not started, or the worker has not published its child yet.
+    /// Not started, or the worker has not published its child yet, or it
+    /// ended.
     #[default]
-    Starting,
-    Running(std::process::Child),
+    NoChild,
+    /// The worker published its child and waits for it; `cancel` kills it.
+    /// The worker leaves this stage before it reaps the child, so the kill
+    /// never reaches a process id that was given away.
+    Spawned(ChildKill),
     /// Abandoned: a child still to be published is killed on arrival, and
     /// the worker reports the cancellation.
     Cancelled,
 }
 
-impl Extraction {
-    /// A poisoned lock still guards the child: take it back rather than
-    /// leave ffmpeg running unreaped.
-    fn stage(&self) -> std::sync::MutexGuard<'_, ExtractionStage> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner())
+/// What it takes to kill a running child from another thread than the one
+/// waiting on it.
+#[derive(Clone, Copy)]
+struct ChildKill {
+    #[cfg(unix)]
+    pid: u32,
+    #[cfg(windows)]
+    handle: usize,
+}
+
+impl ChildKill {
+    fn of(child: &std::process::Child) -> Self {
+        #[cfg(windows)]
+        let handle = {
+            use std::os::windows::io::AsRawHandle;
+            child.as_raw_handle() as usize
+        };
+        Self {
+            #[cfg(unix)]
+            pid: child.id(),
+            #[cfg(windows)]
+            handle,
+        }
     }
 
-    /// Abandon the run: a running ffmpeg is killed and reaped.
+    /// Kills the child. Only called while the extraction's stage is
+    /// `Spawned`: the child is running or exited and not yet reaped, so its
+    /// id (or handle) is still its own.
+    fn kill(self) {
+        #[cfg(unix)]
+        if let Ok(pid) = i32::try_from(self.pid) {
+            // SAFETY: a plain signal to a child of ours that is not yet
+            // reaped (see above), so the pid cannot belong to another process.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+        #[cfg(windows)]
+        // SAFETY: the process handle stays valid while the worker holds the
+        // `Child`, which it does until after it leaves `Spawned`.
+        unsafe {
+            windows_sys::Win32::System::Threading::TerminateProcess(
+                self.handle as windows_sys::Win32::Foundation::HANDLE,
+                1,
+            );
+        }
+    }
+}
+
+impl Extraction {
+    /// A poisoned lock still guards the stage: take it back rather than
+    /// leave ffmpeg running.
+    fn stage(&self) -> std::sync::MutexGuard<'_, ExtractionStage> {
+        self.stage.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Abandon the run: a running ffmpeg is killed, and the worker that
+    /// waits on it reaps it and reports the cancellation.
     pub fn cancel(&self) {
         let mut stage = self.stage();
-        if let ExtractionStage::Running(mut child) =
+        if let ExtractionStage::Spawned(kill) =
             std::mem::replace(&mut *stage, ExtractionStage::Cancelled)
         {
-            let _ = child.kill();
-            let _ = child.wait();
+            kill.kill();
         }
     }
 
@@ -419,11 +475,41 @@ impl Extraction {
     /// An ffmpeg is running (tests).
     #[cfg(test)]
     fn is_running(&self) -> bool {
-        matches!(*self.stage(), ExtractionStage::Running(_))
+        matches!(*self.stage(), ExtractionStage::Spawned(_))
+    }
+
+    /// Blocks until the child is published or the run is cancelled (tests).
+    #[cfg(test)]
+    fn wait_until_running(&self) -> bool {
+        let stage = self.stage();
+        let stage = self
+            .published
+            .wait_while(stage, |stage| matches!(stage, ExtractionStage::NoChild))
+            .unwrap_or_else(|p| p.into_inner());
+        matches!(*stage, ExtractionStage::Spawned(_))
     }
 }
 
 const EXTRACTION_CANCELLED: &str = "ffmpeg extraction was cancelled";
+
+/// Blocks until `child` has exited, without reaping it (so its id stays its
+/// own until the caller reaps).
+#[cfg(unix)]
+fn wait_until_exited(child: &std::process::Child) {
+    let pid: libc::id_t = child.id();
+    loop {
+        // SAFETY: `info` is plain data the call fills in, and the pid is a
+        // child of ours that has not been reaped.
+        let waited = unsafe {
+            let mut info: libc::siginfo_t = std::mem::zeroed();
+            libc::waitid(libc::P_PID, pid, &mut info, libc::WEXITED | libc::WNOWAIT)
+        };
+        if waited == 0 || std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+        {
+            return;
+        }
+    }
+}
 
 fn wait_for_cancelable_child(
     command: &mut Command,
@@ -436,9 +522,8 @@ fn wait_for_cancelable_child(
         eprintln!("quill: could not start ffmpeg: {err}");
         crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_PLAYBACK_NEEDS_FFMPEG).to_string()
     })?;
-    // Publish the running child so the UI can kill an abandoned
-    // extraction. The worker polls `try_wait` instead of blocking in
-    // `wait` so it never holds the lock while the UI killer needs it.
+    // Publish how to kill the running child so the UI can abandon the
+    // extraction; this thread keeps the child and blocks waiting for it.
     {
         let mut stage = extraction.stage();
         if matches!(*stage, ExtractionStage::Cancelled) {
@@ -449,33 +534,41 @@ fn wait_for_cancelable_child(
             let _ = child.wait();
             return Err(EXTRACTION_CANCELLED.to_string());
         }
-        *stage = ExtractionStage::Running(child);
+        *stage = ExtractionStage::Spawned(ChildKill::of(&child));
+        extraction.published.notify_all();
     }
-    loop {
-        let mut stage = extraction.stage();
-        let ExtractionStage::Running(child) = &mut *stage else {
-            // Cancelled: the killer took the child and reaped it. (The UI
-            // drops stale completions by epoch instead of showing an
-            // error.)
-            return Err(EXTRACTION_CANCELLED.to_string());
-        };
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                *stage = ExtractionStage::Starting;
-                return Ok(status);
-            }
-            Ok(None) => {}
-            Err(err) => {
-                // The child cannot be polled: stop it and reap it here.
-                let _ = child.kill();
-                let _ = child.wait();
-                *stage = ExtractionStage::Starting;
-                return Err(err.to_string());
-            }
-        }
-        drop(stage);
-        std::thread::sleep(std::time::Duration::from_millis(50));
+    // Wait for the exit without reaping (unix), so a kill from the UI stays
+    // safe until the stage is left below.
+    #[cfg(unix)]
+    let (cancelled, waited) = {
+        wait_until_exited(&child);
+        (leave_spawned(extraction), child.wait())
+    };
+    // Windows has no wait that keeps the handle valid and reaps later: the
+    // handle stays valid until `child` drops, so wait, then leave.
+    #[cfg(windows)]
+    let (cancelled, waited) = {
+        let waited = child.wait();
+        (leave_spawned(extraction), waited)
+    };
+    if cancelled {
+        // Cancelled: the killer's signal ended the child and it is reaped
+        // here. (The UI drops stale completions by epoch instead of showing
+        // an error.)
+        return Err(EXTRACTION_CANCELLED.to_string());
     }
+    waited.map_err(|err| err.to_string())
+}
+
+/// The worker is done with its child: the stage goes back to `NoChild`,
+/// unless the run was cancelled meanwhile (reported as `true`).
+fn leave_spawned(extraction: &Extraction) -> bool {
+    let mut stage = extraction.stage();
+    if matches!(*stage, ExtractionStage::Cancelled) {
+        return true;
+    }
+    *stage = ExtractionStage::NoChild;
+    false
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -664,6 +757,11 @@ impl VideoNoteCapture {
             .elapsed()
             .as_secs()
             .min(u64::from(i32::MAX as u32)) as i32
+    }
+
+    /// How long until the capture reaches the 60 s limit.
+    pub fn time_left(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(ROUND_MAX_SECS as u64).saturating_sub(self.started.elapsed())
     }
 
     /// Recording progress toward the 60 s limit, `0.0..=1.0`.

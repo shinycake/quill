@@ -351,7 +351,7 @@ fn adding_members_marks_the_member_list_stale() {
             total_count: 0,
         },
     );
-    let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
+    let extra = member_request(&mut session, RequestPurpose::AddChatMember, ChatId(13));
     apply_json(
         &mut session,
         &seq,
@@ -795,8 +795,7 @@ fn g2_chat_boost_status_cached() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
     let fetch = session.groups.chat_boost_status.entry(13).or_default();
-    fetch.begin();
-    fetch.sent(extra);
+    fetch.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -959,8 +958,7 @@ fn g2_welcome_fetch_error_marks_failed() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::LoadChatWelcomeMessages, Some(ChatId(13)));
     let pack = session.groups.welcome_messages.entry(13).or_default();
-    pack.begin();
-    pack.sent(extra);
+    pack.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -1187,7 +1185,12 @@ fn a_refusal_the_edit_box_has_no_field_for_still_fails_its_save() {
     }
     assert!(session.requests.failure(switch).is_some());
     assert!(session.requests.failure(link).is_some());
-    let error = session.groups.info_edit_errors.get(&13).expect("an error");
+    let error = session
+        .groups
+        .info_edit_errors
+        .get(&13)
+        .and_then(|errors| errors.last())
+        .expect("an error");
     assert_eq!(error.field, GroupInfoField::Username);
 }
 

@@ -118,8 +118,7 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
         None,
     );
     if let Some(call) = session.calls.active_group_call.as_mut() {
-        call.join_as_options.begin();
-        call.join_as_options.sent(extra);
+        call.join_as_options.begin_with(extra);
     }
     apply_json(
         &mut session,
@@ -433,7 +432,7 @@ fn a_failed_rating_brings_the_card_back_and_an_ok_says_thanks() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, retry.as_extra()),
     );
-    assert_eq!(rating(&session), Some(CallRating::Sent));
+    assert_eq!(rating(&session), Some(CallRating::Rated));
 }
 
 #[test]
@@ -490,10 +489,63 @@ fn muting_someone_else_does_not_hold_back_your_own_row() {
     assert!(!call.is_muted_self, "your own row settles");
     // Your own toggle in flight holds the row back.
     session.requests.take(other);
-    session.request(mute(MessageSender::User { user_id: 1 }), None);
+    let own = session.request(mute(MessageSender::User { user_id: 1 }), None);
+    session.begin_participant_mute_toggle(555, MessageSender::User { user_id: 1 }, own);
     apply_json(&mut session, &seq, &sink, &own_row(true));
     let call = session.calls.active_group_call.as_ref().unwrap();
     assert!(!call.is_muted_self, "held while your own toggle is out");
+}
+
+#[test]
+fn a_mute_toggle_is_on_its_way_until_its_own_answer_or_error() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let mut call = ActiveGroupCall::fresh(555);
+    call.is_joined = true;
+    session.calls.active_group_call = Some(call);
+    let me = MessageSender::User { user_id: 1 };
+    let toggle = |session: &mut Session| {
+        let id = session.request(
+            RequestPurpose::Calls(CallsPurpose::ToggleGroupCallParticipantMute {
+                group_call_id: 555,
+                participant: me,
+            }),
+            None,
+        );
+        session.begin_participant_mute_toggle(555, me, id);
+        id
+    };
+    let on_its_way = |session: &Session| {
+        session
+            .calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.mute_toggles.contains_key(&me))
+    };
+    let older = toggle(&mut session);
+    let newer = toggle(&mut session);
+    // The older toggle answering does not end the newer one.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, older.0),
+    );
+    assert!(on_its_way(&session));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"no","@extra":"{}"}}"#,
+            newer.0
+        ),
+    );
+    assert!(!on_its_way(&session));
+    // The call ending takes the toggles with it.
+    toggle(&mut session);
+    session.calls.active_group_call = None;
+    assert!(!on_its_way(&session));
 }
 
 #[test]
@@ -501,9 +553,6 @@ fn join_as_failure_leaves_the_picker_out_and_is_not_asked_again() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.calls.active_group_call = Some(ActiveGroupCall::fresh(555));
-    if let Some(call) = session.calls.active_group_call.as_mut() {
-        call.join_as_options.begin();
-    }
     let extra = session.request(
         RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
             group_call_id: 555,
@@ -511,7 +560,7 @@ fn join_as_failure_leaves_the_picker_out_and_is_not_asked_again() {
         None,
     );
     if let Some(call) = session.calls.active_group_call.as_mut() {
-        call.join_as_options.sent(extra);
+        call.join_as_options.begin_with(extra);
     }
     apply_json(
         &mut session,

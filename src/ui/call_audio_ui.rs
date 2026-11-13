@@ -53,7 +53,8 @@ pub(crate) struct MicTest {
     /// When the meter last rendered; the watchdog stops a test whose
     /// section went away (another tab, another settings page).
     last_render: Cell<Instant>,
-    /// The watchdog that stops the test; dropped with the stage.
+    /// The next watchdog look; each look arms the next. Dropped with the
+    /// stage.
     _watchdog: Task<()>,
 }
 
@@ -213,38 +214,38 @@ impl QuillApp {
     }
 
     fn start_mic_test(&mut self, source: Box<dyn LevelSource + Send>, cx: &mut Context<Self>) {
-        // Stop the test, and close the microphone, once its meter stops
-        // rendering: the Calls section is gone, so nobody is watching.
-        // The test is the screen's: a switch drops it with its box.
-        let watchdog = self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(500))
-                    .await;
-                let keep = this
-                    .update(cx, |this, cx| match &this.call_boxes.mic_test {
-                        MicTestRun::On(test) => {
-                            if let Some(reason) = test.source.error() {
-                                this.call_boxes.mic_test = MicTestRun::Failed(reason);
-                                cx.notify();
-                                false
-                            } else if test.last_render.get().elapsed() < UNSEEN_STOP {
-                                true
-                            } else {
-                                this.call_boxes.mic_test = MicTestRun::Off;
-                                cx.notify();
-                                false
-                            }
-                        }
-                        _ => false,
-                    })
-                    .unwrap_or(false);
-                if !keep {
-                    break;
-                }
-            }
-        });
+        let watchdog = self.mic_watchdog(cx);
         self.call_boxes.mic_test = MicTestRun::On(MicTest::new(source, watchdog));
+    }
+
+    /// The next look at the running test, half a second away. The test
+    /// stops, and the microphone closes, once its meter stops rendering:
+    /// the Calls section is gone, so nobody is watching. The test is the
+    /// screen's: a switch drops it with its box.
+    fn mic_watchdog(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        self.spawn_screen(cx, async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(500))
+                .await;
+            let _ = this.update(cx, |this, cx| this.mic_watchdog_look(cx));
+        })
+    }
+
+    fn mic_watchdog_look(&mut self, cx: &mut Context<Self>) {
+        let MicTestRun::On(test) = &self.call_boxes.mic_test else {
+            return;
+        };
+        if let Some(reason) = test.source.error() {
+            self.call_boxes.mic_test = MicTestRun::Failed(reason);
+        } else if test.last_render.get().elapsed() < UNSEEN_STOP {
+            let next = self.mic_watchdog(cx);
+            if let MicTestRun::On(test) = &mut self.call_boxes.mic_test {
+                test._watchdog = next;
+            }
+        } else {
+            self.call_boxes.mic_test = MicTestRun::Off;
+        }
+        cx.notify();
     }
 
     /// Your own level and speaking state in the voice chat, from the

@@ -135,18 +135,61 @@ impl Api {
     }
 }
 
-/// The loaded decoder. Only a success is kept: a failed load (the library
-/// missing or still being installed) is tried again on the next sticker.
-fn api() -> Result<&'static Api, String> {
-    static API: Mutex<Option<&'static Api>> = Mutex::new(None);
-    let mut slot = API.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(api) = *slot {
-        return Ok(api);
+/// How long a failed lookup is remembered before the library is looked for
+/// again (it may be installed while Quill runs).
+const RETRY_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Where the loading of a value stands: not tried, loaded for good, or
+/// failed and not tried again before `retry_at`.
+enum LoadSlot<T> {
+    Untried,
+    Loaded(T),
+    Failed {
+        error: String,
+        retry_at: std::time::Instant,
+    },
+}
+
+impl<T: Copy> LoadSlot<T> {
+    /// The value, loading it with `load` when it was not tried or its
+    /// failure is old enough to try again.
+    fn get(
+        &mut self,
+        now: std::time::Instant,
+        load: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        match self {
+            Self::Loaded(value) => return Ok(*value),
+            Self::Failed { error, retry_at } if now < *retry_at => return Err(error.clone()),
+            Self::Untried | Self::Failed { .. } => {}
+        }
+        match load() {
+            Ok(value) => {
+                *self = Self::Loaded(value);
+                Ok(value)
+            }
+            Err(error) => {
+                *self = Self::Failed {
+                    error: error.clone(),
+                    retry_at: now + RETRY_AFTER,
+                };
+                Err(error)
+            }
+        }
     }
-    // The library stays loaded for the process, so the `Api` is leaked.
-    let api: &'static Api = Box::leak(Box::new(Api::load()?));
-    *slot = Some(api);
-    Ok(api)
+}
+
+/// The loaded decoder. A success is kept for good; a failed lookup (the
+/// library missing, or still being installed) is remembered for
+/// `RETRY_AFTER`, so a chat full of video stickers does not probe the disk
+/// and load libraries for each one.
+fn api() -> Result<&'static Api, String> {
+    static API: Mutex<LoadSlot<&'static Api>> = Mutex::new(LoadSlot::Untried);
+    let mut slot = API.lock().unwrap_or_else(|e| e.into_inner());
+    slot.get(std::time::Instant::now(), || {
+        // The library stays loaded for the process, so the `Api` is leaked.
+        Api::load().map(|api| &*Box::leak(Box::new(api)))
+    })
 }
 
 /// Why opening a sticker in process did not work.
@@ -283,5 +326,40 @@ impl Drop for StickerDecoder {
     fn drop(&mut self) {
         // SAFETY: closes the context exactly once.
         unsafe { (self.api.close)(self.ctx) };
+    }
+}
+
+#[cfg(test)]
+mod load_slot_tests {
+    use super::{LoadSlot, RETRY_AFTER};
+    use std::time::Instant;
+
+    #[test]
+    fn a_failed_lookup_is_not_repeated_until_the_wait_is_over() {
+        let t0 = Instant::now();
+        let mut slot: LoadSlot<u32> = LoadSlot::Untried;
+        let tries = std::cell::Cell::new(0);
+        let fail = |slot: &mut LoadSlot<u32>, now| {
+            slot.get(now, || {
+                tries.set(tries.get() + 1);
+                Err("missing".to_string())
+            })
+        };
+        assert_eq!(fail(&mut slot, t0), Err("missing".to_string()));
+        assert_eq!(fail(&mut slot, t0 + RETRY_AFTER / 2), Err("missing".into()));
+        assert_eq!(tries.get(), 1, "the failure is remembered");
+        assert!(fail(&mut slot, t0 + RETRY_AFTER).is_err());
+        assert_eq!(tries.get(), 2, "tried again once the wait is over");
+    }
+
+    #[test]
+    fn a_success_is_kept_for_good() {
+        let t0 = Instant::now();
+        let mut slot: LoadSlot<u32> = LoadSlot::Untried;
+        assert_eq!(slot.get(t0, || Ok(7)), Ok(7));
+        assert_eq!(
+            slot.get(t0 + RETRY_AFTER * 10, || Err("not asked".to_string())),
+            Ok(7)
+        );
     }
 }

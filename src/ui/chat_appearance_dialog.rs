@@ -26,7 +26,6 @@ use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_color::{name_swatches, profile_swatches};
-use quill::state::RequestPurpose;
 use quill::telegram::envelope::ChatKind;
 
 /// The open box: the chat, the tab and the draft the swatches edit.
@@ -35,6 +34,11 @@ pub(crate) struct ChatAppearanceDialog {
     pub(super) tab: ChatAppearanceTab,
     pub(super) draft: ChatAppearanceDraft,
     pub(super) stage: AppearanceStage,
+    /// The icon and status files already asked for: a file is asked once,
+    /// when it first shows up (a list's answer landed), not on every frame
+    /// the box draws, and a list that stays the same length while its
+    /// files change is still followed.
+    files_asked: std::collections::HashSet<quill::ids::FileId>,
 }
 
 /// Where Apply stands. Each request of the plan answers under its own id
@@ -124,8 +128,9 @@ impl QuillApp {
         }
         let asking = self.session().is_some_and(|session| {
             session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id)
+                .groups
+                .boost_status_fetch(chat_id.0)
+                .is_some_and(|fetch| fetch.shows_loading())
         });
         if asking {
             return line.text_color(muted).child(tr_with(
@@ -219,6 +224,7 @@ impl QuillApp {
             },
             draft,
             stage: AppearanceStage::Editing,
+            files_asked: Default::default(),
         });
         self.open_box(DialogKind::ChatAppearance);
         cx.notify();
@@ -391,6 +397,34 @@ impl QuillApp {
         self.open_group_settings_view(chat_id, GroupSettingsView::Boosts, cx);
     }
 
+    /// Ask for the files of the icon and status choices that were not
+    /// asked for yet (the answers land after the box opens), not on every
+    /// draw.
+    fn ask_chat_appearance_files(&mut self) {
+        let fresh: Vec<_> = match (
+            self.live.as_ref(),
+            self.dialogs.chat_appearance_dialog.as_ref(),
+        ) {
+            (Some(live), Some(dialog)) => live
+                .driver
+                .chat_appearance_files()
+                .into_iter()
+                .filter(|file| !dialog.files_asked.contains(file))
+                .collect(),
+            _ => return,
+        };
+        if fresh.is_empty() {
+            return;
+        }
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let sent = live.driver.download_thumbnails(&fresh);
+        if let Some(dialog) = self.dialogs.chat_appearance_dialog.as_mut() {
+            dialog.files_asked.extend(sent);
+        }
+    }
+
     pub(super) fn build_chat_appearance_dialog(
         app: &Entity<QuillApp>,
         shell: &Entity<QuillShell>,
@@ -405,10 +439,7 @@ impl QuillApp {
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::Q_MISC_APPEARANCE)));
-            if let Some(live) = this.live.as_mut() {
-                live.driver.download_background_emoji_icons();
-                live.driver.download_chat_status_choices();
-            }
+            this.ask_chat_appearance_files();
             let Some(body) = this.chat_appearance_body(cx) else {
                 return dialog.on_close(on_close);
             };
@@ -849,7 +880,7 @@ impl QuillApp {
             .child(div().text_xs().text_color(muted).child(icon_about));
 
         // Emoji status of the chat (both tabs).
-        let status_ids = session.stickers.emoji.chat_default_status_ids.clone();
+        let status_ids = session.stickers.emoji.chat_default_status_ids().to_vec();
         let status_empty = status_ids.is_empty();
         let status_grid = self.chat_appearance_emoji_grid(
             "chat-appearance-status",

@@ -20,7 +20,7 @@ impl QuillApp {
         let session = self.session();
         let chat = session.and_then(|s| s.open_chat_id().and_then(|id| s.chats.get(&id.0)));
         let muted = chat.is_some_and(|c| c.is_muted());
-        let archived = chat.is_some_and(|c| c.in_archive);
+        let archived = chat.is_some_and(|c| c.in_archive());
         let live = self.live.is_some();
         let owner = cx.entity().downgrade();
         let chat_id = chat.map(|c| c.id);
@@ -203,7 +203,11 @@ impl QuillApp {
                 }
             }
             HeaderEntry::AutoDelete => self.open_ttl_picker(chat_id, cx),
-            HeaderEntry::Translate => self.set_translate_bar_hidden(chat_id, false, cx),
+            HeaderEntry::Translate => {
+                // Shown again: the Hide's answer no longer matters.
+                self.forget_hide();
+                self.set_translate_bar_hidden(chat_id, false, cx);
+            }
             HeaderEntry::SendMoney => self.show_wallet_notice(WalletSurface::SendMoney, cx),
             HeaderEntry::CloseSecretChat => self.open_close_secret_chat_confirm(chat_id, cx),
             HeaderEntry::AgentAccess => self.open_agent_access_for_chat(chat_id.0, cx),

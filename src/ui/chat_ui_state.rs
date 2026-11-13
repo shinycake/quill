@@ -90,6 +90,35 @@ pub(super) struct EditMode {
     pub(super) stashed_draft: String,
     /// Reply that belonged to the stashed draft, restored with it on leaving.
     pub(super) stashed_reply: Option<ComposerReplyTo>,
+    /// The "Edit Cover" file dialog, while it is up. It belongs to this edit:
+    /// ending the edit, or starting another, drops the wait with it.
+    pub(super) cover_pick: CoverPick,
+    /// The "Edit Image" decode of the photo to edit, while it runs. It
+    /// belongs to this edit like the cover dialog: ending the edit, or
+    /// starting another, drops the decode with it.
+    pub(super) image_decode: ImageDecode,
+}
+
+/// The full-size decode "Edit Image" waits for: not running, or running
+/// as the task that holds its answer.
+#[derive(Debug, Default)]
+pub(super) enum ImageDecode {
+    #[default]
+    Idle,
+    Decoding {
+        _task: Task<()>,
+    },
+}
+
+/// The file dialog of "Edit Cover" (tdesktop `VideoCoverUploader::choose`):
+/// not up, or up with the task that waits for its answer.
+#[derive(Debug, Default)]
+pub(super) enum CoverPick {
+    #[default]
+    Idle,
+    Picking {
+        _task: Task<()>,
+    },
 }
 
 /// One edit, told apart from every other (an edit cancelled and one started
@@ -98,7 +127,7 @@ pub(super) struct EditMode {
 pub(crate) struct EditId(u64);
 
 impl EditId {
-    fn next() -> Self {
+    pub(crate) fn next() -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
     }
@@ -236,8 +265,12 @@ pub(crate) struct ChatUi {
     /// the stashed query is inserted on Confirm. It lives with the chat
     /// that asked, so another chat never confirms it.
     pub(super) bot_alert: super::inline_mode::BotAlert,
+    /// A command picked from the `/` menu that the paid guard holds for Pay.
+    pub(super) menu_send: super::composer::send_bot_command::MenuSendStage,
     /// A bot's Restart whose unblock is out (`bottom_action`).
     pub(super) restart: super::bottom_action::BotRestart,
+    /// What the chat's action bar sent (report, hide, unarchive, block), until its requests are answered.
+    pub(super) bar_work: super::bar_report::BarWork,
     /// What the last rich send took out of the field, until TDLib answers.
     pub(super) sent_text: super::composer::SentText,
     /// The draft the last AI composer action was asked about.
@@ -471,7 +504,47 @@ impl ChatUi {
             edit,
             stashed_draft,
             stashed_reply,
+            cover_pick: CoverPick::Idle,
+            image_decode: ImageDecode::Idle,
         });
+    }
+
+    /// The edit in place waits for its cover dialog's answer in `task`.
+    pub(super) fn begin_cover_pick(&mut self, task: Task<()>) {
+        if let Some(mode) = self.edit_mode.as_mut() {
+            mode.cover_pick = CoverPick::Picking { _task: task };
+        }
+    }
+
+    /// The cover dialog of edit `asked_for` answered: whether that edit is
+    /// still the one in place (and the wait ends).
+    pub(super) fn end_cover_pick(&mut self, asked_for: EditId) -> bool {
+        match self.edit_mode.as_mut() {
+            Some(mode) if mode.id == asked_for => {
+                mode.cover_pick = CoverPick::Idle;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The edit in place waits for its photo's decode in `task`.
+    pub(super) fn begin_image_decode(&mut self, task: Task<()>) {
+        if let Some(mode) = self.edit_mode.as_mut() {
+            mode.image_decode = ImageDecode::Decoding { _task: task };
+        }
+    }
+
+    /// The decode of edit `asked_for` answered: whether that edit is still
+    /// the one in place (and the wait ends).
+    pub(super) fn end_image_decode(&mut self, asked_for: EditId) -> bool {
+        match self.edit_mode.as_mut() {
+            Some(mode) if mode.id == asked_for => {
+                mode.image_decode = ImageDecode::Idle;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// "Send as a document" ticked for the replacement of the edit in place
@@ -486,6 +559,20 @@ impl ChatUi {
     /// stashed. `None` when nothing was being edited.
     pub(super) fn leave_edit(&mut self) -> Option<EditMode> {
         self.edit_mode.take()
+    }
+
+    /// A refused send's text goes in front of the draft set aside for the
+    /// edit in place. `false` when no message is being edited.
+    pub(super) fn put_before_stashed_draft(&mut self, markup: &str) -> bool {
+        let Some(mode) = self.edit_mode.as_mut() else {
+            return false;
+        };
+        mode.stashed_draft = if mode.stashed_draft.is_empty() {
+            markup.to_string()
+        } else {
+            format!("{markup}\n{}", mode.stashed_draft)
+        };
+        true
     }
 
     pub(super) fn stashed_draft(&self) -> Option<&str> {
@@ -627,6 +714,11 @@ impl QuillApp {
         {
             live.driver.session.acks.forget(request);
         }
+        if let Some(session) = self.session_mut() {
+            for request in old.bar_work.requests() {
+                session.acks.forget(*request);
+            }
+        }
         for delete in &old.scheduled_deletes {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.acks.forget(delete.request);
@@ -639,7 +731,7 @@ impl QuillApp {
     /// an auto-delete picker open for the chat left closes with it.
     pub(super) fn close_ttl_picker_of_left_chat(&mut self, next: Option<ChatId>) {
         let left = self.chat_ui.chat.filter(|chat| Some(*chat) != next);
-        if left.is_some() && self.notify.ttl_picker == left {
+        if left.is_some() && self.notify.ttl_picker() == left {
             self.close_ttl_picker();
         }
     }

@@ -88,6 +88,13 @@ pub(crate) enum SourceStage {
     Closed,
     Emoji,
     Camera(CameraDraft),
+    /// The file dialog or the clipboard image of "Photo or video" / "From
+    /// clipboard" is out, with its decode. The dialog's body still shows;
+    /// closing the box, or opening a source, drops the task and the pick
+    /// with it.
+    Picking {
+        _pick: Task<()>,
+    },
 }
 
 /// State of the source panels. Lives in the edit-profile dialog.
@@ -103,7 +110,10 @@ pub(crate) struct PhotoSources {
 impl PhotoSources {
     /// A camera or emoji panel shows in place of the dialog's body.
     pub(crate) fn is_open(&self) -> bool {
-        !matches!(self.stage, SourceStage::Closed)
+        !matches!(
+            self.stage,
+            SourceStage::Closed | SourceStage::Picking { .. }
+        )
     }
 
     /// Back to the dialog's body: the one way a panel closes (Back, a photo
@@ -112,6 +122,23 @@ impl PhotoSources {
         self.stage = SourceStage::Closed;
         self.emoji.close_editor();
         self.note = None;
+    }
+
+    /// A pick is out as `task`; it replaces whatever the sources held.
+    pub(super) fn begin_pick(&mut self, task: Task<()>) {
+        self.stage = SourceStage::Picking { _pick: task };
+        self.note = None;
+    }
+
+    /// The pick landed: true when it was still the stage waiting, which
+    /// then ends. A pick whose stage was replaced or closed never lands
+    /// (its task went with the stage).
+    pub(super) fn end_pick(&mut self) -> bool {
+        let picking = matches!(self.stage, SourceStage::Picking { .. });
+        if picking {
+            self.stage = SourceStage::Closed;
+        }
+        picking
     }
 
     fn camera_mut(&mut self) -> Option<&mut CameraDraft> {
@@ -214,6 +241,21 @@ impl QuillApp {
                 .as_mut()
                 .map(|dialog| &mut dialog.sources),
         }
+    }
+
+    /// The pick of `target` is out as `task`, held by that box's sources.
+    pub(super) fn hold_photo_pick(&mut self, target: PhotoTarget, task: Task<()>) {
+        if self.photo_target() == Some(target)
+            && let Some(sources) = self.sources_mut()
+        {
+            sources.begin_pick(task);
+        }
+    }
+
+    /// The pick landed: the sources stop waiting for it. False when they
+    /// were not waiting.
+    pub(super) fn end_photo_pick(&mut self) -> bool {
+        self.sources_mut().is_some_and(PhotoSources::end_pick)
     }
 
     fn sources(&self) -> Option<&PhotoSources> {
@@ -400,7 +442,7 @@ impl QuillApp {
     pub(super) fn photo_sources_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let sources = self.sources()?;
         let body = match &sources.stage {
-            SourceStage::Closed => return None,
+            SourceStage::Closed | SourceStage::Picking { .. } => return None,
             SourceStage::Emoji => self.emoji_panel(sources, cx),
             SourceStage::Camera(draft) => self.camera_panel(draft, cx),
         };

@@ -120,12 +120,14 @@ impl Session {
     pub fn custom_keyboard_for_chat(
         &self,
         chat_id: ChatId,
-        dismissed: &std::collections::HashSet<(i64, i64)>,
+        dismissed: &std::collections::HashSet<crate::ids::ChatMessage>,
     ) -> Option<(ChatId, MessageId, ReplyKeyboard)> {
         match self.chat_reply_keyboard(chat_id) {
             Some(entry) => entry
                 .as_ref()
-                .filter(|(message_id, _)| !dismissed.contains(&(chat_id.0, message_id.0)))
+                .filter(|(message_id, _)| {
+                    !dismissed.contains(&crate::ids::ChatMessage::new(chat_id, *message_id))
+                })
                 .map(|(message_id, keyboard)| (chat_id, *message_id, keyboard.clone())),
             None => self
                 .histories

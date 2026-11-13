@@ -24,6 +24,7 @@ mod clock;
 mod decode_loop;
 mod decoding;
 mod presenting;
+mod waiting;
 use presenting::Presenting;
 mod ffi;
 mod nv12;
@@ -622,11 +623,17 @@ impl Drop for AudioTap {
 struct Shared {
     state: Mutex<State>,
     wake: Condvar,
+    /// Notified when the open ends, a picture is queued or decoding fails:
+    /// what [`Player::wait_open`] and [`Player::wait_frame`] sleep on.
+    progress: Condvar,
 }
 
 #[derive(Default)]
 struct State {
     info: Option<MediaInfo>,
+    /// Called once when the file is open or could not be opened
+    /// ([`Player::on_open`]).
+    open_wakes: Vec<Box<dyn FnOnce() + Send>>,
     /// The sound, once the file is open and has some (and it was asked for).
     audio: Option<Arc<AudioShared>>,
     /// Its output end, until the player hands it out.
@@ -674,6 +681,7 @@ impl Drop for ExitReport {
         // Outside the lock: the tap's drop locks it again.
         drop(tap);
         drop(audio);
+        self.0.open_settled();
     }
 }
 
@@ -720,6 +728,7 @@ impl Player {
                 ..State::default()
             }),
             wake: Condvar::new(),
+            progress: Condvar::new(),
         });
         let thread_shared = shared.clone();
         let want_audio = options.want_audio;
@@ -732,8 +741,8 @@ impl Player {
             match opener() {
                 Ok(demuxer) => decode_loop::run(demuxer, thread_shared, want_audio),
                 Err(err) => {
-                    let mut state = lock(&thread_shared.state);
-                    state.decoding.fail(err);
+                    lock(&thread_shared.state).decoding.fail(err);
+                    thread_shared.open_settled();
                 }
             }
         })

@@ -86,6 +86,95 @@ impl ListOp {
     }
 }
 
+/// The refusal of a change to a fetched list (a block, a terminate, a mask
+/// reorder), shown beside the list. It belongs to the changes' own
+/// requests: the note holds every request it was given (several changes can
+/// be out at once), and the refusal of any of them lands, matched by its
+/// `RequestId`. The list's fetch is never touched by it, so a page or
+/// refetch in flight still answers and the list is never turned into
+/// `Failed` by a refused change. The next change adds a wait and takes the
+/// shown line away; the screen's farewell drops everything to `Idle`, so a
+/// refusal that arrives after the screen was left lands nowhere.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ChangeNote {
+    /// No change is out and no refusal is shown.
+    #[default]
+    Idle,
+    /// Changes went out as `requests`; the refusal of any will be shown.
+    Waiting {
+        requests: Vec<crate::ids::RequestId>,
+    },
+    /// A change was refused: `text` is shown; `waiting` are the changes
+    /// still out.
+    Refused {
+        text: String,
+        waiting: Vec<crate::ids::RequestId>,
+    },
+}
+
+impl ChangeNote {
+    fn held(&self) -> Vec<crate::ids::RequestId> {
+        match self {
+            Self::Idle => Vec::new(),
+            Self::Waiting { requests } => requests.clone(),
+            Self::Refused { waiting, .. } => waiting.clone(),
+        }
+    }
+
+    /// A change goes out as `request`; any shown refusal goes, the changes
+    /// already out stay waited for.
+    pub fn begin(&mut self, request: crate::ids::RequestId) {
+        let mut requests = self.held();
+        requests.push(request);
+        *self = Self::Waiting { requests };
+    }
+
+    /// `request` (a change) was answered ok: it is no longer out. A wait
+    /// with nothing left becomes `Idle`; a shown refusal stays.
+    pub fn settled(&mut self, request: crate::ids::RequestId) {
+        match self {
+            Self::Idle => {}
+            Self::Waiting { requests } => {
+                requests.retain(|id| *id != request);
+                if requests.is_empty() {
+                    *self = Self::Idle;
+                }
+            }
+            Self::Refused { waiting, .. } => waiting.retain(|id| *id != request),
+        }
+    }
+
+    /// `request` (a change) was refused; `None` when it never left. A
+    /// refusal of a request the note does not hold lands nowhere.
+    pub fn refused(&mut self, request: Option<crate::ids::RequestId>, line: impl Into<String>) {
+        let mut waiting = self.held();
+        if let Some(asked) = request {
+            let before = waiting.len();
+            waiting.retain(|id| *id != asked);
+            if waiting.len() == before {
+                return;
+            }
+        }
+        *self = Self::Refused {
+            text: line.into(),
+            waiting,
+        };
+    }
+
+    /// The line to show, if a change was refused.
+    pub fn line(&self) -> Option<&str> {
+        match self {
+            Self::Refused { text, .. } => Some(text.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The owner dismisses the line or its screen is left: every wait goes.
+    pub fn clear(&mut self) {
+        *self = Self::Idle;
+    }
+}
+
 /// The state of a fetched `T`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Fetch<T> {
@@ -93,20 +182,26 @@ pub enum Fetch<T> {
     #[default]
     Idle,
     /// A request is in flight; `stale` is the last answer, if any.
-    /// `request` is the one that asked, recorded by [`Fetch::sent`] (`None`
-    /// until it is sent, and for the senders listed in
-    /// `scripts/request-match-baseline.txt`, which take their answer
-    /// through [`Fetch::succeed`] and [`Fetch::fail`]): only its own answer or
-    /// error acts through [`Fetch::answered`] and [`Fetch::failed`].
+    /// `request` is the one that asked, recorded when the stage begins
+    /// ([`Fetch::begin_with`]): only its own answer or error acts through
+    /// [`Fetch::answered`] and [`Fetch::failed`].
     Loading {
         stale: Option<T>,
-        request: Option<crate::ids::RequestId>,
+        request: crate::ids::RequestId,
     },
     /// The latest request answered.
     Ready(T),
     /// A change landed after the answer: the old answer, if any, stays
     /// visible until the refetch replaces it (never optimistic).
-    Outdated(Option<T>),
+    ///
+    /// `asked` is the request that was out when the change landed, if one
+    /// was: its answer predates the change but is the only one that may be
+    /// shown meanwhile ([`Fetch::asked_before_change`]); any other answer is
+    /// not this fetch's.
+    Outdated {
+        held: Option<T>,
+        asked: Option<crate::ids::RequestId>,
+    },
     /// The latest request failed; `stale` is the last answer, if any.
     Failed { error: String, stale: Option<T> },
 }
@@ -124,23 +219,34 @@ impl<T> Fetch<T> {
 
     /// The answer is out of date and a refetch is due.
     pub fn is_outdated(&self) -> bool {
-        matches!(self, Self::Outdated(_))
+        matches!(self, Self::Outdated { .. })
     }
 
     /// A change landed: what is held stays visible and is asked for
     /// again, also when nothing was held (the change needs the answer). A
     /// request in flight asked before the change, so it is dropped with its
-    /// mark: a first ask with nothing held becomes `Outdated(None)` too,
+    /// mark: a first ask with nothing held becomes `Outdated { held: None, .. }` too,
     /// whose answer would otherwise land without the change. The owner that
     /// refetches asks again.
     pub fn outdate(&mut self) {
-        *self = Self::Outdated(self.take_data());
+        let asked = match self {
+            Self::Loading { request, .. } => Some(*request),
+            Self::Outdated { asked, .. } => *asked,
+            _ => None,
+        };
+        *self = Self::Outdated {
+            held: self.take_data(),
+            asked,
+        };
     }
 
     /// Something is being waited for: a request in flight, or a refetch due
     /// with nothing held to show meanwhile. What draws a spinner.
     pub fn shows_loading(&self) -> bool {
-        matches!(self, Self::Loading { .. } | Self::Outdated(None))
+        matches!(
+            self,
+            Self::Loading { .. } | Self::Outdated { held: None, .. }
+        )
     }
 
     pub fn is_loading(&self) -> bool {
@@ -161,7 +267,7 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Outdated(held)
+            Self::Outdated { held, .. }
             | Self::Loading { stale: held, .. }
             | Self::Failed { stale: held, .. } => held.as_ref(),
         }
@@ -171,7 +277,7 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Outdated(held)
+            Self::Outdated { held, .. }
             | Self::Loading { stale: held, .. }
             | Self::Failed { stale: held, .. } => held.as_mut(),
         }
@@ -182,7 +288,7 @@ impl<T> Fetch<T> {
         match std::mem::take(self) {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Outdated(held)
+            Self::Outdated { held, .. }
             | Self::Loading { stale: held, .. }
             | Self::Failed { stale: held, .. } => held,
         }
@@ -204,7 +310,10 @@ impl<T> Fetch<T> {
                 error,
                 stale: Some(make()),
             },
-            Self::Outdated(_) => Self::Outdated(Some(make())),
+            Self::Outdated { asked, .. } => Self::Outdated {
+                held: Some(make()),
+                asked,
+            },
             Self::Idle | Self::Ready(_) => Self::Ready(make()),
         };
     }
@@ -212,29 +321,44 @@ impl<T> Fetch<T> {
     /// Whether a request should go out now: never asked, or a refetch is
     /// owed. A request in flight, an answer and a failure wait.
     pub fn wants_fetch(&self) -> bool {
-        matches!(self, Self::Idle | Self::Outdated(_))
+        matches!(self, Self::Idle | Self::Outdated { .. })
     }
 
-    /// A request goes out. The last answer stays visible, the last error is
-    /// gone.
-    pub fn begin(&mut self) {
+    /// A request goes out as `request` (registered before this call, so the
+    /// stage never reads Loading with nothing to wait for). The last answer
+    /// stays visible, the last error is gone.
+    pub fn begin_with(&mut self, request: crate::ids::RequestId) {
         let stale = self.take_data();
+        *self = Self::Loading { stale, request };
+    }
+
+    /// A change goes out as `request` and is shown at once, ahead of its
+    /// answer (the answer carries no data): the fetch waits for that
+    /// request, and only its answer or error settles it.
+    pub fn written_ahead(&mut self, value: T, request: crate::ids::RequestId) {
         *self = Self::Loading {
-            stale,
-            request: None,
+            stale: Some(value),
+            request,
         };
     }
 
-    /// The request that was begun went out as `request`.
-    pub fn sent(&mut self, request: crate::ids::RequestId) {
-        if let Self::Loading { request: slot, .. } = self {
-            *slot = Some(request);
+    /// The request the fetch waits for, while it is loading and sent.
+    pub fn request(&self) -> Option<crate::ids::RequestId> {
+        match self {
+            Self::Loading { request, .. } => Some(*request),
+            _ => None,
         }
     }
 
     /// The fetch waits for the answer of `request`.
     pub fn waits_for(&self, request: crate::ids::RequestId) -> bool {
-        matches!(self, Self::Loading { request: Some(asked), .. } if *asked == request)
+        matches!(self, Self::Loading { request: asked, .. } if *asked == request)
+    }
+
+    /// Whether `request` is the one that was out when a change outdated the
+    /// list: its answer predates the change.
+    pub fn asked_before_change(&self, request: crate::ids::RequestId) -> bool {
+        matches!(self, Self::Outdated { asked: Some(asked), .. } if *asked == request)
     }
 
     /// `request` answered: taken only by the fetch that waits for it
@@ -289,12 +413,32 @@ impl<T> Fetch<T> {
         true
     }
 
-    /// An answer that names no request: a pushed update, or a fetch whose
-    /// sender does not record its request ([`Fetch::sent`]). An older request's
+    /// The held value is now `value`, and the stage stays what it was: a
+    /// request in flight keeps waiting for its own answer, a failure stays
+    /// failed. For a value that no request of this fetch carries (a server
+    /// push, a local choice), which is therefore not an answer to match;
+    /// [`Fetch::pushed`] replaces the stage instead.
+    pub fn replace_data(&mut self, value: T) {
+        match self.data_mut() {
+            Some(held) => *held = value,
+            None => self.insert_data_if_missing(|| value),
+        }
+    }
+
+    /// An answer that names no request: a fetch whose
+    /// sender does not record its request ([`Fetch::begin_with`]). An older request's
     /// late answer lands on a newer ask through this, so a sender prefers
     /// [`Fetch::answered`]; `scripts/check-request-match.py` counts the callers
     /// that remain in its baseline and fails a new one.
     pub fn succeed(&mut self, value: T) {
+        *self = Self::Ready(value);
+    }
+
+    /// The server pushed the value (an update, or the truth after a change
+    /// that needs no fetch): it is not the answer to any request, so it
+    /// replaces whatever stage the fetch was in. A request still in flight
+    /// finds `Ready` and is dropped by [`Fetch::answered`].
+    pub fn pushed(&mut self, value: T) {
         *self = Self::Ready(value);
     }
 
@@ -441,7 +585,7 @@ mod tests {
             error: "no network".to_string(),
             stale: Some(vec![1]),
         };
-        fetch.begin();
+        fetch.begin_with(crate::ids::RequestId(7004));
         assert!(fetch.is_loading());
         assert_eq!(fetch.data(), Some(&vec![1]));
         assert_eq!(fetch.error(), None);
@@ -452,7 +596,7 @@ mod tests {
     #[test]
     fn failing_keeps_the_last_answer() {
         let mut fetch = Fetch::Ready(vec![1]);
-        fetch.begin();
+        fetch.begin_with(crate::ids::RequestId(7005));
         fetch.fail("timeout");
         assert_eq!(fetch.error(), Some("timeout"));
         assert_eq!(fetch.data(), Some(&vec![1]));
@@ -470,11 +614,11 @@ mod tests {
     #[test]
     fn cancel_returns_to_what_was_held() {
         let mut empty: Fetch<i32> = Fetch::Idle;
-        empty.begin();
+        empty.begin_with(crate::ids::RequestId(7006));
         empty.cancel();
         assert!(empty.is_idle());
         let mut held = Fetch::Ready(5);
-        held.begin();
+        held.begin_with(crate::ids::RequestId(7007));
         held.cancel();
         assert_eq!(held, Fetch::Ready(5));
         // Not loading: nothing to cancel.
@@ -502,7 +646,7 @@ mod tests {
         assert!(bare.is_idle());
         let mut loading: Fetch<i32> = Fetch::Loading {
             stale: None,
-            request: None,
+            request: RequestId(1),
         };
         loading.clear_error();
         assert!(loading.is_loading());
@@ -517,7 +661,7 @@ mod tests {
 
         let mut loading: Fetch<Vec<i32>> = Fetch::Loading {
             stale: None,
-            request: None,
+            request: RequestId(1),
         };
         loading.insert_data_if_missing(Vec::new);
         loading.data_mut().into_iter().for_each(|list| list.push(2));
@@ -525,7 +669,7 @@ mod tests {
             loading,
             Fetch::Loading {
                 stale: Some(vec![2]),
-                request: None,
+                request: RequestId(1),
             }
         );
 
@@ -549,5 +693,26 @@ mod tests {
         let mut fetch = Fetch::Ready(7);
         assert_eq!(fetch.take_data(), Some(7));
         assert!(fetch.is_idle());
+    }
+
+    #[test]
+    fn replacing_the_data_keeps_the_stage_and_its_request() {
+        let mut idle: Fetch<i32> = Fetch::Idle;
+        idle.replace_data(1);
+        assert_eq!(idle, Fetch::Ready(1));
+
+        let mut loading: Fetch<i32> = Fetch::Idle;
+        loading.begin_with(RequestId(7));
+        loading.replace_data(2);
+        assert!(loading.waits_for(RequestId(7)), "{loading:?}");
+        assert_eq!(loading.data(), Some(&2));
+        assert!(loading.answered(Some(RequestId(7)), 3));
+        assert_eq!(loading, Fetch::Ready(3));
+
+        let mut failed: Fetch<i32> = Fetch::Idle;
+        failed.fail("no");
+        failed.replace_data(4);
+        assert_eq!(failed.error(), Some("no"));
+        assert_eq!(failed.data(), Some(&4));
     }
 }

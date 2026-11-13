@@ -347,13 +347,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if acquired.get(&gift_id).is_some_and(|list| list.is_loading()) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        acquired.entry(gift_id).or_default().begin();
         let sent = self.send_market(GiftMarketPurpose::AcquiredGifts { gift_id }, |extra| {
             rq::get_gift_auction_acquired_gifts(extra, gift_id)
         });
-        if let Some(list) = self.session.payments.gift_market.acquired.get_mut(&gift_id) {
+        {
+            let list = self
+                .session
+                .payments
+                .gift_market
+                .acquired
+                .entry(gift_id)
+                .or_default();
             match &sent {
-                Ok(request) => list.sent(*request),
+                Ok(request) => list.begin_with(*request),
                 Err(_) => list.fail("not sent"),
             }
         }
@@ -371,13 +377,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if gift_id == 0 || previews.get(&gift_id).is_some_and(|p| !p.can_ask()) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        previews.entry(gift_id).or_default().begin();
         let sent = self.send_market(purpose, |extra| {
             rq::get_gift_upgrade_preview(extra, gift_id)
         });
-        if let Some(preview) = self.session.payments.gift_market.previews.get_mut(&gift_id) {
+        {
+            let preview = self
+                .session
+                .payments
+                .gift_market
+                .previews
+                .entry(gift_id)
+                .or_default();
             match &sent {
-                Ok(request) => preview.sent(*request),
+                Ok(request) => preview.begin_with(*request),
                 Err(_) => preview.fail("not sent"),
             }
         }

@@ -1,8 +1,8 @@
 //! Where a widget is drawn, with two windows showing it at once.
 
 use super::{
-    Contact, Lander, Live, Presence, PresenceChange, Showing, WidgetEntry, next_query_token,
-    prune_hidden, ticks, write_pending,
+    Contact, Lander, Live, Presence, PresenceChange, Showing, WidgetEntry, prune_hidden, ticks,
+    write_pending,
 };
 use quill::ids::ChatId;
 use quill::message_widget::WidgetKey;
@@ -70,15 +70,6 @@ fn a_narrower_window_scales_the_frame_into_its_card() {
     assert_eq!(frame_scale(400.0, 400.0), 1.0);
     assert_eq!(frame_scale(400.0, 600.0), 1.0);
     assert_eq!(frame_scale(0.0, 200.0), 1.0);
-}
-
-/// Widget query tokens never repeat, whatever screen asks.
-#[test]
-fn query_tokens_are_unique_for_the_run() {
-    let first = next_query_token();
-    let second = next_query_token();
-    assert_ne!(first, second);
-    assert!(second > first);
 }
 
 /// A widget's storage that could not be written stays pending, so the
@@ -231,7 +222,10 @@ fn new_content_replaces_what_was_bound_to_the_old() {
         streak: 2,
     };
     entry.polled = Some("{}".into());
-    entry.poll = super::Poll::Asking(quill::ids::RequestId(1));
+    entry.poll = super::Poll::Asking {
+        request: quill::ids::RequestId(1),
+        asked: std::time::Instant::now(),
+    };
     entry.replace_content(identity("new"), 150.0);
     assert_eq!(
         entry.identity.as_ref().map(|i| i.html.as_str()),

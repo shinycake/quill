@@ -229,18 +229,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Slice G1: a new add attempt resets the failure count — errors
         // from a previous attempt must not linger into this one.
-        self.session.groups.add_members_failed.remove(&chat_id.0);
+        self.session.groups.begin_member_add(chat_id.0);
         // Basic groups need one `addChatMember` per user; supergroups and
         // channels take a single bulk `addChatMembers`.
         let mut first_extra = None;
         if is_basic_group {
             for (index, user_id) in user_ids.iter().enumerate() {
                 let req_extra = self.session.request(purpose, Some(chat_id));
-                if let Err(err) = self
-                    .sender
-                    .send_json(&add_chat_member(req_extra, chat_id.0, *user_id))
-                {
-                    self.session.requests.take(req_extra);
+                if let Err(err) = self.send_member_action(
+                    chat_id,
+                    req_extra,
+                    &add_chat_member(req_extra, chat_id.0, *user_id),
+                ) {
                     if first_extra.is_none() {
                         return Err(err);
                     }
@@ -248,13 +248,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     // dialog's note says so instead of reporting success.
                     let unsent =
                         i32::try_from(user_ids.len().saturating_sub(index)).unwrap_or(i32::MAX);
-                    let failed = self
-                        .session
-                        .groups
-                        .add_members_failed
-                        .entry(chat_id.0)
-                        .or_insert(0);
-                    *failed = failed.saturating_add(unsent);
+                    self.session.groups.add_members_unsent(chat_id.0, unsent);
                     break;
                 }
                 if first_extra.is_none() {
@@ -263,13 +257,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         } else {
             let extra = self.session.request(purpose, Some(chat_id));
-            if let Err(err) = self
-                .sender
-                .send_json(&add_chat_members(extra, chat_id.0, user_ids))
-            {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.send_member_action(
+                chat_id,
+                extra,
+                &add_chat_members(extra, chat_id.0, user_ids),
+            )?;
             first_extra = Some(extra);
         }
         Ok(first_extra)
@@ -314,13 +306,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(purpose, Some(chat_id));
         let member_id = MessageSenderRef::User(user_id).to_value();
-        if let Err(err) = self.sender.send_json(&set_chat_member_status(
-            extra, chat_id.0, &member_id, &status,
-        )) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
+        self.send_member_action(
+            chat_id,
+            extra,
+            &set_chat_member_status(extra, chat_id.0, &member_id, &status),
+        )
+        .map(Some)
     }
 
     /// Slice G1: ban a member (`chatMemberStatusBanned`, schema 1.8.67,
@@ -353,13 +344,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(purpose, Some(chat_id));
         let member_id = MessageSenderRef::User(user_id).to_value();
-        if let Err(err) = self.sender.send_json(&set_chat_member_status(
-            extra, chat_id.0, &member_id, &status,
-        )) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
+        self.send_member_action(
+            chat_id,
+            extra,
+            &set_chat_member_status(extra, chat_id.0, &member_id, &status),
+        )
+        .map(Some)
     }
 
     /// Slice G1: unban / unrestrict a member — `setChatMemberStatus` back
@@ -389,13 +379,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self.session.request(purpose, Some(chat_id));
         let member_id = MessageSenderRef::User(user_id).to_value();
-        if let Err(err) = self.sender.send_json(&set_chat_member_status(
-            extra, chat_id.0, &member_id, &status,
-        )) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
+        self.send_member_action(
+            chat_id,
+            extra,
+            &set_chat_member_status(extra, chat_id.0, &member_id, &status),
+        )
+        .map(Some)
     }
 
     /// "Delete" on the Removed users list (tdesktop `removeKicked`): the
@@ -425,13 +414,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(purpose, Some(chat_id));
         let member_id = MessageSenderRef::User(user_id).to_value();
         let status = chat_member_status_left_json();
-        if let Err(err) = self.sender.send_json(&set_chat_member_status(
-            extra, chat_id.0, &member_id, &status,
-        )) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
+        self.send_member_action(
+            chat_id,
+            extra,
+            &set_chat_member_status(extra, chat_id.0, &member_id, &status),
+        )
+        .map(Some)
     }
 
     /// "Remove from group" (tdesktop `kickParticipant`). A basic group uses
@@ -475,10 +463,20 @@ impl<S: JsonSender> ConnectDriver<S> {
                 &chat_member_status_banned_json(0),
             )
         };
-        if let Err(err) = self.sender.send_json(&json) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(Some(extra))
+        self.send_member_action(chat_id, extra, &json).map(Some)
+    }
+
+    /// Send a member action (a status or tag change, an add) registered as
+    /// `extra`; only a send that went out is recorded as a member action of
+    /// `chat_id`, whose answer or error then counts.
+    pub(crate) fn send_member_action(
+        &mut self,
+        chat_id: ChatId,
+        extra: RequestId,
+        json: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        let sent = self.send_json_request(extra, json)?;
+        self.session.groups.member_action_sent(chat_id.0, sent);
+        Ok(sent)
     }
 }

@@ -10,7 +10,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::ton_wallet::{OFFICIAL_APPS_URL, WalletSurface};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// An outline button that opens the notice for `surface`; `selector` names it for tests.
@@ -125,7 +125,7 @@ impl QuillApp {
                                 })),
                         ),
                 );
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             let on_money_page = this_surface.is_some_and(WalletSurface::on_money_page);
             let dialog = dialog.overlay(true);
             let dialog = if on_money_page {
@@ -136,10 +136,7 @@ impl QuillApp {
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

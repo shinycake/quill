@@ -279,13 +279,13 @@ impl QuillApp {
                 false,
                 tr(keys::GROUP_STICKERS),
                 info.map_or(0, |i| i.sticker_set_id),
-                &session.stickers.stickers.sets,
+                session.stickers.stickers.sets.as_slice(),
             ),
             (
                 true,
                 tr(keys::EMOJI_GROUP_BADGE),
                 info.map_or(0, |i| i.custom_emoji_sticker_set_id),
-                &session.stickers.emoji.installed_sets,
+                session.stickers.emoji.lists.installed.items(),
             ),
         ] {
             let current_label = if current == 0 {

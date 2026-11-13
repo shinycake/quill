@@ -62,10 +62,6 @@ fn category_strip_loads_once_and_each_category_searches_its_own_way() {
         categories[1].source,
         EmojiCategorySource::Search(vec!["😀".into(), "😄".into()])
     );
-    assert!(
-        driver.session.stickers.emoji.categories.is_empty(),
-        "the picker's own categories are not replaced"
-    );
 
     // The Premium category asks TDLib for the Premium stickers.
     driver
@@ -109,4 +105,38 @@ fn category_strip_loads_once_and_each_category_searches_its_own_way() {
             .is_err()
     );
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A strip request that never left is a failed ask: the strip does not ask
+/// again from every render (sweep 18-002).
+#[test]
+fn a_category_ask_that_cannot_be_sent_fails_instead_of_staying_idle() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    recorder.refuse_sends(true);
+    assert!(driver.fetch_sticker_categories().is_err());
+    let categories = &driver.session.stickers.emoji.sticker_categories;
+    assert!(!categories.is_idle(), "a render would ask again");
+    assert!(categories.error().is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The same when the chats path is not active (signed out, shutting down):
+/// the refusal is a failed ask too, not an idle one (sweep 18-002).
+#[test]
+fn a_category_ask_before_the_chats_path_is_active_fails_too() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.auth = crate::telegram::envelope::AuthorizationState::LoggingOut;
+    assert!(driver.fetch_sticker_categories().is_err());
+    let categories = &driver.session.stickers.emoji.sticker_categories;
+    assert!(!categories.is_idle(), "a render would ask again");
+    assert!(categories.error().is_some());
+    let _ = std::fs::remove_dir_all(&dir);
 }

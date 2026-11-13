@@ -282,8 +282,8 @@ impl QuillApp {
                 if let Some(panel) = self.photo_sources_panel(cx) {
                     return Some(panel);
                 }
-                let no_title = matches!(view.failure(), Some((CreateFailure::NoTitle, _)));
-                self.new_chat_info(no_title, cx)
+                let refused = view.refused_title().map(str::to_string);
+                self.new_chat_info(refused.as_deref(), cx)
             }
             NewChatStep::AutoDelete => {
                 let dialog = self.new_chat_dialog()?;
@@ -312,7 +312,7 @@ impl QuillApp {
     }
 
     /// Photo, name and description (tdesktop `GroupInfoBox::prepare`).
-    fn new_chat_info(&self, no_title: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn new_chat_info(&self, refused: Option<&str>, cx: &mut Context<Self>) -> AnyElement {
         let Some(dialog) = self.new_chat_dialog() else {
             return div().into_any_element();
         };
@@ -344,7 +344,7 @@ impl QuillApp {
         );
         let name_label = tr(dialog.kind.name_label());
         let typed = dialog.title_input.read(cx).value().to_string();
-        let title_error = dialog.title.shows_error(no_title, &typed).then(|| {
+        let title_error = dialog.title.shows_error(refused, &typed).then(|| {
             div()
                 .text_xs()
                 .text_color(danger)

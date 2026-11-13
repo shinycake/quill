@@ -1,5 +1,6 @@
 //! A dissolve keeps its clock and ends in panes that build no rows.
 use super::*;
+use crate::ui::vanish::Deletion;
 
 #[gpui_kit::test]
 fn a_dissolve_runs_and_ends_in_a_pane_without_rows(cx: &mut TestAppContext) {
@@ -10,7 +11,7 @@ fn a_dissolve_runs_and_ends_in_a_pane_without_rows(cx: &mut TestAppContext) {
     quill::power_saving::set_force_all(false);
     quill::power_saving::set_os_reduce_motion(false);
     app.update(vcx, |app, _| {
-        app.begin_vanish(ChatId(GROUP), &[MessageId(202)]);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Local);
         app.paint_vanishing_for_test();
     });
     apply(
@@ -63,7 +64,7 @@ fn a_dissolve_is_its_own_chats(cx: &mut TestAppContext) {
     quill::power_saving::set_force_all(false);
     quill::power_saving::set_os_reduce_motion(false);
     app.update(vcx, |app, _| {
-        app.begin_vanish(ChatId(GROUP), &[MessageId(202)]);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Local);
         app.paint_vanishing_for_test();
     });
     apply(
@@ -99,7 +100,7 @@ fn a_delete_still_waiting_asks_for_no_frames(cx: &mut TestAppContext) {
     open_group(&app, vcx);
     dissolves_enabled();
     app.update(vcx, |app, _| {
-        app.begin_vanish(ChatId(GROUP), &[MessageId(202)]);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Local);
         app.paint_vanishing_for_test();
     });
     frames(vcx);
@@ -135,6 +136,7 @@ fn the_last_messages_of_a_chat_dissolve_too(cx: &mut TestAppContext) {
         app.begin_vanish(
             ChatId(GROUP),
             &[MessageId(201), MessageId(202), MessageId(203)],
+            Deletion::Local,
         );
         app.paint_vanishing_for_test();
     });
@@ -166,7 +168,7 @@ fn dust_starts_only_from_a_row_painted_in_the_latest_frame(cx: &mut TestAppConte
     open_group(&app, vcx);
     dissolves_enabled();
     app.update(vcx, |app, _| {
-        app.begin_vanish(ChatId(GROUP), &[MessageId(202)]);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Local);
     });
     let shown = app.read_with(vcx, |app, _| app.vanishing_painted_for_test());
     assert_eq!(shown, [true], "painted in the latest frame");
@@ -176,8 +178,222 @@ fn dust_starts_only_from_a_row_painted_in_the_latest_frame(cx: &mut TestAppConte
     });
     frames(vcx);
     app.update(vcx, |app, _| {
-        app.begin_vanish(ChatId(GROUP), &[MessageId(203)]);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(203)], Deletion::Local);
     });
     let shown = app.read_with(vcx, |app, _| app.vanishing_painted_for_test());
     assert_eq!(shown, [true, false], "the group's row is out of date");
+}
+
+/// A message that is only missing from the rows built (a topic switch, a
+/// search, a jump) is not a deleted one: its ghost keeps waiting, and no dust
+/// plays for it until the session knows the deletion.
+#[gpui_kit::test]
+fn a_message_missing_from_the_rows_is_not_a_deleted_one(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    app.update(vcx, |app, _| {
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Local);
+        let mut rows: Vec<quill::state::HistoryMessage> = app
+            .session()
+            .and_then(|s| s.histories.get(&GROUP))
+            .map(|h| {
+                h.messages
+                    .values()
+                    .filter(|m| m.id != MessageId(202))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(!rows.is_empty(), "the chat has other messages");
+        app.merge_vanishing(&mut rows);
+        assert!(
+            app.vanish_progress(ChatId(GROUP), MessageId(202)).is_none(),
+            "not crumbling: the session does not know a deletion"
+        );
+    });
+}
+
+/// A refused delete (its answer is an error) ends its ghost at once: the
+/// message is still there, and no dust plays for it.
+#[gpui_kit::test]
+fn a_refused_delete_drops_its_ghost_and_an_answered_one_waits(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    use quill::state::{Answer, RequestAcks};
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    app.update(vcx, |app, _| {
+        let mut acks = RequestAcks::default();
+        let (refused, answered) = (RequestId(901), RequestId(902));
+        acks.expect(refused);
+        acks.expect(answered);
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Sent(refused));
+        app.begin_vanish(ChatId(GROUP), &[MessageId(203)], Deletion::Sent(answered));
+        acks.settle(refused, Answer::Failed("no".into()));
+        acks.settle(answered, Answer::Done);
+        app.settle_ghosts_for_test(&mut acks);
+        let (held, _) = app.vanishing_state_for_test();
+        assert_eq!(held, 1, "only the answered delete still waits");
+    });
+}
+
+/// Sweep r4-12: `begin_vanish` says whether a ghost now holds the delete's
+/// request; the callers register the request with the acks only then, so a
+/// request no ghost holds (power saving, a message not in the history, a
+/// ghost already there) leaves nothing in them.
+#[gpui_kit::test]
+fn a_delete_no_ghost_holds_registers_no_ack(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    app.update(vcx, |app, _| {
+        let sent = Deletion::Sent(RequestId(910));
+        assert!(app.begin_vanish(ChatId(GROUP), &[MessageId(202)], sent));
+        assert!(
+            !app.begin_vanish(ChatId(GROUP), &[MessageId(202)], sent),
+            "a ghost already holds that message"
+        );
+        assert!(
+            !app.begin_vanish(ChatId(GROUP), &[MessageId(999)], sent),
+            "not in the history"
+        );
+        quill::power_saving::set_force_all(true);
+        assert!(
+            !app.begin_vanish(ChatId(GROUP), &[MessageId(203)], sent),
+            "power saving: no effect, no ghost"
+        );
+        quill::power_saving::set_force_all(false);
+    });
+}
+
+/// A wait that ran out forgets its request, and a ghost already crumbling
+/// (the update that removed the message came before the answer) lets go of
+/// its request when the answer comes: neither leaves an ack behind.
+#[gpui_kit::test]
+fn a_ghost_that_ends_or_crumbles_leaves_no_ack(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    use quill::state::{Answer, RequestAcks};
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    let (waits, lands) = (RequestId(920), RequestId(921));
+    app.update(vcx, |app, _| {
+        app.freeze_vanish_clock();
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Sent(waits));
+        app.begin_vanish(ChatId(GROUP), &[MessageId(203)], Deletion::Sent(lands));
+        app.paint_vanishing_for_test();
+    });
+    apply(
+        &app,
+        vcx,
+        &[
+            r#"{"@type":"updateDeleteMessages","chat_id":31,"message_ids":[203],"is_permanent":true,"from_cache":false}"#,
+        ],
+    );
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        let mut acks = RequestAcks::default();
+        acks.expect(waits);
+        acks.expect(lands);
+        // The crumbling one's answer comes late; the waiting one's never.
+        acks.settle(lands, Answer::Done);
+        app.advance_vanish_clock(11.0);
+        app.settle_ghosts_for_test(&mut acks);
+        assert!(acks.take(lands).is_none(), "its answer was taken");
+        // Forgotten: an answer that comes now is not kept.
+        acks.settle(waits, Answer::Failed("late".into()));
+        assert!(acks.take(waits).is_none(), "its wait was forgotten");
+    });
+}
+
+/// Sweep r4-12 round 4: the answer to a delete that comes while its ghost
+/// still waits is consumed there; the ghost that crumbles afterwards holds
+/// no request, so at the end of the dust it is pruned by the next frame and
+/// asks for no more, with no later poll to settle it.
+#[gpui_kit::test]
+fn frames_stop_after_the_crumble_of_a_delete_answered_while_waiting(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    use quill::state::{Answer, RequestAcks};
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    let request = RequestId(930);
+    app.update(vcx, |app, _| {
+        app.freeze_vanish_clock();
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Sent(request));
+        app.paint_vanishing_for_test();
+        let mut acks = RequestAcks::default();
+        acks.expect(request);
+        acks.settle(request, Answer::Done);
+        // The poll pass takes the answer while the ghost still waits.
+        app.settle_ghosts_for_test(&mut acks);
+        assert!(acks.take(request).is_none(), "the answer was consumed");
+    });
+    apply(
+        &app,
+        vcx,
+        &[
+            r#"{"@type":"updateDeleteMessages","chat_id":31,"message_ids":[202],"is_permanent":true,"from_cache":false}"#,
+        ],
+    );
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        assert!(app.vanishing_animating_for_test(), "the dust is playing");
+        assert_eq!(
+            app.vanishing_held_for_test(),
+            0,
+            "the consumed answer left no request to wait on"
+        );
+        app.advance_vanish_clock(11.0);
+        app.pin_vanish_now();
+        assert!(
+            !app.vanishing_animating_for_test(),
+            "a finished ghost asks for no frames"
+        );
+    });
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        let (left, _) = app.vanishing_state_for_test();
+        assert_eq!(left, 0, "pruned by the frame, with no poll after it");
+    });
+}
+
+/// A waiting ghost whose message is already gone, in a chat that is not the
+/// one shown, is dropped: back in that chat the message must not reappear
+/// and crumble on arrival.
+#[gpui_kit::test]
+fn a_waiting_ghost_of_a_chat_not_shown_is_dropped_once_its_message_is_gone(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    dissolves_enabled();
+    app.update(vcx, |app, _| {
+        app.begin_vanish(ChatId(GROUP), &[MessageId(202)], Deletion::Local);
+        app.paint_vanishing_for_test();
+        // Another chat is shown (none here) when the deletion lands.
+        if let Some(session) = app.demo_session.as_mut() {
+            session.open = quill::state::OpenView::of(None);
+        }
+    });
+    apply(
+        &app,
+        vcx,
+        &[
+            r#"{"@type":"updateDeleteMessages","chat_id":31,"message_ids":[202],"is_permanent":true,"from_cache":false}"#,
+        ],
+    );
+    app.update(vcx, |app, cx| {
+        assert_eq!(app.vanishing_state_for_test().0, 1, "still waiting");
+        app.settle_vanishing(cx);
+        assert_eq!(app.vanishing_state_for_test().0, 0, "dropped");
+    });
 }

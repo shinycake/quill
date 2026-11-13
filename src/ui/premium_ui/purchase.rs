@@ -48,23 +48,22 @@ impl QuillApp {
                     post: None,
                     story_id: None,
                 });
-                if sent != Some(false) {
-                    // Offline (demos) nothing is sent and nothing answers.
-                    // Tied to the resolve just sent: its error drops it.
-                    // Without a driver (demos) no request exists; request 0 is
-                    // never allocated, so no error ever drops this.
-                    let request = self
-                        .session()
-                        .and_then(|s| s.chats_state.deep_link_stage())
-                        .and_then(quill::state::DeepLinkState::request)
-                        .unwrap_or(RequestId(0));
-                    if let Some(hub) = self.hub_mut() {
-                        hub.auto_start = Some(PremiumAutoStart {
-                            username: auto_start.0,
-                            start_ref: auto_start.1,
-                            request,
-                        });
-                    }
+                // The `/start` waits on the resolve just sent, and its error
+                // drops it. Without a driver (demos) nothing was asked, so
+                // there is nothing to wait for and nothing is queued.
+                let request = self
+                    .session()
+                    .and_then(|s| s.chats_state.deep_link_stage())
+                    .and_then(quill::state::DeepLinkState::request)
+                    .filter(|_| sent != Some(false));
+                if let Some(request) = request
+                    && let Some(hub) = self.hub_mut()
+                {
+                    hub.auto_start = Some(PremiumAutoStart {
+                        username: auto_start.0,
+                        start_ref: auto_start.1,
+                        request,
+                    });
                 }
                 if sent == Some(false) {
                     self.set_status_note(
@@ -106,34 +105,23 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         action: &DeepLinkAction,
+        flow: Option<RequestId>,
         cx: &mut Context<Self>,
     ) -> bool {
         let DeepLinkAction::OpenUsername { domain, .. } = action else {
             return false;
         };
-        let Some(live) = self.live.as_mut() else {
+        let Some(session) = self.session_mut() else {
             return false;
         };
-        let session = &mut live.driver.session;
-        let matches_bot = session
-            .payments
-            .hub
-            .auto_start
-            .as_ref()
-            .is_some_and(|auto| auto.username.eq_ignore_ascii_case(domain));
-        if !matches_bot {
-            // Another link opened a chat: the Premium link's flow is over,
-            // and its `/start` must not wait for a later visit to the bot.
-            session.payments.hub.auto_start = None;
+        let Some(PremiumAutoStart { start_ref, .. }) =
+            session.payments.hub.take_auto_start(domain, flow)
+        else {
             return false;
-        }
+        };
         let bot_id = match session.chats.get(&chat_id.0).map(|chat| &chat.kind) {
             Some(ChatKind::Private { user_id }) => user_id.0,
             _ => return false,
-        };
-        let Some(PremiumAutoStart { start_ref, .. }) = session.payments.hub.auto_start.take()
-        else {
-            return false;
         };
         self.press_bot_start(chat_id, bot_id, start_ref, cx);
         true

@@ -35,7 +35,7 @@ use quill::search_filters::{
 };
 use quill::search_tabs::SearchTab;
 use quill::state::{
-    ChatSearchJump, FromPicker, RequestPurpose, SearchConfirm, SearchStatus, Session,
+    ChatSearchJump, FromPicker, RequestPurpose, SearchConfirm, SearchStateView, Session,
 };
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::MessageSender;
@@ -279,9 +279,9 @@ pub(super) fn apply_ready_search_in_chat(
     if !session.open_chat_search() {
         return;
     }
-    let search_gen = session.search.chat_search.begin_query("hello");
-    let extra =
-        session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11), search_gen);
+    session.search.chat_search.begin_query("hello");
+    let extra = session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11));
+    session.search.chat_search.searching(extra);
     let json = format!(
         r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":2,"next_from_message_id":90,"messages":[{{"id":101,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}}},{{"id":103,"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Two more waiting.","entities":[]}}}}}}]}}"#,
         extra.0
@@ -431,7 +431,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.search.search.top_chats_disabled = disabled;
             if disabled {
-                session.search.search.top_chats.clear();
+                session.search.search.top_chats = Default::default();
             }
         }
         cx.notify();
@@ -656,7 +656,7 @@ impl QuillApp {
             let trimmed = query.trim();
             if session.search.chat_search.is_open()
                 && session.search.chat_search.query() == trimmed
-                && !matches!(session.search.chat_search.status(), SearchStatus::Closed)
+                && !matches!(session.search.chat_search.status(), SearchStateView::Closed)
             {
                 cx.notify();
                 return;

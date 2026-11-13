@@ -400,8 +400,7 @@ fn story_manage_state_transitions() {
     assert!(error.contains("Story update failed"), "{error}");
 
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
-    session.stories.post_as.begin();
-    session.stories.post_as.sent(extra);
+    session.stories.post_as.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -416,8 +415,7 @@ fn story_manage_state_transitions() {
     // Review fix-up: a failed `getChatsToPostStories` surfaces a
     // transient error instead of silently leaving only "Myself".
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
-    session.stories.post_as.begin();
-    session.stories.post_as.sent(extra);
+    session.stories.post_as.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -571,12 +569,11 @@ fn set_account_ttl_ok_stores_confirmed_days() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.settings.account_ttl.succeed(90);
-    session.settings.account_ttl.begin();
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
         None,
     );
-    session.settings.account_ttl.sent(extra);
+    session.settings.account_write = crate::state::AccountWrite::SetTtl { request: extra };
     apply_json(
         &mut session,
         &seq,
@@ -749,7 +746,7 @@ fn b14_close_friends_error_keeps_the_list() {
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
     assert!(matches!(
         session.stories.page_ops.latest().map(|op| &op.state),
-        Some(crate::story_page::StoryPageOpState::Failed(_))
+        Some(crate::story_page::StoryPageOpState::Failed { .. })
     ));
 }
 
@@ -771,7 +768,7 @@ fn b14_hide_and_profile_ops_finish_on_ok() {
         );
         assert_eq!(
             session.stories.page_ops.latest().map(|op| &op.state),
-            Some(&crate::story_page::StoryPageOpState::Succeeded)
+            Some(&crate::story_page::StoryPageOpState::Succeeded { request: extra })
         );
     }
 }
@@ -799,11 +796,11 @@ fn a_stale_answer_does_not_settle_the_op_tracked_now() {
     );
     assert_eq!(
         session.stories.page_ops.get(second).map(|op| &op.state),
-        Some(&crate::story_page::StoryPageOpState::Sending)
+        Some(&crate::story_page::StoryPageOpState::Sending { request: second })
     );
     assert!(matches!(
         session.stories.page_ops.get(first).map(|op| &op.state),
-        Some(crate::story_page::StoryPageOpState::Failed(_))
+        Some(crate::story_page::StoryPageOpState::Failed { .. })
     ));
 }
 
@@ -887,7 +884,7 @@ fn story_custom_emoji_stickers_are_bounded() {
     };
     let total = crate::state::STORY_CUSTOM_EMOJI_CAP as i64 * 3;
     for id in 1..=total {
-        session.accept_story_custom_emoji_stickers(vec![sticker(id)]);
+        session.accept_story_custom_emoji_stickers(None, vec![sticker(id)]);
         assert!(
             session.stories.custom_emoji_stickers.len() <= crate::state::STORY_CUSTOM_EMOJI_CAP
         );
@@ -897,9 +894,9 @@ fn story_custom_emoji_stickers_are_bounded() {
     // An answer that crosses the cap keeps every sticker it brought.
     let cap = crate::state::STORY_CUSTOM_EMOJI_CAP as i64;
     session.stories.custom_emoji_stickers.clear();
-    session.accept_story_custom_emoji_stickers((1..cap - 1).map(sticker).collect());
+    session.accept_story_custom_emoji_stickers(None, (1..cap - 1).map(sticker).collect());
     let batch: Vec<_> = (1_000..1_005).map(sticker).collect();
-    session.accept_story_custom_emoji_stickers(batch);
+    session.accept_story_custom_emoji_stickers(None, batch);
     for id in 1_000..1_005 {
         assert!(session.stories.custom_emoji_stickers.contains_key(&id));
     }
@@ -1017,4 +1014,24 @@ fn r2_clear_all_answers_only_by_its_own_request_and_keeps_the_list_until_ok() {
     );
     assert!(session.calls.recent_calls.rows().is_empty());
     assert_eq!(session.calls.recent_calls.next_offset(), "");
+}
+
+/// A close-friends load that never went out (no connection) fails the list
+/// so the panel shows Retry; a list already held, or a load out, stays.
+#[test]
+fn a_close_friends_load_that_cannot_start_fails_the_list() {
+    let (mut session, _sink) = session();
+    session.stories.close_friends.refused();
+    assert!(session.stories.close_friends.failed_without_list());
+    let load = RequestId(5);
+    session.stories.close_friends.begin_load(load);
+    session.stories.close_friends.refused();
+    assert!(session.stories.close_friends.ids().is_none());
+    assert!(!session.stories.close_friends.failed_without_list());
+    session
+        .stories
+        .close_friends
+        .answered(Some(load), vec![1, 2]);
+    session.stories.close_friends.refused();
+    assert_eq!(session.stories.close_friends.ids(), Some(&vec![1, 2]));
 }

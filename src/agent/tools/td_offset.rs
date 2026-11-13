@@ -28,6 +28,15 @@ pub fn binding(account: &crate::ids::AccountKey, agent: &str, method: &str) -> S
     format!("{}\u{1f}{agent}\u{1f}{method}", account.0)
 }
 
+/// `key`'s account logged out: its tokens expire, so whoever signs in next
+/// under the same key cannot replay them.
+pub fn forget_account(key: &crate::ids::AccountKey) {
+    let prefix = format!("{}\u{1f}", key.0);
+    crate::locks::lock_or_recover(&TOKENS)
+        .issued
+        .retain(|(_, owner, _)| !owner.starts_with(&prefix));
+}
+
 fn issue(offset: String, binding: &str) -> String {
     let mut tokens = crate::locks::lock_or_recover(&TOKENS);
     let id = tokens.next;
@@ -124,6 +133,25 @@ mod tests {
         let mut end = json!({"next_offset": ""});
         hide(&mut end, "a");
         assert_eq!(end["next_offset"], json!(""));
+    }
+
+    #[test]
+    fn a_logged_out_accounts_tokens_expire() {
+        let account = crate::ids::AccountKey("gone-account".into());
+        let other = crate::ids::AccountKey("gone-account-2".into());
+        let mine = binding(&account, "Agent A", "searchMessages");
+        let theirs = binding(&other, "Agent A", "searchMessages");
+        let mut found = json!({"next_offset": "1,2,3"});
+        hide(&mut found, &mine);
+        let token = found["next_offset"].clone();
+        let mut kept = json!({"next_offset": "4,5,6"});
+        hide(&mut kept, &theirs);
+        let kept_token = kept["next_offset"].clone();
+        super::forget_account(&account);
+        let mut replay = json!({"offset": token});
+        assert!(reveal(&mut replay, &mine).is_err());
+        let mut other_page = json!({"offset": kept_token});
+        assert_eq!(reveal(&mut other_page, &theirs), Ok(()));
     }
 
     #[test]

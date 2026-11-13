@@ -5,7 +5,7 @@
 
 use super::layout::{PANEL_PADDING, panel_height};
 use super::pattern::Rect;
-use super::theme::{GIFT_COLUMNS, GiftsLayout};
+use super::theme::{GIFT_COLUMNS, GiftsLayoutView};
 
 /// `peerQrGiftSkip`.
 pub const GIFT_SKIP: f64 = 9.;
@@ -39,15 +39,15 @@ pub fn square_size(width: f64) -> f64 {
     ((inner - (columns - 1.) * GIFT_SKIP) / columns).max(0.)
 }
 
-fn wide(layout: GiftsLayout) -> bool {
-    matches!(layout, GiftsLayout::Wide(1 | 2))
+fn wide(layout: GiftsLayoutView) -> bool {
+    matches!(layout, GiftsLayoutView::Wide(1 | 2))
 }
 
 /// Tile `index`'s rectangle inside the panel's content (tdesktop
 /// `tileRect`).
-pub fn tile_rect(layout: GiftsLayout, width: f64, index: usize) -> Rect {
+pub fn tile_rect(layout: GiftsLayoutView, width: f64, index: usize) -> Rect {
     let size = square_size(width);
-    if let GiftsLayout::Wide(count @ (1 | 2)) = layout {
+    if let GiftsLayoutView::Wide(count @ (1 | 2)) = layout {
         let inner = width - 2. * PANEL_PADDING;
         let tile = if count == 1 {
             inner
@@ -88,11 +88,11 @@ pub fn empty_height(browse: bool) -> f64 {
 }
 
 /// The content's height (tdesktop `contentHeight`); 0 while loading.
-pub fn content_height(layout: GiftsLayout, width: f64, count: usize, browse: bool) -> f64 {
+pub fn content_height(layout: GiftsLayoutView, width: f64, count: usize, browse: bool) -> f64 {
     let size = square_size(width);
     let content = match layout {
-        GiftsLayout::Loading | GiftsLayout::Failed => return 0.,
-        GiftsLayout::Empty => return empty_height(browse),
+        GiftsLayoutView::Loading | GiftsLayoutView::Failed => return 0.,
+        GiftsLayoutView::Empty => return empty_height(browse),
         layout if wide(layout) => size * WIDE_TILE_RATIO,
         _ => {
             let rows = count.div_ceil(GIFT_COLUMNS) as f64;
@@ -118,10 +118,10 @@ pub fn grid_row(width: f64, row: usize, rows: usize) -> (f64, f64) {
 
 /// How tall the gifts panel opens: as tall as the colors panel while it
 /// loads or scrolls, else its content up to that (tdesktop `openHeight`).
-pub fn gifts_panel_height(layout: GiftsLayout, width: f64, count: usize, browse: bool) -> f64 {
+pub fn gifts_panel_height(layout: GiftsLayoutView, width: f64, count: usize, browse: bool) -> f64 {
     let cap = panel_height(width);
     match layout {
-        GiftsLayout::Loading | GiftsLayout::Failed | GiftsLayout::Grid => cap,
+        GiftsLayoutView::Loading | GiftsLayoutView::Failed | GiftsLayoutView::Grid => cap,
         _ => content_height(layout, width, count, browse).min(cap),
     }
 }

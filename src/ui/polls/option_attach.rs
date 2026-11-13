@@ -267,14 +267,14 @@ impl QuillApp {
                     ),
                     None,
                 ),
-                OptionMediaSlot::Ready(PollOptionInput::Photo { path }) => (
+                OptionMediaSlot::Ready(PollOptionInput::Photo { path }, _) => (
                     tr_with(
                         keys::Q_MEDIA_PHOTO,
                         &[("file_name", &(file_name(path)).to_string())],
                     ),
                     Some(PathBuf::from(path)),
                 ),
-                OptionMediaSlot::Ready(PollOptionInput::Video { path, duration, .. }) => (
+                OptionMediaSlot::Ready(PollOptionInput::Video { path, duration, .. }, preview) => (
                     tr_with(
                         keys::Q_LEFTOVERS_VIDEO_NAME_SIZE,
                         &[
@@ -285,13 +285,13 @@ impl QuillApp {
                             ),
                         ],
                     ),
-                    attach.preview.clone(),
+                    preview.clone(),
                 ),
-                OptionMediaSlot::Ready(PollOptionInput::Sticker { emoji, .. }) => (
+                OptionMediaSlot::Ready(PollOptionInput::Sticker { emoji, .. }, _) => (
                     tr_with(keys::Q_MEDIA_STICKER_2, &[("emoji", &emoji.to_string())]),
                     None,
                 ),
-                OptionMediaSlot::Ready(PollOptionInput::Link { url }) => (
+                OptionMediaSlot::Ready(PollOptionInput::Link { url }, _) => (
                     tr_with(keys::Q_MEDIA_LINK, &[("url", &url.to_string())]),
                     None,
                 ),
@@ -329,7 +329,6 @@ impl QuillApp {
         if let Some(attach) = self.attach_mut(target) {
             attach.media = slot;
             attach.leave(|mode| matches!(mode, AttachMode::Menu));
-            attach.preview = None;
         }
     }
 
@@ -450,8 +449,7 @@ impl QuillApp {
         {
             match result {
                 Ok((media, frame)) => {
-                    attach.media = OptionMediaSlot::Ready(media);
-                    attach.preview = frame;
+                    attach.media = OptionMediaSlot::Ready(media, frame);
                 }
                 Err(why) => {
                     attach.media = OptionMediaSlot::None;
@@ -613,12 +611,15 @@ impl QuillApp {
         };
         self.set_poll_option_media(
             target,
-            OptionMediaSlot::Ready(PollOptionInput::Sticker {
-                file_id: file_id.0,
-                width: size.0,
-                height: size.1,
-                emoji: emoji.to_string(),
-            }),
+            OptionMediaSlot::Ready(
+                PollOptionInput::Sticker {
+                    file_id: file_id.0,
+                    width: size.0,
+                    height: size.1,
+                    emoji: emoji.to_string(),
+                },
+                None,
+            ),
         );
         cx.notify();
         true
@@ -634,7 +635,7 @@ impl QuillApp {
         let current = self
             .attach_ref(target)
             .and_then(|attach| match &attach.media {
-                OptionMediaSlot::Ready(PollOptionInput::Link { url }) => Some(url.clone()),
+                OptionMediaSlot::Ready(PollOptionInput::Link { url }, _) => Some(url.clone()),
                 _ => None,
             })
             .unwrap_or_default();
@@ -671,7 +672,7 @@ impl QuillApp {
         }
         self.set_poll_option_media(
             target,
-            OptionMediaSlot::Ready(PollOptionInput::Link { url }),
+            OptionMediaSlot::Ready(PollOptionInput::Link { url }, None),
         );
         if let Some(attach) = self.attach_mut(target) {
             attach.leave(|mode| matches!(mode, AttachMode::Link(_)));

@@ -367,7 +367,7 @@ fn pending_photo(app: &mut QuillApp, caption: &str) -> quill::ids::MessageId {
         .clone();
     message.id = id;
     message.is_outgoing = true;
-    message.send = quill::state::SendState::Sending;
+    message.send = quill::state::SendState::Unconfirmed;
     message.media_album_id = 0;
     message.forward_info = None;
     message.content = MessageContent::Photo(PhotoContent {

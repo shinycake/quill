@@ -7,7 +7,6 @@ use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::RequestPurpose;
 use quill::telegram::envelope::AuthorizationState;
 use zeroize::Zeroize;
 
@@ -17,9 +16,7 @@ impl QuillApp {
             return div().into_any_element();
         };
         let accepted = terms.is_none() || self.auth_ui.registration.is_accepted();
-        let pending = self
-            .session()
-            .is_some_and(|s| s.requests.has_purpose(RequestPurpose::RegisterUser));
+        let pending = self.auth_submit_busy();
         let mut form = div()
             .flex()
             .flex_col()
@@ -85,9 +82,9 @@ impl QuillApp {
     }
 
     fn submit_registration(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(live) = self.live.as_mut() else {
+        if self.live.is_none() {
             return;
-        };
+        }
         let mut first = self
             .screen
             .auth_ui
@@ -102,14 +99,15 @@ impl QuillApp {
             .read(cx)
             .value()
             .to_string();
-        let result = live.driver.register_user(
-            &first,
-            &last,
-            self.screen.auth_ui.registration.accepted_terms(),
-            self.screen.auth_ui.registration_notify_contacts,
-        );
+        let terms = self.screen.auth_ui.registration.accepted_terms().cloned();
+        let notify = self.screen.auth_ui.registration_notify_contacts;
+        let result =
+            self.send_auth(|driver| driver.register_user(&first, &last, terms.as_ref(), notify));
         first.zeroize();
         last.zeroize();
+        let Some(result) = result else {
+            return;
+        };
         self.screen.connection.set_note_for(
             &self.screen.windows,
             match result {

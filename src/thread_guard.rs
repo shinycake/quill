@@ -32,6 +32,12 @@ where
         .spawn(move || guarded(body).ok())
 }
 
+/// Run `body` and say how it ended: `None` when it panicked (the crash-log
+/// hook has filed the report), for a worker that must still tell its owner.
+pub fn run_guarded<T>(body: impl FnOnce() -> T) -> Option<T> {
+    guarded(body).ok()
+}
+
 /// Run the body of an `extern "C"` / `extern "system"` function Quill
 /// implements. A panic must not unwind into the C caller (that aborts the
 /// process), so it is caught here and the callback returns `default`. The

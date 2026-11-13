@@ -101,8 +101,8 @@ fn cheap_list_checks_agree_with_the_lists() {
         !session.ordered_archived_chats().is_empty()
     );
     if let Some(chat) = session.chats.get_mut(&5) {
-        chat.in_archive = true;
-        chat.archive_order = 3;
+        chat.archive.get_or_insert_with(Default::default);
+        chat.archive.get_or_insert_with(Default::default).order = 3;
     }
     session.rebuild_main_order();
     assert!(session.has_archived_chats());

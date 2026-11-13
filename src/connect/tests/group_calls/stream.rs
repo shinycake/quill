@@ -138,7 +138,7 @@ fn connect_records_the_stream_mode() {
     let (dir, driver, ..) = joined_stream_call(GroupCallMode::Rtmp);
     assert_eq!(
         stream_state(&driver),
-        (GroupCallMode::Rtmp, StreamState::Connecting)
+        (GroupCallMode::Rtmp, StreamState::Joined)
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -161,7 +161,7 @@ fn timestamp_request_asks_tdlib_and_answers_the_engine() {
     );
     assert_eq!(times(&handle), vec![(51, 1, 1_700_000_123_456)]);
     // Live comes with the first segment, not the stream list.
-    assert_eq!(stream_state(&driver).1, StreamState::Connecting);
+    assert_eq!(stream_state(&driver).1, StreamState::Joined);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -636,7 +636,7 @@ fn a_refused_stream_connect_is_a_join_error_not_a_crash() {
     // would accept it now, and the call must still be failed.
     assert!(call.transport.answer().is_empty());
     driver
-        .pump_group_call_transport([Some(555), None])
+        .pump_group_call_transport([Some(555), None], std::time::Instant::now())
         .expect("pump");
     let call = driver
         .session

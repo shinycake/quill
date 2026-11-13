@@ -64,11 +64,11 @@ fn attention_follows_the_flash_pref_not_the_desktop_switch() {
     session.settings.desktop_notifications = false;
     apply_json(&mut session, &seq, &sink, JOINED);
     assert!(session.settings.pending_notifications.is_empty());
-    assert!(session.settings.pending_attention);
-    session.settings.pending_attention = false;
+    assert_eq!(session.settings.pending_alerts, [OsAlert::Attention]);
+    session.settings.take_alerts();
     session.settings.badge_prefs.flash_bounce = false;
     apply_json(&mut session, &seq, &sink, JOINED);
-    assert!(!session.settings.pending_attention);
+    assert!(session.settings.pending_alerts.is_empty());
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn a_focused_open_chat_does_not_ask_for_attention() {
     session.app_active = true;
     session.open = crate::state::OpenView::of(Some(ChatId(7)));
     apply_json(&mut session, &seq, &sink, JOINED);
-    assert!(!session.settings.pending_attention);
+    assert!(session.settings.pending_alerts.is_empty());
 }
 
 #[test]

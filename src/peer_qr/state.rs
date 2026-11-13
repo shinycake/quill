@@ -177,8 +177,6 @@ pub struct ShownLink {
 /// The open box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerQrBox {
-    /// Names this box for what outlives a poll step (the clock, the export).
-    pub id: u64,
     pub subject: QrSubject,
     /// What the card shows: a color with emoji, or a gift (one value, so
     /// a gift never has emoji and the colors panel never ringed a gift's).
@@ -245,9 +243,8 @@ fn toggle_emoji(picks: &mut Vec<ThemeEmoji>, emoji: ThemeEmoji) {
 }
 
 impl PeerQrBox {
-    pub fn new(subject: QrSubject, id: u64) -> Self {
+    pub fn new(subject: QrSubject) -> Self {
         Self {
-            id,
             subject,
             shown: ThemeChoice::default(),
             panel: None,

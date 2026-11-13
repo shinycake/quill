@@ -110,15 +110,19 @@ impl QuillApp {
     /// Refresh the operating system's accent color. macOS and Windows read
     /// it right away. On Linux the read runs on a background thread (it
     /// spawns `gdbus`), so this only requests it and returns the cached
-    /// value; a short poll applies the result once it lands.
+    /// value; a task waiting on the read's receiver applies the result once it
+    /// lands (a read that starts while one is awaited takes the wait over).
     pub(in crate::ui) fn refresh_system_accent(&mut self, cx: &mut Context<Self>) {
         // Screenshot demos keep their fixture accent.
         if self.demo_session.is_some() {
             return;
         }
-        quill::system_accent::refresh();
+        let (landed, landing) = futures_channel::oneshot::channel::<()>();
+        let started = quill::system_accent::refresh_then(move || {
+            let _ = landed.send(());
+        });
         let color = quill::system_accent::read();
-        if !quill::system_accent::pending() {
+        if !started && !quill::system_accent::pending() {
             let waited = matches!(self.preferences.system_accent, SystemAccent::Reading { .. });
             self.preferences.system_accent = SystemAccent::Read(color);
             // The wait that was cancelled would have applied it.
@@ -127,17 +131,18 @@ impl QuillApp {
             }
             return;
         }
-        if let SystemAccent::Reading { color: known, .. } = &mut self.preferences.system_accent {
+        // Another refresh's wait still covers a read that is running; a
+        // read this call started has its own receiver, so it takes over.
+        if !started
+            && let SystemAccent::Reading { color: known, .. } = &mut self.preferences.system_accent
+        {
             *known = color;
             return;
         }
         // screen-scope: the system accent is an app-wide setting; it applies to whichever account is on screen.
         let wait = cx.spawn(async move |this, cx| {
-            while quill::system_accent::pending() {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(100))
-                    .await;
-            }
+            // Ends when the read thread says so, or drops its end.
+            let _ = landing.await;
             let _ = this.update(cx, |this, cx| {
                 this.preferences.system_accent = SystemAccent::Read(quill::system_accent::read());
                 this.apply_appearance(cx);
@@ -228,7 +233,7 @@ impl QuillApp {
         let forced = quill::battery_saving::forcing_for(
             saver,
             quill::battery_saving::thermal_hot(),
-            self.appearance.ignore_battery_saving,
+            self.appearance.battery_saver.ignores(),
         );
         let mut groups = div().flex().flex_col().gap_2();
         for group in &GROUPS {
@@ -289,8 +294,8 @@ impl QuillApp {
                         "power-auto",
                         tr(keys::SETTINGS_POWER_AUTO),
                         "",
-                        !self.appearance.ignore_battery_saving,
-                        |prefs, on| prefs.ignore_battery_saving = !on,
+                        !self.appearance.battery_saver.ignores(),
+                        |prefs, on| prefs.battery_saver = quill::settings::BatterySaver::from(!on),
                     ),
                     cx,
                 )))

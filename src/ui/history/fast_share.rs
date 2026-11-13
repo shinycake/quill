@@ -63,7 +63,7 @@ pub(super) fn facts(message: &HistoryMessage, session: Option<&Session>) -> Opti
         send: if message.id.0 > 0 {
             message.send
         } else {
-            SendState::Sending
+            SendState::Unconfirmed
         },
         outgoing: message.is_outgoing,
         forwardable: !session.chat_has_protected_content(message.chat_id)

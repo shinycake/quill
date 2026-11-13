@@ -538,7 +538,7 @@ impl QuillApp {
     pub(super) fn load_more_archived_stories(&mut self, cx: &mut Context<Self>) {
         let (chat_id, from_story_id) = match self.stories.page.as_ref().zip(self.session()) {
             Some((page, session)) => match session.stories.archived_stories.get(&page.chat_id.0) {
-                Some(archived) => (page.chat_id, archived.next_from_story_id.unwrap_or(0)),
+                Some(archived) => (page.chat_id, archived.next_from()),
                 None => (page.chat_id, 0),
             },
             None => return,

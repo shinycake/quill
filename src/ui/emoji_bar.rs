@@ -209,13 +209,15 @@ impl QuillApp {
         let sets: Vec<&[StickerItem]> = session
             .stickers
             .emoji
-            .installed_sets
+            .lists
+            .installed
+            .items()
             .iter()
             .filter_map(|set| library.get(&set.id).map(Vec::as_slice))
             .collect();
         let custom = custom_items(&items, &sets);
-        let missing = sets.len() < session.stickers.emoji.installed_sets.len()
-            || session.stickers.emoji.installed_sets.is_empty();
+        let missing = sets.len() < session.stickers.emoji.lists.installed.items().len()
+            || session.stickers.emoji.lists.installed.items().is_empty();
         items.extend(custom);
         if missing && let Some(live) = self.live.as_mut() {
             let _ = live.driver.ensure_suggestion_emoji_sets();
@@ -239,7 +241,9 @@ impl QuillApp {
             session
                 .stickers
                 .emoji
-                .installed_sets
+                .lists
+                .installed
+                .items()
                 .iter()
                 .filter(|set| library.contains_key(&set.id))
                 .count()

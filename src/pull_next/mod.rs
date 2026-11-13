@@ -90,9 +90,7 @@ const BOUNCE_MS: u64 = 400;
 /// `kPreloadMessagesCount` (`support/support_preload.cpp`): the next
 /// channel's history page loaded while pulling.
 pub const PRELOAD_MESSAGES: i32 = 50;
-/// `jumpWhenReady`: poll interval, longest wait for the history and for
-/// the pinned bar.
-pub const JUMP_POLL_MS: u64 = 100;
+/// `jumpWhenReady`: longest wait for the history and for the pinned bar.
 pub const JUMP_MAX_WAIT_MS: u64 = 1500;
 pub const JUMP_PINNED_MAX_WAIT_MS: u64 = 600;
 

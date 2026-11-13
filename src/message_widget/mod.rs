@@ -73,13 +73,16 @@ pub const MONO_FONTS: &[&str] = &[
 ///
 /// The stops in a row ([`MAX_CRASHES`]) are the `streak` of the stages
 /// between a stop and the next first frame: they travel with the restart
-/// (`Stopped` to `Waiting` to `Loading`) and are gone once the widget runs.
+/// (`Stopped` to `Due` to `Loading`) and are gone once the widget runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Lifecycle<R = ()> {
     /// Never on screen yet: nothing runs and nothing was drawn.
     Idle,
-    /// On screen, waiting for one of the [`MAX_LIVE`] sandboxes.
-    Waiting { streak: u8 },
+    /// Due to start: the next present of a shown widget starts it, as soon
+    /// as there is room among the [`MAX_LIVE`] sandboxes. Nothing is in
+    /// flight and nothing is held: a hidden widget stays due until it is
+    /// shown.
+    Due { streak: u8 },
     /// The sandbox boots and runs the widget's scripts; its first frame has
     /// not come yet.
     Loading { runtime: R, streak: u8 },
@@ -127,9 +130,9 @@ impl<R> Lifecycle<R> {
     /// Stops in a row since the widget last ran.
     pub fn streak(&self) -> u8 {
         match self {
-            Self::Waiting { streak }
-            | Self::Loading { streak, .. }
-            | Self::Stopped { streak, .. } => *streak,
+            Self::Due { streak } | Self::Loading { streak, .. } | Self::Stopped { streak, .. } => {
+                *streak
+            }
             _ => 0,
         }
     }
@@ -239,10 +242,10 @@ pub enum QueryOutcome {
 /// takes them ([`crate::state::BotsState::widget_answers`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WidgetAnswer {
-    /// `getWidgetQueryAnswer` for the widget's request `token`.
+    /// `getWidgetQueryAnswer` for the widget's query sent as `request`.
     Query {
         key: WidgetKey,
-        token: u64,
+        request: crate::ids::RequestId,
         outcome: QueryOutcome,
     },
     /// `getWidgetPublicData` for the poll `request`: the shared data and

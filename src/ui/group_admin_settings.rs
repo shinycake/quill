@@ -96,8 +96,16 @@ impl QuillApp {
             return;
         };
         // A filter box goes with its page: another page replaces it.
+        let from_filter = matches!(dialog.view, GroupSettingsView::RecentActionsFilter(_));
         dialog.view = view.clone();
         let chat_id = dialog.chat_id;
+        // Back to the log from its own filter box (Cancel): the page is the
+        // one already open, so its list, scroll place and poll stay. The ask
+        // and the poll belong to the first open.
+        if from_filter && view == GroupSettingsView::RecentActions {
+            cx.notify();
+            return;
+        }
         if view == GroupSettingsView::Boosts {
             self.open_boosts_page(chat_id, false);
         }

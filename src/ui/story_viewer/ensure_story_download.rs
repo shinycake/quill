@@ -86,11 +86,9 @@ impl QuillApp {
     /// whether a fetch ran.
     pub(in crate::ui) fn warm_story_custom_emoji(&mut self) -> bool {
         self.warm_story_custom_emoji_with(std::time::Instant::now(), |app, ids| {
-            app.live.as_mut().is_some_and(|live| {
-                live.driver
-                    .maybe_fetch_story_custom_emoji_stickers(ids)
-                    .is_ok()
-            })
+            app.live
+                .as_mut()
+                .is_some_and(|live| live.driver.warm_story_custom_emoji_stickers(ids))
         })
     }
 

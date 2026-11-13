@@ -220,7 +220,7 @@ pub(crate) struct Surfaces {
     pub(crate) reply_bar: std::cell::RefCell<Presence<quill::composer::ComposerReplyTo>>,
     pub(crate) forward_bar: std::cell::RefCell<Presence<()>>,
     pub(crate) pinned_bar: std::cell::RefCell<Presence<PinnedShown>>,
-    pub(crate) media_panel: std::cell::RefCell<Presence<super::media_panel::PanelTab>>,
+    pub(crate) media_panel: Presence<super::media_panel::PanelTab>,
     /// The "@", heart and poll corner buttons, by `UnreadJumpKind`.
     pub(crate) corners: std::cell::RefCell<[Presence<i32>; 3]>,
     /// How far the corner stack sits above the jump-to-bottom button,
@@ -242,9 +242,7 @@ impl Surfaces {
             reply_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, linear, now)),
             forward_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, linear, now)),
             pinned_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, linear, now)),
-            media_panel: std::cell::RefCell::new(
-                Presence::new(ENTER, EXIT, ease_out_circ, now).with_exit_ease(linear),
-            ),
+            media_panel: Presence::new(ENTER, EXIT, ease_out_circ, now).with_exit_ease(linear),
             corners: std::cell::RefCell::new([
                 Presence::new(CORNER, EXIT, linear, now),
                 Presence::new(CORNER, EXIT, linear, now),

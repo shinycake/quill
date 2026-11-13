@@ -314,7 +314,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         self.session.settings.proxy.error = None;
         match self.sender.send_json(&set_prefer_ipv6(extra, on)) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session.settings.proxy.ops.ipv6_sent(on, extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -354,10 +357,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return false;
         };
         let step = plan_proxy_sync(target, &current).into_iter().next();
-        let ipv6_differs = proxy.prefer_ipv6 != prefer_ipv6
-            && !self.session.requests.has_purpose(RequestPurpose::Settings(
-                SettingsPurpose::SetPreferIpv6 { on: prefer_ipv6 },
-            ));
+        let ipv6_differs = proxy.prefer_ipv6 != prefer_ipv6 && !proxy.ops.ipv6_setting(prefer_ipv6);
         let mut sent = ipv6_differs && self.set_prefer_ipv6(prefer_ipv6).is_ok();
         sent |= match step {
             None => false,
@@ -455,7 +455,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.session.settings.proxy.rotation_step(now_ms, connected) {
             RotationAction::None => {}
             RotationAction::Ping(id) => {
-                if self.ping_listed_proxy(id).is_ok() {
+                if let Ok(request) = self.ping_listed_proxy(id) {
+                    self.session.settings.proxy.probe_sent(id, request, now_ms);
                     changed = true;
                 } else {
                     // The probe never left: it counts as failed, so the

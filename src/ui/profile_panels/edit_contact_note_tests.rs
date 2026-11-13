@@ -69,7 +69,7 @@ fn edit_contact_waits_for_the_note_before_saving(cx: &mut TestAppContext) {
     frame(vcx);
     assert_eq!(
         note_state(&app, vcx),
-        Some((ContactNote::Waiting, String::new()))
+        Some((ContactNote::Unseeded, String::new()))
     );
     // Round 17 C finding 24: Save before the note is known goes through
     // (the note is sent as "keep", null), so a full-info fetch that never
@@ -131,14 +131,14 @@ fn a_failed_full_info_ends_the_loading_wait(cx: &mut TestAppContext) {
     frame(vcx);
     assert_eq!(
         note_state(&app, vcx).map(|(note, _)| note),
-        Some(ContactNote::Waiting)
+        Some(ContactNote::Unseeded)
     );
     app.update_in(vcx, |app, _, _| {
         if let Some(session) = app.session_mut() {
             session
                 .users_state
                 .user_full_infos
-                .fail(USER, "unreachable".into());
+                .fail_unsent(USER, "unreachable".into());
         }
     });
     frame(vcx);

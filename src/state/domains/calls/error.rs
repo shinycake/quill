@@ -11,6 +11,7 @@ impl Session {
         extra: Option<RequestId>,
         _seq: u64,
     ) {
+        self.settle_participant_mute_toggle(pending);
         // "Stream with...": a failed URL request of the process is shown
         // as a toast by the UI (tdesktop shows the server error), not on a
         // call overlay.
@@ -24,7 +25,7 @@ impl Session {
             return;
         }
         // One of "Add People"'s invitations failed: its toast tells.
-        if let Some(results) = self.calls.invite_results.as_mut()
+        if let Some(results) = self.calls.invite_results_mut()
             && let Some(extra) = extra
             && results.owns(Some(extra))
         {
@@ -63,9 +64,7 @@ impl Session {
                 if let Some(hang_up) = self.calls.hang_up_failed(extra) {
                     self.calls.second_call.back_to_prompt();
                     // The call stays up, so no link waits for it to end.
-                    self.calls
-                        .call_link_stage
-                        .drop_waiting_for(crate::call_link::LeavingCall::Private(hang_up.call_id));
+                    self.calls.call_link_stage.drop_waiting_for(hang_up.request);
                     self.calls.error =
                         Some(call_request_error_line(err, "Could not hang up the call"));
                 }
@@ -76,7 +75,7 @@ impl Session {
                 if let Some(summary) = self.calls.summary.as_mut()
                     && extra.is_some_and(|extra| summary.rating.sends(extra))
                     && let CallRating::Sending { draft, .. } =
-                        std::mem::replace(&mut summary.rating, CallRating::Sent)
+                        std::mem::replace(&mut summary.rating, CallRating::Rated)
                 {
                     summary.rating = CallRating::Failed {
                         error: call_request_error_line(err, "Could not send the rating"),
@@ -309,6 +308,9 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::GetGroupCall { group_call_id })) => {
                 self.calls.call_link_stage.forget_hash(Some(group_call_id));
                 self.calls.note_group_call_fetch_failed(group_call_id);
+                if let Some(pending) = pending {
+                    self.group_call_fetch_ended(pending.id, false);
+                }
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
             }

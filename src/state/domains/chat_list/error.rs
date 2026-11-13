@@ -13,6 +13,7 @@ impl Session {
         _seq: u64,
     ) {
         let pending_id = pending.map(|p| p.id);
+        self.chat_list.folder_write_settled(pending);
         // Pins over the limit open the Premium limit box (tdesktop `PinsLimitBox`).
         let pins_box = matches!(
             pending.map(|p| p.purpose),
@@ -69,15 +70,14 @@ impl Session {
                     .failed(pending_id, error_reason(err), false);
             }
             Some((RequestPurpose::DeleteChatFolderInviteLink, Some(folder_id))) => {
-                // The link left the list at send time: what the box holds is
-                // wrong now, so it shows the error with a Retry that asks
-                // the list again.
-                self.chat_list
-                    .folder_shares
-                    .entry(folder_id)
-                    .or_default()
-                    .links
-                    .fail_dropping_data(error_reason(err));
+                // The link left the list at send time, so what the box holds
+                // is wrong now: the list is outdated (a fetch in flight keeps
+                // its place and answers) and is asked again. The refusal
+                // reaches the box as the delete's own answer.
+                let share = self.chat_list.folder_shares.entry(folder_id).or_default();
+                if !share.links.is_loading() {
+                    share.links.outdate();
+                }
             }
             // The tab order or the tags switch snapped back (its rollback):
             // the toast says why.
@@ -87,7 +87,15 @@ impl Session {
             )) => {
                 self.chats_state.chat_action_error.push(error_reason(err));
             }
-            Some((RequestPurpose::GetRecommendedChatFolders, _)) => {
+            // Only the request the list waits for says why; an older one's
+            // refusal is not a new line.
+            Some((RequestPurpose::GetRecommendedChatFolders, _))
+                if self.chat_list.recommended_folders.failed(
+                    pending_id,
+                    error_reason(err),
+                    false,
+                ) =>
+            {
                 self.chats_state.chat_action_error.push(error_reason(err));
             }
             _ => {}
@@ -100,7 +108,7 @@ impl Session {
                 .chat_lists_for_add
                 .entry(chat_id.0)
                 .or_default()
-                .fail(error_reason(err));
+                .failed(pending.map(|p| p.id), error_reason(err), false);
         }
         match pending.map(|p| p.purpose) {
             // Slice CL1: refused chat-list actions surface in the
@@ -138,16 +146,21 @@ impl Session {
             // on every ingest would loop at round-trip speed.
             Some(RequestPurpose::GetChatFolder) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
-                    self.chat_list.folder_specs.fail(
+                    let waited = self.chat_list.folder_specs.failed(
                         folder_id,
+                        pending_id,
                         call_request_error_line(
                             err,
                             crate::lang::tr(crate::lang::keys::Q_NOTES_FAILED_FOLDER),
                         ),
                     );
+                    // A fetch a change outdated meanwhile is asked again, so
+                    // its error leaves the queue alone.
                     let queue = &mut self.chat_list.folder_remove_queue;
                     let before = queue.len();
-                    queue.retain(|(_, folder)| *folder != folder_id);
+                    if waited {
+                        queue.retain(|(_, folder)| *folder != folder_id);
+                    }
                     if queue.len() != before {
                         self.chats_state.chat_action_error.push(format!(
                             "{} (error {})",
@@ -167,13 +180,11 @@ impl Session {
                     err.code
                 ));
             }
-            // Asked, so the poll waits out the update period instead of
+            // The poll that failed waits out the update period instead of
             // asking again on every tick.
             Some(RequestPurpose::GetChatFolderNewChats) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
-                    self.chat_list
-                        .folder_new_chats_asked
-                        .insert(folder_id, std::time::Instant::now());
+                    self.chat_list.new_chats_settled(folder_id, pending_id);
                 }
             }
             Some(RequestPurpose::HidePromotion) => {
@@ -216,9 +227,6 @@ impl Session {
                     format!("error {}", err.code),
                     false,
                 );
-                self.chat_list
-                    .archive_mute
-                    .note_reload_failed(pending.map(|p| p.id));
                 self.chats_state.chat_action_error.push(format!(
                     "could not load archive settings (error {})",
                     err.code
@@ -237,9 +245,13 @@ impl Session {
         let now = std::time::Instant::now();
         let list = &mut self.chat_list;
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) => list.main_paging.page_failed(err.code, now),
+            Some(RequestPurpose::LoadChats) => {
+                list.main_paging
+                    .page_failed(err.code, now, pending.map(|p| p.id))
+            }
             Some(RequestPurpose::LoadArchiveChats) => {
-                list.archive_paging.page_failed(err.code, now)
+                list.archive_paging
+                    .page_failed(err.code, now, pending.map(|p| p.id))
             }
             _ => {}
         }
@@ -249,7 +261,8 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadFolderChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id())
         {
-            self.chat_list.folder_page_failed(folder_id, err.code, now);
+            self.chat_list
+                .folder_page_failed(folder_id, err.code, now, pending.map(|p| p.id));
         }
         // Slice CL: failed preview-history fetch — mark the peek
         // preview so it shows an error instead of a spinner.

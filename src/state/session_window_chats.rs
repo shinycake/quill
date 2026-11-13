@@ -66,6 +66,7 @@ impl Session {
             .instant_view_fallbacks
             .retain(|fallback| fallback.window != Some(chat_id));
         let was_window = self.window_chats.remove(&chat_id);
+        self.forget_window_jump_lookup(chat_id);
         if was_window {
             self.release_chat_history(chat_id);
         }
@@ -146,6 +147,9 @@ impl Session {
         extra: Option<RequestId>,
         seq: u64,
     ) {
+        if let Some(pending) = pending {
+            self.settle_held(pending.id);
+        }
         let Some(asked_in) = pending
             .filter(|pending| lands_in_view(pending.purpose))
             .map(|pending| pending.asked_in)
@@ -221,7 +225,7 @@ fn lands_in_view(purpose: RequestPurpose) -> bool {
             | RequestPurpose::SearchChatMessagesMore
             | RequestPurpose::SearchFromMembers
             | RequestPurpose::GetChatMessageByDate
-            | RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { .. })
+            | RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar)
             | RequestPurpose::GetHistoryAround
             | RequestPurpose::GetSharedMedia { .. }
             | RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { .. })

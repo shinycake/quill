@@ -101,7 +101,7 @@ fn app_wide_actions(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 }
 
 fn box_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
-    app.read_with(vcx, |app, _| app.main_window.quit_gate.is_asking())
+    app.read_with(vcx, |app, _| app.main_window.quit_gate.is_held())
 }
 
 #[gpui_kit::test]
@@ -511,5 +511,58 @@ fn a_quit_from_the_lock_screen_stops_the_export_and_quits(cx: &mut TestAppContex
     });
     wait_for_the_end(|| export.progress().is_settled());
     drop(export);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Sweep r4-08 round 3: the exports ending closes the "Stop and quit?"
+/// alert itself, not a box that opened on top of it since.
+#[gpui_kit::test]
+fn the_exports_ending_closes_the_alert_not_the_box_above(cx: &mut TestAppContext) {
+    use gpui_kit::component::WindowExt as _;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = scratch("alert-id");
+    let export = running_chat_export(&dir);
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
+    });
+    use gpui::Focusable as _;
+    let base = app.read_with(vcx, |app, cx| app.focus_handle(cx));
+    vcx.update(|window, cx| window.focus(&base, cx));
+    settle(vcx);
+    assert!(!ask(&app, vcx).get(), "held back");
+    assert!(
+        !vcx.update(|window, _| base.is_focused(window)),
+        "the alert opened over the base focus"
+    );
+    let above = vcx.update(|window, cx| {
+        window.open_dialog(cx, |dialog, _, _| dialog.title("Other"));
+        window.last_dialog_id(cx)
+    });
+    settle(vcx);
+    let focus_before = vcx.update(|window, cx| window.focused(cx));
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = None;
+    });
+    app.update_in(vcx, |app, window, cx| app.quit_gate_upkeep(window, cx));
+    settle(vcx);
+    assert!(!box_open(&app, vcx), "the hold is over");
+    let focus_after = vcx.update(|window, cx| window.focused(cx));
+    let top = vcx.update(|window, cx| window.last_dialog_id(cx));
+    assert!(above.is_some() && top == above, "the box above stays");
+    assert!(
+        focus_before.is_some() && focus_after == focus_before,
+        "focus stays in the box above"
+    );
+    assert!(
+        focus_after != Some(base.clone()),
+        "focus did not fall back to the base"
+    );
+    vcx.update(|window, cx| window.close_dialog(cx));
+    settle(vcx);
+    assert!(
+        vcx.update(|window, _| base.is_focused(window)),
+        "closing the box above hands back what was focused before the alert"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

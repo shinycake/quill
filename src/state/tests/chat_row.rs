@@ -2,7 +2,7 @@
 use super::common::*;
 use super::*;
 use crate::peer_badge::TitleBadge;
-use crate::state::{RowStatus, SidebarLine};
+use crate::state::{RowStatusIcon, SidebarLine};
 
 const NEW_CHAT_WITH_DRAFT: &str = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":UNREAD,"draft_message":{"@type":"draftMessage","reply_to":null,"date":1,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#;
 
@@ -69,7 +69,7 @@ fn row_status_follows_the_send_state() {
     apply_json(&mut session, &seq, &sink, &last_message_json(5, true, ""));
     assert_eq!(
         session.chats.get(&11).unwrap().row_status(),
-        RowStatus::None
+        RowStatusIcon::None
     );
 
     // Without the draft: sending, failed, sent, read.
@@ -83,7 +83,7 @@ fn row_status_follows_the_send_state() {
     );
     assert_eq!(
         session.chats.get(&11).unwrap().row_status(),
-        RowStatus::Sending
+        RowStatusIcon::Sending
     );
 
     let failed = r#""sending_state":{"@type":"messageSendingStateFailed","can_retry":true},"#;
@@ -95,13 +95,13 @@ fn row_status_follows_the_send_state() {
     );
     assert_eq!(
         session.chats.get(&11).unwrap().row_status(),
-        RowStatus::Failed
+        RowStatusIcon::Failed
     );
 
     apply_json(&mut session, &seq, &sink, &last_message_json(9, true, ""));
     assert_eq!(
         session.chats.get(&11).unwrap().row_status(),
-        RowStatus::Sent
+        RowStatusIcon::Sent
     );
     session
         .chats
@@ -110,14 +110,14 @@ fn row_status_follows_the_send_state() {
         .last_read_outbox_message_id = MessageId(9);
     assert_eq!(
         session.chats.get(&11).unwrap().row_status(),
-        RowStatus::Read
+        RowStatusIcon::Read
     );
 
     // Incoming messages never get a mark.
     apply_json(&mut session, &seq, &sink, &last_message_json(10, false, ""));
     assert_eq!(
         session.chats.get(&11).unwrap().row_status(),
-        RowStatus::None
+        RowStatusIcon::None
     );
 }
 
@@ -139,7 +139,7 @@ fn send_succeeded_turns_the_clock_into_a_check() {
         r#"{"@type":"updateMessageSendSucceeded","old_message_id":-1,"message":{"id":42,"chat_id":11,"date":1700000001,"is_outgoing":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
     );
     let chat = session.chats.get(&11).unwrap();
-    assert_eq!(chat.row_status(), RowStatus::Sent);
+    assert_eq!(chat.row_status(), RowStatusIcon::Sent);
     assert_eq!(chat.last_message().unwrap().id, MessageId(42));
 }
 
@@ -162,7 +162,7 @@ fn send_failed_marks_the_last_message_failed() {
     );
     assert_eq!(
         session.chats.get(&11).unwrap().row_status(),
-        RowStatus::Failed
+        RowStatusIcon::Failed
     );
 }
 

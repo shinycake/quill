@@ -9,7 +9,7 @@ impl QuillApp {
         let session = self.session();
         let status = session
             .map(|s| s.search.chat_search.status())
-            .unwrap_or(SearchStatus::Closed);
+            .unwrap_or(SearchStateView::Closed);
         let query = session
             .map(|s| s.search.chat_search.query().to_owned())
             .unwrap_or_default();
@@ -55,15 +55,15 @@ impl QuillApp {
             media.label().to_lowercase()
         };
         let caption = match status {
-            SearchStatus::Idle if query.is_empty() => {
+            SearchStateView::Idle if query.is_empty() => {
                 tr(keys::Q_CHAT_TYPE_TO_SEARCH_THIS_CHAT).to_string()
             }
             // Typed, waiting for the debounce: the search is on its way, so
             // say so instead of asking for typing that already happened.
-            SearchStatus::Idle | SearchStatus::Searching => {
+            SearchStateView::Idle | SearchStateView::Searching => {
                 tr_with(keys::Q_CHAT_SEARCHING, &[("subject", &subject.to_string())])
             }
-            SearchStatus::Ready => {
+            SearchStateView::Ready => {
                 if jump_note.is_empty() {
                     tr_with(
                         keys::Q_CHAT_RESULTS_FOR,
@@ -79,12 +79,12 @@ impl QuillApp {
                     )
                 }
             }
-            SearchStatus::Empty => tr_with(
+            SearchStateView::Empty => tr_with(
                 keys::Q_CHAT_NO_MESSAGES_MATCH,
                 &[("subject", &subject.to_string())],
             ),
-            SearchStatus::Failed => tr(keys::Q_CHAT_SEARCH_IN_CHAT_FAILED).to_string(),
-            SearchStatus::Closed => String::new(),
+            SearchStateView::Failed => tr(keys::Q_CHAT_SEARCH_IN_CHAT_FAILED).to_string(),
+            SearchStateView::Closed => String::new(),
         };
         let picker_open = picker.is_some();
         // A hashtag or cashtag: tdesktop's This chat / My messages / Public
@@ -310,7 +310,7 @@ impl QuillApp {
             let trimmed = query.trim();
             if session.search.search.is_open()
                 && session.search.search.query == trimmed
-                && !matches!(session.search.search.status(), SearchStatus::Closed)
+                && !matches!(session.search.search.status(), SearchStateView::Closed)
             {
                 cx.notify();
                 return;

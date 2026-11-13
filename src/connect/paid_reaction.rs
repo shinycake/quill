@@ -94,32 +94,59 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// Commits every Star reaction whose Undo window is over. Returns
-    /// whether anything was due (the toast needs a redraw). A reaction stays
-    /// until TDLib answers its commit; one that cannot be sent is released
-    /// and the user told, never retried on its own.
+    /// Commits every Star reaction whose Undo window is over, and sends a
+    /// stuck one again once its wait is over. Returns whether anything was
+    /// due (the toast needs a redraw). A reaction stays until TDLib answers
+    /// its commit; one that cannot be sent is told to the user once and sent
+    /// again on a growing wait, a few times.
     pub fn paid_reaction_tick(&mut self, now_ms: u64) -> bool {
         let due = self.session.payments.paid.due(now_ms);
         let any = !due.is_empty();
         for pending in due {
             let chat_id = ChatId(pending.chat_id);
             let message_id = MessageId(pending.message_id);
-            let extra = self.session.request(
-                RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction {
-                    message_id: pending.message_id,
-                }),
-                Some(chat_id),
+            let undo = matches!(
+                pending.stage,
+                crate::paid_reaction::PaidStage::Stuck {
+                    settle: crate::paid_reaction::Settle::Undo,
+                    ..
+                }
             );
-            let json = commit_pending_paid_message_reactions(extra, chat_id, message_id);
-            let sent = self.send_json_request(extra, &json).is_ok();
-            let paid = &mut self.session.payments.paid;
-            if sent {
-                paid.begin_commit(pending.chat_id, pending.message_id, extra);
-            } else if paid.commit_unsent(pending.chat_id, pending.message_id) {
-                self.session.payments.notify(
-                    NoticeKind::Error,
-                    crate::lang::tr(crate::lang::keys::Q_MONEY_STARS_NOT_SENT),
+            let sent = if undo {
+                let extra = self.session.request(
+                    RequestPurpose::Payments(PaymentsPurpose::RemovePendingPaidReaction {
+                        message_id: pending.message_id,
+                    }),
+                    Some(chat_id),
                 );
+                let json = remove_pending_paid_message_reactions(extra, chat_id, message_id);
+                self.send_json_request(extra, &json)
+                    .is_ok()
+                    .then_some(extra)
+            } else {
+                let extra = self.session.request(
+                    RequestPurpose::Payments(PaymentsPurpose::CommitPaidReaction {
+                        message_id: pending.message_id,
+                    }),
+                    Some(chat_id),
+                );
+                let json = commit_pending_paid_message_reactions(extra, chat_id, message_id);
+                self.send_json_request(extra, &json)
+                    .is_ok()
+                    .then_some(extra)
+            };
+            let paid = &mut self.session.payments.paid;
+            match sent {
+                Some(extra) if undo => paid.begin_undo(pending.chat_id, pending.message_id, extra),
+                Some(extra) => paid.begin_commit(pending.chat_id, pending.message_id, extra),
+                None => {
+                    if paid.commit_unsent(pending.chat_id, pending.message_id, now_ms) {
+                        self.session.payments.notify(
+                            NoticeKind::Error,
+                            crate::lang::tr(crate::lang::keys::Q_MONEY_STARS_NOT_SENT),
+                        );
+                    }
+                }
             }
         }
         any
@@ -161,8 +188,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.send_json_request(extra, &json) {
             Ok(id) => {
                 let options = &mut self.session.payments.star_packs.options;
-                options.begin();
-                options.sent(id);
+                options.begin_with(id);
                 Ok(Some(id))
             }
             Err(err) => Err(err),

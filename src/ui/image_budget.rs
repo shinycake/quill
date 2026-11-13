@@ -604,67 +604,8 @@ fn atlas_cost(width: u32, height: u32) -> usize {
 
 type LoadResult = Result<Arc<RenderImage>, ImageCacheError>;
 
-/// A display-size decode on the background executor; views that asked
-/// while it ran are notified when it lands (as GPUI's own image loads).
-struct SizedLoad {
-    state: Rc<RefCell<SizedState>>,
-    _task: Task<()>,
-}
-
-enum SizedState {
-    Loading(SmallVec<[EntityId; 2]>),
-    Loaded(LoadResult),
-}
-
-impl SizedLoad {
-    fn new(key: SizedKey, cx: &mut App) -> Self {
-        let state = Rc::new(RefCell::new(SizedState::Loading(SmallVec::new())));
-        let decode = cx
-            .background_executor()
-            .spawn(async move { decode_sized(&key) });
-        let weak = Rc::downgrade(&state);
-        let task = cx.spawn(async move |cx| {
-            let result = decode.await;
-            let Some(state) = weak.upgrade() else {
-                return;
-            };
-            // Nothing holds the state across a turn; if it is borrowed all
-            // the same, the picture stays unloaded rather than panic.
-            let Ok(mut guard) = state.try_borrow_mut() else {
-                return;
-            };
-            let previous = std::mem::replace(&mut *guard, SizedState::Loaded(result));
-            drop(guard);
-            if let SizedState::Loading(views) = previous {
-                cx.update(|cx| {
-                    for view in views {
-                        cx.notify(view);
-                    }
-                });
-            }
-        });
-        Self { state, _task: task }
-    }
-
-    fn get(&self) -> Option<LoadResult> {
-        match &*self.state.try_borrow().ok()? {
-            SizedState::Loading(_) => None,
-            SizedState::Loaded(result) => Some(result.clone()),
-        }
-    }
-
-    fn use_by(&self, view: EntityId) -> Option<LoadResult> {
-        match &mut *self.state.try_borrow_mut().ok()? {
-            SizedState::Loading(views) => {
-                if !views.contains(&view) {
-                    views.push(view);
-                }
-                None
-            }
-            SizedState::Loaded(result) => Some(result.clone()),
-        }
-    }
-}
+mod sized_load;
+use sized_load::SizedLoad;
 
 enum Load {
     /// GPUI's loader: the file at its own size.
@@ -694,7 +635,6 @@ impl Load {
 const RETRY_FAILED_AFTER: Duration = Duration::from_secs(30);
 
 struct Entry {
-    load: Load,
     stage: EntryStage,
     /// The last frame each scope (slice, or `None` for the app) used it.
     uses: SmallVec<[(Option<EntityId>, u64); 2]>,
@@ -808,7 +748,7 @@ impl BoundedImageCache {
             .entries
             .values()
             .filter(|entry| !entry.may_be_visible(self.window))
-            .filter_map(|entry| entry.load.get()?.ok());
+            .filter_map(|entry| entry.stage.load().get()?.ok());
         for image in images.into_iter().chain(off_screen) {
             cx.drop_image(image, None);
         }
@@ -836,7 +776,7 @@ impl BoundedImageCache {
                 continue;
             };
             self.bytes -= entry.stage.bytes();
-            if let Some(Ok(image)) = entry.load.get() {
+            if let Some(Ok(image)) = entry.stage.load().get() {
                 images.push(image);
             }
         }
@@ -859,15 +799,14 @@ impl BoundedImageCache {
         let (scope, now) = (self.scope.get(), frame());
         let clock = cx.background_executor().now();
         if self.entries.get(&key).is_some_and(|entry| {
-            matches!(entry.stage, EntryStage::Failed { at }
+            matches!(entry.stage, EntryStage::Failed { at, .. }
                 if clock.saturating_duration_since(at) >= RETRY_FAILED_AFTER)
         }) && let Some(failed) = self.entries.remove(&key)
         {
             self.bytes -= failed.stage.bytes();
         }
         let entry = self.entries.entry(key).or_insert_with(|| Entry {
-            load: start(cx),
-            stage: EntryStage::Loading,
+            stage: EntryStage::Loading { load: start(cx) },
             uses: SmallVec::new(),
         });
         let previous = match entry.uses.iter_mut().find(|(s, _)| *s == scope) {
@@ -880,11 +819,16 @@ impl BoundedImageCache {
         if previous != Some(now) && newly_shown(self.window, scope, previous) {
             note_activity();
         }
-        let result = entry.load.use_image(window);
-        if entry.stage == EntryStage::Loading
+        let result = entry.stage.load().use_image(window);
+        if matches!(entry.stage, EntryStage::Loading { .. })
             && let Some(result) = &result
+            && let Some(Entry {
+                stage: EntryStage::Loading { load },
+                uses,
+            }) = self.entries.remove(&key)
         {
-            entry.stage = match result {
+            // The result is first seen: the entry settles with its load.
+            let stage = match result {
                 Ok(image) => EntryStage::Ready {
                     bytes: (0..image.frame_count())
                         .map(|frame| {
@@ -892,10 +836,12 @@ impl BoundedImageCache {
                             atlas_cost(size.width.0.max(0) as u32, size.height.0.max(0) as u32)
                         })
                         .sum(),
+                    load,
                 },
-                Err(_) => EntryStage::Failed { at: clock },
+                Err(_) => EntryStage::Failed { at: clock, load },
             };
-            self.bytes += entry.stage.bytes();
+            self.bytes += stage.bytes();
+            self.entries.insert(key, Entry { stage, uses });
         }
         result
     }
@@ -920,7 +866,7 @@ impl BoundedImageCache {
             .filter(|(_, hash)| {
                 self.entries
                     .get(hash)
-                    .is_some_and(|entry| matches!(entry.load.get(), Some(Ok(_))))
+                    .is_some_and(|entry| matches!(entry.stage.load().get(), Some(Ok(_))))
             })
             .collect();
         let edges: SmallVec<[u32; 2]> = loaded.iter().map(|(edge, _)| *edge).collect();
@@ -997,7 +943,8 @@ mod tests {
         ) -> Option<std::sync::Arc<gpui_kit::RenderImage>> {
             self.entries
                 .get(&gpui_kit::hash(resource))?
-                .load
+                .stage
+                .load()
                 .get()?
                 .ok()
         }
@@ -1006,7 +953,7 @@ mod tests {
         pub(in crate::ui) fn loaded_images(&self) -> Vec<std::sync::Arc<gpui_kit::RenderImage>> {
             self.entries
                 .values()
-                .filter_map(|entry| entry.load.get()?.ok())
+                .filter_map(|entry| entry.stage.load().get()?.ok())
                 .collect()
         }
     }
@@ -1504,8 +1451,10 @@ mod tests {
                     edge,
                 };
                 let entry = Entry {
-                    load: Load::Sized(SizedLoad::new(sized, cx)),
-                    stage: EntryStage::Ready { bytes: 10 },
+                    stage: EntryStage::Ready {
+                        bytes: 10,
+                        load: Load::Sized(SizedLoad::new(sized, cx)),
+                    },
                     uses: SmallVec::new(),
                 };
                 cache.entries.insert(key, entry);
@@ -1698,8 +1647,8 @@ mod tests {
                     .entries
                     .values()
                     .map(|entry| match entry.stage {
-                        EntryStage::Failed { at } => Some(at),
-                        EntryStage::Loading | EntryStage::Ready { .. } => None,
+                        EntryStage::Failed { at, .. } => Some(at),
+                        EntryStage::Loading { .. } | EntryStage::Ready { .. } => None,
                     })
                     .collect::<Vec<_>>()
             })

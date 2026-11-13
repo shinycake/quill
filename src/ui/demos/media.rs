@@ -264,11 +264,11 @@ impl QuillApp {
                     is_viewed: true,
                 }
             };
-            session.stickers.emoji.installed_sets = vec![
+            session.stickers.emoji.lists.installed.succeed(vec![
                 pack(1, "Fun faces", &["😀", "😎", "🤩", "🥳"], true),
                 pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
                 pack(3, "Food and drink", &["🍕", "🍣", "🍩", "☕"], true),
-            ];
+            ]);
             session.stickers.emoji.lists.trending = quill::emoji::TrendingSets::ready(vec![
                 pack(4, "Travel", &["✈️", "🏝️", "🗺️", "🚆"], false),
                 pack(5, "Weather", &["☀️", "🌧️", "⛄", "🌈"], false),
@@ -436,7 +436,9 @@ impl QuillApp {
             session.media.media_library.insert(77, stickers);
         }
         self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-        self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
+        self.pickers
+            .media_panel
+            .show(crate::ui::media_panel::PanelTab::Stickers, None);
         self.set_note(StatusNote::silent(
             "screenshot demo — stickers · tap to send",
         ));
@@ -455,7 +457,9 @@ impl QuillApp {
         }
         if demo == GifsDemo::Gifs {
             self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-            self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Gifs;
+            self.pickers
+                .media_panel
+                .show(crate::ui::media_panel::PanelTab::Gifs, None);
             self.toggle_animation_playback(
                 MessageId(501),
                 quill::ids::FileId(63),

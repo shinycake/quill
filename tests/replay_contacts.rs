@@ -26,8 +26,7 @@ fn replay_contacts_list_and_user_full_info() {
     );
     assert!(!session.contacts_settled());
     let extra = session.request(RequestPurpose::GetContacts, None);
-    session.users_state.contacts.begin();
-    session.users_state.contacts.sent(extra);
+    session.users_state.contacts.begin_with(extra);
     apply_all_seq(
         &mut session,
         &sink,

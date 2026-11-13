@@ -25,8 +25,9 @@ const MAX_COUNTED: usize = 4096;
 /// for (or may be asked for again with no failures counted).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IdLookup {
-    /// A lookup for it is out; `failures` earlier ones failed.
-    Asking { failures: u8 },
+    /// A lookup for it is out as `request`; `failures` earlier ones failed.
+    /// Only that request's answer or error leaves the stage.
+    Asking { failures: u8, request: RequestId },
     /// Free to ask again; `failures` lookups failed so far.
     Failed { failures: u8 },
     /// Its lookups failed [`MAX_FAILURES`] times: not asked for again until
@@ -38,7 +39,6 @@ enum IdLookup {
 
 #[derive(Debug, Clone, Default)]
 pub struct CustomEmojiLookups {
-    by_request: HashMap<RequestId, Vec<i64>>,
     ids: HashMap<i64, IdLookup>,
 }
 
@@ -59,17 +59,26 @@ impl CustomEmojiLookups {
         self.ids.remove(&id);
     }
 
+    /// The ids whose lookup is out as `request`.
+    fn asked_by(&self, request: RequestId) -> Vec<i64> {
+        self.ids
+            .iter()
+            .filter_map(|(id, stage)| match stage {
+                IdLookup::Asking { request: asked, .. } if *asked == request => Some(*id),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// `request`'s ids are free to ask again; `failed` counts one failure.
     fn release(&mut self, request: RequestId, failed: bool) {
-        let Some(ids) = self.by_request.remove(&request) else {
-            return;
-        };
+        let ids = self.asked_by(request);
         if failed && self.ids.len() > MAX_COUNTED {
             self.ids
                 .retain(|_, stage| !matches!(stage, IdLookup::Failed { .. }));
         }
         for id in ids {
-            let Some(IdLookup::Asking { failures }) = self.ids.get(&id).copied() else {
+            let Some(IdLookup::Asking { failures, .. }) = self.ids.get(&id).copied() else {
                 continue;
             };
             let failures = if failed {
@@ -102,22 +111,23 @@ impl EmojiPanel {
         let lookups = &mut self.custom_lookups;
         for id in ids {
             let failures = match lookups.ids.get(id) {
-                Some(IdLookup::Failed { failures } | IdLookup::Asking { failures }) => *failures,
+                Some(IdLookup::Failed { failures } | IdLookup::Asking { failures, .. }) => {
+                    *failures
+                }
                 _ => 0,
             };
-            lookups.ids.insert(*id, IdLookup::Asking { failures });
+            lookups
+                .ids
+                .insert(*id, IdLookup::Asking { failures, request });
         }
-        lookups.by_request.insert(request, ids.to_vec());
     }
 
     /// `request` was answered: its ids that loaded landed in the cache, and
     /// the rest (TDLib knows no sticker for them) are not asked for again.
     pub fn custom_emoji_lookup_answered(&mut self, request: RequestId) {
         let lookups = &mut self.custom_lookups;
-        for id in lookups.by_request.remove(&request).unwrap_or_default() {
-            if matches!(lookups.ids.get(&id), Some(IdLookup::Asking { .. })) {
-                lookups.ids.insert(id, IdLookup::Answered);
-            }
+        for id in lookups.asked_by(request) {
+            lookups.ids.insert(id, IdLookup::Answered);
         }
     }
 
@@ -141,16 +151,28 @@ impl EmojiPanel {
     /// Lookups no longer pending that were never answered (the stale
     /// request sweep dropped them) count as failed.
     pub fn sweep_custom_emoji_lookups(&mut self, pending: impl Fn(RequestId) -> bool) {
-        let lost: Vec<RequestId> = self
+        let mut lost: Vec<RequestId> = self
             .custom_lookups
-            .by_request
-            .keys()
-            .copied()
-            .filter(|request| !pending(*request))
+            .ids
+            .values()
+            .filter_map(|stage| match stage {
+                IdLookup::Asking { request, .. } if !pending(*request) => Some(*request),
+                _ => None,
+            })
             .collect();
+        lost.sort_unstable_by_key(|request| request.0);
+        lost.dedup();
         for request in lost {
             self.custom_emoji_lookup_failed(request);
         }
+    }
+
+    /// A `getCustomEmojiStickers` is out and waiting for its answer.
+    pub fn custom_emoji_lookup_in_flight(&self) -> bool {
+        self.custom_lookups
+            .ids
+            .values()
+            .any(|stage| matches!(stage, IdLookup::Asking { .. }))
     }
 
     /// The status picker opened: every id not being asked for now may be
@@ -160,7 +182,9 @@ impl EmojiPanel {
             .ids
             .retain(|_, stage| matches!(stage, IdLookup::Asking { .. }));
         for stage in self.custom_lookups.ids.values_mut() {
-            *stage = IdLookup::Asking { failures: 0 };
+            if let IdLookup::Asking { failures, .. } = stage {
+                *failures = 0;
+            }
         }
     }
 }

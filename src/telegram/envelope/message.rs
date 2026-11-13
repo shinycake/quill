@@ -3,7 +3,7 @@ use crate::ids::{ChatId, MessageId, UserId};
 use serde_json::Value;
 
 /// `messageSenderUser` / `messageSenderChat` (TDLib 1.8.67).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MessageSender {
     User { user_id: i64 },
     Chat { chat_id: i64 },

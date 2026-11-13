@@ -540,8 +540,8 @@ impl QuillApp {
         // above the list, which stays as it was.
         let action_error = self
             .session()
-            .and_then(|session| session.groups.member_action_error.get(&chat_id.0))
-            .cloned();
+            .and_then(|session| session.groups.member_action_error(chat_id.0))
+            .map(str::to_owned);
         if let Some(line) = action_error {
             section = section.child(
                 div()

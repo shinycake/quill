@@ -250,7 +250,7 @@ pub type LiveFrameCallback = Arc<dyn Fn(LiveKey, LiveFrame) + Send + Sync + 'sta
 pub enum StreamState {
     /// Joined, waiting for the stream's current time and first segments.
     #[default]
-    Connecting,
+    Joined,
     /// `getGroupCallStreams` returned no channels: nobody is broadcasting.
     NoStream,
     /// Segments are flowing.

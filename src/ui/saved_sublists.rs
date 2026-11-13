@@ -27,7 +27,7 @@ use quill::state::{SAVED_TAG_LABEL_MAX, clean_tag_label};
 use quill::telegram::envelope::{
     ReactionType, SavedMessagesTag, SavedMessagesTopic, SavedTopicKind,
 };
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// Which Saved Messages view the open chat shows instead of its history.
@@ -194,6 +194,19 @@ impl QuillApp {
         }
     }
 
+    /// The loaded messages `chat`'s view draws: a Saved Messages sublist or
+    /// tag filter shows its own page, every other view what the session
+    /// says it shows.
+    pub(super) fn shown_history(&self, chat: ChatId) -> Option<&quill::state::HistoryMessages> {
+        let session = self.session()?;
+        if session.is_saved_messages(chat)
+            && let Some((_, history)) = self.saved_history()
+        {
+            return Some(&history.messages);
+        }
+        session.shown_history(chat)
+    }
+
     /// The history key's last part for the Saved Messages view shown: a
     /// sublist and each tag filter (of all of Saved Messages or of one
     /// sublist) is a history of its own, with its own saved place and its
@@ -269,7 +282,7 @@ impl QuillApp {
                     keys::Q_PEOPLE_COULD_NOT_CHANGE_THE_VIEW,
                 )));
             } else if view_as_topics && live.driver.session.is_saved_messages(chat_id) {
-                let _ = live.driver.load_saved_topics();
+                restart_saved_topics(&mut live.driver, &self.screen.dialogs.saved_asked);
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.set_chat_view_as_topics(chat_id.0, view_as_topics);
@@ -367,18 +380,14 @@ impl QuillApp {
         if session.threads.saved.waiting_to_retry() {
             return;
         }
-        if session.threads.saved.tags.is_idle()
-            && !session
-                .requests
-                .has_purpose(quill::state::RequestPurpose::GetSavedMessagesTags { topic_id: 0 })
-        {
+        if session.threads.saved.tags.is_idle() {
             let _ = live.driver.load_saved_tags(0);
         }
         let session = &live.driver.session;
         if session.chat_views_as_topics(chat_id)
             && session.threads.saved.topics_load == quill::state::SavedTopicsLoad::Idle
         {
-            let _ = live.driver.load_saved_topics();
+            restart_saved_topics(&mut live.driver, &self.screen.dialogs.saved_asked);
         }
     }
 
@@ -904,7 +913,7 @@ impl QuillApp {
                         ),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(if named {
@@ -914,10 +923,7 @@ impl QuillApp {
                 }))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))
@@ -955,11 +961,59 @@ crate::ui::shell::register_dialogs! {
     .close(|app, _, cx| app.close_saved_tag_dialog(cx)),
 }
 
+/// The sublist list starts over (first look, a reconnect, "View as
+/// Chats"): its first page is asked, and a page that comes back at the
+/// length it had asks again.
+pub(super) fn restart_saved_topics<S: quill::connect::JsonSender>(
+    driver: &mut quill::connect::ConnectDriver<S>,
+    asked: &crate::ui::scroll_load::Asked,
+) {
+    let _ = driver.load_saved_topics();
+    asked.reset();
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{count_line, tag_name};
+    use super::{count_line, restart_saved_topics, tag_name};
     use crate::ui::shell::{DialogKind, QuillShell};
     use quill::telegram::envelope::{ReactionType, SavedMessagesTag};
+
+    /// Sweep r4-10 round 4: a restarted list asks again at the length it
+    /// was last allowed at.
+    #[test]
+    fn a_restarted_sublist_list_asks_again_at_the_same_length() {
+        use quill::connect::{ConnectDriver, RecordingSender, prepare_connect};
+        use quill::credentials::TelegramCredentials;
+        use quill::ids::AccountKey;
+        use quill::platform::MemorySecretStore;
+        use quill::state::Session;
+        let credentials = TelegramCredentials {
+            api_id: 99,
+            api_hash: "unit-test-hash-not-for-network".into(),
+        };
+        let dir = quill::scratch::unique_dir("quill-saved-restart");
+        let prepared = prepare_connect(
+            &dir,
+            AccountKey::primary(),
+            &MemorySecretStore::new(),
+            &credentials,
+        )
+        .expect("prepare");
+        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+            std::sync::Arc::new(quill::diagnostics::MemorySink::new());
+        let mut driver = ConnectDriver::new(
+            Session::new(AccountKey::primary(), sink),
+            std::sync::Arc::new(RecordingSender::new()),
+            credentials,
+            prepared,
+        );
+        let asked = crate::ui::scroll_load::Asked::default();
+        assert!(asked.allow(20, false));
+        assert!(!asked.allow(20, false), "once per length");
+        restart_saved_topics(&mut driver, &asked);
+        assert!(asked.allow(20, false), "the restart asks at 20 again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn count_lines_pluralise() {

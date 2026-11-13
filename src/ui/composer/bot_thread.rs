@@ -90,10 +90,17 @@ impl QuillApp {
         let BotThreadStart::Asked { request, .. } = self.chat_ui.bot_thread else {
             return;
         };
-        let Some(outcome) = self
-            .session_mut()
-            .and_then(|session| session.take_bot_thread_start(request))
-        else {
+        let Some(session) = self.session_mut() else {
+            return;
+        };
+        let answer = session.take_bot_thread_start(request);
+        // A request the session no longer knows, with no answer kept, is
+        // lost (a reset, a dropped send): the text stays in the field and
+        // the next Send asks again.
+        let lost = answer.is_none() && session.requests.get(request).is_none();
+        let Some(outcome) = answer.or_else(|| {
+            lost.then(|| Err(tr(keys::Q_CHAT_COULDN_T_START_A_NEW_THREAD).to_string()))
+        }) else {
             return;
         };
         let BotThreadStart::Asked { text, once, .. } = std::mem::take(&mut self.chat_ui.bot_thread)
@@ -108,6 +115,16 @@ impl QuillApp {
                 return;
             }
         };
+        // What was typed while the thread was being made goes with the
+        // text: the field still holds what Send took, plus the new typing.
+        // A field that no longer starts with it (the user rewrote it) is
+        // kept for the thread's field, and the Send's own text goes.
+        let current = self.composer_markup(cx);
+        let (text, rest) = if current.starts_with(text.as_str()) {
+            (current, String::new())
+        } else {
+            (text, current)
+        };
         // The field leaves "All" empty: the draft saved there on the way
         // out is nothing.
         self.composer
@@ -120,6 +137,9 @@ impl QuillApp {
             self.update_pending_send(|send| *send = tray);
         }
         self.submit_composer(text, once, window, cx);
+        if !rest.is_empty() {
+            self.set_composer_markup(&rest, window, cx);
+        }
     }
 
     /// The demo has no TDLib: the thread is made from the answer TDLib

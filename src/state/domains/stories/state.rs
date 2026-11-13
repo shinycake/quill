@@ -49,6 +49,11 @@ impl CloseFriendsList {
         }
     }
 
+    /// A load is out.
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
     /// `getCloseFriends` `request` went out.
     pub fn begin_load(&mut self, request: RequestId) {
         let stale = self.take_ids();
@@ -65,6 +70,15 @@ impl CloseFriendsList {
             return true;
         }
         false
+    }
+
+    /// A load could not go out at all (no request was made): a list never
+    /// loaded is `Failed`, so the panel offers Retry instead of waiting for
+    /// an answer that is not coming. A list held, or a load out, is left.
+    pub fn refused(&mut self) {
+        if matches!(self, Self::NotLoaded) {
+            *self = Self::Failed { stale: None };
+        }
     }
 
     /// The send of the load failed, or TDLib's error for `request`
@@ -164,6 +178,10 @@ impl ActiveStoriesPaging {
 pub enum CustomEmojiFetch {
     #[default]
     Idle,
+    /// The fetch is out as `request` (after `failures` failures in a row);
+    /// only its own answer or error leaves the stage, and no second fetch
+    /// goes out meanwhile.
+    Asking { request: RequestId, failures: u32 },
     /// It failed `failures` times in a row: no new fetch before `until`,
     /// and `wait` doubles per failure. An answer ends it.
     Backoff {
@@ -179,7 +197,7 @@ impl CustomEmojiFetch {
     pub fn failures(&self) -> u32 {
         match self {
             Self::Idle => 0,
-            Self::Backoff { failures, .. } => *failures,
+            Self::Asking { failures, .. } | Self::Backoff { failures, .. } => *failures,
         }
     }
 
@@ -187,10 +205,45 @@ impl CustomEmojiFetch {
         matches!(self, Self::Backoff { until, .. } if now < *until)
     }
 
-    pub fn failed(&mut self, now: Instant) {
+    /// A fetch is out.
+    pub fn is_asking(&self) -> bool {
+        matches!(self, Self::Asking { .. })
+    }
+
+    /// A fetch went out as `request`.
+    pub fn asked(&mut self, request: RequestId) {
+        *self = Self::Asking {
+            request,
+            failures: self.failures(),
+        };
+    }
+
+    /// `request` answered: the stage returns to idle with no failures. The
+    /// answer of any other request leaves a fetch in flight alone.
+    pub fn answered(&mut self, request: Option<RequestId>) {
+        if let Self::Asking {
+            request: waiting, ..
+        } = self
+            && request != Some(*waiting)
+        {
+            return;
+        }
+        *self = Self::Idle;
+    }
+
+    /// `request` failed at `now`. Another request's error leaves a fetch in
+    /// flight alone.
+    pub fn failed(&mut self, request: Option<RequestId>, now: Instant) {
+        if let Self::Asking {
+            request: waiting, ..
+        } = self
+            && request != Some(*waiting)
+        {
+            return;
+        }
         let previous = match self {
             Self::Backoff { until, wait, .. } => Some((*until, *wait)),
-            Self::Idle => None,
+            Self::Idle | Self::Asking { .. } => None,
         };
         let (until, wait) = next_retry(previous, now);
         *self = Self::Backoff {
@@ -198,6 +251,51 @@ impl CustomEmojiFetch {
             until,
             wait,
         };
+    }
+}
+
+/// The story asks in flight, by what they ask for.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct StoryAsks {
+    chats: HashMap<i64, RequestId>,
+    stories: HashMap<(i64, i32), RequestId>,
+}
+
+impl StoryAsks {
+    /// The active-stories ask for `chat_id` is still out.
+    pub fn chat_out(&self, chat_id: i64, requests: &crate::state::RequestRegistry) -> bool {
+        self.chats
+            .get(&chat_id)
+            .is_some_and(|id| requests.get(*id).is_some())
+    }
+
+    /// The `getStory` for `story` is still out.
+    pub fn story_out(&self, story: (i64, i32), requests: &crate::state::RequestRegistry) -> bool {
+        self.stories
+            .get(&story)
+            .is_some_and(|id| requests.get(*id).is_some())
+    }
+
+    /// The active-stories ask for `chat_id` went out as `request`.
+    pub fn chat_sent(
+        &mut self,
+        chat_id: i64,
+        request: RequestId,
+        requests: &crate::state::RequestRegistry,
+    ) {
+        self.chats.retain(|_, id| requests.get(*id).is_some());
+        self.chats.insert(chat_id, request);
+    }
+
+    /// The `getStory` for `story` went out as `request`.
+    pub fn story_sent(
+        &mut self,
+        story: (i64, i32),
+        request: RequestId,
+        requests: &crate::state::RequestRegistry,
+    ) {
+        self.stories.retain(|_, id| requests.get(*id).is_some());
+        self.stories.insert(story, request);
     }
 }
 
@@ -273,6 +371,9 @@ pub struct StoriesState {
     /// story ids, `pinned_story_ids` (first page only), and the server
     /// total for the "Load more" gate.
     pub chat_page_stories: HashMap<i64, ChatPageStories>,
+    /// The stories page's own `getChatPostedToChatPageStories` asks out, by
+    /// chat (the gallery's tab keeps its own request in its stage).
+    pub page_asks: crate::state::held::Holds<i64>,
     /// Phase 9.7: `getChatArchivedStories` pages per chat (accumulated;
     /// `next_from_story_id` is the smallest loaded id, `None` until the
     /// first page lands).
@@ -295,6 +396,11 @@ pub struct StoriesState {
     /// that may pass. A user opening the story drops its wait and asks at
     /// once.
     pub story_fetch: StoryFetches,
+    /// The `getChatActiveStories` asked for each chat and the `getStory`
+    /// asked for each story: an ask is out while its own request is still
+    /// registered (an answer, an error or a sweep removes it), so a second
+    /// ask for the same chat or story waits instead of going out twice.
+    pub asks: StoryAsks,
     /// The live story the viewer is watching.
     pub live: Option<LiveStoryState>,
     /// Paid live story comment levels from `updateGroupCallMessageLevels`,
@@ -334,6 +440,7 @@ impl StoriesState {
             albums: HashMap::new(),
             album_stories: HashMap::new(),
             chat_page_stories: HashMap::new(),
+            page_asks: Default::default(),
             archived_stories: HashMap::new(),
             page_ops: StoryPageOps::default(),
             close_friends: CloseFriendsList::NotLoaded,
@@ -341,6 +448,7 @@ impl StoriesState {
             hidden_paging: ActiveStoriesPaging::default(),
             custom_emoji_fetch: CustomEmojiFetch::Idle,
             story_fetch: StoryFetches::default(),
+            asks: StoryAsks::default(),
             live: None,
             live_levels: Vec::new(),
             live_max_stars: None,
@@ -366,8 +474,13 @@ impl StoriesState {
 
     /// `getStory` for `story` failed with an error that may pass. A card or
     /// reply header showing it asks again once the wait is over.
-    pub fn story_fetch_failed(&mut self, story: (i64, i32), now: Instant) {
-        self.story_fetch.failed(story, now);
+    pub fn story_fetch_failed(
+        &mut self,
+        story: (i64, i32),
+        request: Option<RequestId>,
+        now: Instant,
+    ) {
+        self.story_fetch.failed(story, request, now);
     }
 
     /// `story` arrived (an answer or `updateStory`): whatever said it was
@@ -385,8 +498,8 @@ impl StoriesState {
     }
 
     /// The story picker's `getCustomEmojiStickers` failed at `now`.
-    pub fn custom_emoji_fetch_failed(&mut self, now: Instant) {
-        self.custom_emoji_fetch.failed(now);
+    pub fn custom_emoji_fetch_failed(&mut self, request: Option<RequestId>, now: Instant) {
+        self.custom_emoji_fetch.failed(request, now);
     }
 
     /// Whether the next picker fetch still waits out a failed one.

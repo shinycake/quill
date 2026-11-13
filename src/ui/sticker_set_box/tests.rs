@@ -375,7 +375,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
             // The stub isn't a video: the real probe's answer is stale
             // (the test answers the probe itself below).
             if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut() {
-                editor.make_probe_stale();
+                editor.stop_probe();
             }
         });
     });
@@ -390,12 +390,6 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
     // or GIF choice.
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
-            let serial = app
-                .composer_ui
-                .send_box
-                .video_editor
-                .as_ref()
-                .map_or(0, |editor| editor.serial());
             let info = quill::video_edit::VideoSource {
                 duration_ms: 10_000,
                 width: 640,
@@ -403,7 +397,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
                 has_audio: true,
                 ..Default::default()
             };
-            app.video_editor_probed(serial, Some(info), None, window, cx);
+            app.video_editor_probed(Some(info), None, window, cx);
         });
     });
     frames(vcx);
@@ -678,6 +672,7 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
         })
         .expect("a demo sticker");
     app.update(vcx, |app, cx| {
+        app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::In(None);
         app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
             crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
                 pick,
@@ -689,17 +684,20 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
         );
         cx.notify();
     });
-    // The next frame opens the editor; the stub isn't a video, so the
-    // real probe's answer is made stale.
+    // The poll sees the download end with the file, then the next frame
+    // opens the editor; the stub isn't a video, so the real probe's answer
+    // is made stale.
+    assert!(app.update(vcx, |app, cx| app.settle_sticker_pick_download(cx)));
     vcx.update(|window, cx| window.render_frame(cx));
     app.update(vcx, |app, _| {
         if let Some(editor) = app.composer_ui.send_box.video_editor.as_mut() {
-            editor.make_probe_stale();
+            editor.stop_probe();
         }
     });
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| {
         app.sticker_box.editing.downloading().is_none()
+            && app.sticker_box.editing.downloaded().is_none()
     }));
     assert!(app.read_with(vcx, |app, _| app.video_editor_for_set()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
@@ -717,6 +715,84 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
     frames(vcx);
 }
 
+/// The wait on a chosen file ends with the download's own end, in the
+/// poll, with no frame drawn: a transfer that ended without the file says
+/// so and lets the pick go; one still running keeps it.
+#[gpui_kit::test]
+fn a_download_that_ends_without_the_file_ends_the_wait_with_a_note(cx: &mut TestAppContext) {
+    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting, PickWait, PickedFile};
+    use quill::ids::FileId;
+    use quill::sticker_set_box::SetKind;
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let file_id = FileId(48_001);
+    app.update(vcx, |app, _| {
+        app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::In(None);
+        app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
+            PickWait::Downloading(PendingVideo {
+                pick: PickExisting {
+                    set_id: 78,
+                    kind: SetKind::Stickers,
+                    adapt: false,
+                },
+                file_id,
+                file: PickedFile::Video,
+                emoji: None,
+                window: None,
+            }),
+        );
+        if let Some(session) = app.demo_session.as_mut() {
+            session.begin_download(file_id);
+        }
+    });
+    assert!(
+        !app.update(vcx, |app, cx| app.settle_sticker_pick_download(cx)),
+        "still running: the pick stays"
+    );
+    assert!(app.read_with(vcx, |app, _| {
+        app.sticker_box.editing.downloading().is_some()
+    }));
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.media.downloads.end(file_id.0);
+        }
+    });
+    assert!(app.update(vcx, |app, cx| app.settle_sticker_pick_download(cx)));
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.is_idle()));
+}
+
+/// `downloadFile` sends nothing for a file that cannot be downloaded or one
+/// whose cancel is settling: no transfer is tracked, nothing will arrive, and
+/// the wait ends with a note instead of holding the pick for good.
+#[gpui_kit::test]
+fn a_pick_whose_download_sent_nothing_ends_the_wait_with_a_note(cx: &mut TestAppContext) {
+    use crate::ui::sticker_set_box::state::{PendingVideo, PickExisting, PickWait, PickedFile};
+    use quill::ids::FileId;
+    use quill::sticker_set_box::SetKind;
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let file_id = FileId(48_002);
+    app.update(vcx, |app, _| {
+        app.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::In(None);
+        // No transfer was begun: the tracker holds no record of the file.
+        app.sticker_box.editing = crate::ui::sticker_set_box::state::SetEditing::Waiting(
+            PickWait::Downloading(PendingVideo {
+                pick: PickExisting {
+                    set_id: 78,
+                    kind: SetKind::Stickers,
+                    adapt: false,
+                },
+                file_id,
+                file: PickedFile::Video,
+                emoji: None,
+                window: None,
+            }),
+        );
+    });
+    assert!(app.update(vcx, |app, cx| app.settle_sticker_pick_download(cx)));
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.editing.is_idle()));
+}
+
 #[gpui_kit::test]
 fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
     use crate::ui::sticker_set_box::state::PickExisting;
@@ -727,16 +803,20 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.gifs.saved_answered(vec![AnimationItem {
-                duration: 2,
-                width: 320,
-                height: 240,
-                file_name: "dance.mp4".into(),
-                mime_type: "video/mp4".into(),
-                file_id: FileId(9_001),
-                thumb: quill::telegram::envelope::Thumb::of(None, 0, 0, true),
-                minithumbnail: None,
-            }]);
+            session.stickers.gifs.saved_asked(quill::ids::RequestId(1));
+            session.stickers.gifs.saved_answered(
+                Some(quill::ids::RequestId(1)),
+                vec![AnimationItem {
+                    duration: 2,
+                    width: 320,
+                    height: 240,
+                    file_name: "dance.mp4".into(),
+                    mime_type: "video/mp4".into(),
+                    file_id: FileId(9_001),
+                    thumb: quill::telegram::envelope::Thumb::of(None, 0, 0, true),
+                    minithumbnail: None,
+                }],
+            );
         }
         app.sticker_box
             .editing

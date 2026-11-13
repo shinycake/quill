@@ -96,11 +96,16 @@ impl Session {
     }
 
     /// `getForumTopicDefaultIcons` answered.
-    pub(crate) fn accept_topic_default_icons(&mut self, stickers: Vec<StickerItem>) {
-        self.threads.forum_topic_icons = stickers
+    pub(crate) fn accept_topic_default_icons(
+        &mut self,
+        request: Option<RequestId>,
+        stickers: Vec<StickerItem>,
+    ) {
+        let icons = stickers
             .into_iter()
             .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
             .collect();
+        self.threads.forum_topic_icons.answered(request, icons);
     }
 
     // ---- Saved Messages sublists -------------------------------------
@@ -120,16 +125,16 @@ impl Session {
         tags: Vec<SavedMessagesTag>,
         request: Option<RequestId>,
     ) {
-        if topic_id == 0 {
-            let fetch = &mut self.threads.saved.tags;
-            match request {
-                Some(_) => {
-                    fetch.answered(request, tags);
-                }
-                None => fetch.succeed(tags),
-            }
+        let fetch = if topic_id == 0 {
+            &mut self.threads.saved.tags
         } else {
-            self.threads.saved.topic_tags.insert(topic_id, tags);
+            self.threads.saved.topic_tags.entry(topic_id).or_default()
+        };
+        match request {
+            Some(_) => {
+                fetch.answered(request, tags);
+            }
+            None => fetch.replace_data(tags),
         }
         self.view_generation.bump();
     }
@@ -246,11 +251,12 @@ impl Session {
             .sublist
             .as_mut()
             .filter(|view| view.topic_id == topic_id)
-            .filter(|view| pending.is_some_and(|p| view.history.older == OlderEnd::Asking(p.id)))
         else {
             return;
         };
-        view.history.older = OlderEnd::Open;
+        if !pending.is_some_and(|p| view.history.settle_older(p.id)) {
+            return;
+        }
         let empty = messages.is_empty();
         let mut oldest: Option<i64> = None;
         for message in messages {
@@ -354,6 +360,7 @@ impl Session {
             .saved
             .topic_tags
             .get(&view.topic_id)
+            .and_then(crate::state::fetch::Fetch::data)
             .map(|tags| {
                 tags.iter()
                     .map(|tag| {

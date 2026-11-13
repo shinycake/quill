@@ -260,8 +260,8 @@ fn ui_main(args: &[String]) {
         // kit Phase 9: honor the OS reduce-motion preference.
         ui::reduce_motion_probe::apply_at_startup(cx);
         ui::bind_keys(cx);
-        cx.on_system_wake(|_| quill::net_watch::system_woke())
-            .detach();
+        let wake = cx.on_system_wake(|_| quill::net_watch::system_woke());
+        cx.set_global(WakeWatch(wake));
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows. The native menu
         // waits for the main window (`install_app_menus`).
@@ -282,11 +282,13 @@ fn ui_main(args: &[String]) {
         open_main_window(cx, launch)
             .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
         #[cfg(not(target_os = "macos"))]
-        cx.spawn(async move |cx| {
-            cx.update(|cx| open_main_window(cx, launch))
-                .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
-        })
-        .detach();
+        {
+            let opening = cx.spawn(async move |cx| {
+                cx.update(|cx| open_main_window(cx, launch))
+                    .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
+            });
+            cx.set_global(OpeningMainWindow(opening));
+        }
     });
     log::logger().flush();
 }
@@ -381,8 +383,8 @@ fn install_app_menus(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, star
         ui::setup_app_menus(cx);
     } else {
         window.on_next_frame(|_, cx| {
-            cx.spawn(async move |cx| cx.update(ui::setup_app_menus))
-                .detach();
+            let menus = cx.spawn(async move |cx| cx.update(ui::setup_app_menus));
+            cx.set_global(InstallingMenus(menus));
         });
     }
 }
@@ -428,7 +430,7 @@ fn install_main_window_tray(
     // unread count, synced when `wake::CHROME` is poked. The
     // tray module no-ops when the count is unchanged or
     // the OS exposes no system tray.
-    cx.spawn({
+    let chrome = cx.spawn({
         let tray_view = view.downgrade();
         let tray_window = window.window_handle();
         async move |cx| {
@@ -507,8 +509,11 @@ fn install_main_window_tray(
             })
             .await;
         }
-    })
-    .detach();
+    });
+    // The loop ends with its view. A main window reopened after a GPU loss
+    // (`startup_failure::device_loss::reopen_main_window`) keeps the same
+    // view and installs no second loop, so this one goes on serving it.
+    cx.set_global(ChromeLoop(chrome));
     // A shown window gets its tray from the chrome loop's first pass, once
     // it has drawn.
     if start_in_tray {
@@ -651,7 +656,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             ui::reduce_motion_probe::apply_at_startup(cx);
             ui::bind_keys(cx);
             ui::setup_app_menus(cx);
-            cx.spawn(async move |cx| {
+            let driver = cx.spawn(async move |cx| {
                 let demo_window = cx
                     .open_window(
                         WindowOptions {
@@ -773,17 +778,18 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                 // synthetic wheel events (~60/s, `dy` px each, turning
                 // around every `steps`, stopping after `stop` events when
                 // given), to profile scrolling and what stays after it.
-                if let Some((x, y, step_dy, turn, stop)) =
-                    std::env::var("QUILL_DEMO_AUTOSCROLL").ok().and_then(|v| {
-                        let mut parts = v.split(',').map(|p| p.trim().parse::<f32>().ok());
-                        let x = parts.next()??;
-                        let y = parts.next()??;
-                        let dy = parts.next().flatten().unwrap_or(24.);
-                        let turn = parts.next().flatten().unwrap_or(120.).max(1.) as u32;
-                        let stop = parts.next().flatten().map_or(u32::MAX, |stop| stop as u32);
-                        Some((x, y, dy, turn, stop))
-                    })
-                {
+                let scroll_params = std::env::var("QUILL_DEMO_AUTOSCROLL").ok().and_then(|v| {
+                    let mut parts = v.split(',').map(|p| p.trim().parse::<f32>().ok());
+                    let x = parts.next()??;
+                    let y = parts.next()??;
+                    let dy = parts.next().flatten().unwrap_or(24.);
+                    let turn = parts.next().flatten().unwrap_or(120.).max(1.) as u32;
+                    let stop = parts.next().flatten().map_or(u32::MAX, |stop| stop as u32);
+                    Some((x, y, dy, turn, stop))
+                });
+                // Held until the demo quits: the driver ends the process, and
+                // dropping it here would stop the scroll.
+                let _autoscroll = scroll_params.map(|(x, y, step_dy, turn, stop)| {
                     cx.spawn(async move |cx| {
                         for step in 0_u32..stop {
                             cx.background_executor()
@@ -811,8 +817,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                             }
                         }
                     })
-                    .detach();
-                }
+                });
                 cx.background_executor()
                     .timer(Duration::from_millis(
                         std::env::var("QUILL_DEMO_LINGER_MS")
@@ -823,10 +828,58 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                     ))
                     .await;
                 cx.update(|cx| cx.quit());
-            })
-            .detach();
+            });
+            // The demo's driver lives as long as the app: the global owns it.
+            cx.set_global(DemoDriver(driver));
         });
 }
+
+/// The system-wake watch, owned by the app until it quits: a held
+/// `Subscription` or `Task` ends with its owner, a detached one could not be
+/// stopped.
+#[cfg(feature = "ui")]
+struct WakeWatch(
+    #[allow(dead_code, reason = "held so the subscription is not dropped")] gpui_kit::Subscription,
+);
+
+#[cfg(feature = "ui")]
+impl gpui_kit::Global for WakeWatch {}
+
+/// The main window's first open, queued behind the kit's start.
+#[cfg(all(feature = "ui", not(target_os = "macos")))]
+struct OpeningMainWindow(
+    #[allow(dead_code, reason = "held so the task is not dropped")] gpui_kit::Task<()>,
+);
+
+#[cfg(all(feature = "ui", not(target_os = "macos")))]
+impl gpui_kit::Global for OpeningMainWindow {}
+
+/// The macOS menu bar's install, queued after the first frame.
+#[cfg(all(feature = "ui", target_os = "macos"))]
+struct InstallingMenus<T: 'static>(
+    #[allow(dead_code, reason = "held so the task is not dropped")] gpui_kit::Task<T>,
+);
+
+#[cfg(all(feature = "ui", target_os = "macos"))]
+impl<T: 'static> gpui_kit::Global for InstallingMenus<T> {}
+
+/// The tray and app-icon chrome loop of the main window.
+#[cfg(feature = "ui")]
+struct ChromeLoop(
+    #[allow(dead_code, reason = "held so the task is not dropped")] gpui_kit::Task<()>,
+);
+
+#[cfg(feature = "ui")]
+impl gpui_kit::Global for ChromeLoop {}
+
+/// The screenshot demo's driver task, owned by the app until it quits.
+#[cfg(feature = "ui")]
+struct DemoDriver(
+    #[allow(dead_code, reason = "held so the driver is not dropped")] gpui_kit::Task<()>,
+);
+
+#[cfg(feature = "ui")]
+impl gpui_kit::Global for DemoDriver {}
 
 #[cfg(test)]
 #[cfg(feature = "ui")]

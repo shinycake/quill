@@ -36,7 +36,7 @@ pub(in crate::ui) struct PendingGallery {
     window: Option<ChatId>,
     chat: Option<ChatId>,
     panel: Option<InfoPanelTarget>,
-    viewer_opens: u64,
+    viewer_opens: quill::media_viewer::ViewerOpen,
     locks: u64,
 }
 
@@ -48,7 +48,7 @@ impl QuillApp {
             window: self.asking_window_or_last_press(),
             chat: self.viewed_chat(),
             panel: self.open_info_target(),
-            viewer_opens: self.viewer.open_gen,
+            viewer_opens: self.viewer.state.opened(),
             locks: self.account.passcode.lock_count(),
         });
     }
@@ -58,7 +58,7 @@ impl QuillApp {
     fn pending_gallery_still_wanted(&self, pending: &PendingGallery) -> bool {
         !self.account.passcode.locked_since(pending.locks)
             && !self.viewer.state.is_open()
-            && self.viewer.open_gen == pending.viewer_opens
+            && self.viewer.state.opened() == pending.viewer_opens
             && self.viewed_chat() == pending.chat
             && self.open_info_target() == pending.panel
     }
@@ -200,7 +200,6 @@ impl QuillApp {
         }
         self.dialogs.pending_profile_gallery = None;
         self.viewer.state = MediaViewer::open_profile(owner, items, 0, gallery.total);
-        self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();

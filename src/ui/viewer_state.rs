@@ -62,8 +62,6 @@ pub(crate) struct ViewerUi {
     pub(super) hdr: super::hdr_image::HdrViewer,
     /// The header's album Pin or Unpin, kept while the history is unchanged.
     pub(super) album_pin: quill::album_pin::AlbumPins,
-    /// Counts viewer opens; keys the 200 ms fade-in so each open animates.
-    pub(super) open_gen: u64,
     /// A media-timestamp link opened this message's video; the viewer
     /// starts it at the given second once the clip is ready.
     /// Keyed by chat and message: a bare id matched a later clip of
@@ -113,7 +111,7 @@ impl ViewerUi {
     pub(super) fn new_item(&mut self, orientation: quill::media_viewer::ViewerOrientation) {
         let Self {
             state: _,
-            extra: _,
+            extra,
             photo_editor: _,
             zoom,
             frame: _,
@@ -127,7 +125,6 @@ impl ViewerUi {
             reorient,
             hdr,
             album_pin: _,
-            open_gen: _,
             pending_seek: _,
             last_activity: _,
             visibility: _,
@@ -141,6 +138,10 @@ impl ViewerUi {
         hdr.reset();
         clip.clear_error();
         reorient.reset(orientation);
+        // The caption's expand state and a photo copy under way are the
+        // item's: the item leaving ends both.
+        extra.caption.reset();
+        extra.copy = Default::default();
     }
 
     /// The viewer closed: everything that belongs to this open goes (the
@@ -163,7 +164,6 @@ impl ViewerUi {
             reorient,
             hdr,
             album_pin: _,
-            open_gen: _,
             pending_seek,
             last_activity: _,
             visibility: _,
@@ -174,8 +174,10 @@ impl ViewerUi {
         // played here must not start there the next time it opens.
         *pending_seek = None;
         extra.saved_toast = Default::default();
-        // Reopening the same item starts with its caption collapsed.
+        // Reopening the same item starts with its caption collapsed, and a
+        // photo copy under way is dropped.
         extra.caption = Default::default();
+        extra.copy = Default::default();
         state.close();
         // A turned photo is a full-size picture of its own (up to about
         // 20 MB, and as much again on the GPU); opening the next item
@@ -207,7 +209,6 @@ impl ViewerUi {
             video_layer: None,
             reorient: Default::default(),
             hdr: Default::default(),
-            open_gen: 0,
             pending_seek: None,
             last_activity: std::time::Instant::now(),
             visibility: Default::default(),

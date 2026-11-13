@@ -150,8 +150,20 @@ pub fn countdown(date: i64, now: i64) -> Countdown {
     }
 }
 
-/// The description refreshes this often (`kLabelRefreshInterval`).
-pub const COUNTDOWN_REFRESH_SECS: u64 = 10;
+/// Seconds until [`countdown`] of `date` next reads differently: the line
+/// changes when the remaining time crosses a whole day, hour or minute, so
+/// the box wakes then and not on a clock. Under two minutes the line reads
+/// "1 minute" until `date` itself; a date that has passed changes nothing.
+pub fn countdown_wait(date: i64, now: i64) -> u64 {
+    let left = date - now;
+    let unit = match countdown(date, now) {
+        Countdown::Days(_) => 86_400,
+        Countdown::Hours(_) => 3600,
+        Countdown::Minutes(_) if left < 120 => return u64::try_from(left).unwrap_or(0).max(1),
+        Countdown::Minutes(_) => 60,
+    };
+    u64::try_from(left.rem_euclid(unit) + 1).unwrap_or(1)
+}
 
 /// The "join as" list asked for before a video chat is created
 /// (`ChooseJoinAsProcess::requestList`, `getVideoChatAvailableParticipants`
@@ -266,6 +278,21 @@ mod tests {
     const UTC: fn(i64) -> i32 = |_| 0;
     /// 2026-10-15 09:20:30 UTC.
     const MORNING: i64 = 1_792_056_030;
+
+    #[test]
+    fn the_countdown_wakes_when_its_line_changes() {
+        // 2 d 3 h away: the days line changes after 3 h + 1 s.
+        let date = MORNING + 2 * 86_400 + 3 * 3600;
+        assert_eq!(countdown_wait(date, MORNING), 3 * 3600 + 1);
+        // 125 s away reads "2 minutes" and reads "1 minute" 6 s later.
+        assert_eq!(countdown(MORNING + 125, MORNING), Countdown::Minutes(2));
+        assert_eq!(countdown_wait(MORNING + 125, MORNING), 6);
+        assert_eq!(countdown(MORNING + 125, MORNING + 6), Countdown::Minutes(1));
+        // Under two minutes the line holds until the date.
+        assert_eq!(countdown_wait(MORNING + 90, MORNING), 90);
+        // A passed date changes nothing; wake no faster than a second.
+        assert_eq!(countdown_wait(MORNING - 5, MORNING), 1);
+    }
 
     #[test]
     fn a_call_you_are_in_is_confirmed_before_another_starts() {

@@ -85,6 +85,9 @@ pub enum NewChatStage {
     Creating {
         request: RequestId,
         back: NewChatBack,
+        /// The name the request asked for: a refusal of it (`NO_CHAT_TITLE`)
+        /// is about this text.
+        title: String,
     },
     /// A group exists; its dialog closes and the chat opens. (A supergroup's
     /// answer moves the stage to `Type`.)
@@ -94,6 +97,8 @@ pub enum NewChatStage {
         back: NewChatBack,
         failure: CreateFailure,
         reason: String,
+        /// The name that was refused.
+        title: String,
     },
     /// The create request is no longer pending and nothing answered it: the
     /// step `back` returns, without a reason.
@@ -117,6 +122,35 @@ pub enum TypeSaveStage {
     Saving(Vec<RequestId>),
     /// A request of the Save was refused or lost.
     Refused(String),
+}
+
+/// What a stage that was left lets go of once the dialog is in `now`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Release {
+    /// The create request the stage held.
+    Create(RequestId),
+    /// The type Save requests the stage held.
+    Save(Vec<RequestId>),
+}
+
+impl NewChatStage {
+    /// What this stage, now left, held that `now` does not hold: the create
+    /// request of `Creating`, or the Save requests of a `Type` in `Saving`.
+    /// The same request still held by `now` is not let go.
+    pub fn released_by(self, now: &NewChatStage) -> Option<Release> {
+        match self {
+            Self::Creating { request, .. } if !matches!(now, Self::Creating { request: held, .. } if *held == request) => {
+                Some(Release::Create(request))
+            }
+            Self::Type {
+                save: TypeSaveStage::Saving(sent),
+                ..
+            } if !matches!(now, Self::Type { save: TypeSaveStage::Saving(held), .. } if *held == sent) => {
+                Some(Release::Save(sent))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// The step a refused create returns to.
@@ -201,12 +235,14 @@ pub enum CreationOutcome {
 /// What the step is doing: nothing, a request of its own out (the confirm
 /// button waits), or the refusal of the create it returned from.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ViewState {
+pub enum StepView {
     Idle,
+    /// A request of the stage the step is showing is out; the stage owns it.
     Waiting,
     Refused {
         failure: CreateFailure,
         reason: String,
+        title: String,
     },
 }
 
@@ -214,19 +250,34 @@ pub enum ViewState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewChatView {
     pub step: NewChatStep,
-    pub state: ViewState,
+    pub state: StepView,
 }
 
 impl NewChatView {
     /// A request of this step is out: its confirm button waits.
     pub fn busy(&self) -> bool {
-        self.state == ViewState::Waiting
+        matches!(self.state, StepView::Waiting)
     }
 
     /// The refused create, shown on the step it returned to.
     pub fn failure(&self) -> Option<(CreateFailure, &str)> {
         match &self.state {
-            ViewState::Refused { failure, reason } => Some((*failure, reason)),
+            StepView::Refused {
+                failure, reason, ..
+            } => Some((*failure, reason)),
+            _ => None,
+        }
+    }
+
+    /// The name TDLib refused as no title (`NO_CHAT_TITLE`): the name field
+    /// shows its error while it holds this text.
+    pub fn refused_title(&self) -> Option<&str> {
+        match &self.state {
+            StepView::Refused {
+                failure: CreateFailure::NoTitle,
+                title,
+                ..
+            } => Some(title),
             _ => None,
         }
     }
@@ -235,7 +286,7 @@ impl NewChatView {
 pub fn view(stage: &NewChatStage) -> NewChatView {
     let plain = |step| NewChatView {
         step,
-        state: ViewState::Idle,
+        state: StepView::Idle,
     };
     match stage {
         NewChatStage::Info => plain(NewChatStep::Info),
@@ -243,27 +294,28 @@ pub fn view(stage: &NewChatStage) -> NewChatView {
         NewChatStage::Members => plain(NewChatStep::Members),
         NewChatStage::Creating { back, .. } => NewChatView {
             step: back.step(),
-            state: ViewState::Waiting,
+            state: StepView::Waiting,
         },
         NewChatStage::Created(chat) => plain(NewChatStep::Done(*chat)),
         NewChatStage::CreateRefused {
             back,
             failure,
             reason,
+            title,
         } => NewChatView {
             step: back.step(),
-            state: ViewState::Refused {
+            state: StepView::Refused {
                 failure: *failure,
                 reason: reason.clone(),
+                title: title.clone(),
             },
         },
         NewChatStage::CreateLost { back } => plain(back.step()),
         NewChatStage::Type { chat, save } => NewChatView {
             step: NewChatStep::Type(*chat),
-            state: if matches!(save, TypeSaveStage::Saving(_)) {
-                ViewState::Waiting
-            } else {
-                ViewState::Idle
+            state: match save {
+                TypeSaveStage::Saving(_) => StepView::Waiting,
+                _ => StepView::Idle,
             },
         },
         NewChatStage::Subscribers { chat } => plain(NewChatStep::Subscribers(*chat)),
@@ -363,7 +415,49 @@ mod tests {
         NewChatStage::Creating {
             request: RequestId(7),
             back,
+            title: "A".into(),
         }
+    }
+
+    #[test]
+    fn a_left_stage_lets_go_of_its_create_or_save() {
+        let sent = vec![RequestId(3), RequestId(4)];
+        let saving = || NewChatStage::Type {
+            chat: CHAT,
+            save: TypeSaveStage::Saving(sent.clone()),
+        };
+        let idle = NewChatStage::Type {
+            chat: CHAT,
+            save: TypeSaveStage::Editing,
+        };
+        let failed = NewChatStage::Type {
+            chat: CHAT,
+            save: TypeSaveStage::Refused("no".into()),
+        };
+        for now in [
+            &idle,
+            &failed,
+            &NewChatStage::Subscribers { chat: CHAT },
+            &NewChatStage::Created(CHAT),
+        ] {
+            assert_eq!(saving().released_by(now), Some(Release::Save(sent.clone())));
+        }
+        assert_eq!(saving().released_by(&saving()), None);
+        let creating = creating(NewChatBack::Info);
+        for now in [
+            &NewChatStage::Info,
+            &NewChatStage::Created(CHAT),
+            &NewChatStage::CreateLost {
+                back: NewChatBack::Info,
+            },
+        ] {
+            assert_eq!(
+                creating.clone().released_by(now),
+                Some(Release::Create(RequestId(7)))
+            );
+        }
+        assert_eq!(creating.clone().released_by(&creating), None);
+        assert_eq!(idle.clone().released_by(&saving()), None);
     }
 
     #[test]
@@ -415,11 +509,28 @@ mod tests {
             back: NewChatBack::Info,
             failure: CreateFailure::Restricted,
             reason: "nope".into(),
+            title: "A".into(),
         };
         let shown = view(&failed);
         assert_eq!(shown.step, NewChatStep::Info);
         assert_eq!(shown.failure(), Some((CreateFailure::Restricted, "nope")));
+        assert_eq!(
+            shown.refused_title(),
+            None,
+            "only NO_CHAT_TITLE is about the name"
+        );
         assert!(!shown.busy());
+    }
+
+    #[test]
+    fn a_no_title_refusal_names_the_text_that_was_refused() {
+        let refused = NewChatStage::CreateRefused {
+            back: NewChatBack::Info,
+            failure: CreateFailure::NoTitle,
+            reason: "NO_CHAT_TITLE".into(),
+            title: "A".into(),
+        };
+        assert_eq!(view(&refused).refused_title(), Some("A"));
     }
 
     #[test]

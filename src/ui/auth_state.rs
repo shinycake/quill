@@ -19,6 +19,8 @@ pub(crate) struct AuthUi {
     pub(super) registration_last_input: Entity<TextareaState>,
     /// The registration step and the terms the user ticked in it.
     pub(super) registration: RegistrationStep,
+    /// The sign-in submit that is out, by its request.
+    pub(super) submit: AuthSubmit,
     /// The proxy list as a box over the sign-in screen (tdesktop's
     /// `ProxiesBox`), which has no Settings window to hold it. It belongs to
     /// the sign-in screen: the account reaching Ready ends it
@@ -64,6 +66,89 @@ macro_rules! submit_on_enter {
     };
 }
 
+/// The sign-in submit this screen sent. One goes at a time: a press while
+/// one is out sends nothing ([`Self::send`]). The session is the one that
+/// knows when it is answered: the submit is out while its own request is
+/// still in the session's table, so another account's request, or an older
+/// one, never reads as this one. The request numbers restart with a new
+/// client, so the stage also holds the screen it was sent from: an `Out` of
+/// another screen is no submit of this one.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AuthSubmit {
+    #[default]
+    Idle,
+    Out {
+        request: quill::ids::RequestId,
+        screen: super::on_screen::ScreenEpoch,
+    },
+}
+
+impl AuthSubmit {
+    /// The submit's request is still unanswered in `requests`, and was
+    /// sent from the screen `screen` that is on now.
+    pub(super) fn is_out(
+        self,
+        requests: &quill::state::RequestRegistry,
+        screen: super::on_screen::ScreenEpoch,
+    ) -> bool {
+        match self {
+            Self::Idle => false,
+            Self::Out {
+                request,
+                screen: sent_from,
+            } => sent_from == screen && requests.get(request).is_some(),
+        }
+    }
+
+    /// The stage after a look at the session's table: an answered request,
+    /// a request of another screen, or no session at all, ends it, so an id
+    /// never outlives its session and never reads as an unrelated request of
+    /// the next one.
+    pub(super) fn settle(
+        &mut self,
+        requests: Option<&quill::state::RequestRegistry>,
+        screen: super::on_screen::ScreenEpoch,
+    ) {
+        if let Self::Out { .. } = *self
+            && !requests.is_some_and(|requests| self.is_out(requests, screen))
+        {
+            *self = Self::Idle;
+        }
+    }
+
+    /// Sends through `send` unless a submit is out already (`busy`, from
+    /// [`Self::is_out`]): `None`, nothing sent. A send that went out holds
+    /// the stage.
+    pub(super) fn send<E>(
+        &mut self,
+        busy: bool,
+        screen: super::on_screen::ScreenEpoch,
+        send: impl FnOnce() -> Result<quill::ids::RequestId, E>,
+    ) -> Option<Result<quill::ids::RequestId, E>> {
+        if busy {
+            return None;
+        }
+        let result = send();
+        self.sent(&result, screen);
+        Some(result)
+    }
+
+    /// A send that went out holds its request and its screen; a refused one
+    /// leaves the stage as it was.
+    pub(super) fn sent<E>(
+        &mut self,
+        result: &Result<quill::ids::RequestId, E>,
+        screen: super::on_screen::ScreenEpoch,
+    ) {
+        if let Ok(request) = result {
+            *self = Self::Out {
+                request: *request,
+                screen,
+            };
+        }
+    }
+}
+
 /// The registration step by the authorization state: it exists only while
 /// `WaitRegistration` does ([`AuthUi::follow_auth`] builds it from the
 /// state), and what was ticked holds only for the terms it was ticked for.
@@ -73,7 +158,7 @@ pub(crate) enum RegistrationStep {
     #[default]
     Idle,
     /// The terms (none when there are none to accept) wait for a tick.
-    Asking(Option<RegistrationTerms>),
+    Unticked(Option<RegistrationTerms>),
     /// The user accepted these terms; with none to accept, it starts so.
     Accepted(Option<RegistrationTerms>),
 }
@@ -97,7 +182,7 @@ impl RegistrationStep {
         *self = if on {
             Self::Accepted(terms)
         } else {
-            Self::Asking(terms)
+            Self::Unticked(terms)
         };
     }
 }
@@ -115,11 +200,11 @@ impl AuthUi {
         };
         let same = matches!(
             &self.registration,
-            RegistrationStep::Asking(asked) | RegistrationStep::Accepted(asked) if asked == terms
+            RegistrationStep::Unticked(asked) | RegistrationStep::Accepted(asked) if asked == terms
         );
         if !same {
             self.registration = match terms {
-                Some(_) => RegistrationStep::Asking(terms.clone()),
+                Some(_) => RegistrationStep::Unticked(terms.clone()),
                 None => RegistrationStep::Accepted(None),
             };
         }
@@ -188,6 +273,7 @@ impl AuthUi {
             registration_first_input,
             registration_last_input,
             registration: RegistrationStep::Idle,
+            submit: AuthSubmit::Idle,
             proxy_list_open: false,
             registration_notify_contacts: false,
             email_input,
@@ -223,5 +309,162 @@ impl AuthDemo {
             stage,
             demo_inputs: demo.is_some_and(|d| d.auth_inputs()),
         }
+    }
+}
+
+/// The recording driver the sign-in, bottom-action and report tests send
+/// through; test-only, declared here so the shared module list stays as is.
+#[cfg(test)]
+#[path = "driver_fixture.rs"]
+pub(in crate::ui) mod driver_fixture;
+
+#[cfg(test)]
+mod submit_tests {
+    use super::AuthSubmit;
+    use crate::ui::on_screen::ScreenEpoch;
+    use quill::state::{RequestPurpose, RequestRegistry};
+
+    fn screen() -> ScreenEpoch {
+        ScreenEpoch::default()
+    }
+
+    fn registry_with_reset() -> (RequestRegistry, quill::ids::RequestId) {
+        let mut registry = RequestRegistry::default();
+        let id = registry.register(
+            quill::ids::AccountGeneration::default(),
+            RequestPurpose::ResetAuthenticationEmail,
+            None,
+            None,
+        );
+        (registry, id)
+    }
+
+    /// A reset that went out holds the submit busy until its answer.
+    #[test]
+    fn a_sent_reset_holds_the_submit_busy_until_answered() {
+        let (mut registry, id) = registry_with_reset();
+        let mut submit = AuthSubmit::Idle;
+        submit.sent::<()>(&Ok(id), screen());
+        assert!(submit.is_out(&registry, screen()));
+        registry.take(id);
+        submit.settle(Some(&registry), screen());
+        assert!(!submit.is_out(&registry, screen()));
+        assert_eq!(submit, AuthSubmit::Idle, "the answer ends the stage");
+    }
+
+    fn driver_in(
+        auth: &str,
+    ) -> (
+        quill::connect::ConnectDriver<std::sync::Arc<quill::connect::RecordingSender>>,
+        std::sync::Arc<quill::connect::RecordingSender>,
+    ) {
+        crate::ui::auth_state::driver_fixture::driver_with(&[format!(
+            r#"{{"@type":"updateAuthorizationState","authorization_state":{auth}}}"#
+        )])
+    }
+
+    /// The real driver's reset holds the submit busy, and a second press
+    /// while it is out sends nothing.
+    #[test]
+    fn the_reset_through_the_driver_holds_the_submit_and_blocks_a_second() {
+        let (mut driver, recorder) = driver_in(
+            r#"{"@type":"authorizationStateWaitEmailCode","code_info":{"email_address_pattern":"a***@b.c","length":5},"email_address_reset_state":{"@type":"emailAddressResetStateAvailable","wait_period":3600}}"#,
+        );
+        let before = recorder.snapshot().len();
+        let mut submit = AuthSubmit::Idle;
+        let busy = |submit: AuthSubmit, driver: &quill::connect::ConnectDriver<_>| {
+            submit.is_out(&driver.session.requests, screen())
+        };
+        assert!(!busy(submit, &driver));
+        let first = submit.send(false, screen(), || driver.reset_login_email());
+        assert!(matches!(first, Some(Ok(_))), "it went out");
+        assert!(busy(submit, &driver), "the submit is out");
+        let second = submit.send(busy(submit, &driver), screen(), || {
+            driver.reset_login_email()
+        });
+        assert!(second.is_none(), "a second press sends nothing");
+        assert_eq!(
+            crate::ui::auth_state::driver_fixture::sent_types(&recorder, before).len(),
+            1
+        );
+    }
+
+    /// A resend of the recovery code while the first request is out is not
+    /// sent: it would overwrite the stage of the one still in flight.
+    #[test]
+    fn a_recovery_resend_waits_for_the_request_out() {
+        let (mut driver, recorder) = driver_in(
+            r#"{"@type":"authorizationStateWaitPassword","has_recovery_email_address":true}"#,
+        );
+        let before = recorder.snapshot().len();
+        let mut submit = AuthSubmit::Idle;
+        let first = submit.send(false, screen(), || driver.request_password_recovery());
+        let Some(Ok(request)) = first else {
+            panic!("the request went out: {first:?}");
+        };
+        assert_eq!(
+            submit,
+            AuthSubmit::Out {
+                request,
+                screen: screen()
+            }
+        );
+        let busy = submit.is_out(&driver.session.requests, screen());
+        assert!(
+            submit
+                .send(busy, screen(), || driver.request_password_recovery())
+                .is_none()
+        );
+        assert_eq!(
+            submit,
+            AuthSubmit::Out {
+                request,
+                screen: screen()
+            },
+            "still the first"
+        );
+        assert_eq!(
+            crate::ui::auth_state::driver_fixture::sent_types(&recorder, before).len(),
+            1
+        );
+    }
+
+    /// The request numbers restart with a new client: an `Out` sent from
+    /// another screen is no submit of this one, though its number is still
+    /// in the table (it names the new client's request).
+    #[test]
+    fn a_submit_of_another_screen_is_not_out() {
+        let (registry, id) = registry_with_reset();
+        let mut submit = AuthSubmit::Out {
+            request: id,
+            screen: screen(),
+        };
+        assert!(submit.is_out(&registry, screen()));
+        assert!(!submit.is_out(&registry, screen().next()));
+        submit.settle(Some(&registry), screen().next());
+        assert_eq!(submit, AuthSubmit::Idle, "the next screen's look ends it");
+    }
+
+    /// A refused send leaves the stage as it was.
+    #[test]
+    fn a_refused_send_holds_nothing() {
+        let (registry, _) = registry_with_reset();
+        let mut submit = AuthSubmit::Idle;
+        submit.sent(&Err::<quill::ids::RequestId, ()>(()), screen());
+        assert!(!submit.is_out(&registry, screen()));
+    }
+
+    /// A replaced session ends the stage, so an old id never matches an
+    /// unrelated request of the new session.
+    #[test]
+    fn a_replaced_session_ends_the_stage() {
+        let (registry, id) = registry_with_reset();
+        let mut submit = AuthSubmit::Out {
+            request: id,
+            screen: screen(),
+        };
+        submit.settle(None, screen());
+        assert_eq!(submit, AuthSubmit::Idle);
+        assert!(!submit.is_out(&registry, screen()));
     }
 }

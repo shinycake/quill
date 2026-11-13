@@ -23,6 +23,7 @@ use crate::locks::lock_or_recover;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket};
 use std::sync::{Mutex, OnceLock};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const TELEGRAM_V4: SocketAddr =
@@ -189,15 +190,29 @@ pub struct NetworkState {
     pub available: bool,
 }
 
+/// How long a gateway that never answered stays asked for: the next network
+/// event after this asks again.
+const RESOLVE_AGAIN_AFTER: Duration = Duration::from_secs(60);
+
 /// Where one IP version's gateway stands in having its link-layer address
 /// resolved. It leaves `Asking` when the route no longer carries the old
-/// address over (the system resolved it, or the gateway changed).
+/// address over (the system resolved it, or the gateway changed), or
+/// [`RESOLVE_AGAIN_AFTER`] after the ask.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Neighbour {
     /// Nothing is awaited.
     Unasked,
-    /// This gateway was asked for; not asked again until it changes.
-    Asking(IpAddr),
+    /// This gateway was asked for at `since`; not asked again until it
+    /// changes, or the wait runs out.
+    Asking { gateway: IpAddr, since: Instant },
+}
+
+impl Neighbour {
+    /// Whether `gateway` is still awaited at `now`.
+    fn awaits(self, gateway: IpAddr, now: Instant) -> bool {
+        matches!(self, Self::Asking { gateway: asked, since }
+            if asked == gateway && now.saturating_duration_since(since) < RESOLVE_AGAIN_AFTER)
+    }
 }
 
 #[derive(Debug)]
@@ -231,7 +246,7 @@ impl Tracker {
 
     /// The gateways to resolve now, before `route` is observed: those whose
     /// link-layer address would be carried over, each named once.
-    fn gateways_to_resolve(&mut self, route: Route) -> Vec<IpAddr> {
+    fn gateways_to_resolve(&mut self, route: Route, now: Instant) -> Vec<IpAddr> {
         let carried = [
             route.v4.carried(self.route.v4),
             route.v6.carried(self.route.v6),
@@ -239,10 +254,20 @@ impl Tracker {
         let fresh = carried
             .iter()
             .zip(self.neighbours)
-            .filter_map(|(now, asked)| now.filter(|gateway| asked != Neighbour::Asking(*gateway)))
+            .filter_map(|(carried, asked)| carried.filter(|gateway| !asked.awaits(*gateway, now)))
             .collect();
-        self.neighbours =
-            carried.map(|gateway| gateway.map_or(Neighbour::Unasked, Neighbour::Asking));
+        let before = self.neighbours;
+        self.neighbours = [0, 1].map(|version| {
+            let (carried, asked) = (carried.get(version).copied().flatten(), before.get(version));
+            match (carried, asked) {
+                (Some(gateway), Some(asked)) if asked.awaits(gateway, now) => *asked,
+                (Some(gateway), _) => Neighbour::Asking {
+                    gateway,
+                    since: now,
+                },
+                (None, _) => Neighbour::Unasked,
+            }
+        });
         fresh
     }
 
@@ -290,14 +315,121 @@ impl Tracker {
     }
 }
 
+/// The thread that listens to the OS (`platform::watch`). The stage holds
+/// it: on Linux and macOS the listener runs for as long as Quill does, so a
+/// finished thread (the socket closed, or the listener panicked) is replaced
+/// by the next [`tracker`] call, no sooner than [`WATCH_RESTART_AFTER`] after
+/// the last start. On Windows the listener hands over to system threads and
+/// returns, which is not a loss.
+enum Watcher {
+    /// Nothing started yet.
+    Stopped,
+    Running {
+        _thread: JoinHandle<Option<()>>,
+        since: Instant,
+        /// How many starts in a row ended soon after (see [`WATCH_STABLE_FOR`]).
+        quick_ends: u8,
+    },
+    /// The thread could not be started at `at`; tried again on the same
+    /// back-off.
+    Refused { at: Instant, quick_ends: u8 },
+}
+
+/// How soon a lost listener is started again; each lost start in a row that
+/// lived less than [`WATCH_STABLE_FOR`] doubles the wait up to
+/// [`WATCH_RESTART_MAX`], so a listener that can never start (a sandbox
+/// refuses the socket) is not respawned every few seconds for the whole
+/// session.
+const WATCH_RESTART_AFTER: Duration = Duration::from_secs(5);
+
+/// The longest wait between starts of a listener that keeps ending.
+const WATCH_RESTART_MAX: Duration = Duration::from_secs(300);
+
+/// A listener that ran this long (past its wait) was working: its end starts
+/// the back-off over.
+const WATCH_STABLE_FOR: Duration = Duration::from_secs(60);
+
+/// The wait after `quick_ends` quick ends in a row.
+fn restart_wait(quick_ends: u8) -> Duration {
+    WATCH_RESTART_AFTER
+        .saturating_mul(1u32 << quick_ends.min(6))
+        .min(WATCH_RESTART_MAX)
+}
+
+/// Whether a finished listener thread means the listener was lost.
+const WATCH_RUNS_FOR_GOOD: bool = cfg!(any(target_os = "linux", target_os = "macos"));
+
+impl Watcher {
+    /// Starts the listener when none runs or the last one is lost.
+    fn ensure(&mut self, now: Instant, spawn: impl FnOnce() -> io::Result<JoinHandle<Option<()>>>) {
+        self.ensure_with(now, JoinHandle::is_finished, spawn);
+    }
+
+    /// [`Self::ensure`], with `finished` as the way a thread is told lost.
+    fn ensure_with(
+        &mut self,
+        now: Instant,
+        finished: impl FnOnce(&JoinHandle<Option<()>>) -> bool,
+        spawn: impl FnOnce() -> io::Result<JoinHandle<Option<()>>>,
+    ) {
+        let quick_ends = match &*self {
+            Watcher::Stopped => 0,
+            Watcher::Running {
+                _thread,
+                since,
+                quick_ends,
+            } => {
+                let ran = now.saturating_duration_since(*since);
+                if !WATCH_RUNS_FOR_GOOD || !finished(_thread) {
+                    return;
+                }
+                // The end is noticed on a later call, so a listener that
+                // lived less than the wait plus [`WATCH_STABLE_FOR`] did
+                // not run for long.
+                let wait = restart_wait(*quick_ends);
+                if ran < wait {
+                    return;
+                } else if ran >= wait.saturating_add(WATCH_STABLE_FOR) {
+                    0
+                } else {
+                    quick_ends.saturating_add(1)
+                }
+            }
+            Watcher::Refused { at, quick_ends } => {
+                if now.saturating_duration_since(*at) < restart_wait(*quick_ends) {
+                    return;
+                }
+                quick_ends.saturating_add(1)
+            }
+        };
+        *self = match spawn() {
+            Ok(thread) => Watcher::Running {
+                _thread: thread,
+                since: now,
+                quick_ends,
+            },
+            Err(error) => {
+                eprintln!("quill: no network watcher: {error}");
+                Watcher::Refused {
+                    at: now,
+                    quick_ends,
+                }
+            }
+        };
+    }
+}
+
 fn tracker() -> &'static Mutex<Tracker> {
     static TRACKER: OnceLock<Mutex<Tracker>> = OnceLock::new();
-    TRACKER.get_or_init(|| {
-        if let Err(error) = crate::thread_guard::spawn_guarded("quill-net-watch", platform::watch) {
-            eprintln!("quill: no network watcher: {error}");
-        }
-        Mutex::new(Tracker::new(route_now()))
-    })
+    static WATCHER: Mutex<Watcher> = Mutex::new(Watcher::Stopped);
+    lock_or_recover(&WATCHER).ensure(Instant::now(), || {
+        // Once the listener is on, the route is read again: what changed
+        // while no listener ran (a replaced one) is not waited for. This runs
+        // on the listener's own thread, never under the WATCHER lock
+        // (`network_changed` takes TRACKER and calls `tracker()`).
+        crate::thread_guard::spawn_guarded("quill-net-watch", || platform::watch(network_changed))
+    });
+    TRACKER.get_or_init(|| Mutex::new(Tracker::new(route_now())))
 }
 
 /// The network as last seen. The first call starts the watcher.
@@ -330,13 +462,14 @@ fn is_gateway(ip: IpAddr) -> bool {
 fn still_resolving(gateway: IpAddr) -> bool {
     lock_or_recover(tracker())
         .neighbours
-        .contains(&Neighbour::Asking(gateway))
+        .iter()
+        .any(|asked| asked.awaits(gateway, Instant::now()))
 }
 
 fn network_changed() {
     let route = route_now();
     let mut tracker = lock_or_recover(tracker());
-    let resolve = tracker.gateways_to_resolve(route);
+    let resolve = tracker.gateways_to_resolve(route, Instant::now());
     let moved = tracker.observe(route);
     drop(tracker);
     // The answer comes back as a neighbour change (Linux), from the

@@ -194,8 +194,7 @@ fn premium_features_apply_to_their_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetPremiumFeatures, None);
-    session.payments.hub.premium.begin();
-    session.payments.hub.premium.sent(extra);
+    session.payments.hub.premium.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -223,8 +222,7 @@ fn business_features_keep_the_server_order() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBusinessFeatures, None);
-    session.payments.hub.business_features.begin();
-    session.payments.hub.business_features.sent(extra);
+    session.payments.hub.business_features.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -276,8 +274,7 @@ fn the_premium_state_is_matched_to_its_request_and_refreshes() {
     let seq = AtomicU64::new(0);
     let old = session.request(RequestPurpose::GetPremiumState, None);
     let live = session.request(RequestPurpose::GetPremiumState, None);
-    session.payments.hub.premium_state.begin();
-    session.payments.hub.premium_state.sent(live);
+    session.payments.hub.premium_state.begin_with(live);
     let state = |extra: u64, text: &str| {
         format!(
             r#"{{"@type":"premiumState","@extra":"{extra}","state":{{"text":"{text}","entities":[]}},"payment_options":[],"animations":[],"business_animations":[]}}"#
@@ -297,8 +294,7 @@ fn the_premium_state_is_matched_to_its_request_and_refreshes() {
     );
     // A failure of the request out is kept for the next opening to retry.
     let failing = session.request(RequestPurpose::GetPremiumState, None);
-    session.payments.hub.premium_state.begin();
-    session.payments.hub.premium_state.sent(failing);
+    session.payments.hub.premium_state.begin_with(failing);
     apply_json(
         &mut session,
         &seq,

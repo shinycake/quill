@@ -45,14 +45,23 @@ pub enum Correlation {
     Subject(String),
     /// `downloadFile`: the file.
     File(i32),
-    /// A search request: the search generation it belongs to.
-    Search(u64),
     /// A page the shared-media gallery's Stories tab asked for (the stories
     /// page asks for the same purpose without it).
     GalleryTab,
+    /// A page of a paged list (the archived or trending sticker sets): the
+    /// offset it started at (0 = the first page, which replaces the list).
+    PageFrom(i64),
 }
 
 impl PendingRequest {
+    /// The offset a page was asked from; 0 for the first page.
+    pub fn page_from(&self) -> i64 {
+        match &self.correlation {
+            Correlation::PageFrom(from) => *from,
+            _ => 0,
+        }
+    }
+
     /// `from_message_id` of a history page, or the message a request acts on.
     pub fn around_message_id(&self) -> Option<MessageId> {
         match &self.correlation {
@@ -164,13 +173,6 @@ impl PendingRequest {
     pub fn file_id(&self) -> Option<i32> {
         match &self.correlation {
             Correlation::File(file) => Some(*file),
-            _ => None,
-        }
-    }
-
-    pub fn search_generation(&self) -> Option<u64> {
-        match &self.correlation {
-            Correlation::Search(generation) => Some(*generation),
             _ => None,
         }
     }

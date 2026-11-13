@@ -212,7 +212,7 @@ impl QuillApp {
         } else {
             self.background
                 .client_mut(account)
-                .and_then(|client| client.live.as_mut())
+                .and_then(|client| client.live_mut())
         }
     }
 
@@ -558,6 +558,7 @@ mod tests {
 
     fn photo(path: &str) -> ComposerAttachment {
         ComposerAttachment {
+            id: Default::default(),
             path: PathBuf::from(path),
             kind: AttachmentKind::Photo,
             file_name: path.into(),

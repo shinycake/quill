@@ -11,8 +11,8 @@ thread_local! {
     /// Glyph advances by font, size and character, as GPUI's own line
     /// wrapper caches them; cleared when it grows past
     /// [`CHAR_WIDTH_CACHE_CAP`] entries so a long session stays bounded.
-    static CHAR_WIDTHS: std::cell::RefCell<HashMap<(FontId, u32, char), Pixels>> =
-        std::cell::RefCell::new(HashMap::new());
+    static CHAR_WIDTHS: std::cell::Cell<HashMap<(FontId, u32, char), Pixels>> =
+        std::cell::Cell::new(HashMap::new());
 }
 
 const CHAR_WIDTH_CACHE_CAP: usize = 16 * 1024;
@@ -29,18 +29,22 @@ pub(in crate::ui) const QUOTE_BLOCK_CHROME: i32 = 8 + 8 + 2;
 /// The width `c` takes in `font_id` at `font_size`.
 fn char_width(text_system: &TextSystem, font_id: FontId, font_size: Pixels, c: char) -> Pixels {
     let key = (font_id, f32::from(font_size).to_bits(), c);
-    CHAR_WIDTHS.with(|cache| {
-        if let Some(width) = cache.borrow().get(&key) {
-            return *width;
+    // Taken while in use: a re-entrant call sees an empty map and measures
+    // again instead of hitting a borrowed cell.
+    let mut cache = CHAR_WIDTHS.take();
+    let width = match cache.get(&key) {
+        Some(width) => *width,
+        None => {
+            let width = text_system.layout_width(font_id, font_size, c);
+            if cache.len() >= CHAR_WIDTH_CACHE_CAP {
+                cache.clear();
+            }
+            cache.insert(key, width);
+            width
         }
-        let width = text_system.layout_width(font_id, font_size, c);
-        let mut cache = cache.borrow_mut();
-        if cache.len() >= CHAR_WIDTH_CACHE_CAP {
-            cache.clear();
-        }
-        cache.insert(key, width);
-        width
-    })
+    };
+    CHAR_WIDTHS.set(cache);
+    width
 }
 
 /// The face a run renders in.

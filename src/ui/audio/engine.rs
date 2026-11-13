@@ -33,9 +33,11 @@ use super::engine_build::{
 use super::tempo::SharedSpeed;
 use super::{AudioError, SharedOutput};
 
-/// What the engine is doing right now.
+/// What the engine is doing right now: a view computed on each call from
+/// `Playback` and `Sound`, which own the stage and the build task. Nothing
+/// stores it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::ui) enum EngineState {
+pub(in crate::ui) enum EngineView {
     /// Nothing loaded.
     Idle,
     /// The track is being built and plays when it lands.
@@ -373,38 +375,38 @@ impl AudioEngine {
     }
 
     /// What the track is doing, read from the sound itself.
-    pub(in crate::ui) fn state(&self) -> EngineState {
+    pub(in crate::ui) fn state(&self) -> EngineView {
         let sound = match &self.playback {
             Playback::Simulated(run) => {
                 let clock = &run.clock;
                 return if clock.finished_at(self.sim_now()) {
-                    EngineState::Ended
+                    EngineView::Ended
                 } else if clock.is_playing() {
-                    EngineState::Playing
+                    EngineView::Playing
                 } else {
-                    EngineState::Paused
+                    EngineView::Paused
                 };
             }
             Playback::Building { build, sound } => {
                 return if sound.is_failed() {
-                    EngineState::Failed
+                    EngineView::Failed
                 } else if build.landing == Landing::Held {
-                    EngineState::Paused
+                    EngineView::Paused
                 } else {
-                    EngineState::Loading
+                    EngineView::Loading
                 };
             }
             Playback::Settled(sound) => sound,
         };
         match sound {
-            Sound::Empty => EngineState::Idle,
-            Sound::Failed(_) => EngineState::Failed,
+            Sound::Empty => EngineView::Idle,
+            Sound::Failed(_) => EngineView::Failed,
             // Seeked while paused: the sound still sits at the old position
             // (a track that ran out reads empty), and Play restarts it.
-            Sound::Stale(_) => EngineState::Paused,
-            Sound::Current(track) if track.player.is_paused() => EngineState::Paused,
-            Sound::Current(track) if track.player.empty() => EngineState::Ended,
-            Sound::Current(_) => EngineState::Playing,
+            Sound::Stale(_) => EngineView::Paused,
+            Sound::Current(track) if track.player.is_paused() => EngineView::Paused,
+            Sound::Current(track) if track.player.empty() => EngineView::Ended,
+            Sound::Current(_) => EngineView::Playing,
         }
     }
 
@@ -657,7 +659,7 @@ impl AudioEngine {
 
     /// The loaded track played to its end.
     pub(in crate::ui) fn is_ended(&self) -> bool {
-        self.state() == EngineState::Ended
+        self.state() == EngineView::Ended
     }
 
     pub(in crate::ui) fn pause(&mut self) {
@@ -891,7 +893,7 @@ pub(in crate::ui) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::test_support::{RATE, device, device_at, pull, track, track_at};
-    use super::{AudioEngine, AudioError, EngineState, Simulation};
+    use super::{AudioEngine, AudioError, EngineView, Simulation};
     use crate::ui::audio::SharedOutput;
     use rodio::mixer::MixerSource;
     use std::path::{Path, PathBuf};
@@ -921,7 +923,7 @@ mod tests {
         let mut engine = AudioEngine::new(SharedOutput::for_test(None));
         let path = track("no-output.wav", 2);
         assert!(engine.start(&path, 1.5, 1.0, 1.0, 2.0).is_err());
-        assert_eq!(engine.state(), EngineState::Failed);
+        assert_eq!(engine.state(), EngineView::Failed);
         assert!((engine.position_secs() - 1.5).abs() < 1e-9);
     }
 
@@ -930,9 +932,9 @@ mod tests {
         let (mut engine, _device) = rig();
         let path = std::env::temp_dir().join("quill-engine-test-missing.wav");
         engine.start(&path, 1.5, 1.0, 1.0, 2.0).unwrap();
-        assert_eq!(engine.state(), EngineState::Loading);
+        assert_eq!(engine.state(), EngineView::Loading);
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Failed);
+        assert_eq!(engine.state(), EngineView::Failed);
         assert_eq!(engine.error(), Some(AudioError::Open));
         assert!((engine.position_secs() - 1.5).abs() < 1e-9);
         assert!(engine.take_start_failed());
@@ -945,14 +947,14 @@ mod tests {
         let open = engine.gate_builds();
         let path = track("loading.wav", 4);
         engine.start(&path, 2.0, 1.0, 1.0, 4.0).unwrap();
-        assert_eq!(engine.state(), EngineState::Loading);
+        assert_eq!(engine.state(), EngineView::Loading);
         assert!(engine.is_loaded());
         assert!((engine.position_secs() - 2.0).abs() < 1e-9);
         engine.settle();
-        assert_eq!(engine.state(), EngineState::Loading, "still reading");
+        assert_eq!(engine.state(), EngineView::Loading, "still reading");
         open.send(()).unwrap();
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         pull(&mut device, usize::try_from(RATE).unwrap());
         let secs = engine.position_secs();
         assert!((2.9..=3.3).contains(&secs), "got {secs}");
@@ -965,17 +967,17 @@ mod tests {
         let path = track("loading-pause.wav", 4);
         engine.start(&path, 1.0, 1.0, 1.0, 4.0).unwrap();
         engine.pause();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         engine.resume(1.0).unwrap();
-        assert_eq!(engine.state(), EngineState::Loading);
+        assert_eq!(engine.state(), EngineView::Loading);
         engine.pause();
         open.send(()).unwrap();
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         pull(&mut device, usize::try_from(RATE).unwrap());
         assert!((engine.position_secs() - 1.0).abs() < 0.05);
         engine.resume(1.0).unwrap();
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         pull(&mut device, usize::try_from(RATE).unwrap());
         let secs = engine.position_secs();
         assert!((1.9..=2.3).contains(&secs), "got {secs}");
@@ -990,10 +992,10 @@ mod tests {
         engine.seek(5.0, true).unwrap();
         engine.seek(3.0, true).unwrap();
         assert!((engine.position_secs() - 3.0).abs() < 1e-9);
-        assert_eq!(engine.state(), EngineState::Loading);
+        assert_eq!(engine.state(), EngineView::Loading);
         drop(open);
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         pull(&mut device, usize::try_from(RATE).unwrap());
         let secs = engine.position_secs();
         assert!((3.9..=4.3).contains(&secs), "got {secs}");
@@ -1007,10 +1009,10 @@ mod tests {
         engine.start(&path, 1.0, 1.0, 1.0, 6.0).unwrap();
         engine.pause();
         engine.seek(4.0, false).unwrap();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         drop(open);
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         assert!((engine.position_secs() - 4.0).abs() < 0.05);
     }
 
@@ -1021,11 +1023,11 @@ mod tests {
         let path = track("loading-stop.wav", 4);
         engine.start(&path, 1.0, 1.0, 1.0, 4.0).unwrap();
         engine.stop();
-        assert_eq!(engine.state(), EngineState::Idle);
+        assert_eq!(engine.state(), EngineView::Idle);
         assert!(!engine.is_loaded());
         drop(open);
         engine.settle();
-        assert_eq!(engine.state(), EngineState::Idle);
+        assert_eq!(engine.state(), EngineView::Idle);
         assert_eq!(engine.error(), None);
     }
 
@@ -1054,7 +1056,7 @@ mod tests {
             building.built = mpsc::channel().1;
         }
         engine.settle();
-        assert_eq!(engine.state(), EngineState::Failed);
+        assert_eq!(engine.state(), EngineView::Failed);
         assert_eq!(engine.error(), Some(AudioError::Open));
     }
 
@@ -1072,7 +1074,7 @@ mod tests {
         engine.join_builds();
         assert_eq!(PANICKED_BUILD_WAKES.load(Ordering::SeqCst), 1);
         engine.settle();
-        assert_eq!(engine.state(), EngineState::Failed);
+        assert_eq!(engine.state(), EngineView::Failed);
         assert!(engine.take_start_failed(), "the user is told");
     }
 
@@ -1086,11 +1088,11 @@ mod tests {
             building.built = mpsc::channel().1;
         }
         engine.settle();
-        assert_eq!(engine.state(), EngineState::Failed);
+        assert_eq!(engine.state(), EngineView::Failed);
         engine.resume(1.0).unwrap();
         drop(open);
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         assert!(!engine.take_start_failed());
     }
 
@@ -1100,11 +1102,11 @@ mod tests {
         let path = track("replay-missing.wav", 1);
         start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 1.0);
         pull(&mut device, usize::try_from(RATE).unwrap() * 2);
-        assert_eq!(engine.state(), EngineState::Ended);
+        assert_eq!(engine.state(), EngineView::Ended);
         std::fs::remove_file(&path).unwrap();
         engine.resume(0.0).unwrap();
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Failed);
+        assert_eq!(engine.state(), EngineView::Failed);
         assert!(!engine.is_ended(), "the tick must not take it for the end");
         assert_eq!(engine.error(), Some(AudioError::Open));
         assert!(engine.take_start_failed(), "the user is told");
@@ -1124,7 +1126,7 @@ mod tests {
         drop(open);
         engine.join_builds();
         engine.settle();
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         assert_eq!(output.players_made(), 1, "only the build that landed");
     }
 
@@ -1133,9 +1135,9 @@ mod tests {
         let (mut engine, mut device) = rig();
         let path = track("play-pause.wav", 4);
         start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 4.0);
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         engine.pause();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         pull(&mut device, 4000);
         assert!(engine.position_secs() < 0.05);
     }
@@ -1182,7 +1184,7 @@ mod tests {
         let path = track("ended.wav", 1);
         start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 1.0);
         pull(&mut device, usize::try_from(RATE).unwrap() * 2);
-        assert_eq!(engine.state(), EngineState::Ended);
+        assert_eq!(engine.state(), EngineView::Ended);
     }
 
     #[test]
@@ -1193,11 +1195,11 @@ mod tests {
         pull(&mut device, usize::try_from(RATE).unwrap() * 2);
         assert!(engine.is_ended());
         engine.seek(0.0, false).unwrap();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         assert!(!engine.is_ended(), "the tick does not end a parked track");
         engine.resume(0.0).unwrap();
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
     }
 
     #[test]
@@ -1208,14 +1210,14 @@ mod tests {
         let open = engine.gate_builds();
         engine.seek(3.0, true).unwrap();
         engine.pause();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         pull(&mut device, usize::try_from(RATE).unwrap());
         assert!(engine.position_secs() - 3.0 < 1e-9, "the target is shown");
         engine.resume(3.0).unwrap();
-        assert_eq!(engine.state(), EngineState::Loading);
+        assert_eq!(engine.state(), EngineView::Loading);
         drop(open);
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
     }
 
     /// The output closes while nothing plays, so a resume opens it before
@@ -1230,7 +1232,7 @@ mod tests {
         let asked = output.wakes();
         engine.resume(0.0).unwrap();
         assert_eq!(output.wakes(), asked + 1);
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         pull(&mut device, 4000);
         assert!(engine.position_secs() > 0.4, "{}", engine.position_secs());
     }
@@ -1244,7 +1246,7 @@ mod tests {
         let path = track("opening.wav", 4);
         start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 4.0);
         engine.settle();
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         assert_eq!(engine.error(), None, "opening is no error");
         gate.answer(true);
         output.settle_device();
@@ -1265,7 +1267,7 @@ mod tests {
         gate.answer(false);
         output.settle_device();
         engine.settle();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         assert_eq!(engine.error(), Some(AudioError::NoOutput));
     }
 
@@ -1278,9 +1280,9 @@ mod tests {
         engine.seek(2.0, false).unwrap();
         std::fs::remove_file(&path).unwrap();
         engine.resume(2.0).unwrap();
-        assert_eq!(engine.state(), EngineState::Loading);
+        assert_eq!(engine.state(), EngineView::Loading);
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         assert!((engine.position_secs() - 2.0).abs() < 0.05);
         assert!(engine.take_start_failed());
     }
@@ -1294,11 +1296,11 @@ mod tests {
             stall: false,
         }));
         assert!(engine.start(&path, 1.0, 1.0, 1.0, 4.0).is_err());
-        assert_eq!(engine.state(), EngineState::Failed);
+        assert_eq!(engine.state(), EngineView::Failed);
         engine.set_simulation(None);
         engine.resume(1.0).unwrap();
         engine.await_landing();
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         assert!((engine.position_secs() - 1.0).abs() < 0.05);
     }
 
@@ -1309,7 +1311,7 @@ mod tests {
         start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 4.0);
         pull(&mut device, usize::try_from(RATE).unwrap());
         engine.stop();
-        assert_eq!(engine.state(), EngineState::Idle);
+        assert_eq!(engine.state(), EngineView::Idle);
         assert!((0.9..=1.3).contains(&engine.position_secs()));
     }
 
@@ -1322,13 +1324,13 @@ mod tests {
         }));
         let path = PathBuf::from("unused.wav");
         start_landed(&mut engine, &path, 3.0, 1.0, 1.0, 10.0);
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         engine.pause();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         assert!((engine.position_secs() - 3.0).abs() < 0.05);
         engine.seek(12.0, false).unwrap();
         engine.resume(12.0).unwrap();
-        assert_eq!(engine.state(), EngineState::Ended);
+        assert_eq!(engine.state(), EngineView::Ended);
     }
     /// Land the build a seek started, as the tick would.
     fn land_seek(engine: &mut AudioEngine) {
@@ -1348,13 +1350,13 @@ mod tests {
         engine.seek(4.0, true).unwrap();
         engine.seek(5.0, true).unwrap();
         assert!(engine.seek_pending());
-        assert_eq!(engine.state(), EngineState::Loading);
+        assert_eq!(engine.state(), EngineView::Loading);
         assert!(
             (engine.position_secs() - 5.0).abs() < 1e-9,
             "the newest target"
         );
         land_seek(&mut engine);
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         let landed = engine.position_secs();
         assert!((landed - 5.0).abs() < 1e-9, "got {landed}");
         assert_eq!(engine.error(), None);
@@ -1375,10 +1377,10 @@ mod tests {
         let open = engine.gate_builds();
         engine.seek(4.0, true).unwrap();
         engine.pause();
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         open.send(()).unwrap();
         land_seek(&mut engine);
-        assert_eq!(engine.state(), EngineState::Paused, "the pause survives");
+        assert_eq!(engine.state(), EngineView::Paused, "the pause survives");
         let secs = engine.position_secs();
         assert!((secs - 4.0).abs() < 1e-9, "got {secs}");
         assert_eq!(engine.error(), None);
@@ -1421,7 +1423,7 @@ mod tests {
         );
         land_seek(&mut engine);
         assert_eq!(engine.error(), Some(AudioError::Open));
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
         let secs = engine.position_secs();
         assert!(
             (0.95..=1.2).contains(&secs),
@@ -1478,7 +1480,7 @@ mod tests {
         assert_eq!(engine.error(), None);
         assert!(engine.start(&path, 0.0, 1.0, 1.0, 2.0).is_err());
         assert_eq!(engine.error(), Some(AudioError::NoOutput));
-        assert_eq!(engine.state(), EngineState::Failed);
+        assert_eq!(engine.state(), EngineView::Failed);
         engine.stop();
         assert_eq!(engine.error(), None);
     }
@@ -1489,7 +1491,7 @@ mod tests {
         let path = track("error-seek.wav", 1);
         start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 1.0);
         pull(&mut device, usize::try_from(RATE).unwrap() * 2);
-        assert_eq!(engine.state(), EngineState::Ended);
+        assert_eq!(engine.state(), EngineView::Ended);
         std::fs::remove_file(&path).unwrap();
         engine.seek(0.5, true).unwrap();
         engine.await_landing();
@@ -1498,7 +1500,7 @@ mod tests {
         engine.seek(0.5, true).unwrap();
         engine.await_landing();
         assert_eq!(engine.error(), None);
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
     }
 
     #[test]
@@ -1512,11 +1514,11 @@ mod tests {
         engine.resume(2.0).unwrap();
         engine.await_landing();
         assert_eq!(engine.error(), Some(AudioError::Open));
-        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.state(), EngineView::Paused);
         track("error-resume.wav", 4);
         engine.resume(2.0).unwrap();
         engine.await_landing();
         assert_eq!(engine.error(), None);
-        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.state(), EngineView::Playing);
     }
 }

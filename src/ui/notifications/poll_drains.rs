@@ -15,6 +15,18 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
+    /// Each window in `failed` gets "Couldn't jump to that date" in its own
+    /// toast host. True when a note was set.
+    pub(crate) fn say_date_jumps_failed(&mut self, failed: Vec<Option<ChatId>>) -> bool {
+        let any = !failed.is_empty();
+        for window in failed {
+            self.as_asked_by(window, |this| {
+                this.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_JUMP_TO_THAT)));
+            });
+        }
+        any
+    }
+
     /// Drain what the last ingest left for the UI. Returns whether anything
     /// was drained (the poll redraws at once).
     pub(super) fn poll_drains(&mut self, cx: &mut Context<Self>) -> bool {
@@ -56,6 +68,10 @@ impl QuillApp {
         // `getDeepLinkInfo` once auth is Ready, then follow-ups / dialog /
         // deferred chat open from each terminal session state.
         self.pump_deep_link(cx);
+        // A sticker the set box waits on lands (or fails) with its download.
+        if self.settle_sticker_pick_download(cx) {
+            progressed = true;
+        }
         // A box that sent its request closes on the answer (`box_submits`).
         self.settle_box_submits(cx);
         // M1 fix-up: a "Share link" gated off by
@@ -81,6 +97,8 @@ impl QuillApp {
             self.land_widget_answers(answers, cx);
             progressed = true;
         }
+        // A refused delete ends the delete animation waiting for it.
+        self.settle_vanishing(cx);
         // B7: a basic group became a supergroup: leave the old chat.
         if self.pump_chat_upgrades(cx) {
             progressed = true;
@@ -99,6 +117,15 @@ impl QuillApp {
             .unwrap_or_default()
         {
             self.set_note(StatusNote::error(err));
+            progressed = true;
+        }
+        // A date lookup that failed says so in the window that asked.
+        let failed = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.session.take_failed_date_jumps())
+            .unwrap_or_default();
+        if self.say_date_jumps_failed(failed) {
             progressed = true;
         }
         if self.drain_replies_blocked() {
@@ -338,6 +365,7 @@ impl QuillApp {
             | self.settle_recommended_adds(cx)
             | self.settle_folder_deletes(cx)
             | self.settle_add_contact(cx)
+            | self.drain_new_contact(cx)
             | self.settle_edit_contact(cx)
             | self.drive_folder_invite(cx)
             | self.drain_folder_limit(cx)

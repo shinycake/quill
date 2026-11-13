@@ -5,7 +5,7 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::paid_messages::PaidTarget;
-use crate::paid_messages_guard::HeldSend;
+use crate::paid_messages_guard::{HeldSend, PaidOutcome};
 use crate::state::{RequestPurpose, unix_ms_now};
 use crate::telegram::envelope::CommonPayload;
 use crate::telegram::envelope::{EnvelopePayload, GroupsPayload, SettingsPayload};
@@ -49,50 +49,82 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(guard) = self.sender.paid_guard() {
             guard.set_state(prices, trusted);
         }
-        self.save_paid_trust();
+        self.save_paid_trust(crate::state::unix_ms_now());
     }
 
-    /// Reads the account's trusted prices once.
-    fn load_paid_trust(&mut self) {
-        if !self.session.payments.paid_messages.trust_unread() {
+    /// Writes the trusted prices again when the last write failed and its
+    /// wait is over. Per tick, in the background too.
+    pub(crate) fn paid_trust_tick(&mut self, now_ms: u64) {
+        self.load_paid_trust(now_ms);
+        self.save_paid_trust(now_ms);
+    }
+
+    /// Reads the account's trusted prices once. Only a missing file means
+    /// there are none; a file that cannot be read is kept as it is and read
+    /// again after a wait.
+    fn load_paid_trust(&mut self, now_ms: u64) {
+        if !self.session.payments.paid_messages.trust_read_due(now_ms) {
             return;
         }
-        let text = std::fs::read_to_string(self.paths.root.join(TRUST_FILE)).ok();
-        self.session
-            .payments
-            .paid_messages
-            .trust_loaded(text.as_deref());
+        let paid = &mut self.session.payments.paid_messages;
+        match std::fs::read_to_string(self.paths.root.join(TRUST_FILE)) {
+            Ok(text) => paid.trust_loaded(Some(&text)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => paid.trust_loaded(None),
+            Err(_) => paid.trust_load_failed(now_ms),
+        }
         self.sync_paid_guard();
     }
 
     /// Writes the trusted prices when they changed; the file is clean
     /// after, or the write failed and the store says why.
-    fn save_paid_trust(&mut self) {
-        let Some(json) = self.session.payments.paid_messages.trust_to_write() else {
+    fn save_paid_trust(&mut self, now_ms: u64) {
+        let Some(json) = self.session.payments.paid_messages.trust_to_write(now_ms) else {
             return;
         };
         let path = self.paths.root.join(TRUST_FILE);
         let written = std::fs::create_dir_all(&self.paths.root)
             .and_then(|()| std::fs::write(path, json))
             .map_err(|err| format!("Couldn't remember this price: {err}"));
-        self.session.payments.paid_messages.trust_written(written);
+        self.session
+            .payments
+            .paid_messages
+            .trust_written(written, now_ms);
     }
 
     /// "Don't ask me again": trusts `stars` per message in a chat and
     /// keeps it across restarts.
     pub fn remember_paid_trust(&mut self, chat_id: ChatId, stars: i64) {
-        self.load_paid_trust();
+        self.load_paid_trust(crate::state::unix_ms_now());
         self.session
             .payments
             .paid_messages
             .remember_trust(chat_id.0, stars);
-        self.save_paid_trust();
+        self.save_paid_trust(crate::state::unix_ms_now());
         self.sync_paid_guard();
     }
 
     /// The send waiting for the user's confirmation, if a guard holds one.
     pub fn held_paid_send(&self) -> Option<HeldSend> {
         self.sender.paid_guard()?.held()
+    }
+
+    /// Whether the send that went out as `request` is held for the
+    /// user's confirmation, not sent: its `Ok` meant only that the guard
+    /// took it.
+    pub fn paid_send_is_held(&self, request: RequestId) -> bool {
+        self.sender
+            .paid_guard()
+            .is_some_and(|guard| guard.holds(&request.0.to_string()))
+    }
+
+    /// Where the send that went out as `request` stands: held, released,
+    /// or discarded (an ended hold is read once).
+    pub fn paid_send_outcome(&self, request: RequestId) -> PaidOutcome {
+        self.sender
+            .paid_guard()
+            .map_or(PaidOutcome::Unknown, |guard| {
+                guard.outcome(&request.0.to_string())
+            })
     }
 
     /// The user confirmed: sends the oldest held request with its total,
@@ -107,7 +139,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // confirmation.
         self.sender.send_json(&held.with_price())?;
         if let Some(guard) = self.sender.paid_guard() {
-            guard.take_held();
+            guard.end_held(PaidOutcome::Released);
         }
         if remember {
             self.remember_paid_trust(ChatId(held.chat_id), held.per_message);
@@ -118,7 +150,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The user cancelled: drops the oldest held request and its pending
     /// entry.
     pub fn discard_paid_send(&mut self) {
-        let Some(held) = self.sender.paid_guard().and_then(|guard| guard.take_held()) else {
+        let Some(held) = self
+            .sender
+            .paid_guard()
+            .and_then(|guard| guard.end_held(PaidOutcome::Discarded))
+        else {
             return;
         };
         if let Some(extra) = held.extra().and_then(|e| e.parse::<u64>().ok()) {
@@ -135,7 +171,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        self.load_paid_trust();
+        self.load_paid_trust(crate::state::unix_ms_now());
         let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };

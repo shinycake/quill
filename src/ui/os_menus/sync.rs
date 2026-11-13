@@ -12,7 +12,8 @@ use quill::ids::AccountKey;
 use std::time::{Duration, Instant};
 
 /// How long the account registry read from disk is trusted when nothing
-/// else changed (the registry is what no update announces).
+/// else changed (the registry is what no update announces). It is checked on
+/// a poke, not on a clock: another process's write shows on the next one.
 pub(super) const REGISTRY_MAX_AGE: Duration = Duration::from_secs(10);
 
 /// The account registry the menus are built from, and whether it was read.

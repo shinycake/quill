@@ -12,7 +12,7 @@ mod people;
 mod status;
 mod target;
 mod td_call;
-mod td_offset;
+pub(crate) mod td_offset;
 pub(crate) mod td_policy;
 mod td_redact;
 pub(crate) mod td_request;
@@ -459,8 +459,9 @@ pub(crate) fn locked_since_call_began() -> bool {
 /// The name of the agent making the current call.
 pub(crate) fn current_agent() -> String {
     AGENT
-        .try_with(|agent| agent.borrow().clone())
+        .try_with(|agent| agent.try_borrow().ok().map(|name| name.clone()))
         .ok()
+        .flatten()
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "An agent".to_string())
 }

@@ -100,11 +100,7 @@ impl QuillApp {
     /// that was on the GIFs tab stops downloading them.
     pub(in crate::ui) fn enter_selector_mode(&mut self, mode: PanelMode) {
         self.set_media_panel_mode(mode);
-        let panel = &mut self.pickers.media_panel;
-        panel.key = None;
-        panel.active_section = 0;
-        panel.category = None;
-        panel.tab = PanelTab::Emoji;
+        self.pickers.media_panel.show(PanelTab::Emoji, None);
         self.sync_gif_downloads();
     }
 

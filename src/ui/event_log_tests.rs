@@ -3,6 +3,7 @@
 //! keeps its choices until Save and drops them on Cancel.
 #![cfg(feature = "demo-capture")]
 
+use crate::ui::admin_state::{EventLogAutoload, EventLogPoll};
 use crate::ui::app::QuillApp;
 use crate::ui::dialogs::group_admin_settings::GroupSettingsView;
 use crate::ui::event_log_rows::LogBody;
@@ -230,10 +231,12 @@ fn the_search_box_follows_the_chat_whose_log_is_open(cx: &mut TestAppContext) {
 fn the_older_events_mark_is_cleared_when_the_list_starts_over(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update(&mut vcx, |app, _| {
-        app.event_log_page_for(CHANNEL).autoload.set(Some(3));
+        app.event_log_page_for(CHANNEL)
+            .autoload
+            .set(EventLogAutoload::AskedAt { len: 3 });
         app.event_log_reset_list();
         let mark = app.admin.event_log_page.as_ref().map(|p| p.autoload.get());
-        assert_eq!(mark, Some(None));
+        assert_eq!(mark, Some(EventLogAutoload::Unasked));
     });
 }
 
@@ -243,10 +246,15 @@ fn the_older_events_mark_is_cleared_when_the_list_starts_over(cx: &mut TestAppCo
 fn a_second_chats_page_replaces_the_first(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update(&mut vcx, |app, _| {
-        app.event_log_page_for(CHANNEL).autoload.set(Some(3));
+        app.event_log_page_for(CHANNEL)
+            .autoload
+            .set(EventLogAutoload::AskedAt { len: 3 });
         let other = ChatId(CHANNEL.0 + 1);
         let page = app.event_log_page_for(other);
-        assert_eq!((page.chat, page.autoload.get()), (other, None));
+        assert_eq!(
+            (page.chat, page.autoload.get()),
+            (other, EventLogAutoload::Unasked)
+        );
     });
 }
 
@@ -257,22 +265,42 @@ fn the_poll_stops_while_the_window_is_inactive(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
-        app.event_log_page_for(CHANNEL).poll = Some(cx.spawn(async |_, _| {}));
+        app.event_log_page_for(CHANNEL).poll = crate::ui::admin_state::EventLogPoll::Running {
+            _task: cx.spawn(async |_, _| {}),
+        };
+        let running = |app: &QuillApp| {
+            app.admin.event_log_page.as_ref().is_some_and(|p| {
+                matches!(p.poll, crate::ui::admin_state::EventLogPoll::Running { .. })
+            })
+        };
         app.frame.window_active.set(true);
         assert!(app.event_log_poll_tick(CHANNEL, cx), "active: keeps going");
-        assert!(
-            app.admin
-                .event_log_page
-                .as_ref()
-                .is_some_and(|p| p.poll.is_some())
-        );
+        assert!(running(app));
         app.frame.window_active.set(false);
         assert!(!app.event_log_poll_tick(CHANNEL, cx), "inactive: stops");
+        // The loop ends by itself and says so: the page holds no poll.
+        app.event_log_poll_ended(CHANNEL);
+        assert!(!running(app));
+    });
+}
+
+/// The tick that finds the page closed ends the poll: the page no longer
+/// reads as running with a finished task.
+#[gpui_kit::test]
+fn a_poll_tick_on_a_closed_page_stops_the_poll(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_page_for(CHANNEL).poll = EventLogPoll::Running {
+            _task: cx.spawn(async |_, _| {}),
+        };
+        app.admin.group_settings_dialog = None;
+        assert!(!app.event_log_poll_tick(CHANNEL, cx));
         assert!(
             app.admin
                 .event_log_page
                 .as_ref()
-                .is_some_and(|p| p.poll.is_none())
+                .is_some_and(|p| !p.poll.is_running())
         );
     });
 }

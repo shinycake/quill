@@ -34,6 +34,7 @@ fn a_topic_without_an_entry_is_loading_not_empty() {
 fn a_failed_first_page_shows_the_retry_state() {
     let (mut session, sink, seq) = topic_session();
     let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+    session.topic_older_asked(ChatId(16), 2, extra);
     assert!(session.topic_history_loading(ChatId(16), 2));
     answer_error(&mut session, &seq, &sink, extra);
     assert!(session.topic_history_load_failed(ChatId(16), 2));
@@ -46,7 +47,8 @@ fn a_failed_first_page_shows_the_retry_state() {
 fn a_timed_out_first_page_shows_the_retry_state() {
     let (mut session, _, _) = topic_session();
     session.connection = ConnectionState::Ready;
-    session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+    let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+    session.topic_older_asked(ChatId(16), 2, extra);
     let later = std::time::Instant::now() + std::time::Duration::from_secs(600);
     session.sweep_stale_requests(later, std::time::Duration::from_secs(30), |_| false);
     assert!(session.topic_history_load_failed(ChatId(16), 2));
@@ -94,8 +96,33 @@ fn a_landed_page_clears_an_earlier_failure() {
 fn opening_the_topic_again_forgets_the_failure() {
     let (mut session, sink, seq) = topic_session();
     let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+    // An error of a page nobody waits for fails nothing.
+    answer_error(&mut session, &seq, &sink, extra);
+    assert!(!session.topic_history_load_failed(ChatId(16), 2));
+    let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+    session.topic_older_asked(ChatId(16), 2, extra);
     answer_error(&mut session, &seq, &sink, extra);
     assert!(session.topic_history_load_failed(ChatId(16), 2));
     session.select_topic(ChatId(16), 2);
     assert!(!session.topic_history_load_failed(ChatId(16), 2));
+}
+
+/// 10-002: the failure of an older page the window no longer waits for
+/// (it asked again after the window moved) does not fail the new ask, and
+/// the page that is waited for does.
+#[test]
+fn only_the_older_page_the_topic_waits_for_fails_it() {
+    let (mut session, sink, seq) = topic_session();
+    let first = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+    session.topic_older_asked(ChatId(16), 2, first);
+    // The window moved: the page is forgotten and a new one asked.
+    session.drop_topic_pages_past(ChatId(16), 2, &[WindowEnd::Oldest]);
+    let second = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(16)), 2);
+    session.topic_older_asked(ChatId(16), 2, second);
+    assert!(session.topic_history_loading(ChatId(16), 2));
+    // A late failure of the forgotten page finds no request.
+    answer_error(&mut session, &seq, &sink, first);
+    assert!(!session.topic_history_load_failed(ChatId(16), 2));
+    answer_error(&mut session, &seq, &sink, second);
+    assert!(session.topic_history_load_failed(ChatId(16), 2));
 }

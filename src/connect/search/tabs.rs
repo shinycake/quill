@@ -45,10 +45,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             && !search.is_recents()
             && matches!(
                 search.status(),
-                SearchStatus::Searching
-                    | SearchStatus::Ready
-                    | SearchStatus::Empty
-                    | SearchStatus::Failed
+                SearchStateView::Searching
+                    | SearchStateView::Ready
+                    | SearchStateView::Empty
+                    | SearchStateView::Failed
             )
         {
             return Ok(None);
@@ -203,7 +203,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .fail("could not send");
             return Err(err);
         }
-        self.session.search.search.tabs.recommended.begin();
+        self.session
+            .search
+            .search
+            .tabs
+            .recommended
+            .begin_with(extra);
         Ok(Some(extra))
     }
 
@@ -227,8 +232,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         let limits = &mut self.session.search.search.tabs.limits;
-        limits.begin();
-        limits.sent(extra);
+        limits.begin_with(extra);
         Ok(Some(extra))
     }
 }

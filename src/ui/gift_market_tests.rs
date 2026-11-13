@@ -4,7 +4,7 @@
 //! support). Nothing reaches Telegram: the app has no connection.
 use super::{AUCTION_GIFT, ME, RESALE_GIFT};
 use crate::ui::app::QuillApp;
-use crate::ui::gift_market_state::MarketBox;
+use crate::ui::gift_market_state::{MarketBox, OpeningFrom};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -374,10 +374,12 @@ fn clearing_the_boxes_ends_a_pending_open_and_forgets_the_recipient(cx: &mut Tes
                 is_self: false,
                 is_channel: false,
             }));
-        market.flow.begin_opening(quill::ids::RequestId(9));
+        market
+            .flow
+            .begin_opening(quill::ids::RequestId(9), OpeningFrom::SendBox);
         assert_eq!(
             market.flow.opening(),
-            Some((quill::ids::RequestId(9), true))
+            Some((quill::ids::RequestId(9), OpeningFrom::SendBox))
         );
         market.clear();
         assert_eq!(market.flow.opening(), None);
@@ -394,7 +396,9 @@ fn another_asks_auction_answer_does_not_open_this_asks_box(cx: &mut TestAppConte
     vcx.run_until_parked();
     app.update_in(vcx, |app, window, cx| {
         app.gift_market.stack = vec![MarketBox::ActiveAuctions];
-        app.gift_market.flow.begin_opening(quill::ids::RequestId(7));
+        app.gift_market
+            .flow
+            .begin_opening(quill::ids::RequestId(7), OpeningFrom::Elsewhere);
         let other = quill::gift_market::AuctionFetch::Ready {
             gift_id: AUCTION_GIFT,
             request: quill::ids::RequestId(8),
@@ -426,5 +430,42 @@ fn a_bid_box_reads_its_own_slider(cx: &mut TestAppContext) {
         assert!(app.gift_market.bid(AUCTION_GIFT).is_some());
         assert!(app.gift_market.bid(AUCTION_GIFT + 1).is_none());
         assert!(app.gift_market.bid_mut(AUCTION_GIFT + 1).is_none());
+    });
+}
+
+/// Sweep r4-08 round 3 (10-004): a link opens an auction as `Elsewhere`
+/// whatever recipient a raised bid left, so no send box is needed and the
+/// bid is for the user.
+#[gpui_kit::test]
+fn a_link_open_ignores_a_raised_bids_recipient(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-gift-auction");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, window, cx| {
+        app.gift_market.stack = vec![MarketBox::ActiveAuctions];
+        app.gift_market
+            .flow
+            .set_recipient(Some(quill::gift_manage::GiftRecipient {
+                sender: quill::telegram::envelope::MessageSender::User { user_id: 5 },
+                name: "Maya".into(),
+                is_self: false,
+                is_channel: false,
+            }));
+        app.open_gift_auction(AUCTION_GIFT, "link", OpeningFrom::Elsewhere, cx);
+        assert!(app.gift_market.flow.recipient().is_none());
+        // Its pending open is not dropped for want of a send box.
+        app.gift_market
+            .flow
+            .begin_opening(quill::ids::RequestId(3), OpeningFrom::Elsewhere);
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.gift_market.auction = quill::gift_market::AuctionFetch::Loading {
+                request: quill::ids::RequestId(3),
+            };
+        }
+        app.gift_market_frame_upkeep(window, cx);
+        assert_eq!(
+            app.gift_market.flow.opening(),
+            Some((quill::ids::RequestId(3), OpeningFrom::Elsewhere))
+        );
     });
 }

@@ -143,6 +143,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn after_passkeys_ingest(&mut self) {
         self.maybe_request_login_config();
         self.drop_lost_passkey_login();
+        let requests = &self.session.requests;
+        self.session
+            .settings
+            .passkeys
+            .drop_lost_register(|id| requests.get(id).is_some());
         if self.session.settings.passkeys.is_stale() {
             let _ = self.request_passkeys();
         }

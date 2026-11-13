@@ -348,7 +348,7 @@ impl QuillApp {
                         shown: Shown {
                             pixels,
                             headroom: 0.0,
-                            _poll: Self::poll_viewer_headroom(app, window, cx),
+                            _poll: Self::poll_viewer_headroom(app, window, cx, 1),
                         },
                     },
                 };
@@ -365,40 +365,38 @@ impl QuillApp {
 
     /// While an HDR frame shows, re-read the display headroom (ten times a
     /// second at first, while the screen ramps into EDR, then once a
-    /// second) and repaint only when it changed. The task belongs to the
-    /// frame; it also ends by itself once no frame or picture shows.
-    fn poll_viewer_headroom(&self, window: &Window, cx: &mut Context<Self>) -> Task<()> {
+    /// second) and repaint only when it changed. One wake-up per task: a
+    /// step that finds the frame still showing replaces the frame's task
+    /// with the next wake-up, so the task belongs to the frame and ends with
+    /// it. `tick` counts the wake-ups, from 1.
+    fn poll_viewer_headroom(&self, window: &Window, cx: &mut Context<Self>, tick: u32) -> Task<()> {
         self.spawn_scoped_in(window, cx, async move |this, cx| {
-            let mut ticks = 0_u32;
-            loop {
-                ticks = ticks.saturating_add(1);
-                let wait = if ticks <= RAMP_TICKS {
-                    RAMP_POLL
-                } else {
-                    HEADROOM_POLL
-                };
-                cx.background_executor().timer(wait).await;
-                let keep = this.update_in(cx, |app, window, cx| {
-                    let hdr = &mut app.screen.viewer.hdr;
-                    if !hdr.has_frame() || app.screen.viewer.state.current().is_none() {
-                        return false;
-                    }
-                    let left_edr = hdr.edr == Edr::On && super::renderer_left_edr(window);
-                    // The same value the draw aims at, so a screen that lost
-                    // EDR (drawn at SDR) does not read as changed forever.
-                    let drawn = hdr.decode.frame().map_or(0.0, |shown| shown.headroom);
-                    if left_edr
-                        || app.screen.viewer.reorient.orientation().is_identity()
-                            && hdr.display_headroom(super::headroom(window)) != drawn
-                    {
-                        cx.notify();
-                    }
-                    true
-                });
-                if !matches!(keep, Ok(true)) {
-                    break;
+            let wait = if tick <= RAMP_TICKS {
+                RAMP_POLL
+            } else {
+                HEADROOM_POLL
+            };
+            cx.background_executor().timer(wait).await;
+            let _ = this.update_in(cx, |app, window, cx| {
+                let hdr = &mut app.screen.viewer.hdr;
+                if !hdr.has_frame() || app.screen.viewer.state.current().is_none() {
+                    return;
                 }
-            }
+                let left_edr = hdr.edr == Edr::On && super::renderer_left_edr(window);
+                // The same value the draw aims at, so a screen that lost
+                // EDR (drawn at SDR) does not read as changed forever.
+                let drawn = hdr.decode.frame().map_or(0.0, |shown| shown.headroom);
+                if left_edr
+                    || app.screen.viewer.reorient.orientation().is_identity()
+                        && hdr.display_headroom(super::headroom(window)) != drawn
+                {
+                    cx.notify();
+                }
+                let next = Self::poll_viewer_headroom(app, window, cx, tick.saturating_add(1));
+                if let Some(shown) = app.screen.viewer.hdr.decode.frame_mut() {
+                    shown._poll = next;
+                }
+            });
         })
     }
 

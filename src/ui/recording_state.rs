@@ -25,14 +25,15 @@ impl CaptureMedia {
     }
 }
 
-/// How a press of record (or a call's camera) is starting, one stage at a
-/// time: the system prompt for the camera or microphone, then the capture
-/// coming up off the UI thread. It is not a recording yet (no bar, nothing
-/// to send), but no other press may start meanwhile. Each stage holds the
-/// task that waits for its answer, so cancelling goes straight back to
-/// `Idle` and drops the wait: a device that never answers must not keep the
-/// next press from starting.
-pub(super) enum CaptureStart {
+/// The one recording lifecycle of the app: a press starts it one stage at a
+/// time (the system prompt for the camera or microphone, then the capture
+/// coming up off the UI thread), and it ends as a recording in progress.
+/// Asking and Opening are not a recording yet (no bar, nothing to send), but
+/// no other press may start meanwhile. Each starting stage holds the task
+/// that waits for its answer, so cancelling goes straight back to `Idle` and
+/// drops the wait: a device that never answers must not keep the next press
+/// from starting. A recording and a start cannot both exist.
+pub(super) enum RecordStage {
     Idle,
     /// The system prompt for the camera or microphone is up for one press.
     /// Its answer starts the press that asked only while the call that
@@ -49,6 +50,9 @@ pub(super) enum CaptureStart {
         purpose: CaptureFor,
         _opening: gpui_kit::Task<()>,
     },
+    /// The voice or round video message being recorded, with the window it
+    /// belongs to. One at a time, for the whole app.
+    Recording(Box<Capture>),
 }
 
 /// Which start a device answer belongs to. An answer for any start but the
@@ -88,6 +92,11 @@ pub(crate) struct Capture {
     preview: Option<PlaybackClock>,
     /// The live camera image while a video message records.
     round: super::round_record::RoundPreview,
+    /// The wake-up for the capture's own deadlines: it belongs to the
+    /// recording, so whatever ends it ends the wake-up too, and it runs while
+    /// no window draws (a background recording keeps its chat action,
+    /// reports a failed device and sends a round video at its limit).
+    wake: RecordWake,
 }
 
 /// MED2: lock-to-record — a locked recording ignores Esc; only Send or
@@ -113,16 +122,24 @@ enum Delivery {
 }
 
 pub(crate) struct RecordingUi {
-    /// The voice or round video message being recorded, with the window it
-    /// belongs to. One at a time, for the whole app.
-    capture: Option<Capture>,
-    pub(super) start: CaptureStart,
+    stage: RecordStage,
     next_start: u64,
     pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
-    /// The 100 ms tick that moves the record bar and the preview; it ends
-    /// itself (and clears this) when nothing needs it, and dropping the
-    /// owner stops it.
-    pub(super) tick: Option<gpui_kit::Task<()>>,
+    /// What the OS says about the microphone and camera, and its prompt.
+    pub(super) device_os: super::capture_access::DeviceOs,
+}
+
+/// The recording's wake-up: not armed, or the task that runs the next one,
+/// with the instant it is due (a deadline of the capture, `record_wake.rs`).
+/// The recording holds it, so it ends with the recording.
+enum RecordWake {
+    Stopped,
+    Armed {
+        /// Read by the tests that watch when the wake-up falls.
+        #[cfg_attr(not(test), allow(dead_code))]
+        due: std::time::Instant,
+        _task: gpui_kit::Task<()>,
+    },
 }
 
 /// A recording still running, or a camera starting, is cancelled: its
@@ -148,16 +165,39 @@ impl RecordingUi {
     }
 
     /// The prompt for `id` is up, waited on by `wait`.
+    /// A recording in progress is not replaced: the wait is dropped.
     pub(super) fn begin_asking(&mut self, id: StartId, wait: gpui_kit::Task<()>) {
-        self.start = CaptureStart::Asking { id, _wait: wait };
+        if self.capture().is_none() {
+            self.stage = RecordStage::Asking { id, _wait: wait };
+        }
+    }
+
+    /// The capture for `start` is coming up, waited on by `opening`.
+    pub(super) fn begin_opening(
+        &mut self,
+        start: StartId,
+        video: bool,
+        origin: Option<ChatId>,
+        purpose: CaptureFor,
+        opening: gpui_kit::Task<()>,
+    ) {
+        if self.capture().is_none() {
+            self.stage = RecordStage::Opening {
+                start,
+                video,
+                origin,
+                purpose,
+                _opening: opening,
+            };
+        }
     }
 
     /// The prompt answered for `id`: true when that prompt is still the one
     /// waited for, which then ends.
     pub(super) fn finish_asking(&mut self, id: StartId) -> bool {
-        let current = matches!(self.start, CaptureStart::Asking { id: asked, .. } if asked == id);
+        let current = matches!(self.stage, RecordStage::Asking { id: asked, .. } if asked == id);
         if current {
-            self.start = CaptureStart::Idle;
+            self.stage = RecordStage::Idle;
         }
         current
     }
@@ -165,35 +205,61 @@ impl RecordingUi {
     /// A press is starting: waiting on the prompt, or on the capture to
     /// open.
     pub(super) fn starting(&self) -> bool {
-        !matches!(self.start, CaptureStart::Idle)
+        matches!(
+            self.stage,
+            RecordStage::Asking { .. } | RecordStage::Opening { .. }
+        )
     }
 
     /// A start is waiting on the prompt: another press must not wipe it.
     pub(super) fn asking(&self) -> bool {
-        matches!(self.start, CaptureStart::Asking { .. })
+        matches!(self.stage, RecordStage::Asking { .. })
     }
 
     pub(super) fn new() -> Self {
         Self {
-            capture: None,
-            start: CaptureStart::Idle,
+            stage: RecordStage::Idle,
             next_start: 0,
             open_voice: Arc::new(VoiceCapture::start),
-            tick: None,
+            device_os: Default::default(),
         }
     }
 }
 
 impl RecordingUi {
+    fn capture(&self) -> Option<&Capture> {
+        match &self.stage {
+            RecordStage::Recording(capture) => Some(capture.as_ref()),
+            _ => None,
+        }
+    }
+
+    fn capture_mut(&mut self) -> Option<&mut Capture> {
+        match &mut self.stage {
+            RecordStage::Recording(capture) => Some(capture.as_mut()),
+            _ => None,
+        }
+    }
+
+    /// Take the recording out, leaving the stage idle.
+    fn take_capture(&mut self) -> Option<Capture> {
+        match std::mem::replace(&mut self.stage, RecordStage::Idle) {
+            RecordStage::Recording(capture) => Some(*capture),
+            other => {
+                self.stage = other;
+                None
+            }
+        }
+    }
+
     pub(super) fn locked(&self) -> bool {
-        self.capture
-            .as_ref()
+        self.capture()
             .is_some_and(|capture| capture.mode == RecordMode::Locked)
     }
 
     /// Locks or unlocks the recording; nothing records, nothing changes.
     pub(super) fn set_locked(&mut self, locked: bool) {
-        if let Some(capture) = self.capture.as_mut() {
+        if let Some(capture) = self.capture_mut() {
             capture.mode = if locked {
                 RecordMode::Locked
             } else {
@@ -203,13 +269,12 @@ impl RecordingUi {
     }
 
     pub(super) fn discard_confirming(&self) -> bool {
-        self.capture
-            .as_ref()
+        self.capture()
             .is_some_and(|capture| capture.discard == DiscardRow::Confirming)
     }
 
     pub(super) fn set_discard_confirming(&mut self, confirming: bool) {
-        if let Some(capture) = self.capture.as_mut() {
+        if let Some(capture) = self.capture_mut() {
             capture.discard = if confirming {
                 DiscardRow::Confirming
             } else {
@@ -219,14 +284,13 @@ impl RecordingUi {
     }
 
     pub(super) fn play_once(&self) -> bool {
-        self.capture
-            .as_ref()
+        self.capture()
             .is_some_and(|capture| capture.delivery == Delivery::PlayOnce)
     }
 
     /// Switches "Play once"; the new value, `false` when nothing records.
     pub(super) fn toggle_play_once(&mut self) -> bool {
-        let Some(capture) = self.capture.as_mut() else {
+        let Some(capture) = self.capture_mut() else {
             return false;
         };
         capture.delivery = match capture.delivery {
@@ -237,57 +301,105 @@ impl RecordingUi {
     }
 
     pub(super) fn preview(&self) -> Option<&PlaybackClock> {
-        self.capture.as_ref()?.preview.as_ref()
+        self.capture()?.preview.as_ref()
     }
 
     pub(super) fn preview_mut(&mut self) -> Option<&mut PlaybackClock> {
-        self.capture.as_mut()?.preview.as_mut()
+        self.capture_mut()?.preview.as_mut()
     }
 
     pub(super) fn set_preview(&mut self, clock: PlaybackClock) {
-        if let Some(capture) = self.capture.as_mut() {
+        if let Some(capture) = self.capture_mut() {
             capture.preview = Some(clock);
         }
     }
 
     pub(super) fn take_preview(&mut self) -> Option<PlaybackClock> {
-        self.capture.as_mut()?.preview.take()
+        self.capture_mut()?.preview.take()
     }
 
     pub(super) fn active(&self) -> bool {
-        self.capture.is_some()
+        self.capture().is_some()
+    }
+
+    /// The recording's next wake-up is the task `task`, due at `due`; the
+    /// one that ran before is dropped. `false` when nothing records.
+    pub(super) fn set_wake(&mut self, due: std::time::Instant, task: gpui_kit::Task<()>) -> bool {
+        let Some(capture) = self.capture_mut() else {
+            return false;
+        };
+        capture.wake = RecordWake::Armed { due, _task: task };
+        true
+    }
+
+    /// The wait until the capture's next deadline, `None` when it has none.
+    pub(super) fn wake_in(&self) -> Option<std::time::Duration> {
+        let capture = self.capture()?;
+        let now = std::time::Instant::now();
+        let (acting, limit) = match &capture.media {
+            CaptureMedia::Voice(voice) => (!voice.is_paused(), None),
+            CaptureMedia::Video(video) => (true, Some(video.time_left())),
+        };
+        super::record_wake::Deadlines {
+            acting,
+            limit,
+            preview_end: capture
+                .preview
+                .as_ref()
+                .and_then(|clock| clock.ends_in_at(now)),
+        }
+        .next()
+    }
+
+    /// The wake-up ended: no next one is armed.
+    pub(super) fn stop_wake(&mut self) {
+        if let Some(capture) = self.capture_mut() {
+            capture.wake = RecordWake::Stopped;
+        }
+    }
+
+    /// When the next wake-up is due, if one is armed.
+    #[cfg(test)]
+    pub(super) fn wake_due(&self) -> Option<std::time::Instant> {
+        match &self.capture()?.wake {
+            RecordWake::Armed { due, .. } => Some(*due),
+            RecordWake::Stopped => None,
+        }
     }
 
     /// A recording runs or is about to: another one must not start.
     pub(super) fn busy(&self) -> bool {
-        self.capture.is_some() || self.starting()
+        !matches!(self.stage, RecordStage::Idle)
     }
 
     pub(super) fn opening_video(&self) -> bool {
-        matches!(self.start, CaptureStart::Opening { video: true, .. })
+        matches!(self.stage, RecordStage::Opening { video: true, .. })
     }
 
     pub(super) fn opening_origin(&self) -> Option<Option<ChatId>> {
-        match &self.start {
-            CaptureStart::Opening { origin, .. } => Some(*origin),
+        match &self.stage {
+            RecordStage::Opening { origin, .. } => Some(*origin),
             _ => None,
         }
     }
 
     pub(super) fn opening_for(&self, wanted: CaptureFor) -> bool {
-        matches!(&self.start, CaptureStart::Opening { purpose, .. } if *purpose == wanted)
+        matches!(&self.stage, RecordStage::Opening { purpose, .. } if *purpose == wanted)
     }
 
+    /// A starting press is cancelled; a recording that runs stays.
     pub(super) fn cancel_start(&mut self) {
-        self.start = CaptureStart::Idle;
+        if self.starting() {
+            self.stage = RecordStage::Idle;
+        }
     }
 
     /// The device answered for `start`: true when that start is still the
     /// one wanted, which then ends. A stale answer leaves a newer start be.
     pub(super) fn finish_start(&mut self, start: StartId) -> bool {
-        let current = matches!(&self.start, CaptureStart::Opening { start: s, .. } if *s == start);
+        let current = matches!(&self.stage, RecordStage::Opening { start: s, .. } if *s == start);
         if current {
-            self.start = CaptureStart::Idle;
+            self.stage = RecordStage::Idle;
         }
         current
     }
@@ -295,36 +407,36 @@ impl RecordingUi {
     /// The window the recording belongs to (`Some(None)`: the main
     /// window); `None` when nothing records.
     pub(super) fn origin(&self) -> Option<Option<ChatId>> {
-        self.capture.as_ref().map(|capture| capture.origin)
+        self.capture().map(|capture| capture.origin)
     }
 
     pub(super) fn purpose(&self) -> Option<CaptureFor> {
-        self.capture.as_ref().map(|capture| capture.purpose)
+        self.capture().map(|capture| capture.purpose)
     }
 
     pub(super) fn voice(&self) -> Option<&VoiceCapture> {
-        match self.capture.as_ref().map(|capture| &capture.media) {
+        match self.capture().map(|capture| &capture.media) {
             Some(CaptureMedia::Voice(voice)) => Some(voice),
             _ => None,
         }
     }
 
     pub(super) fn voice_mut(&mut self) -> Option<&mut VoiceCapture> {
-        match self.capture.as_mut().map(|capture| &mut capture.media) {
+        match self.capture_mut().map(|capture| &mut capture.media) {
             Some(CaptureMedia::Voice(voice)) => Some(voice),
             _ => None,
         }
     }
 
     pub(super) fn video(&self) -> Option<&VideoNoteCapture> {
-        match self.capture.as_ref().map(|capture| &capture.media) {
+        match self.capture().map(|capture| &capture.media) {
             Some(CaptureMedia::Video(video)) => Some(video),
             _ => None,
         }
     }
 
     pub(super) fn video_mut(&mut self) -> Option<&mut VideoNoteCapture> {
-        match self.capture.as_mut().map(|capture| &mut capture.media) {
+        match self.capture_mut().map(|capture| &mut capture.media) {
             Some(CaptureMedia::Video(video)) => Some(video),
             _ => None,
         }
@@ -333,13 +445,13 @@ impl RecordingUi {
     /// Take the voice recording, with its window; nothing when a video
     /// message records.
     pub(super) fn take_voice(&mut self) -> Option<VoiceCapture> {
-        match self.capture.take()? {
+        match self.take_capture()? {
             Capture {
                 media: CaptureMedia::Voice(voice),
                 ..
             } => Some(voice),
             other => {
-                self.capture = Some(other);
+                self.stage = RecordStage::Recording(Box::new(other));
                 None
             }
         }
@@ -348,13 +460,13 @@ impl RecordingUi {
     /// Take the video message recording, with its window; nothing when a
     /// voice message records.
     pub(super) fn take_video(&mut self) -> Option<VideoNoteCapture> {
-        match self.capture.take()? {
+        match self.take_capture()? {
             Capture {
                 media: CaptureMedia::Video(video),
                 ..
             } => Some(video),
             other => {
-                self.capture = Some(other);
+                self.stage = RecordStage::Recording(Box::new(other));
                 None
             }
         }
@@ -362,7 +474,7 @@ impl RecordingUi {
 
     /// Take whatever records, with its window.
     pub(super) fn take(&mut self) -> Option<CaptureMedia> {
-        self.capture.take().map(|capture| capture.media)
+        self.take_capture().map(|capture| capture.media)
     }
 
     /// The camera's image of the video message recording, with the
@@ -370,7 +482,7 @@ impl RecordingUi {
     pub(super) fn video_with_preview_mut(
         &mut self,
     ) -> Option<(&VideoNoteCapture, &mut super::round_record::RoundPreview)> {
-        let capture = self.capture.as_mut()?;
+        let capture = self.capture_mut()?;
         match &capture.media {
             CaptureMedia::Video(video) => Some((video, &mut capture.round)),
             CaptureMedia::Voice(_) => None,
@@ -388,19 +500,15 @@ impl QuillApp {
         purpose: CaptureFor,
         opening: gpui_kit::Task<()>,
     ) {
-        self.recording.start = CaptureStart::Opening {
-            start,
-            video,
-            origin: self.windows.scope,
-            purpose,
-            _opening: opening,
-        };
+        let origin = self.windows.scope;
+        self.recording
+            .begin_opening(start, video, origin, purpose, opening);
     }
 
     /// Hold a recording that just started, as the window whose state is
     /// in place (the one whose composer or story viewer asked for it).
     pub(super) fn hold_capture(&mut self, media: CaptureMedia, purpose: CaptureFor) {
-        self.recording.capture = Some(Capture {
+        self.recording.stage = RecordStage::Recording(Box::new(Capture {
             media,
             origin: self.windows.scope,
             purpose,
@@ -409,6 +517,7 @@ impl QuillApp {
             delivery: Delivery::Normal,
             preview: None,
             round: Default::default(),
-        });
+            wake: RecordWake::Stopped,
+        }));
     }
 }

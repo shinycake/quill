@@ -9,34 +9,33 @@ use crate::ui::story_page::PageWait;
 use quill::ids::RequestId;
 use quill::story_page::{StoryPageOpState, StoryPageOps};
 
-/// Where the calls of one wait stand.
+/// How the calls of one wait ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Answer {
-    /// At least one is still on its way.
-    Waiting,
     /// All of them succeeded.
     Succeeded,
     /// One failed, or its op is gone (the page was left, the account went).
     Refused,
 }
 
-/// The state of `requests` in `ops`.
-pub(super) fn answer(ops: &StoryPageOps, requests: &[RequestId]) -> Answer {
+/// How `requests` ended in `ops`; `None` while at least one is still on its
+/// way.
+pub(super) fn answer(ops: &StoryPageOps, requests: &[RequestId]) -> Option<Answer> {
     let mut refused = false;
     for request in requests {
         match ops.get(*request).map(|op| &op.state) {
-            Some(StoryPageOpState::Sending | StoryPageOpState::Checking) => {
-                return Answer::Waiting;
+            Some(StoryPageOpState::Sending { .. } | StoryPageOpState::Checking { .. }) => {
+                return None;
             }
-            Some(StoryPageOpState::Succeeded) => {}
-            Some(StoryPageOpState::Failed(_)) | None => refused = true,
+            Some(StoryPageOpState::Succeeded { .. }) => {}
+            Some(StoryPageOpState::Failed { .. }) | None => refused = true,
         }
     }
-    if refused {
+    Some(if refused {
         Answer::Refused
     } else {
         Answer::Succeeded
-    }
+    })
 }
 
 impl QuillApp {
@@ -59,13 +58,14 @@ impl QuillApp {
         };
         let delete_answer = deleting.map(|request| answer(&session.stories.page_ops, &[request]));
         let answered = waits.then(|| answer(&session.stories.page_ops, &requests));
-        if delete_answer.is_none() && answered.is_none() {
+        // A call still out answers nothing: no redraw asks for the next frame.
+        if delete_answer.flatten().is_none() && answered.flatten().is_none() {
             return;
         }
         let Some(page) = self.stories.page.as_mut() else {
             return;
         };
-        match delete_answer {
+        match delete_answer.flatten() {
             Some(Answer::Succeeded) => page.view = AlbumView::List,
             Some(Answer::Refused) => {
                 page.view = page
@@ -73,9 +73,9 @@ impl QuillApp {
                     .open_album()
                     .map_or(AlbumView::List, AlbumView::album);
             }
-            Some(Answer::Waiting) | None => {}
+            None => {}
         }
-        if let Some(answered) = answered.filter(|answered| *answered != Answer::Waiting) {
+        if let Some(answered) = answered.flatten() {
             let wait = std::mem::replace(&mut page.wait, PageWait::Idle);
             if answered == Answer::Succeeded {
                 // What the answer acts on is what asked: a picker the user

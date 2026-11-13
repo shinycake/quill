@@ -6,8 +6,9 @@
 
 use super::geo::{GeoOutcome, GeoPoint, same_place};
 use super::map_view::{MapSize, MapView, START_ZOOM, TileKey};
-use super::venues::{Venue, VenueList, normalize_query};
+use super::venues::{Venue, VenueView, normalize_query};
 use crate::ids::{ChatId, FileId, RequestId};
+use crate::task_hold::TaskHold;
 use std::collections::HashSet;
 
 const TILE_CAP: usize = 24;
@@ -30,42 +31,70 @@ pub enum AddressLine<'a> {
     Text(&'a str),
 }
 
-/// The address under the pin, from asking to showing. One value: the
-/// place it is for travels with each stage, and an answer applies only
-/// to the place asked.
+/// The work to find the address of a place, before it is shown.
 #[derive(Debug, Clone, Default, PartialEq)]
-enum AddressStage {
-    /// Nothing is wanted or shown.
+enum Lookup {
+    /// Nothing is wanted.
     #[default]
     Idle,
     /// Resolve this once the pin rests (tdesktop `kResolveAddressDelay`).
     Postponed(GeoPoint),
-    /// The UI should look this place up ([`LocationPicker::take_address_job`]).
+    /// The UI should look this place up ([`LocationPicker::address_job`]).
     Wanted(GeoPoint),
-    /// The UI is looking this place up.
-    Resolving(GeoPoint),
+    /// The UI is looking this place up; dropping the stage stops it.
+    Resolving { point: GeoPoint, _job: TaskHold },
+}
+
+/// The address under the pin, from asking to showing. One value: the
+/// place it is for travels with each stage, and an answer applies only
+/// to the place asked. `First` is before any address was shown (the line
+/// stays empty); `Later` is after one was (a blank line reads "Loading…").
+#[derive(Debug, Clone, PartialEq)]
+enum AddressStage {
+    First(Lookup),
+    Later(Lookup),
     /// The address for `point`. While the pin is lifted ([`Pin::Moving`])
     /// it is kept but not drawn, for a return to the same place.
-    Shown { point: GeoPoint, text: String },
+    Shown {
+        point: GeoPoint,
+        text: String,
+    },
+}
+
+impl Default for AddressStage {
+    fn default() -> Self {
+        Self::First(Lookup::Idle)
+    }
 }
 
 impl AddressStage {
     /// The place a stage is asking for or showing.
     fn point(&self) -> Option<GeoPoint> {
         match self {
-            Self::Idle | Self::Postponed(_) => None,
-            Self::Wanted(point) | Self::Resolving(point) => Some(*point),
+            Self::First(lookup) | Self::Later(lookup) => match lookup {
+                Lookup::Idle | Lookup::Postponed(_) => None,
+                Lookup::Wanted(point) | Lookup::Resolving { point, .. } => Some(*point),
+            },
             Self::Shown { point, .. } => Some(*point),
         }
     }
-}
 
-#[derive(Debug, Default)]
-struct Address {
-    stage: AddressStage,
-    /// Some address was shown before: a blank line then reads "Loading…"
-    /// instead of nothing. A latch of the history, not a stage.
-    ever_shown: bool,
+    /// The work now under way, if no address is shown.
+    fn lookup(&self) -> Option<&Lookup> {
+        match self {
+            Self::First(lookup) | Self::Later(lookup) => Some(lookup),
+            Self::Shown { .. } => None,
+        }
+    }
+
+    /// This stage with `lookup` as its work; an address shown once stays
+    /// remembered as shown.
+    fn with(self, lookup: Lookup) -> Self {
+        match self {
+            Self::First(_) => Self::First(lookup),
+            Self::Later(_) | Self::Shown { .. } => Self::Later(lookup),
+        }
+    }
 }
 
 /// Where the venue query for a place and text stands.
@@ -90,47 +119,71 @@ enum AskStage {
 #[derive(Debug)]
 struct VenueAsk {
     point: GeoPoint,
+    /// As typed; the bot gets [`normalize_query`] of it.
     query: String,
     stage: AskStage,
 }
 
+/// The answered part of the venue list. What is loading, what failed and
+/// what is waiting for a place is not stored here: it follows the ask, the
+/// search field and the "where am I" lookup ([`LocationPicker::venues`]).
+#[derive(Debug, Clone, PartialEq)]
+enum ListData {
+    NothingFound { query: String },
+    Found(Vec<Venue>),
+}
+
 #[derive(Debug)]
 struct VenueSearch {
-    list: VenueList,
+    list: Option<ListData>,
     request: Option<VenueAsk>,
-    initial_query: String,
     cache: Vec<(String, GeoPoint, Vec<Venue>)>,
     /// Where a search looks (tdesktop `_venuesSearchLocation`); a search
     /// is offered once it is known.
     search_location: Option<GeoPoint>,
-    no_search_location: Option<GeoPoint>,
     /// The search field (tdesktop `venuesSearchChanged`).
     input: SearchInput,
 }
 
 /// The venue search field: closed, open and blank, typing (the search
 /// waits for typing to pause, tdesktop `kSearchDebounceDelay`), or
-/// settled on a query.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// settled on a query. A shown query remembers the place the nearby list was
+/// for when it opened (`back`), which closing the search shows again.
+#[derive(Debug, Clone, PartialEq, Default)]
 enum SearchInput {
     #[default]
     Closed,
     Blank(String),
-    Typing(String),
-    Settled(String),
+    Typing {
+        query: String,
+        back: Option<GeoPoint>,
+    },
+    Settled {
+        query: String,
+        back: Option<GeoPoint>,
+    },
 }
 
 impl SearchInput {
     fn query(&self) -> Option<&str> {
         match self {
             Self::Closed => None,
-            Self::Blank(query) | Self::Typing(query) | Self::Settled(query) => Some(query),
+            Self::Blank(query) | Self::Typing { query, .. } | Self::Settled { query, .. } => {
+                Some(query)
+            }
         }
     }
 
     /// A non-blank query is on.
     fn is_shown(&self) -> bool {
-        matches!(self, Self::Typing(_) | Self::Settled(_))
+        matches!(self, Self::Typing { .. } | Self::Settled { .. })
+    }
+
+    fn back(&self) -> Option<GeoPoint> {
+        match self {
+            Self::Typing { back, .. } | Self::Settled { back, .. } => *back,
+            Self::Closed | Self::Blank(_) => None,
+        }
     }
 }
 
@@ -167,7 +220,7 @@ pub struct LocationPicker {
     pin: Pin,
     map_size: Option<MapSize>,
     here: HereState,
-    address: Address,
+    address: AddressStage,
     venues: VenueSearch,
     tiles: Vec<(TileKey, TileState)>,
 }
@@ -187,14 +240,12 @@ impl LocationPicker {
             pin: Pin::Resting,
             map_size: None,
             here: HereState::Locating,
-            address: Address::default(),
+            address: AddressStage::default(),
             venues: VenueSearch {
-                list: VenueList::Loading,
+                list: None,
                 request: None,
-                initial_query: String::new(),
                 cache: Vec::new(),
                 search_location: None,
-                no_search_location: None,
                 input: SearchInput::Closed,
             },
             tiles: Vec::new(),
@@ -223,8 +274,34 @@ impl LocationPicker {
         self.here
     }
 
-    pub fn venues(&self) -> &VenueList {
-        &self.venues.list
+    pub fn venues(&self) -> VenueView<'_> {
+        if self.venues_loading() {
+            return VenueView::Loading;
+        }
+        if self
+            .venues
+            .request
+            .as_ref()
+            .is_some_and(|ask| ask.stage == AskStage::Failed)
+        {
+            return VenueView::Failed;
+        }
+        match &self.venues.list {
+            // Nothing asked: still looking for a place, or waiting for the
+            // user to choose one.
+            None if self.here == HereState::Locating => VenueView::Loading,
+            None => VenueView::WaitingForLocation,
+            Some(ListData::NothingFound { query }) => VenueView::NothingFound { query },
+            Some(ListData::Found(venues)) => VenueView::Found(venues),
+        }
+    }
+
+    /// The search is typing, or the ask for the list is not answered yet.
+    fn venues_loading(&self) -> bool {
+        matches!(self.venues.input, SearchInput::Typing { .. })
+            || self.venues.request.as_ref().is_some_and(|ask| {
+                matches!(ask.stage, AskStage::Unsent | AskStage::InFlight { .. })
+            })
     }
 
     pub fn places_in_area_shown(&self) -> bool {
@@ -247,18 +324,14 @@ impl LocationPicker {
 
     /// The search timer is armed; the UI fires [`Self::search_debounce_fired`].
     pub fn search_debounce_pending(&self) -> bool {
-        matches!(self.venues.input, SearchInput::Typing(_))
+        matches!(self.venues.input, SearchInput::Typing { .. })
     }
 
     pub fn address_line(&self) -> AddressLine<'_> {
-        if let AddressStage::Shown { text, .. } = &self.address.stage
-            && self.pin != Pin::Moving
-        {
-            AddressLine::Text(text)
-        } else if self.address.ever_shown {
-            AddressLine::Loading
-        } else {
-            AddressLine::Hidden
+        match &self.address {
+            AddressStage::Shown { text, .. } if self.pin != Pin::Moving => AddressLine::Text(text),
+            AddressStage::First(_) => AddressLine::Hidden,
+            AddressStage::Later(_) | AddressStage::Shown { .. } => AddressLine::Loading,
         }
     }
 
@@ -289,8 +362,8 @@ impl LocationPicker {
         self.pin = Pin::Moving;
         // A lookup not started is dropped; one under way goes on, and a
         // shown address is kept (not drawn while the pin is lifted).
-        if matches!(self.address.stage, AddressStage::Postponed(_)) {
-            self.address.stage = AddressStage::Idle;
+        if let Some(Lookup::Postponed(_)) = self.address.lookup() {
+            self.address = std::mem::take(&mut self.address).with(Lookup::Idle);
         }
     }
 
@@ -310,58 +383,70 @@ impl LocationPicker {
         self.tiles
             .retain(|(_, state)| !matches!(state, TileState::Failed(_)));
         let location = self.view.center();
-        self.address.stage = match std::mem::take(&mut self.address.stage) {
+        self.address = match std::mem::take(&mut self.address) {
             // The address, or a lookup already out, is for this place.
-            kept @ (AddressStage::Shown { .. }
-            | AddressStage::Wanted(_)
-            | AddressStage::Resolving(_))
-                if same_place(kept.point(), Some(location)) =>
-            {
-                kept
-            }
-            _ => AddressStage::Postponed(location),
+            kept if same_place(kept.point(), Some(location)) => kept,
+            other => other.with(Lookup::Postponed(location)),
         };
+        self.venues.search_location = Some(location);
+        // A query typed before any place was known is asked around this one.
+        if let Some(query) = self.unasked_query() {
+            self.request_venues(location, &query);
+        }
         if !same_place(
             self.venues.request.as_ref().map(|r| r.point),
             Some(location),
         ) {
             self.pin = Pin::RestedAway;
         }
-        self.venues.search_location = Some(location);
     }
 
     /// The pin rested long enough: resolve its address.
     pub fn resolve_postponed(&mut self) {
-        if let AddressStage::Postponed(point) = self.address.stage {
-            self.address.stage = AddressStage::Idle;
+        if let Some(&Lookup::Postponed(point)) = self.address.lookup() {
+            self.address = std::mem::take(&mut self.address).with(Lookup::Idle);
             self.resolve_address(point);
         }
     }
 
     pub fn address_postponed(&self) -> bool {
-        matches!(self.address.stage, AddressStage::Postponed(_))
+        matches!(self.address.lookup(), Some(Lookup::Postponed(_)))
     }
 
     fn resolve_address(&mut self, point: GeoPoint) {
-        if same_place(self.address.stage.point(), Some(point)) {
+        if same_place(self.address.point(), Some(point)) {
             return;
         }
-        self.address.stage = AddressStage::Wanted(point);
+        self.address = std::mem::take(&mut self.address).with(Lookup::Wanted(point));
     }
 
-    /// The place whose address the UI should look up now.
-    pub fn take_address_job(&mut self) -> Option<GeoPoint> {
-        let AddressStage::Wanted(point) = self.address.stage else {
-            return None;
-        };
-        self.address.stage = AddressStage::Resolving(point);
-        Some(point)
+    /// The place whose address the UI should look up now. It answers with
+    /// [`Self::address_started`] (the lookup runs) or [`Self::address_resolved`]
+    /// (nothing can look it up).
+    pub fn address_job(&self) -> Option<GeoPoint> {
+        match self.address.lookup() {
+            Some(&Lookup::Wanted(point)) => Some(point),
+            _ => None,
+        }
+    }
+
+    /// The UI started looking up `point`; `job` is the work, which the stage
+    /// holds so a new place or closing the picker stops it.
+    pub fn address_started(&mut self, point: GeoPoint, job: TaskHold) {
+        if let Some(&Lookup::Wanted(wanted)) = self.address.lookup()
+            && same_place(Some(wanted), Some(point))
+        {
+            self.address = std::mem::take(&mut self.address).with(Lookup::Resolving {
+                point: wanted,
+                _job: job,
+            });
+        }
     }
 
     /// The geocoder answered for `point`; without a name the coordinates
     /// stand in (tdesktop `resolveAddress`'s fallback).
     pub fn address_resolved(&mut self, point: GeoPoint, name: Option<String>) {
-        if !same_place(self.address.stage.point(), Some(point)) {
+        if !same_place(self.address.point(), Some(point)) {
             return;
         }
         let text = name
@@ -369,8 +454,7 @@ impl LocationPicker {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| point.coordinates_label());
         // An answer that lands while the pin is lifted is drawn on its return.
-        self.address.stage = AddressStage::Shown { point, text };
-        self.address.ever_shown = true;
+        self.address = AddressStage::Shown { point, text };
     }
 
     /// A new "where am I" lookup began: the picker is locating again until
@@ -387,52 +471,83 @@ impl LocationPicker {
             GeoOutcome::Found(point) => {
                 self.here = HereState::Found;
                 if !changed {
-                    self.wait_for_location();
                     return;
                 }
-                if self.venues.input.query().unwrap_or("").is_empty() {
-                    self.request_venues(point, "");
-                }
+                self.request_venues_for_fix(point);
                 self.resolve_address(point);
                 self.moved_to(MapView::new(point, START_ZOOM));
                 self.move_ended();
             }
             GeoOutcome::Denied => {
                 self.here = HereState::Denied;
-                self.wait_for_location();
             }
             GeoOutcome::Unavailable => {
                 self.here = HereState::Unavailable;
-                self.wait_for_location();
             }
         }
     }
 
-    fn wait_for_location(&mut self) {
-        if self.venues.search_location.is_none() {
-            self.venues.list = VenueList::WaitingForLocation;
+    /// A new fix: the nearby list is asked for, or, when a query was typed
+    /// and not asked yet, that query around the fix. A query typed after a
+    /// place was known waits for its own debounce.
+    fn request_venues_for_fix(&mut self, point: GeoPoint) {
+        match self.unasked_query() {
+            Some(query) => self.request_venues(point, &query),
+            None if self.venues.input.query().unwrap_or("").is_empty() => {
+                self.request_venues(point, "");
+            }
+            None => {}
         }
+    }
+
+    /// The settled query no ask was made for (it was typed with no place to
+    /// search around).
+    fn unasked_query(&self) -> Option<String> {
+        let SearchInput::Settled { query, .. } = &self.venues.input else {
+            return None;
+        };
+        let asked = self
+            .venues
+            .request
+            .as_ref()
+            .is_some_and(|ask| normalize_query(&ask.query) == normalize_query(query));
+        (!asked).then(|| query.clone())
     }
 
     pub fn search_places_in_area(&mut self) {
         if self.pin == Pin::RestedAway {
             self.pin = Pin::Resting;
         }
-        self.request_venues(self.view.center(), "");
+        // The settled query is asked around the new center, so the list
+        // keeps matching the field and a later pan has no query to send.
+        let query = self
+            .venues
+            .input
+            .query()
+            .filter(|_| self.venues.input.is_shown())
+            .unwrap_or("")
+            .to_string();
+        self.request_venues(self.view.center(), &query);
     }
 
     /// tdesktop `venuesSearchChanged`: `None` when the search field closed.
     pub fn search_changed(&mut self, query: Option<String>) {
         let shown = query.as_ref().is_some_and(|q| !q.trim().is_empty());
-        if self.venues.input.is_shown() != shown {
-            if shown {
-                self.venues.no_search_location = self.venues.request.as_ref().map(|r| r.point);
-            } else if let Some(point) = self.venues.no_search_location
-                && !self.venues_from_cache(point, "")
-            {
-                self.request_venues(point, "");
+        let back = match (self.venues.input.is_shown(), shown) {
+            (false, true) => self.venues.request.as_ref().map(|ask| ask.point),
+            (true, true) => self.venues.input.back(),
+            (true, false) => {
+                // Closed: the nearby list comes back.
+                let nearby = self.venues.input.back().or(self.venues.search_location);
+                if let Some(point) = nearby
+                    && !self.venues_from_cache(point, "")
+                {
+                    self.request_venues(point, "");
+                }
+                None
             }
-        }
+            (false, false) => None,
+        };
         let text = query.clone().unwrap_or_default();
         let cached = match self.venues.search_location {
             Some(point) if shown => self.venues_from_cache(point, &text),
@@ -441,20 +556,25 @@ impl LocationPicker {
         self.venues.input = match query {
             None => SearchInput::Closed,
             Some(query) if !shown => SearchInput::Blank(query),
-            Some(query) if cached => SearchInput::Settled(query),
-            Some(query) => {
-                self.venues.list = VenueList::Loading;
-                SearchInput::Typing(query)
+            Some(query) if cached => SearchInput::Settled { query, back },
+            // Nowhere to search around yet: the debounce would send nothing,
+            // so the field settles and the list keeps saying so.
+            Some(query) if self.venues.search_location.is_none() => {
+                SearchInput::Settled { query, back }
             }
+            Some(query) => SearchInput::Typing { query, back },
         };
     }
 
     /// The search paused long enough: ask the bot.
     pub fn search_debounce_fired(&mut self) {
-        let SearchInput::Typing(query) = std::mem::take(&mut self.venues.input) else {
+        let SearchInput::Typing { query, back } = std::mem::take(&mut self.venues.input) else {
             return;
         };
-        self.venues.input = SearchInput::Settled(query.clone());
+        self.venues.input = SearchInput::Settled {
+            query: query.clone(),
+            back,
+        };
         if let Some(point) = self.venues.search_location {
             self.request_venues(point, &query);
         }
@@ -473,10 +593,9 @@ impl LocationPicker {
         };
         self.venues.request = Some(VenueAsk {
             point,
-            query: normalized,
+            query: query.to_string(),
             stage: AskStage::Answered,
         });
-        self.venues.initial_query = query.to_string();
         self.apply_venues(list);
         true
     }
@@ -488,27 +607,25 @@ impl LocationPicker {
         // list, it is asked again.
         if let Some(ask) = &self.venues.request
             && ask.point.same_place(&point)
-            && ask.query == normalized
+            && normalize_query(&ask.query) == normalized
             && match ask.stage {
                 AskStage::Unsent | AskStage::InFlight { .. } => true,
-                AskStage::Answered => self.venues.list != VenueList::Loading,
+                AskStage::Answered => !self.venues_loading(),
                 AskStage::Failed => false,
             }
         {
             return;
         }
-        self.venues.list = VenueList::Loading;
         self.venues.request = Some(VenueAsk {
             point,
-            query: normalized,
+            query: query.to_string(),
             stage: AskStage::Unsent,
         });
-        self.venues.initial_query = query.to_string();
     }
 
     pub(super) fn venue_query_to_send(&self) -> Option<(GeoPoint, String)> {
         let ask = self.venues.request.as_ref()?;
-        (ask.stage == AskStage::Unsent).then(|| (ask.point, ask.query.clone()))
+        (ask.stage == AskStage::Unsent).then(|| (ask.point, normalize_query(&ask.query)))
     }
 
     /// The query to send went out as `request`.
@@ -538,7 +655,7 @@ impl LocationPicker {
             ask.stage = AskStage::Answered;
             self.venues
                 .cache
-                .push((ask.query.clone(), ask.point, venues.clone()));
+                .push((normalize_query(&ask.query), ask.point, venues.clone()));
         }
         self.apply_venues(venues);
     }
@@ -555,7 +672,6 @@ impl LocationPicker {
         if let Some(ask) = self.venues.request.as_mut() {
             ask.stage = AskStage::Failed;
         }
-        self.venues.list = VenueList::Failed;
     }
 
     /// The venue query still to send cannot go out (the send failed, or the
@@ -597,24 +713,34 @@ impl LocationPicker {
 
     /// The Retry under a failed list: ask for the same place and text again.
     pub fn retry_venues(&mut self) {
-        if self.venues.list != VenueList::Failed {
+        if self.venues_loading() {
             return;
         }
-        let Some(point) = self.venues.request.as_ref().map(|ask| ask.point) else {
+        let Some(ask) = self
+            .venues
+            .request
+            .as_ref()
+            .filter(|ask| ask.stage == AskStage::Failed)
+        else {
             return;
         };
-        let query = self.venues.initial_query.clone();
+        let (point, query) = (ask.point, ask.query.clone());
         self.request_venues(point, &query);
     }
 
     fn apply_venues(&mut self, venues: Vec<Venue>) {
-        self.venues.list = if venues.is_empty() {
-            VenueList::NothingFound {
-                query: self.venues.initial_query.clone(),
+        self.venues.list = Some(if venues.is_empty() {
+            ListData::NothingFound {
+                query: self
+                    .venues
+                    .request
+                    .as_ref()
+                    .map(|ask| ask.query.clone())
+                    .unwrap_or_default(),
             }
         } else {
-            VenueList::Found(venues)
-        };
+            ListData::Found(venues)
+        });
     }
 
     pub(super) fn tile_to_request(&self) -> Option<TileKey> {
@@ -708,7 +834,7 @@ impl LocationPicker {
     }
 
     pub(super) fn listed_venue_types(&self) -> Vec<String> {
-        let VenueList::Found(venues) = &self.venues.list else {
+        let Some(ListData::Found(venues)) = &self.venues.list else {
             return Vec::new();
         };
         let mut types: Vec<String> = Vec::new();

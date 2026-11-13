@@ -19,36 +19,54 @@ impl Session {
     /// come: the pending request is the only record of it, so an answer, an
     /// error or a lost request frees the post.
     pub fn suggested_post_busy(&self, chat_id: i64, message_id: i64) -> bool {
-        [
-            SuggestedPostPurpose::Approve {
+        self.payments
+            .suggested_posts
+            .deciding
+            .iter()
+            .any(|decision| decision.chat_id == chat_id && decision.message_id == message_id)
+    }
+
+    /// An approve or decline of the post went out as `request`.
+    pub fn decision_sent(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
+        self.payments
+            .suggested_posts
+            .deciding
+            .push(crate::suggested_posts::PostDecision {
                 chat_id,
                 message_id,
-            },
-            SuggestedPostPurpose::Decline {
-                chat_id,
-                message_id,
-            },
-        ]
-        .into_iter()
-        .any(|purpose| {
-            self.requests
-                .has_purpose(RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(
-                    purpose,
-                )))
-        })
+                request,
+            });
+    }
+
+    /// `request` was answered, refused or lost: its post is free.
+    pub fn decision_settled(&mut self, request: RequestId) {
+        let posts = &mut self.payments.suggested_posts;
+        posts
+            .deciding
+            .retain(|decision| decision.request != request);
+        posts.offering.retain(|offer| offer.request != request);
     }
 
     /// An `addOffer` for this message is on its way (at any price): a second
     /// submit of the box must not send another offer message.
     pub fn suggested_offer_busy(&self, chat_id: i64, message_id: i64) -> bool {
-        self.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(
-                    SuggestedPostPurpose::AddOffer { chat_id: c, message_id: m, .. }
-                )) if c == chat_id && m == message_id
-            )
-        })
+        self.payments
+            .suggested_posts
+            .offering
+            .iter()
+            .any(|offer| offer.chat_id == chat_id && offer.message_id == message_id)
+    }
+
+    /// An `addOffer` of the post went out as `request`.
+    pub fn offer_sent(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
+        self.payments
+            .suggested_posts
+            .offering
+            .push(crate::suggested_posts::PostDecision {
+                chat_id,
+                message_id,
+                request,
+            });
     }
 
     pub(crate) fn apply_suggested_post(&mut self, payload: SuggestedPostPayload) {
@@ -71,6 +89,9 @@ impl Session {
     /// The `message` answer of an edit's send: the bar's terms rode it, so
     /// the bar goes (when it is the bar that sent).
     pub(crate) fn settle_suggested_send(&mut self, pending: Option<&PendingRequest>) {
+        if let Some(pending) = pending {
+            self.decision_settled(pending.id);
+        }
         let Some(SuggestedPostPurpose::SendChange { chat_id, .. }) = suggested_purpose(pending)
         else {
             return;
@@ -90,6 +111,9 @@ impl Session {
         purpose: SuggestedPostPurpose,
         request: Option<RequestId>,
     ) {
+        if let Some(request) = request {
+            self.decision_settled(request);
+        }
         let posts = &mut self.payments.suggested_posts;
         if let SuggestedPostPurpose::SendChange { chat_id, .. } = purpose
             && let Some(bar) = posts.bars.get_mut(&chat_id)

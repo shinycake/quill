@@ -57,7 +57,7 @@ pub(in crate::ui) fn seed_grams_session(sink: Arc<MemorySink>) -> Session {
     let grams = &mut session.payments.hub.grams;
     grams.probe.succeed(());
     grams.apply_page(page, false);
-    grams.revenue = Some(GramRevenue {
+    grams.revenue.succeed(GramRevenue {
         available_nano: 18_500_000_000,
         balance_nano: 18_500_000_000,
         withdrawal_enabled: true,
@@ -81,7 +81,7 @@ impl QuillApp {
             "withdraw-check" => {
                 self.open_grams(cx);
                 if let Some(grams) = self.grams_mut() {
-                    grams.withdraw = Some(GramWithdraw::SecurityCheck { later: false });
+                    grams.put_withdraw(GramWithdraw::SecurityCheck { later: false });
                 }
             }
             "loading-more" => {

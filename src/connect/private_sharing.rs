@@ -109,7 +109,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
-        self.send_json_request(
+        self.session
+            .groups
+            .private_sharing
+            .answer_sent(chat_id, message_id, extra);
+        let sent = self.send_json_request(
             extra,
             &process_chat_has_protected_content_disable_request(
                 extra,
@@ -117,7 +121,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 message_id.0,
                 approve,
             ),
-        )
-        .map(Some)
+        );
+        if sent.is_err() {
+            self.session.groups.private_sharing.answer_settled(extra);
+        }
+        sent.map(Some)
     }
 }

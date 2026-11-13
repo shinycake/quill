@@ -9,7 +9,8 @@ use crate::ids::{ChatId, MessageId};
 use crate::locks::LockExt;
 use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 /// What to save and where.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,18 +36,36 @@ pub enum RichHtmlOutcome {
     Cancelled,
 }
 
-/// Where an export stands: the worker is running, or it left how it ended.
-/// The worker publishes `Done` once; a worker that dies leaves `Done(Failed)`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RichHtmlStage {
-    Running,
+/// Where an export stands: the worker is running and will send how it ended
+/// on `done`, or the outcome is kept. A worker that dies drops its sender
+/// without sending, which reads as `Failed`.
+#[derive(Debug)]
+enum RichHtmlStage {
+    Running { done: Receiver<RichHtmlOutcome> },
     Done(RichHtmlOutcome),
+}
+
+impl RichHtmlStage {
+    /// How the worker ended, once it has; the outcome is kept after the
+    /// first read.
+    fn outcome(&mut self) -> Option<RichHtmlOutcome> {
+        let ended = match self {
+            Self::Done(outcome) => return Some(outcome.clone()),
+            Self::Running { done } => match done.try_recv() {
+                Ok(outcome) => outcome,
+                Err(TryRecvError::Empty) => return None,
+                Err(TryRecvError::Disconnected) => RichHtmlOutcome::Failed,
+            },
+        };
+        *self = Self::Done(ended.clone());
+        Some(ended)
+    }
 }
 
 pub struct RichHtmlExport {
     pub link: WorkerLink,
     pub request: RichHtmlRequest,
-    stage: Arc<Mutex<RichHtmlStage>>,
+    stage: Mutex<RichHtmlStage>,
 }
 
 impl RichHtmlExport {
@@ -58,11 +77,10 @@ impl RichHtmlExport {
         leftovers: Option<crate::export::leftovers::Leftovers>,
     ) -> io::Result<Self> {
         let (link, mut tdlib) = WorkerLink::pair(leftovers);
-        let stage = Arc::new(Mutex::new(RichHtmlStage::Running));
-        let worker_stage = stage.clone();
+        let (sender, done) = channel();
         let worker_request = request.clone();
         crate::thread_guard::spawn_guarded("quill-rich-html", move || {
-            let slot = OutcomeSlot(worker_stage);
+            let slot = OutcomeSlot(Some(sender));
             let date = |unix: i64| {
                 let time = crate::local_time::civil_local(unix);
                 format!(
@@ -82,16 +100,13 @@ impl RichHtmlExport {
         Ok(Self {
             link,
             request,
-            stage,
+            stage: Mutex::new(RichHtmlStage::Running { done }),
         })
     }
 
     /// How it ended, once it has.
     pub fn outcome(&self) -> Option<RichHtmlOutcome> {
-        match &*self.stage.lock_or_recover() {
-            RichHtmlStage::Running => None,
-            RichHtmlStage::Done(outcome) => Some(outcome.clone()),
-        }
+        self.stage.lock_or_recover().outcome()
     }
 
     /// Whether this export saves `message_id` of `chat_id`.
@@ -101,24 +116,23 @@ impl RichHtmlExport {
 }
 
 /// Where the worker leaves how the export ended. Dropped without an outcome,
-/// which only a panic does (`spawn_guarded` catches it), it records
-/// `Failed`, so the export never looks like it is still running and the
-/// same message can be saved again.
-struct OutcomeSlot(Arc<Mutex<RichHtmlStage>>);
+/// which only a panic does (`spawn_guarded` catches it), its sender goes
+/// away unsent and the export reads as `Failed`, so it never looks like it
+/// is still running and the same message can be saved again.
+struct OutcomeSlot(Option<Sender<RichHtmlOutcome>>);
 
 impl OutcomeSlot {
-    fn set(self, outcome: RichHtmlOutcome) {
-        *self.0.lock_or_recover() = RichHtmlStage::Done(outcome);
+    fn set(mut self, outcome: RichHtmlOutcome) {
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(outcome);
+        }
     }
 }
 
 impl Drop for OutcomeSlot {
     fn drop(&mut self) {
-        let mut stage = self.0.lock_or_recover();
-        if *stage == RichHtmlStage::Running {
-            *stage = RichHtmlStage::Done(RichHtmlOutcome::Failed);
-        }
-        drop(stage);
+        // The sender goes first: the woken reader must see the end.
+        drop(self.0.take());
         crate::wake::UPDATES.poke();
     }
 }
@@ -126,31 +140,30 @@ impl Drop for OutcomeSlot {
 #[cfg(test)]
 mod tests {
     use super::{OutcomeSlot, RichHtmlOutcome, RichHtmlStage};
-    use std::sync::{Arc, Mutex};
+    use std::sync::mpsc::channel;
 
     #[test]
     fn a_panicking_worker_still_ends_as_failed() {
-        let outcome = Arc::new(Mutex::new(RichHtmlStage::Running));
-        let slot = OutcomeSlot(outcome.clone());
+        let (sender, done) = channel();
+        let mut stage = RichHtmlStage::Running { done };
+        let slot = OutcomeSlot(Some(sender));
+        assert_eq!(stage.outcome(), None);
         let joined = std::thread::spawn(move || {
             let _slot = slot;
             panic!("worker panic (expected by this test)");
         })
         .join();
         assert!(joined.is_err());
-        assert_eq!(
-            *outcome.lock().unwrap(),
-            RichHtmlStage::Done(RichHtmlOutcome::Failed)
-        );
+        assert_eq!(stage.outcome(), Some(RichHtmlOutcome::Failed));
+        assert_eq!(stage.outcome(), Some(RichHtmlOutcome::Failed));
     }
 
     #[test]
     fn a_set_outcome_is_kept() {
-        let outcome = Arc::new(Mutex::new(RichHtmlStage::Running));
-        OutcomeSlot(outcome.clone()).set(RichHtmlOutcome::Cancelled);
-        assert_eq!(
-            *outcome.lock().unwrap(),
-            RichHtmlStage::Done(RichHtmlOutcome::Cancelled)
-        );
+        let (sender, done) = channel();
+        let mut stage = RichHtmlStage::Running { done };
+        OutcomeSlot(Some(sender)).set(RichHtmlOutcome::Cancelled);
+        assert_eq!(stage.outcome(), Some(RichHtmlOutcome::Cancelled));
+        assert_eq!(stage.outcome(), Some(RichHtmlOutcome::Cancelled));
     }
 }

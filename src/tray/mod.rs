@@ -177,9 +177,9 @@ fn forum_topics_extra(session: &Session, prefs: &BadgePrefs, archive: bool) -> u
 /// topics: it counts in neither.
 fn in_list(chat: &ChatSummary, archive: bool) -> bool {
     let left = chat.member_status() == Some(ChannelMemberStatus::Left)
-        && !chat.in_main_list
-        && !chat.in_archive;
-    chat.in_archive == archive && !left
+        && !chat.in_main_list()
+        && !chat.in_archive();
+    chat.in_archive() == archive && !left
 }
 
 fn list_badge(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {

@@ -9,6 +9,7 @@ use super::app::QuillApp;
 use super::chat_ui_state::A11yFocus;
 use super::motion;
 use crate::ui::status_note::StatusNote;
+use crate::ui::vanish::Deletion;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -295,14 +296,13 @@ impl QuillApp {
             .is_empty()
     }
 
-    /// Loaded, sent messages of the chat in history order.
+    /// Loaded, sent messages the chat's view draws (the open thread's,
+    /// topic's or Saved view's own rows), in history order.
     pub(super) fn loaded_selectable_ids(&self, chat_id: ChatId) -> Vec<MessageId> {
-        self.session()
-            .and_then(|s| s.histories.get(&chat_id.0))
-            .map(|history| {
-                history
-                    .ordered()
-                    .into_iter()
+        self.shown_history(chat_id)
+            .map(|messages| {
+                messages
+                    .values()
                     .filter(|m| m.can_pin())
                     .map(|m| m.id)
                     .collect()
@@ -328,17 +328,14 @@ impl QuillApp {
         let Some(draft) = self.forward_draft() else {
             return Vec::new();
         };
-        let Some(history) = self
-            .session()
-            .and_then(|s| s.histories.get(&draft.from_chat_id.0))
-        else {
+        let Some(messages) = self.shown_history(draft.from_chat_id) else {
             return Vec::new();
         };
         let mut ids = draft.message_ids.clone();
         ids.sort_by_key(|id| id.0);
         ids.into_iter()
             .filter_map(|id| {
-                let message = history.messages.get(&id.0)?;
+                let message = messages.get(&id.0)?;
                 let target = quill::message_menu::media_target(effective_content(
                     &message.content,
                     message.ephemeral.as_ref(),
@@ -406,13 +403,12 @@ impl QuillApp {
         {
             return false;
         }
-        let Some(history) = session.histories.get(&chat_id.0) else {
+        let Some(messages) = self.shown_history(chat_id) else {
             return false;
         };
         !draft.message_ids.is_empty()
             && draft.message_ids.iter().all(|id| {
-                history
-                    .messages
+                messages
                     .get(&id.0)
                     .is_some_and(|m| !m.is_outgoing && !m.pending() && m.id.0 > 0)
             })
@@ -435,13 +431,10 @@ impl QuillApp {
     pub(super) fn selected_messages_text(&self) -> Option<(ChatId, String)> {
         let draft = self.forward_draft()?;
         let session = self.session()?;
-        let history = session.histories.get(&draft.from_chat_id.0)?;
+        let shown = self.shown_history(draft.from_chat_id)?;
         let mut ids = draft.message_ids.clone();
         ids.sort_by_key(|id| id.0);
-        let messages: Vec<_> = ids
-            .iter()
-            .filter_map(|id| history.messages.get(&id.0))
-            .collect();
+        let messages: Vec<_> = ids.iter().filter_map(|id| shown.get(&id.0)).collect();
         let body = |message: &quill::state::HistoryMessage| {
             Self::message_copyable_text(effective_content(
                 &message.content,
@@ -488,9 +481,9 @@ impl QuillApp {
         };
         // Every message must be yours and still open to "delete for
         // everyone" (TDLib refuses the whole batch otherwise).
-        let all_outgoing = session.histories.get(&chat_id.0).is_some_and(|history| {
+        let all_outgoing = self.shown_history(chat_id).is_some_and(|shown| {
             ids.iter().all(|id| {
-                history.messages.get(&id.0).is_some_and(|message| {
+                shown.get(&id.0).is_some_and(|message| {
                     message.is_outgoing
                         && session
                             .messages
@@ -616,16 +609,23 @@ impl QuillApp {
         let mut went_out = true;
         if !ids.is_empty() {
             if let Some(live) = self.live.as_mut() {
-                if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
-                    went_out = false;
-                    self.set_note(StatusNote::error(tr(
-                        keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
-                    )));
-                } else {
-                    self.begin_vanish(chat_id, ids);
+                match live.driver.delete_selected(chat_id, ids, revoke) {
+                    Err(_) => {
+                        went_out = false;
+                        self.set_note(StatusNote::error(tr(
+                            keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
+                        )));
+                    }
+                    Ok(request) => {
+                        if self.begin_vanish(chat_id, ids, Deletion::Sent(request))
+                            && let Some(live) = self.live.as_mut()
+                        {
+                            live.driver.session.acks.expect(request);
+                        }
+                    }
                 }
             } else if self.demo_session.is_some() {
-                self.begin_vanish(chat_id, ids);
+                self.begin_vanish(chat_id, ids, Deletion::Local);
                 for id in ids {
                     self.apply_demo_delete(chat_id, *id);
                 }

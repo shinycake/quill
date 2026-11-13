@@ -17,7 +17,7 @@ impl Session {
         };
         let GiftValuePayload::Info(info) = payload;
         if let Some(lookup) = self.payments.hub.gift_value.as_mut() {
-            lookup.land(pending.id.0, info);
+            lookup.land(pending.id, info);
         }
     }
 
@@ -31,7 +31,7 @@ impl Session {
         };
         if let Some(lookup) = self.payments.hub.gift_value.as_mut() {
             lookup.fail(
-                pending.id.0,
+                pending.id,
                 crate::lang::tr_with(
                     crate::lang::keys::Q_GIFT_VALUE_COULDNT_LOAD,
                     &[("reason", &error_reason(err))],

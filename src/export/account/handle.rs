@@ -35,7 +35,7 @@ impl AccountExport {
             let _settle = SettleOnPanic::new(
                 &worker_progress,
                 AccountProgress::is_settled,
-                |progress, why| progress.stage = AccountStage::Failed(why),
+                |progress, why| progress.stage = Some(AccountStage::Failed(why)),
             );
             let report = |progress: AccountProgress| {
                 publish(&worker_progress, &crate::wake::UPDATES, |slot| {
@@ -54,7 +54,7 @@ impl AccountExport {
                 Err(err) => AccountStage::Failed(err.to_string()),
             };
             publish(&worker_progress, &crate::wake::UPDATES, |slot| {
-                slot.stage = last;
+                slot.stage = Some(last);
             });
         })?;
         Ok(Self {

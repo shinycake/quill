@@ -84,7 +84,7 @@ fn a_chat_windows_box_closes_with_it_and_does_not_move(cx: &mut TestAppContext) 
         "the box did not move to the main window"
     );
     h.app.read_with(cx, |app, _| {
-        assert!(app.notify.mute_box.is_none(), "its own close ran");
+        assert!(app.notify.mute_box().is_none(), "its own close ran");
     });
 }
 
@@ -244,7 +244,6 @@ fn a_closed_windows_flow_asks_as_the_main_window(cx: &mut TestAppContext) {
             Some(None),
             "the closed window asks for nothing"
         );
-        assert_eq!(app.mini_app_window(), None, "the mini app forgot it");
         app.as_asked_by(Some(OTHER), |app| {
             app.set_note(StatusNote::info("Added to the attachment menu"))
         });
@@ -253,6 +252,26 @@ fn a_closed_windows_flow_asks_as_the_main_window(cx: &mut TestAppContext) {
             Some(None),
             "the toast shows in the main window"
         );
+    });
+}
+
+/// A date lookup that failed says so in the window that asked, not in the
+/// main window's toast host.
+#[gpui_kit::test]
+fn a_failed_date_lookup_toasts_in_the_window_that_asked(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, _| {
+        assert!(app.say_date_jumps_failed(vec![Some(OTHER)]));
+        assert_eq!(
+            app.connection.toasts.visible_host(),
+            Some(Some(OTHER)),
+            "the chat window's toast"
+        );
+        app.connection.toasts.clear_note();
+        assert!(app.say_date_jumps_failed(vec![None]));
+        assert_eq!(app.connection.toasts.visible_host(), Some(None));
+        assert!(!app.say_date_jumps_failed(Vec::new()));
     });
 }
 
@@ -423,5 +442,41 @@ fn an_ask_made_before_its_request_waits_for_that_request(cx: &mut TestAppContext
         // An ask already read keeps its own requests.
         app.windows.read_ask_waits(&[RequestId(99)]);
         assert_eq!(waits_of(app), Some(AskWaits::Requests(vec![sent_after])));
+    });
+}
+
+/// Sweep r4-07 round 4 (item 10): a closed chat window's value goes through
+/// the one writer (`SlotFarewell for ChatUi`), so the acks its bar work
+/// waits on are forgotten with it, and a late answer is kept for nobody.
+#[gpui_kit::test]
+fn closing_a_chat_window_forgets_the_acks_of_its_bar_work(cx: &mut TestAppContext) {
+    use crate::ui::bar_report::{BarKind, BarWork};
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let request = RequestId(4_000_001);
+    h.app.update(cx, |app, cx| {
+        app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.chat_ui.bar_work = BarWork::Out {
+                kind: BarKind::Report,
+                waiting: vec![request],
+            };
+            if let Some(session) = app.session_mut() {
+                session.acks.expect(request);
+            }
+        })
+    });
+    cx.update_window(chat_window, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
+    h.app.update(cx, |app, _| {
+        let session = app.session_mut().expect("a session");
+        session.acks.settle(request, Answer::Done);
+        assert_eq!(
+            session.acks.take(request),
+            None,
+            "nothing waits for it any more"
+        );
     });
 }

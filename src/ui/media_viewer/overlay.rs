@@ -520,7 +520,7 @@ impl QuillApp {
             };
             self.viewer_chrome(&item, facts, geometry, window, cx)
         });
-        let open_gen = self.viewer.open_gen as usize;
+        let open_gen = self.viewer.state.opened().get() as usize;
         let viewport = window.viewport_size();
         let swipe = self
             .viewer

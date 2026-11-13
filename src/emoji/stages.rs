@@ -4,6 +4,7 @@
 //! request that asked, so only its own answer lands.
 use crate::ids::RequestId;
 use crate::telegram::envelope::{StickerItem, StickerSetInfo};
+use std::collections::VecDeque;
 
 /// The trending emoji sets the box shows.
 #[derive(Debug, Clone, Default)]
@@ -23,10 +24,10 @@ pub enum TrendingSets {
     #[default]
     Idle,
     /// A page is out from `from` (0 = the first page, which replaces the
-    /// list); `request` is set once it went out.
+    /// list) as `request`.
     Loading {
         from: i32,
-        request: Option<RequestId>,
+        request: RequestId,
         shown: Option<TrendingPage>,
     },
     Ready(TrendingPage),
@@ -103,12 +104,12 @@ impl TrendingSets {
         self.page().map_or(0, |page| page.next_offset)
     }
 
-    /// A page is about to be asked from `from`; what is shown stays.
-    pub fn begin(&mut self, from: i32) {
+    /// The page from `from` went out as `request`; what is shown stays.
+    pub fn begin(&mut self, from: i32, request: RequestId) {
         let shown = std::mem::take(self).into_shown();
         *self = Self::Loading {
             from,
-            request: None,
+            request,
             shown,
         };
     }
@@ -118,13 +119,6 @@ impl TrendingSets {
             Self::Idle => None,
             Self::Ready(page) | Self::Stale(page) => Some(page),
             Self::Loading { shown, .. } | Self::Failed { shown, .. } => shown,
-        }
-    }
-
-    /// The page went out as `asked`.
-    pub fn sent(&mut self, asked: RequestId) {
-        if let Self::Loading { request, .. } = self {
-            *request = Some(asked);
         }
     }
 
@@ -158,9 +152,17 @@ impl TrendingSets {
         };
     }
 
+    /// The page request the list waits for.
+    pub fn request(&self) -> Option<RequestId> {
+        match self {
+            Self::Loading { request, .. } => Some(*request),
+            _ => None,
+        }
+    }
+
     /// `request` is the page this list waits for.
     pub fn waits_for(&self, asked: Option<RequestId>) -> bool {
-        matches!(self, Self::Loading { request: Some(waiting), .. } if Some(*waiting) == asked)
+        matches!(self, Self::Loading { request: waiting, .. } if Some(*waiting) == asked)
     }
 
     /// `request` failed: only the page the list waits for fails it.
@@ -208,84 +210,120 @@ impl TrendingSets {
     }
 }
 
-/// The panel's `getKeywordEmojis` search: one list for the session, with
-/// the query it was asked for. Two windows' panels share it, so each reads
-/// it through [`KeywordEmojis::for_query`]: a list asked for another
-/// window's query is none of its own.
+/// Queries kept: every open window's panel asks for its own.
+const KEYWORD_KEPT: usize = 8;
+
+/// Where one query's `getKeywordEmojis` stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KeywordEmojis {
-    /// No search, or an empty query was the last.
-    Idle {
-        query: String,
-    },
-    /// The search for `query` is out as `request`.
+enum KeywordStage {
+    /// The search is out as `request`; only its answer or error leaves.
     Asking {
-        query: String,
         request: RequestId,
     },
     Ready {
-        query: String,
         emojis: Vec<String>,
     },
-    /// The search never left or was refused: the panel shows the
-    /// catalog's matches only, and does not ask this query again.
-    Failed {
-        query: String,
-    },
+    /// The search never left or was refused: the panel shows the catalog's
+    /// matches only, and does not ask this query again.
+    Failed,
 }
 
-impl Default for KeywordEmojis {
-    fn default() -> Self {
-        Self::Idle {
-            query: String::new(),
-        }
-    }
+/// The panels' `getKeywordEmojis` searches, one stage per query. Two windows'
+/// panels search different queries at once, so each reads its own through
+/// [`KeywordEmojis::for_query`], and a search for one query never replaces
+/// another's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeywordEmojis {
+    /// Oldest first; at most [`KEYWORD_KEPT`].
+    entries: VecDeque<(String, KeywordStage)>,
 }
 
 impl KeywordEmojis {
-    /// The trimmed query the list is for (the last one asked).
-    pub fn query(&self) -> &str {
-        match self {
-            Self::Idle { query }
-            | Self::Asking { query, .. }
-            | Self::Ready { query, .. }
-            | Self::Failed { query } => query,
-        }
+    fn stage(&self, query: &str) -> Option<&KeywordStage> {
+        let query = query.trim();
+        self.entries
+            .iter()
+            .find_map(|(asked, stage)| (asked == query).then_some(stage))
     }
 
-    /// The matches for `query`; none when the list is another query's.
+    /// Nothing is left to ask for `query`: it is empty, or its search is
+    /// out, answered or refused.
+    pub fn knows(&self, query: &str) -> bool {
+        query.trim().is_empty() || self.stage(query).is_some()
+    }
+
+    /// The search for `query` is out.
+    pub fn asking(&self, query: &str) -> bool {
+        matches!(self.stage(query), Some(KeywordStage::Asking { .. }))
+    }
+
+    /// The matches for `query`; none when it has no answer.
     pub fn for_query(&self, query: &str) -> &[String] {
-        match self {
-            Self::Ready {
-                query: asked,
-                emojis,
-            } if asked == query.trim() => emojis,
+        match self.stage(query) {
+            Some(KeywordStage::Ready { emojis }) => emojis,
             _ => &[],
         }
     }
 
-    /// `request` is the search this list waits for.
+    /// The query was cleared: the searches that failed are forgotten, so
+    /// typing the same words again asks again.
+    pub fn cleared(&mut self) {
+        self.forgive_failures();
+    }
+
+    /// The connection is back, or the field was cleared: refused searches
+    /// are asked again.
+    pub fn forgive_failures(&mut self) {
+        self.entries
+            .retain(|(_, stage)| !matches!(stage, KeywordStage::Failed));
+    }
+
+    fn put(&mut self, query: &str, stage: KeywordStage) {
+        let query = query.trim().to_string();
+        self.entries.retain(|(asked, _)| *asked != query);
+        if self.entries.len() >= KEYWORD_KEPT {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((query, stage));
+    }
+
+    /// The search for `query` went out as `request`.
+    pub fn asked(&mut self, query: &str, request: RequestId) {
+        self.put(query, KeywordStage::Asking { request });
+    }
+
+    /// The search for `query` could not be sent.
+    pub fn unsent(&mut self, query: &str) {
+        self.put(query, KeywordStage::Failed);
+    }
+
+    /// `request` is a search this list waits for.
     pub fn waits_for(&self, asked: Option<RequestId>) -> bool {
-        matches!(self, Self::Asking { request, .. } if Some(*request) == asked)
+        asked.is_some_and(|asked| {
+            self.entries.iter().any(
+                |(_, stage)| matches!(stage, KeywordStage::Asking { request } if *request == asked),
+            )
+        })
+    }
+
+    fn asking_entry(&mut self, asked: Option<RequestId>) -> Option<&mut KeywordStage> {
+        let asked = asked?;
+        self.entries.iter_mut().find_map(|(_, stage)| {
+            matches!(stage, KeywordStage::Asking { request } if *request == asked).then_some(stage)
+        })
     }
 
     /// The answer of `asked`, taken only by the search that waits for it.
     pub fn answered(&mut self, asked: Option<RequestId>, emojis: Vec<String>) {
-        if let Self::Asking { query, request } = self
-            && Some(*request) == asked
-        {
-            let query = std::mem::take(query);
-            *self = Self::Ready { query, emojis };
+        if let Some(stage) = self.asking_entry(asked) {
+            *stage = KeywordStage::Ready { emojis };
         }
     }
 
     /// `asked` was refused: only the search that waits for it fails.
     pub fn failed_request(&mut self, asked: Option<RequestId>) {
-        if let Self::Asking { query, request } = self
-            && Some(*request) == asked
-        {
-            let query = std::mem::take(query);
-            *self = Self::Failed { query };
+        if let Some(stage) = self.asking_entry(asked) {
+            *stage = KeywordStage::Failed;
         }
     }
 }
@@ -330,6 +368,14 @@ impl AnimatedSuggestion {
 
     pub fn is_idle(&self) -> bool {
         matches!(self, Self::Idle)
+    }
+
+    /// The ask this suggestion waits for.
+    pub fn request(&self) -> Option<RequestId> {
+        match self {
+            Self::Asking { request, .. } => Some(*request),
+            _ => None,
+        }
     }
 
     /// `request` is the ask this suggestion waits for.

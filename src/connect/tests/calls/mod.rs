@@ -344,7 +344,7 @@ fn call_ready_connects_transport_once_with_mapped_params() {
     assert!(webrtc.peer_tag.is_empty());
 
     let call = driver.session.calls.active_call.as_ref().unwrap();
-    assert_eq!(call.transport.state(), Some(TransportState::Connecting));
+    assert_eq!(call.transport.state(), Some(TransportState::Establishing));
     assert_eq!(call.transport.error(), None);
 
     // A second Ready update must not reconnect.
@@ -419,6 +419,61 @@ fn call_transport_retries_same_params_three_times_then_stops() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A retry the engine never reports on does not stay `Reconnecting`: at its
+/// deadline it counts as a failed report, so the budget runs out and the
+/// call shows the failure. The clock is the test's own.
+#[test]
+fn a_silent_retry_runs_out_at_its_deadline_and_spends_the_budget() {
+    use crate::state::{CALL_RECONNECT_WINDOW, MAX_CALL_RECONNECT_ATTEMPTS};
+    use std::time::Duration;
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    let t0 = std::time::Instant::now();
+    handle.emit_transport_state(77, TransportState::Failed);
+    assert!(driver.request_tick(t0));
+    let state = |driver: &ConnectDriver<_>| {
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .transport
+            .state()
+    };
+    assert_eq!(state(&driver), Some(TransportState::Reconnecting));
+    // Before its deadline the retry is left alone.
+    assert!(!driver.expire_call_reconnect(t0 + Duration::from_secs(19)));
+    assert_eq!(handle.connects().len(), 2);
+    // Each silent retry that passes its deadline asks again, until the
+    // budget is spent.
+    let mut now = t0;
+    for _ in 1..MAX_CALL_RECONNECT_ATTEMPTS {
+        now += CALL_RECONNECT_WINDOW;
+        assert!(driver.expire_call_reconnect(now));
+        assert_eq!(state(&driver), Some(TransportState::Reconnecting));
+    }
+    now += CALL_RECONNECT_WINDOW;
+    assert!(driver.expire_call_reconnect(now));
+    assert_eq!(state(&driver), Some(TransportState::Failed));
+    assert_eq!(handle.connects().len(), 1 + MAX_CALL_RECONNECT_ATTEMPTS);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The poll loop sleeps no longer than a silent retry has left.
+#[test]
+fn the_poll_loop_wakes_for_a_silent_retrys_deadline() {
+    use crate::state::CALL_RECONNECT_WINDOW;
+    let (dir, mut driver, handle, sink, seq) = ready_call_driver();
+    ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
+    let t0 = std::time::Instant::now();
+    assert_eq!(driver.next_deadline(t0, 0), None);
+    handle.emit_transport_state(77, TransportState::Failed);
+    assert!(driver.request_tick(t0));
+    assert_eq!(driver.next_deadline(t0, 0), Some(CALL_RECONNECT_WINDOW));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn call_transport_connected_resets_reconnect_attempts() {
     let (dir, mut driver, handle, sink, seq) = ready_call_driver();
@@ -467,7 +522,7 @@ fn call_transport_reconnect_error_is_reported() {
     driver.session.calls.active_call.as_mut().unwrap().muted = true;
     handle.fail_mute();
     handle.emit_transport_state(77, TransportState::Failed);
-    handle.emit_transport_state(77, TransportState::Connecting);
+    handle.emit_transport_state(77, TransportState::Establishing);
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
     let call = driver.session.calls.active_call.as_ref().unwrap();
     assert_eq!(call.transport.state(), Some(TransportState::Failed));

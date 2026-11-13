@@ -345,7 +345,7 @@ fn provider_errors_keep_the_form_open(cx: &mut TestAppContext) {
         assert!(!form.is_tokenizing(), "Done works again");
         assert!(dialog.method.card().is_none());
         assert_eq!(
-            form.notice.as_ref().map(|notice| notice.as_ref()),
+            form.notice().map(|notice| notice.as_ref()),
             Some(quill::lang::tr(quill::lang::keys::PAYMENTS_CARD_DECLINED))
         );
     });
@@ -356,7 +356,7 @@ fn provider_errors_keep_the_form_open(cx: &mut TestAppContext) {
     // Done again drops the old refusal while the provider answers.
     let cleared = app.update_in(&mut vcx, |app, window, cx| {
         app.submit_card_form(window, cx);
-        app.card_form().is_some_and(|form| form.notice.is_none())
+        app.card_form().is_some_and(|form| form.notice().is_none())
     });
     assert!(cleared);
     draw(&mut vcx);
@@ -502,6 +502,10 @@ fn an_older_presses_clear_leaves_a_newer_snapshot(cx: &mut TestAppContext) {
     // must not drop the second press's snapshot.
     let held = app.update_in(&mut vcx, |app, window, cx| {
         app.card_field_before_delete(CardField::Number, true, window, cx);
+        let older = app
+            .card_form_mut()
+            .and_then(|form| form.input_mut(CardField::Number))
+            .and_then(|input| input.delete_cycle());
         app.card_field_before_delete(CardField::Number, true, window, cx);
         let Some(input) = app
             .card_form_mut()
@@ -509,9 +513,12 @@ fn an_older_presses_clear_leaves_a_newer_snapshot(cx: &mut TestAppContext) {
         else {
             return (false, false);
         };
-        input.expire_delete(1);
+        let (Some(older), Some(newer)) = (older, input.delete_cycle()) else {
+            return (false, false);
+        };
+        input.expire_delete(&older);
         let after_older = input.has_delete_snapshot();
-        input.expire_delete(2);
+        input.expire_delete(&newer);
         (after_older, input.has_delete_snapshot())
     });
     assert_eq!(held, (true, false));

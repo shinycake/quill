@@ -24,7 +24,7 @@ pub(super) enum CallSound {
     Ringback,
     Connect,
     End,
-    Busy,
+    BusyTone,
     Mute,
     Unmute,
 }
@@ -36,7 +36,7 @@ impl CallSound {
             CallSound::Ringback => call_tones::ringback(),
             CallSound::Connect => call_tones::connect(),
             CallSound::End => call_tones::end(),
-            CallSound::Busy => call_tones::busy(),
+            CallSound::BusyTone => call_tones::busy(),
             CallSound::Mute => call_tones::mute(),
             CallSound::Unmute => call_tones::unmute(),
         }
@@ -125,7 +125,8 @@ impl CallSounds {
 }
 
 impl CallSounds {
-    /// Follow the "Play sounds" preference; turning it off cuts any sound.
+    /// Follow the "Play sounds" preference; turning it off cuts a cue that
+    /// plays, and leaves a ring going (ringing always plays, `audible`).
     pub(super) fn set_enabled(&mut self, enabled: bool) {
         if self.enabled && !enabled && !self.voice.is_looping() {
             self.voice.stop();
@@ -256,6 +257,18 @@ pub(super) struct SoundMarks {
     muted: bool,
 }
 
+#[cfg(test)]
+impl SoundMarks {
+    /// The marks of a call that played its cues up to its connection.
+    pub(super) fn connected_call(call_id: i32) -> Self {
+        Self {
+            call_id: Some(call_id),
+            cue: CueStage::Connected,
+            muted: false,
+        }
+    }
+}
+
 /// The call-long cues, in the order a call reaches them: the connect chime
 /// plays once, then the hang-up one.
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -333,8 +346,10 @@ impl super::app::QuillApp {
                 sounds.keep_looping(background_ring.then_some(CallSound::Incoming));
                 if marks.call_id == Some(summary.call_id) && marks.cue < CueStage::Ended {
                     marks.cue = CueStage::Ended;
-                    sounds.play(if summary.busy() {
-                        CallSound::Busy
+                    // A cue, not a cut: a ring still looping (a background
+                    // account's call) would end this chime on its next tick.
+                    sounds.play_cue(if summary.busy() {
+                        CallSound::BusyTone
                     } else {
                         CallSound::End
                     });
@@ -364,5 +379,17 @@ mod tests {
         // A plain play still cuts the loop.
         sounds.play(CallSound::End);
         assert_eq!(sounds.looping(), None);
+    }
+
+    /// The hang-up chime of a call that ends while another account's call
+    /// rings does not cut that ring (and is not cut by it next tick).
+    #[test]
+    fn the_end_chime_keeps_a_background_ring_looping() {
+        let mut sounds = CallSounds::new(SharedOutput::for_test(None));
+        sounds.keep_looping(Some(CallSound::Incoming));
+        sounds.play_cue(CallSound::End);
+        // The next tick asks for the same ring: it stays what it was.
+        sounds.keep_looping(Some(CallSound::Incoming));
+        assert_eq!(sounds.looping(), Some(CallSound::Incoming));
     }
 }

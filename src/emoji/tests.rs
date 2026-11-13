@@ -1,7 +1,6 @@
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId};
-use crate::state::StickersPurpose;
 use crate::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -35,7 +34,12 @@ fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
         cover_files: Vec::new(),
         is_viewed: true,
     };
-    session.stickers.emoji.installed_sets = vec![pack(1), pack(2), pack(3)];
+    session
+        .stickers
+        .emoji
+        .lists
+        .installed
+        .succeed(vec![pack(1), pack(2), pack(3)]);
     session.remember_emoji_pack_usage(&[10]);
     session
         .stickers
@@ -208,6 +212,61 @@ fn open_chat_custom_emoji_files_cover_text_and_reactions() {
     assert!(session.open_chat_custom_emoji_files().is_empty());
 }
 
+/// A status-id list takes only the answer of the ask it waits for: the one
+/// of a request it never sent (an older ask, a status change away) is dropped.
+#[test]
+fn a_status_list_answer_of_another_request_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let waited = session.request(RequestPurpose::GetThemedEmojiStatuses, None);
+    session
+        .stickers
+        .emoji
+        .lists
+        .themed_statuses
+        .begin_with(waited);
+    let other = session.request(RequestPurpose::GetThemedEmojiStatuses, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"emojiStatusCustomEmojis","custom_emoji_ids":["11","22"],"@extra":"{}"}}"#,
+            other.0
+        ),
+    );
+    assert!(session.stickers.emoji.themed_status_ids().is_empty());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"emojiStatusCustomEmojis","custom_emoji_ids":["11","22"],"@extra":"{}"}}"#,
+            waited.0
+        ),
+    );
+    assert_eq!(session.stickers.emoji.themed_status_ids(), &[11, 22]);
+
+    let waited = session.request(RequestPurpose::GetUpgradedGiftEmojiStatuses, None);
+    session
+        .stickers
+        .emoji
+        .lists
+        .upgraded_gift_statuses
+        .begin_with(waited);
+    let other = session.request(RequestPurpose::GetUpgradedGiftEmojiStatuses, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"emojiStatuses","emoji_statuses":[{{"@type":"emojiStatus","type":{{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"5"}},"expiration_date":0}}],"@extra":"{}"}}"#,
+            other.0
+        ),
+    );
+    assert!(session.stickers.emoji.upgraded_gift_statuses().is_empty());
+}
+
 /// Slice S10: emoji-backend answers are stored only under a matching
 /// request purpose (stray answers ignored, never landing in the regular
 /// sticker panel), and mutation `ok`s invalidate the affected caches.
@@ -219,6 +278,12 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     // Recent statuses land in the emoji panel under
     // GetRecentEmojiStatuses.
     let extra = with_purpose.request(RequestPurpose::GetRecentEmojiStatuses, None);
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .recent_statuses
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -228,15 +293,10 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.recent_statuses.len(), 1);
-    assert_eq!(
-        with_purpose.stickers.emoji.recent_statuses[0].custom_emoji_id,
-        12345
-    );
-    assert_eq!(
-        with_purpose.stickers.emoji.recent_statuses[0].expiration_date,
-        3600
-    );
+    let recent = with_purpose.stickers.emoji.recent_statuses();
+    assert_eq!(recent.len(), 1);
+    assert_eq!(recent.first().map(|s| s.custom_emoji_id), Some(12345));
+    assert_eq!(recent.first().map(|s| s.expiration_date), Some(3600));
 
     // A stray emojiStatuses (no matching purpose) is ignored.
     let (mut without_purpose, sink2) = session();
@@ -247,10 +307,16 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"emojiStatuses","emoji_statuses":[]}"#,
     );
-    assert!(without_purpose.stickers.emoji.recent_statuses.is_empty());
+    assert!(without_purpose.stickers.emoji.recent_statuses().is_empty());
 
     // Themed/default ids land in their own slots.
     let extra = with_purpose.request(RequestPurpose::GetThemedEmojiStatuses, None);
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .themed_statuses
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -260,8 +326,14 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.themed_status_ids, vec![11, 22]);
+    assert_eq!(with_purpose.stickers.emoji.themed_status_ids(), &[11, 22]);
     let extra = with_purpose.request(RequestPurpose::GetDefaultEmojiStatuses, None);
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .default_statuses
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -271,7 +343,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.default_status_ids, vec![33]);
+    assert_eq!(with_purpose.stickers.emoji.default_status_ids(), &[33]);
 
     // getAnimatedEmoji's animatedEmoji lands under GetAnimatedEmoji.
     let extra = with_purpose.request(RequestPurpose::GetAnimatedEmoji, None);
@@ -335,22 +407,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert_eq!(lookups.generation, 1);
     assert_eq!(lookups.answer("fire").map(<[_]>::len), Some(1));
 
-    // getEmojiCategories answers land under GetEmojiCategories.
-    let extra = with_purpose.request(RequestPurpose::GetEmojiCategories, None);
-    apply_json(
-        &mut with_purpose,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"emojiCategories","categories":[{{"@type":"emojiCategory","name":"Smileys","icon":null,"source":{{"@type":"emojiCategorySourcePremium"}},"is_greeting":false}}],"@extra":"{}"}}"#,
-            extra.0
-        ),
-    );
-    assert_eq!(with_purpose.stickers.emoji.categories.len(), 1);
-    assert_eq!(with_purpose.stickers.emoji.categories[0].name, "Smileys");
-
-    // Emoji-pack sets: installed / search / archived (first page
-    // replaces, second appends) / trending — none touches the regular
+    // Emoji-pack sets: installed / search / trending — none touches the regular
     // sticker panel's slots.
     let set_json = |id: i64, title: &str| {
         format!(
@@ -358,8 +415,12 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         )
     };
     let extra = with_purpose.request(RequestPurpose::GetInstalledEmojiSets, None);
-    with_purpose.stickers.emoji.lists.installed.begin();
-    with_purpose.stickers.emoji.lists.installed.sent(extra);
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .installed
+        .begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -370,13 +431,15 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.installed_sets.len(), 1);
-    assert_eq!(with_purpose.stickers.emoji.installed_sets[0].id, 77);
+    assert_eq!(with_purpose.stickers.emoji.lists.installed.items().len(), 1);
+    assert_eq!(
+        with_purpose.stickers.emoji.lists.installed.items()[0].id,
+        77
+    );
     assert!(with_purpose.stickers.stickers.sets.is_empty());
 
     let extra = with_purpose.request(RequestPurpose::SearchEmojiSets, None);
-    with_purpose.stickers.emoji.lists.search.begin();
-    with_purpose.stickers.emoji.lists.search.sent(extra);
+    with_purpose.stickers.emoji.lists.search.begin_with(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -387,42 +450,11 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.found_sets.len(), 1);
+    assert_eq!(with_purpose.stickers.emoji.lists.search.items().len(), 1);
     assert!(with_purpose.stickers.stickers.search.sets.is_empty());
 
-    let extra = with_purpose.request(
-        RequestPurpose::Stickers(StickersPurpose::GetArchivedEmojiSets { first_page: true }),
-        None,
-    );
-    apply_json(
-        &mut with_purpose,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"stickerSets","total_count":2,"sets":[{}],"@extra":"{}"}}"#,
-            set_json(79, "Old"),
-            extra.0
-        ),
-    );
-    let extra = with_purpose.request(
-        RequestPurpose::Stickers(StickersPurpose::GetArchivedEmojiSets { first_page: false }),
-        None,
-    );
-    apply_json(
-        &mut with_purpose,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"stickerSets","total_count":2,"sets":[{}],"@extra":"{}"}}"#,
-            set_json(80, "Older"),
-            extra.0
-        ),
-    );
-    assert_eq!(with_purpose.stickers.emoji.archived_sets.len(), 2);
-
     let extra = with_purpose.request(RequestPurpose::GetTrendingEmojiSets, None);
-    with_purpose.stickers.emoji.lists.trending.begin(0);
-    with_purpose.stickers.emoji.lists.trending.sent(extra);
+    with_purpose.stickers.emoji.lists.trending.begin(0, extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -435,7 +467,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     );
     assert_eq!(with_purpose.stickers.emoji.lists.trending.sets().len(), 1);
     assert!(with_purpose.stickers.emoji.lists.trending.is_premium());
-    assert!(with_purpose.stickers.stickers.trending.is_empty());
+    assert!(with_purpose.stickers.stickers.trending.sets.is_empty());
 
     // A clearRecentEmojiStatuses `ok` drops the recent statuses.
     let extra = with_purpose.request(RequestPurpose::ClearRecentEmojiStatuses, None);
@@ -445,14 +477,15 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.emoji.recent_statuses.is_empty());
+    assert!(with_purpose.stickers.emoji.recent_statuses().is_empty());
 
     // A setEmojiStatus `ok` likewise invalidates recent statuses.
-    with_purpose.stickers.emoji.recent_statuses = vec![EmojiStatusItem {
-        custom_emoji_id: 1,
-        expiration_date: 0,
-        gift: None,
-    }];
+    with_purpose.stickers.emoji.lists.recent_statuses =
+        crate::state::fetch::Fetch::Ready(vec![EmojiStatusItem {
+            custom_emoji_id: 1,
+            expiration_date: 0,
+            gift: None,
+        }]);
     let extra = with_purpose.request(RequestPurpose::SetEmojiStatus, None);
     apply_json(
         &mut with_purpose,
@@ -460,7 +493,7 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.emoji.recent_statuses.is_empty());
+    assert!(with_purpose.stickers.emoji.recent_statuses().is_empty());
 
     // A changeStickerSet (emoji) `ok` drops the installed emoji sets.
     let extra = with_purpose.request(RequestPurpose::ChangeEmojiSet, None);
@@ -470,11 +503,24 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.emoji.installed_sets.is_empty());
+    assert!(
+        with_purpose
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .items()
+            .is_empty()
+    );
 
     // A reorderInstalledStickerSets (emoji) `ok` does the same.
-    with_purpose.stickers.emoji.installed_sets =
-        vec![with_purpose.stickers.emoji.found_sets[0].clone()];
+    let found = with_purpose.stickers.emoji.lists.search.items()[0].clone();
+    with_purpose
+        .stickers
+        .emoji
+        .lists
+        .installed
+        .succeed(vec![found]);
     let extra = with_purpose.request(RequestPurpose::ReorderInstalledEmojiSets, None);
     apply_json(
         &mut with_purpose,
@@ -482,7 +528,15 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.emoji.installed_sets.is_empty());
+    assert!(
+        with_purpose
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .items()
+            .is_empty()
+    );
 }
 
 /// Round 11 (area A): custom emoji of a chat shown only in its own window
@@ -510,8 +564,7 @@ fn an_empty_installed_list_is_loaded_only_after_its_answer() {
     let (mut session, _) = session();
     assert!(session.stickers.emoji.lists.installed.can_ask());
     let request = session.request(RequestPurpose::GetInstalledEmojiSets, None);
-    session.stickers.emoji.lists.installed.begin();
-    session.stickers.emoji.lists.installed.sent(request);
+    session.stickers.emoji.lists.installed.begin_with(request);
     session.accept_installed_emoji_sets(Some(request), Vec::new());
     assert!(!session.stickers.emoji.lists.installed.can_ask());
     session.invalidate_installed_emoji_sets();

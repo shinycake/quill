@@ -206,6 +206,8 @@ pub(crate) struct NotifyWindows {
     /// The main window's windowing system and display, noted every frame.
     pub(super) platform: NotifyPlatform,
     pub(super) main_display: Option<DisplayId>,
+    /// The OS idle clock (`quill::passcode::os_idle_ms`); a test swaps it.
+    pub(super) idle_ms: fn() -> Option<u64>,
 }
 
 impl NotifyWindows {
@@ -221,6 +223,7 @@ impl NotifyWindows {
             clock: Clock::Stopped,
             platform: NotifyPlatform::Other,
             main_display: None,
+            idle_ms: quill::passcode::os_idle_ms,
         }
     }
 
@@ -774,25 +777,37 @@ impl QuillApp {
         }
     }
 
+    /// An event changed what the windows need (a hover, a click, a new
+    /// notice): the clock steps at once, unless it is a frame away anyway.
     fn ensure_notify_clock(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.delivery.windows.clock, Clock::Running { .. }) {
+        let soon = Instant::now() + FRAME;
+        if let Clock::Running { due, .. } = self.delivery.windows.clock
+            && due <= soon
+        {
             return;
         }
+        self.arm_notify_clock(Instant::now(), cx);
+    }
+
+    /// Run one clock step at `due`; the step arms the next one. The stage
+    /// holds the one task and its due instant, so each step replaces the
+    /// task that ran it, and the step that finds no popup left stops the
+    /// clock. While a popup waits for the user, the OS idle clock is read every
+    /// `INPUT_CHECK_MS` (tdesktop `_inputCheckTimer`): the OS posts no
+    /// event for the next key or mouse move anywhere on the desktop.
+    fn arm_notify_clock(&mut self, due: Instant, cx: &mut Context<Self>) {
         // screen-scope: the notification windows are the app's; the tick
         // shows whichever account's notices are queued.
         let task = cx.spawn(async move |this, cx| {
-            loop {
-                let next = this
-                    .update(cx, |app, cx| app.notify_windows_tick(cx))
-                    .ok()
-                    .flatten();
-                let Some(delay) = next else {
-                    break;
-                };
-                cx.background_executor().timer(delay).await;
-            }
+            let wait = due.saturating_duration_since(Instant::now());
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(next) = app.notify_windows_tick(cx) {
+                    app.arm_notify_clock(Instant::now() + next, cx);
+                }
+            });
         });
-        self.delivery.windows.clock = Clock::Running { _task: task };
+        self.delivery.windows.clock = Clock::Running { due, _task: task };
     }
 
     /// One clock step: timers, fades, slides. Returns when to run again,
@@ -857,42 +872,12 @@ impl QuillApp {
                 .retain(|(_, p)| !(p.hiding() && p.opacity.done(now)));
             self.notify_show_next(cx);
         }
-        let windows = &mut self.delivery.windows;
-        if animating {
+        // A close restacks, which starts fades and slides `animating` did
+        // not see: step again a frame later and let them play out.
+        if animating || closed {
             return Some(FRAME);
         }
-        // Held, nothing is due: the hold ends on an event, which settles.
-        let deadline = (!windows.held())
-            .then(|| {
-                windows
-                    .shown
-                    .iter()
-                    .filter(|s| !s.unlinked() && !s.popup.hiding())
-                    .filter_map(|s| s.hold.hide_at())
-                    .min()
-            })
-            .flatten()
-            .map(|at| at.saturating_duration_since(now));
-        let waiting = windows
-            .shown
-            .iter()
-            .any(|s| s.hold.waiting() && !s.unlinked());
-        let next = match (deadline, waiting) {
-            (Some(deadline), true) => Some(deadline.min(Duration::from_millis(INPUT_CHECK_MS))),
-            (Some(deadline), false) => Some(deadline),
-            (None, true) => Some(Duration::from_millis(INPUT_CHECK_MS)),
-            (None, false) => None,
-        };
-        let open =
-            !windows.shown.is_empty() || windows.hide_all.is_some() || !windows.samples.is_empty();
-        match next {
-            Some(delay) => Some(delay.max(FRAME)),
-            None if open => Some(Duration::from_millis(INPUT_CHECK_MS)),
-            None => {
-                windows.clock = Clock::Stopped;
-                None
-            }
-        }
+        self.delivery.windows.next_step(now)
     }
 
     /// tdesktop `checkLastInput`: a notification stays until the user has
@@ -900,8 +885,8 @@ impl QuillApp {
     /// `WAIT_LONG_HIDE_MS` before the slow fade. Without an idle clock it
     /// starts the timer at once.
     fn notify_check_input(&mut self, now: Instant) {
-        let idle = quill::passcode::os_idle_ms().map(Duration::from_millis);
         let windows = &mut self.delivery.windows;
+        let idle = (windows.idle_ms)().map(Duration::from_millis);
         for shown in windows.shown.iter_mut().filter(|s| s.hold.waiting()) {
             let back = match idle {
                 None => true,

@@ -9,7 +9,6 @@ use super::shell::{DialogKind, QuillShell};
 use super::suggested_posts_state::{AcceptBox, BalanceFor, DeclineBox, SuggestTarget, TimeTarget};
 use super::suggested_posts_ui::{channel_name, sender_short_name};
 use crate::ui::status_note::StatusNote;
-use gpui_base::Disableable;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -21,7 +20,7 @@ use quill::suggested_posts::{
     DECLINE_REASON_MAX, DirectMessagesRole, LOW_TON_BUTTON, LOW_TON_TEXT, LOW_TON_URL, SuggestMode,
     SuggestTerms, SuggestedPostInfo, SuggestedPostState, accept_text, decline_text, low_ton_title,
 };
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// What the boxes need to know about one suggestion.
@@ -135,12 +134,27 @@ impl QuillApp {
             return;
         };
         let (chat_id, message_id) = (accept.chat_id, accept.message_id);
-        let decided = self
-            .suggestion(chat_id, message_id)
-            .is_some_and(|s| s.info.state != SuggestedPostState::Pending);
-        if decided {
+        if self.suggestion_decided(chat_id, message_id) {
             self.close_suggest_accept(cx);
         }
+    }
+
+    /// The Decline box of a post that is no longer pending (decided or
+    /// expired, here or by the other side) closes with nothing sent.
+    pub(super) fn close_decided_decline(&mut self, cx: &mut Context<Self>) {
+        let Some(decline) = self.suggested_posts.decline() else {
+            return;
+        };
+        let (chat_id, message_id) = (decline.chat_id, decline.message_id);
+        if self.suggestion_decided(chat_id, message_id) {
+            self.close_suggest_decline(cx);
+        }
+    }
+
+    /// Whether the post is known and no longer pending.
+    fn suggestion_decided(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.suggestion(chat_id, message_id)
+            .is_some_and(|s| s.info.state != SuggestedPostState::Proposed)
     }
 
     /// "Publish": a member is checked against the balance first.
@@ -148,9 +162,11 @@ impl QuillApp {
         let Some(accept) = self.suggested_posts.accept().cloned() else {
             return;
         };
-        // A second Publish while the first is on its way does nothing and
-        // the box stays, its button waiting, until the answer settles it.
+        // The Terms box stayed open while a Publish or Decline went out
+        // (the other window, a keyboard shortcut): the driver would
+        // refuse a second one and the note would blame the wrong action.
         if self.publish_busy(accept.chat_id, accept.message_id) {
+            self.suggested_posts.close_accept();
             cx.notify();
             return;
         }
@@ -158,7 +174,7 @@ impl QuillApp {
         // is sent for a suggestion that is no longer pending.
         let pending = self
             .suggestion(accept.chat_id, accept.message_id)
-            .is_none_or(|s| s.info.state == SuggestedPostState::Pending);
+            .is_none_or(|s| s.info.state == SuggestedPostState::Proposed);
         if !pending {
             self.suggested_posts.close_accept();
             self.set_note(StatusNote::error(tr(
@@ -223,6 +239,12 @@ impl QuillApp {
         let Some(suggestion) = self.suggestion(chat_id, message_id) else {
             return;
         };
+        // A Publish or Decline of this post is still out: its answer
+        // settles it, and a Decline over a Publish would read "couldn't
+        // decline" for a post that is being published.
+        if self.publish_busy(chat_id, message_id) {
+            return;
+        }
         let reason = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(tr(keys::SUGGEST_DECLINE_REASON))
@@ -262,6 +284,15 @@ impl QuillApp {
         let Some(decline) = self.suggested_posts.take_decline() else {
             return;
         };
+        // Decided meanwhile (the other side, or it expired), or a Publish
+        // is out for it: nothing is sent for a post that is no longer
+        // pending.
+        if self.suggestion_decided(decline.chat_id, decline.message_id)
+            || self.publish_busy(decline.chat_id, decline.message_id)
+        {
+            cx.notify();
+            return;
+        }
         let reason: String = decline
             .reason
             .read(cx)
@@ -422,16 +453,13 @@ impl QuillApp {
         dialog: Dialog,
         on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + Clone + 'static,
     ) -> Dialog {
-        let body = Rc::new(RefCell::new(Some(body)));
+        let body = Rc::new(Cell::new(Some(body)));
         dialog
             .overlay(true)
             .title(crate::ui::shell::dialog_title(title))
             .content(crate::ui::shell::scrollable_dialog_content(
                 move |content, _, _| {
-                    let body = body
-                        .borrow_mut()
-                        .take()
-                        .unwrap_or_else(|| div().into_any_element());
+                    let body = body.take().unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 },
             ))
@@ -452,7 +480,6 @@ impl QuillApp {
             let Some(accept) = this.suggested_posts.accept() else {
                 return dialog.on_close(on_close);
             };
-            let publishing = this.publish_busy(accept.chat_id, accept.message_id);
             let body = div()
                 .flex()
                 .flex_col()
@@ -485,8 +512,6 @@ impl QuillApp {
                             Button::new("suggest-accept-publish")
                                 .label(tr(keys::Q_MONEY_PUBLISH))
                                 .primary()
-                                .loading(publishing)
-                                .disabled(publishing)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.confirm_suggest_accept(cx);
                                     this.close_kit_dialog_if_done(
@@ -605,16 +630,13 @@ impl QuillApp {
                         })),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

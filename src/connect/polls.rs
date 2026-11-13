@@ -182,6 +182,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_poll_voters_page(chat_id, message_id, option_index, 0)
     }
 
+    /// Frame upkeep: the poll changed, which made the list `Stale`; ask for
+    /// it again. A request that goes out turns the stage into `Loading`, and
+    /// one that cannot go turns it into `Failed`, so a stale list is asked
+    /// once. A `getPollVoters` for it still out sends nothing and leaves it
+    /// `Stale` for a later frame. Whether a request went out.
+    pub fn refresh_stale_poll_voters(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+    ) -> bool {
+        let key = (chat_id.0, message_id.0, option_index as i32);
+        matches!(
+            self.session.messages.poll_voters.get(&key),
+            Some(PollVotersFetch::Stale)
+        ) && matches!(
+            self.fetch_poll_voters(chat_id, message_id, option_index),
+            Ok(Some(_))
+        )
+    }
+
     /// B4: the next `getPollVoters` page — `offset` is the already-loaded
     /// count. No-op unless the cache holds a loaded page; exhaustion is
     /// handled in the reducer, which clamps `total_count` on a short
@@ -206,6 +227,31 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub const POLL_VOTERS_PAGE_SIZE: i32 = 50;
 
     fn fetch_poll_voters_page(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_index: usize,
+        offset: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let sent = self.send_poll_voters_page(chat_id, message_id, option_index, offset);
+        // A refused ask of a stale list ends it as `Failed`, which the
+        // dialog draws with a Retry; left `Stale`, it would ask every frame.
+        let key = (chat_id.0, message_id.0, option_index as i32);
+        if sent.is_err()
+            && matches!(
+                self.session.messages.poll_voters.get(&key),
+                Some(PollVotersFetch::Stale)
+            )
+        {
+            self.session.messages.poll_voters.insert(
+                key,
+                PollVotersFetch::Failed(crate::state::send_failed_line("Could not load voters")),
+            );
+        }
+        sent
+    }
+
+    fn send_poll_voters_page(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
@@ -293,7 +339,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 match self.session.messages.poll_voters.get_mut(&key) {
                     Some(PollVotersFetch::Loading(id)) if *id == extra => {
-                        self.session.messages.poll_voters.remove(&key);
+                        self.session.messages.poll_voters.insert(
+                            key,
+                            PollVotersFetch::Failed(crate::state::send_failed_line(
+                                "Could not load voters",
+                            )),
+                        );
                     }
                     Some(PollVotersFetch::Loaded { more, .. })
                         if *more == VotersMore::Asking(extra) =>

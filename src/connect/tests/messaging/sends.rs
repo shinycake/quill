@@ -252,6 +252,7 @@ fn driver_sends_photo_and_document_from_picked_paths() {
         driver.session.view_generation,
         "",
         Some(crate::composer::ComposerAttachment {
+            id: Default::default(),
             path: pick_dir.join("missing-forged.bin"),
             kind: AttachmentKind::Document,
             file_name: "missing-forged.bin".into(),

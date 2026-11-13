@@ -235,6 +235,161 @@ class Timers(unittest.TestCase):
         }
         self.assertEqual(keys(timers, files), ["poll:watch"])
 
+    def test_a_task_that_rearms_itself_at_a_fixed_period_is_a_poll(self):
+        files = {
+            "src/ui/a.rs": (
+                "impl App {\n"
+                "    fn tick(&mut self, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(Duration::from_millis(250)).await;\n"
+                "            this.update(cx, |this, cx| this.tick(cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                "    fn clock(&mut self, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(TICK).await;\n"
+                "            this.update(cx, |this, cx| this.clock(cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                # Deadline-driven: the wait comes from a stored instant.
+                "    fn wake(&mut self, due: Instant, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            let wait = due.saturating_duration_since(Instant::now());\n"
+                "            cx.background_executor().timer(wait).await;\n"
+                "            this.update(cx, |this, cx| this.wake(next_due(), cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                # Another function's call after the wait is not a re-arm.
+                "    fn once(&mut self, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(Duration::from_secs(1)).await;\n"
+                "            this.update(cx, |this, cx| this.finish(cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                "}\n"
+            )
+        }
+        self.assertEqual(
+            keys(timers, files), ["poll:App::clock", "poll:App::tick"]
+        )
+
+    def test_a_deadline_elsewhere_in_the_function_does_not_exempt_a_fixed_rearm(self):
+        files = {
+            "src/ui/a.rs": (
+                "impl App {\n"
+                # A fixed re-arm in one branch beside a deadline in another.
+                "    fn clock(&mut self, due: Option<Instant>, cx: &mut Cx) {\n"
+                "        let wait = match due {\n"
+                "            Some(due) => due.saturating_duration_since(Instant::now()),\n"
+                "            None => Duration::from_millis(300),\n"
+                "        };\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(wait).await;\n"
+                "            this.update(cx, |this, cx| this.clock(None, cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                # The same through an `if` binding and a `*_wait(` call.
+                "    fn idle(&mut self, held: bool, deadline: Instant, cx: &mut Cx) {\n"
+                "        let wait = if held { HELD_MS } else { deadline - Instant::now() };\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(wait).await;\n"
+                "            this.update(cx, |this, cx| this.idle(held, deadline, cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                "    fn walk(&mut self, cx: &mut Cx) {\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(self.registry_wait()).await;\n"
+                "            this.update(cx, |this, cx| this.walk(cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                # Every branch computed from a deadline: not a poll.
+                "    fn both(&mut self, due: Instant, next: Instant, cx: &mut Cx) {\n"
+                "        let wait = if due < next { due.saturating_duration_since(Instant::now()) } else { next.saturating_duration_since(Instant::now()) };\n"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                "            cx.background_executor().timer(wait).await;\n"
+                "            this.update(cx, |this, cx| this.both(due, next, cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+                "}\n"
+            )
+        }
+        self.assertEqual(
+            keys(timers, files), ["poll:App::clock", "poll:App::idle", "poll:App::walk"]
+        )
+
+    def test_a_rearm_must_hand_on_a_stored_deadline(self):
+        def wake(name, delay, rearm, lets=""):
+            return (
+                f"    fn {name}(&mut self, due: Instant, cx: &mut Cx) {{\n"
+                f"{lets}"
+                "        let task = cx.spawn(async move |this, cx| {\n"
+                f"            cx.background_executor().timer({delay}).await;\n"
+                f"            this.update(cx, |this, cx| this.{name}({rearm}, cx)).ok();\n"
+                "        });\n"
+                "        self.task = Some(task);\n"
+                "    }\n"
+            )
+
+        stored = "due.saturating_duration_since(Instant::now())"
+        files = {
+            "src/ui/a.rs": (
+                "impl App {\n"
+                # The delay is a deadline, but the next one is now + a period.
+                + wake("fixed_next", stored, "Instant::now() + STEP")
+                + wake(
+                    "bound_next",
+                    stored,
+                    "next",
+                    "        let next = Instant::now() + Duration::from_millis(100);\n",
+                )
+                # A `let` constant period read inside a compound expression.
+                + wake(
+                    "period",
+                    "period.saturating_sub(started.elapsed())",
+                    "due",
+                    "        let period = Duration::from_secs(10);\n",
+                )
+                # A field that only has the word in its name.
+                + wake("remaining", "self.remaining", "due")
+                # A constant floor turns the wait into a period.
+                + wake("floor", stored + ".max(Duration::from_secs(10))", "due")
+                # Passing: the next deadline comes from the stage; a frame floor.
+                + wake("stage", stored, "self.stage.next_due(Instant::now())")
+                + wake("frame", stored + ".max(Duration::from_millis(16))", "due")
+                + "}\n"
+            )
+        }
+        self.assertEqual(
+            keys(timers, files),
+            [
+                "poll:App::bound_next",
+                "poll:App::fixed_next",
+                "poll:App::floor",
+                "poll:App::period",
+                "poll:App::remaining",
+            ],
+        )
+
+    def test_a_loop_that_sleeps_a_computed_wait_is_still_a_poll(self):
+        files = {
+            "src/ui/a.rs": (
+                "async fn watch(spent: Duration) {\n"
+                "    loop {\n"
+                "        cx.background_executor().timer(PERIOD.saturating_sub(spent)).await;\n"
+                "    }\n"
+                "}\n"
+            )
+        }
+        self.assertEqual(keys(timers, files), ["poll:watch"])
+
 
 class Requests(unittest.TestCase):
     def test_purpose_checks_and_unmatched_answers_fail(self):
@@ -330,6 +485,47 @@ class Enums(unittest.TestCase):
             "src/telegram/envelope/a.rs": "pub enum CallState { Pending, Ready }\n",
         }
         self.assertEqual(keys(enums, files), ["bare:Load::Loading", "unkeyed:Gate::Asking"])
+
+    def test_a_download_stage_holds_its_file_id(self):
+        files = {
+            "src/state/a.rs": (
+                "pub enum Wait { Idle, Downloading { file: FileId } }\n"
+                "pub enum Named { Idle, Downloading(Pending) }\n"
+                "pub struct Pending { file_id: FileId, text: String }\n"
+                "pub enum Bare { Idle, Downloading { name: String } }\n"
+                "pub enum Deep { Idle, Downloading(Outer) }\n"
+                "pub struct Outer { inner: Pending }\n"
+                "pub enum Other { Idle, Waiting(Contents) }\n"
+                "pub struct Contents { inner: Pending }\n"
+                "pub enum Send { Idle, Sending { file: FileId } }\n"
+            ),
+        }
+        self.assertEqual(
+            keys(enums, files),
+            [
+                "unkeyed:Bare::Downloading",
+                "unkeyed:Deep::Downloading",
+                "unkeyed:Other::Waiting",
+                "unkeyed:Send::Sending",
+            ],
+        )
+
+    def test_a_deadline_or_an_owned_generic_handle_is_what_ends_the_stage(self):
+        files = {
+            "src/state/a.rs": (
+                "pub enum Held { Idle, Waiting { commit_at_ms: u64 }, Retrying { retry_at_secs: i64 } }\n"
+                "pub enum Owned<R = ()> { Idle, Loading { runtime: R }, Running(R) }\n"
+                "pub enum Vague { Idle, Waiting { at: u64 } }\n"
+                "pub enum Plain<R> { Idle, Loading { count: u8 }, Running(R) }\n"
+                "pub enum Empty<R> { Idle, Running(R) }\n"
+                "fn f(_: Empty<()>) {}\n"
+                "pub enum Stamp { Idle, Sent { sent_at_ms: u64 } }\n"
+            ),
+        }
+        self.assertEqual(
+            keys(enums, files),
+            ["unkeyed:Empty::Running", "unkeyed:Plain::Loading", "unkeyed:Stamp::Sent", "unkeyed:Vague::Waiting"],
+        )
 
     def test_a_u64_standing_in_for_a_request_id_fails(self):
         files = {

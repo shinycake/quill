@@ -371,6 +371,9 @@ impl QuillApp {
     /// state is there; a closed window's list runs nothing.
     fn note_history_scroll(&mut self, window: Option<quill::ids::ChatId>, cx: &mut Context<Self>) {
         self.in_window_scope(window, cx, |this, cx| {
+            // A link tooltip belongs to the text under the pointer: the rows
+            // moved, and a wheel sends no mouse move to end it.
+            this.set_link_tooltip(None, cx);
             // Record where the reader is now: the saved position follows
             // every scroll, not only the next full render.
             if let Some(key) = this.history.anchor.key() {

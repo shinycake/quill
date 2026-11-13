@@ -25,6 +25,26 @@ fn notification_settings_mute_and_unmute() {
     assert!(!session.chats.get(&7).unwrap().is_muted());
 }
 
+/// Sweep r4-03 round 2 (item 14): a `chat` object asked before a
+/// notification save and answered after it does not put the old settings
+/// back while the save is out.
+#[test]
+fn a_chat_object_answered_during_a_notification_save_keeps_the_saved_settings() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let new_chat = r#"{"@type":"updateNewChat","chat":{"id":7,"title":"m","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0,"notification_settings":{"@type":"chatNotificationSettings","use_default_mute_for":false,"mute_for":0,"use_default_sound":true,"sound_id":"0","use_default_show_preview":true,"show_preview":false,"use_default_mute_stories":true,"mute_stories":false,"use_default_story_sound":true,"story_sound_id":"0","use_default_show_story_poster":true,"show_story_poster":false,"use_default_disable_pinned_message_notifications":true,"disable_pinned_message_notifications":false,"use_default_disable_mention_notifications":true,"disable_mention_notifications":false}}}"#;
+    apply_json(&mut session, &seq, &sink, new_chat);
+    let muted = crate::telegram::envelope::ChatNotificationSettings::default()
+        .with_mute_for(crate::telegram::envelope::MUTE_FOREVER);
+    session.show_chat_save(ChatId(7), RequestId(1), &muted);
+    assert!(session.chats.get(&7).unwrap().is_muted());
+    apply_json(&mut session, &seq, &sink, new_chat);
+    assert!(
+        session.chats.get(&7).unwrap().is_muted(),
+        "the old answer does not undo the save"
+    );
+}
+
 #[test]
 fn scope_mute_default_suppresses_toast_and_sound() {
     let (mut session, sink) = session();
@@ -498,13 +518,7 @@ fn notification_exceptions_answer_lands_per_scope() {
         .notification_exceptions
         .entry(NotificationSettingsScope::PrivateChats)
         .or_default()
-        .begin();
-    session
-        .settings
-        .notification_exceptions
-        .entry(NotificationSettingsScope::PrivateChats)
-        .or_default()
-        .sent(extra);
+        .begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -535,13 +549,7 @@ fn failed_notification_exceptions_fetch_retries() {
         .notification_exceptions
         .entry(NotificationSettingsScope::GroupChats)
         .or_default()
-        .begin();
-    session
-        .settings
-        .notification_exceptions
-        .entry(NotificationSettingsScope::GroupChats)
-        .or_default()
-        .sent(extra);
+        .begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -871,8 +879,7 @@ fn default_auto_delete_roundtrip_and_failure() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetDefaultAutoDelete, None);
-    session.settings.default_auto_delete.begin();
-    session.settings.default_auto_delete.sent(extra);
+    session.settings.default_auto_delete.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -892,8 +899,7 @@ fn default_auto_delete_roundtrip_and_failure() {
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 86_400 }),
         None,
     );
-    session.settings.default_auto_delete.begin();
-    session.settings.default_auto_delete.sent(extra);
+    session.settings.default_auto_delete.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -909,8 +915,7 @@ fn default_auto_delete_roundtrip_and_failure() {
         RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds: 0 }),
         None,
     );
-    session.settings.default_auto_delete.begin();
-    session.settings.default_auto_delete.sent(extra);
+    session.settings.default_auto_delete.begin_with(extra);
     apply_json(
         &mut session,
         &seq,

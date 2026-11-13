@@ -526,8 +526,9 @@ fn serve(
     let Some(args) = decode_args(stream) else {
         return;
     };
-    let mark = owner.ui.mark();
-    let deadline = owner.clock.now().checked_add(owner.answer);
+    let now = owner.clock.now();
+    let deadline = now.checked_add(owner.answer);
+    let mark = deadline.map(|deadline| owner.ui.mark(now, deadline));
     on_launch(args);
     crate::wake::LINKS.poke();
     let mut out = stream;
@@ -541,8 +542,10 @@ fn serve(
     let _ = out.flush();
     // Closing without an answer would read as a dead owner, and the launch
     // would start a second Quill on this profile.
-    let answered =
-        deadline.is_none_or(|deadline| owner.ui.answered_by(mark, deadline, owner.clock));
+    let answered = match (&mark, deadline) {
+        (Some(mark), Some(deadline)) => owner.ui.answered_by(mark, deadline, owner.clock),
+        _ => true,
+    };
     let _ = out.write_all(if answered { b"ok\n" } else { b"stuck\n" });
     let _ = out.flush();
 }

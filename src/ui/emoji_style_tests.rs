@@ -95,7 +95,7 @@ fn switching_sets_draws_emoji_from_sprites(cx: &mut TestAppContext) {
 fn a_new_choice_stops_the_download_in_flight(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     vcx.run_until_parked();
-    let progress = std::sync::Arc::new(quill::spell_download::Progress::default());
+    let (progress, _worker) = quill::spell_download::Progress::start();
     let held = progress.clone();
     app.update(&mut vcx, |app, cx| {
         let task = cx.spawn(async move |_, _| {});

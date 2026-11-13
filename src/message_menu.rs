@@ -170,10 +170,11 @@ pub fn song_name(performer: &str, title: &str, file_name: &str) -> String {
     }
 }
 
-/// Where the media file is: a download running (the menu then only offers
-/// to cancel it), on disk, or neither.
+/// Where the media file is, read from the download tracker and the disk when
+/// the menu is built (never stored): a download running (the menu then only
+/// offers to cancel it), on disk, or neither.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum MediaFile {
+pub enum MediaFileView {
     #[default]
     Remote,
     Downloading,
@@ -183,7 +184,7 @@ pub enum MediaFile {
 /// What is known about the media right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MediaFacts {
-    pub file: MediaFile,
+    pub file: MediaFileView,
     /// Saving the content is allowed (`messageProperties.can_be_saved`,
     /// which is false in a protected chat).
     pub can_save: bool,
@@ -256,12 +257,12 @@ pub fn media_actions(target: &MediaTarget, facts: &MediaFacts) -> Vec<MediaActio
         }
         return actions;
     }
-    if facts.file == MediaFile::Downloading {
+    if facts.file == MediaFileView::Downloading {
         return vec![MediaAction::CancelDownload];
     }
     if target.kind == MediaKind::Animation {
         // A GIF that is not on disk (not autoplayed) can be opened.
-        if facts.file != MediaFile::Local {
+        if facts.file != MediaFileView::Local {
             actions.push(MediaAction::OpenGif);
         }
         if facts.can_save && facts.gif_saved != Some(true) {
@@ -285,7 +286,7 @@ pub fn media_actions(target: &MediaTarget, facts: &MediaFacts) -> Vec<MediaActio
             actions.push(MediaAction::ToggleFavorite { remove: favorite });
         }
     }
-    if facts.file == MediaFile::Local {
+    if facts.file == MediaFileView::Local {
         actions.push(MediaAction::ShowInFolder);
     }
     if facts.can_save && facts.tone_ok {
@@ -534,10 +535,10 @@ mod tests {
 
     use crate::local_time::civil_at;
     use crate::message_menu::{
-        MediaAction, MediaFacts, MediaFile, MediaKind, MediaTarget, ToneLimits, copy_link_label,
-        fact_check_label, link_copied_note, media_actions, media_target, reacted_label,
-        read_date_label, read_status_label, seen_kind, seen_label, sent_label, song_name,
-        timecode_insertion, timecode_offered, timecode_text, tone_offered,
+        MediaAction, MediaFacts, MediaFileView, MediaKind, MediaTarget, ToneLimits,
+        copy_link_label, fact_check_label, link_copied_note, media_actions, media_target,
+        reacted_label, read_date_label, read_status_label, seen_kind, seen_label, sent_label,
+        song_name, timecode_insertion, timecode_offered, timecode_text, tone_offered,
     };
     use crate::telegram::envelope::{MessageContent, MessageReadDate};
 
@@ -559,7 +560,7 @@ mod tests {
 
     fn local() -> MediaFacts {
         MediaFacts {
-            file: MediaFile::Local,
+            file: MediaFileView::Local,
             can_save: true,
             ..MediaFacts::default()
         }
@@ -613,7 +614,7 @@ mod tests {
     #[test]
     fn downloading_documents_only_offer_cancel() {
         let facts = MediaFacts {
-            file: MediaFile::Downloading,
+            file: MediaFileView::Downloading,
             ..local()
         };
         for kind in [MediaKind::Document, MediaKind::Video, MediaKind::Audio] {
@@ -636,7 +637,7 @@ mod tests {
         );
         // Not downloaded: nothing to show in the folder.
         let remote = MediaFacts {
-            file: MediaFile::Remote,
+            file: MediaFileView::Remote,
             ..local()
         };
         assert_eq!(
@@ -660,7 +661,7 @@ mod tests {
         let mut animation = target(MediaKind::Animation);
         animation.copy_name = None;
         let remote = MediaFacts {
-            file: MediaFile::Remote,
+            file: MediaFileView::Remote,
             gif_saved: Some(false),
             ..local()
         };

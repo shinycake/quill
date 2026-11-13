@@ -40,9 +40,17 @@ fn a_busy_camera_at_join_still_connects_with_audio_and_reports_the_camera() {
     );
     assert_eq!(handle.group_connects().len(), 1);
 
-    // The camera step retries it once it can open.
+    // The camera step retries it once it can open, after its backoff: an
+    // update inside the wait does not drive the engine again.
     handle.set_camera_refuses(false);
     ingest_call_json(&mut driver, &seq, &sink, UNRELATED);
+    assert!(handle.group_camera_changes().is_empty());
+    driver
+        .pump_group_call_transport(
+            [Some(555), None],
+            std::time::Instant::now() + std::time::Duration::from_secs(10),
+        )
+        .expect("pump");
     assert_eq!(
         handle.group_camera_changes(),
         vec![(555, Some("cam-1".to_string()))]

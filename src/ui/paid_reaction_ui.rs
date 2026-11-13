@@ -28,7 +28,7 @@ use quill::paid_reaction::{
 };
 use quill::premium_hub::group_digits;
 use quill::state::unix_ms_now;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 impl QuillApp {
@@ -121,7 +121,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.undo_paid_reaction(chat_id, message_id);
+            // A refused send leaves the Stars waiting: they are committed
+            // when their time comes, so the person is told now.
+            if live.driver.undo_paid_reaction(chat_id, message_id).is_err() {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_MONEY_COULD_NOT_UNDO_THE_REACTION,
+                )));
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.payments.paid.undo(chat_id.0, message_id.0);
         }
@@ -492,12 +498,9 @@ impl QuillApp {
             );
             dialog
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

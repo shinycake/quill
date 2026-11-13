@@ -82,7 +82,7 @@ fn launch_links_resolve_locally_instead_of_get_deep_link_info() {
         );
         assert!(matches!(
             driver.session.chats_state.deep_link_stage().cloned(),
-            Some(DeepLinkState::ChatReady { chat_id, action: DeepLinkAction::OpenUsername { ref domain, .. } })
+            Some(DeepLinkState::ChatReady { chat_id, action: DeepLinkAction::OpenUsername { ref domain, .. }, .. })
                 if chat_id.0 == 42 && domain == "durov"
         ));
     }
@@ -148,6 +148,52 @@ fn failed_links_use_tdesktop_wording() {
         fail("tg://resolve?domain=durov", 500, "Internal"),
         "Couldn't open the link (error 500)."
     );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The chat the Premium bot link resolved carries the request of the
+/// `ResolvingChat` the subscribe button queued its `/start` for, so the
+/// open takes it for that flow only.
+#[test]
+fn the_resolved_premium_chat_carries_the_request_its_start_waits_on() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let extra = driver
+        .resolve_deep_link(DeepLinkAction::OpenUsername {
+            domain: "PremiumBot".into(),
+            start_param: Some("ref".into()),
+            post: None,
+            story_id: None,
+        })
+        .unwrap()
+        .unwrap();
+    driver.session.payments.hub.auto_start = Some(PremiumAutoStart {
+        username: "premiumbot".into(),
+        start_ref: "ref".into(),
+        request: extra,
+    });
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type": "chat", "@extra": extra.as_extra(), "id": 42, "title": "Premium",
+            "type": {"@type": "chatTypePrivate", "user_id": 42}, "unread_count": 0}),
+    );
+    let Some(DeepLinkState::ChatReady {
+        action, request, ..
+    }) = driver.session.chats_state.deep_link_stage().cloned()
+    else {
+        panic!("the bot's chat is ready");
+    };
+    assert_eq!(request, extra);
+    let DeepLinkAction::OpenUsername { domain, .. } = action else {
+        panic!("an username link");
+    };
+    let hub = &mut driver.session.payments.hub;
+    assert!(hub.take_auto_start(&domain, Some(request)).is_some());
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -673,6 +719,20 @@ fn a_flow_in_progress_wins_over_another_link() {
             .request_deep_link_info_from("https://t.me/userpick", false)
             .unwrap(),
         None
+    );
+    // So does a pasted text link: it does not replace the flow in flight.
+    assert_eq!(
+        driver
+            .request_deep_link_text_from("https://t.me/userpick", false)
+            .unwrap(),
+        None
+    );
+    assert!(
+        !recorder
+            .snapshot()
+            .iter()
+            .any(|json| json.contains("getDeepLinkInfo")),
+        "no second lookup went out"
     );
     assert!(
         driver

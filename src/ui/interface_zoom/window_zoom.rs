@@ -10,7 +10,8 @@ pub(super) type ResizeCallback = Box<dyn FnMut(Size<Pixels>, f32)>;
 pub(super) enum Refire {
     #[default]
     Idle,
-    Running,
+    /// The callback is on the stack (a synchronous re-entry guard, not work in flight).
+    InCallback,
     RunAgain,
 }
 
@@ -84,7 +85,7 @@ impl WindowZoom {
             callback: Some(callback),
         };
         for _ in 0..=MAX_REFIRES {
-            self.refire.set(Refire::Running);
+            self.refire.set(Refire::InCallback);
             let zoom = self.zoom.get();
             if let Some(callback) = run.callback.as_mut() {
                 callback(

@@ -75,19 +75,19 @@ fn a_refused_collections_send_keeps_the_stale_mark() {
     let mut t = Flaky::new();
     let hub = &mut t.driver.session.payments.hub;
     hub.received.owner = Some(MessageSender::User { user_id: 7 });
-    t.driver.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale;
+    t.driver.session.payments.gifts_manage.collections_fetch = CollectionsFetch::Stale(Vec::new());
     t.sender.refuse(&["getGiftCollections"]);
     assert!(t.driver.refresh_gift_collections_if_stale().is_err());
     assert_eq!(
         t.driver.session.payments.gifts_manage.collections_fetch,
-        CollectionsFetch::Stale
+        CollectionsFetch::Stale(Vec::new())
     );
     t.sender.refuse(&[]);
     t.driver.refresh_gift_collections_if_stale().unwrap();
     assert_eq!(t.sender.count("getGiftCollections"), 1);
     assert!(matches!(
         t.driver.session.payments.gifts_manage.collections_fetch,
-        CollectionsFetch::Loading(_)
+        CollectionsFetch::Loading { .. }
     ));
 }
 
@@ -320,10 +320,13 @@ fn a_failed_data_storage_write_is_tried_once_and_said() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(&blocked, b"in the way").unwrap();
     t.driver.paths.root = blocked;
-    t.driver.session.settings.data_storage_dirty = true;
+    t.driver.session.settings.data_storage_disk = crate::state::DataStorageDisk::Due;
     t.feed(json!({"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":7}}));
     // One attempt per mark, not one per ingest; the page says it failed.
-    assert!(!t.driver.session.settings.data_storage_dirty);
+    assert_eq!(
+        t.driver.session.settings.data_storage_disk,
+        crate::state::DataStorageDisk::Unsaved
+    );
     assert!(
         t.driver
             .session
@@ -344,7 +347,7 @@ fn a_failed_data_storage_write_is_tried_once_and_said() {
         "nothing marked the settings changed, so nothing was written again"
     );
     // The next change marks them again and the write goes through.
-    t.driver.session.settings.data_storage_dirty = true;
+    t.driver.session.settings.data_storage_disk = crate::state::DataStorageDisk::Due;
     t.feed(json!({"@type":"updateOption","name":"my_id","value":{"@type":"optionValueInteger","value":7}}));
     assert!(
         t.driver

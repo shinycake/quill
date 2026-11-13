@@ -6,42 +6,38 @@
 //! (`PropertiesChanged`) under FDE2 or FFF9.
 //!
 //! zbus is pure Rust: no libdbus or GLib is needed, only a running
-//! `bluetoothd`. The scan runs on its own thread and looks at the stop
-//! flag between messages.
+//! `bluetoothd`. The scan runs on its own thread and waits for the next
+//! message or the stop signal, whichever comes first.
 #![deny(clippy::indexing_slicing)]
 
 use super::ble::{ScanEvent, Scanner, is_cable_uuid};
 use super::eid::ADVERT_LEN;
 use crate::webauthn::log;
+use futures_channel::oneshot;
 use futures_lite::StreamExt;
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::time::Duration;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 const BLUEZ: &str = "org.bluez";
 const ADAPTER: &str = "org.bluez.Adapter1";
 const DEVICE: &str = "org.bluez.Device1";
-/// How often the scan thread looks at the stop flag.
-const POLL: Duration = Duration::from_millis(200);
 /// How deep a `ServiceData` value may nest variants.
 const MAX_VARIANT_DEPTH: usize = 4;
 
 /// One scan on its own thread.
 #[derive(Default)]
 pub struct LinuxScanner {
-    stop: Option<Arc<AtomicBool>>,
+    /// Sending on it (or dropping it) stops the scan thread's wait.
+    stop: Option<oneshot::Sender<()>>,
 }
 
 impl Scanner for LinuxScanner {
     fn start(&mut self, events: Sender<ScanEvent>) -> bool {
         self.stop();
-        let stop = Arc::new(AtomicBool::new(false));
-        let flag = stop.clone();
+        let (stop, stopped) = oneshot::channel();
         let spawned = crate::thread_guard::spawn_guarded("quill-cable-scan", move || {
-            zbus::block_on(scan(&events, &flag));
+            zbus::block_on(scan(&events, stopped));
         });
         if spawned.is_err() {
             return false;
@@ -52,7 +48,7 @@ impl Scanner for LinuxScanner {
 
     fn stop(&mut self) {
         if let Some(stop) = self.stop.take() {
-            stop.store(true, Ordering::SeqCst);
+            let _ = stop.send(());
         }
     }
 }
@@ -135,7 +131,13 @@ fn handle(events: &Sender<ScanEvent>, message: &zbus::Message) {
     }
 }
 
-async fn scan(events: &Sender<ScanEvent>, stop: &AtomicBool) {
+/// What ended one wait of the scan loop.
+enum Wake {
+    Stopped,
+    Signal(Option<zbus::Result<zbus::Message>>),
+}
+
+async fn scan(events: &Sender<ScanEvent>, mut stop: oneshot::Receiver<()>) {
     let tell = |available| {
         let _ = events.send(ScanEvent::Available(available));
     };
@@ -224,17 +226,27 @@ async fn scan(events: &Sender<ScanEvent>, stop: &AtomicBool) {
             send_device(events, device);
         }
     }
-    while !stop.load(Ordering::SeqCst) {
-        let next = futures_lite::future::or(async { Some(stream.next().await) }, async {
-            async_io::Timer::after(POLL).await;
-            None
-        })
+    loop {
+        // The stop signal is polled first, so a flood of adverts cannot
+        // starve it; sent or dropped, it ends the wait at once.
+        let next = futures_lite::future::or(
+            async {
+                let _ = (&mut stop).await;
+                Wake::Stopped
+            },
+            async { Wake::Signal(stream.next().await) },
+        )
         .await;
         match next {
-            None => {}
-            Some(None) => break,
-            Some(Some(Ok(message))) => handle(events, &message),
-            Some(Some(Err(_))) => {}
+            Wake::Stopped => break,
+            // BlueZ went away (bluetoothd stopped): no more adverts will
+            // come, which the ceremony hears as Bluetooth being gone.
+            Wake::Signal(None) => {
+                tell(false);
+                break;
+            }
+            Wake::Signal(Some(Ok(message))) => handle(events, &message),
+            Wake::Signal(Some(Err(_))) => {}
         }
     }
     let _ = proxy.call_method("StopDiscovery", &()).await;

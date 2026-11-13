@@ -146,22 +146,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let create = &mut self.session.bots.owned.create;
-        create.generation = create.generation.wrapping_add(1);
-        let generation = create.generation;
-        create.check = BotUsernameCheck::Checking {
-            generation,
-            username: username.to_string(),
-        };
-        let extra = self.session.request(
-            RequestPurpose::Bots(BotsPurpose::CheckBotUsername { generation }),
-            None,
-        );
+        let extra = self
+            .session
+            .request(RequestPurpose::Bots(BotsPurpose::CheckBotUsername), None);
         let json = owned_bots::check_username_request(&extra.as_extra(), username);
         let sent = self.send_json_request(extra, &json);
-        if sent.is_err() {
-            self.session.bots.owned.create.check = BotUsernameCheck::Idle;
-        }
+        // Only a check that went out is waited for, under its own request;
+        // a newer check replaces the stage, so the older answer matches
+        // nothing.
+        self.session.bots.owned.create.check = match sent {
+            Ok(_) => BotUsernameCheck::Checking {
+                request: extra,
+                username: username.to_string(),
+            },
+            Err(_) => BotUsernameCheck::Idle,
+        };
         sent
     }
 
@@ -177,26 +176,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         share: Option<ManagedBotShare>,
     ) -> Result<RequestId, ConnectSendError> {
         self.owned_bots_ready(manager_bot_user_id)?;
-        let create = &mut self.session.bots.owned.create;
         // One create at a time, owned here and not by the Create button: a
         // second `createBot` would drop the first's stage and its answer,
         // and a second bot could be made unreported.
-        if matches!(create.stage, CreateStage::Creating(_)) {
+        if self.session.bots.owned.create.creating() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        create.generation = create.generation.wrapping_add(1);
-        let generation = create.generation;
-        create.stage = CreateStage::Creating(CreateSubmission {
-            generation,
+        let submission = CreateSubmission {
             name: name.to_string(),
             username: username.to_string(),
             manager_id: manager_bot_user_id,
             share,
-        });
-        let extra = self.session.request(
-            RequestPurpose::Bots(BotsPurpose::CreateBot { generation }),
-            None,
-        );
+        };
+        let extra = self
+            .session
+            .request(RequestPurpose::Bots(BotsPurpose::CreateBot), None);
         let json = owned_bots::create_request(
             &extra.as_extra(),
             manager_bot_user_id,
@@ -205,19 +199,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             via_link,
         );
         let sent = self.send_json_request(extra, &json);
-        if sent.is_err() {
-            self.session.bots.owned.create.stage = CreateStage::Editing;
-        }
+        // Only a create that went out is waited for.
+        self.session.bots.owned.create.stage = match sent {
+            Ok(_) => CreateStage::Creating {
+                request: extra,
+                submission,
+            },
+            Err(_) => CreateStage::Editing,
+        };
         sent
     }
 
     /// Reset the create dialog's state.
     pub fn reset_create_bot(&mut self) {
-        let generation = self.session.bots.owned.create.generation;
-        self.session.bots.owned.create = crate::state::CreateBotState {
-            generation: generation.wrapping_add(1),
-            ..Default::default()
-        };
+        self.session.bots.owned.create = crate::state::CreateBotState::default();
     }
 
     /// The bot a `createBot` made, once: the UI reports it. Any other stage

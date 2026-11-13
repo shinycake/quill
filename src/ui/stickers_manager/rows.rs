@@ -12,7 +12,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, trn};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{RequestPurpose, StickersPurpose};
 use quill::telegram::envelope::{StickerItem, StickerSetInfo};
 
 /// The size of the set thumbnail (tdesktop `stickersRowItem.photoSize`).
@@ -51,18 +50,8 @@ impl QuillApp {
     /// A request that changes this set is in flight.
     pub(super) fn manager_set_pending(&self, kind: Kind, set_id: i64) -> bool {
         self.session().is_some_and(|session| match kind {
-            Kind::Masks => session.mask_set_change_pending(set_id),
-            Kind::Stickers => [(true, false), (false, true), (false, false)]
-                .into_iter()
-                .any(|(installed, archived)| {
-                    session.requests.has_purpose(RequestPurpose::Stickers(
-                        StickersPurpose::ManageStickerSet {
-                            set_id,
-                            installed,
-                            archived,
-                        },
-                    ))
-                }),
+            Kind::Masks => session.stickers.masks.set_change_pending(set_id),
+            Kind::Stickers => session.sticker_set_change_pending(set_id),
         })
     }
 

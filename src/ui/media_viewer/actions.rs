@@ -309,6 +309,7 @@ impl QuillApp {
         ) {
             return;
         }
+        let shown = self.viewer_item_key();
         let mut viewer = std::mem::take(&mut self.viewer.state);
         let changed = match self.session() {
             Some(session) => viewer.retain(|item| {
@@ -324,7 +325,10 @@ impl QuillApp {
             return;
         }
         if self.viewer.state.is_open() {
-            self.reset_viewer_item_state(cx);
+            // Another message's deletion leaves the item on show alone.
+            if self.viewer_item_key() != shown {
+                self.reset_viewer_item_state(cx);
+            }
         } else {
             // Emptied: the same close as Esc (full screen, caption, seek).
             self.close_media_viewer(cx);
@@ -369,9 +373,10 @@ impl QuillApp {
                 .ok()?;
             Some(bytes.into_inner())
         });
-        self.spawn_scoped(cx, async move |this, cx| {
+        let encoding = self.spawn_scoped(cx, async move |this, cx| {
             let png = job.await;
             let _ = this.update(cx, |this, cx| {
+                this.viewer.extra.copy.finish();
                 match png {
                     Some(bytes) => {
                         cx.write_to_clipboard(ClipboardItem::new_image(
@@ -385,8 +390,8 @@ impl QuillApp {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.viewer.extra.copy = PhotoCopy::Encoding { task: encoding };
     }
 
     /// "Copy Frame": the video frame on screen to the clipboard as an
@@ -604,20 +609,25 @@ impl QuillApp {
             self.viewer.visibility.timer_done();
             return;
         }
-        // Never mid-drag (a seek, volume or speed thumb).
+        // Never mid-drag (a seek, volume or speed thumb). Held, no timer
+        // runs: the pointer leaving the controls and the end of a drag call
+        // `viewer_note_activity`, which arms the next real deadline.
         let held = self.viewer.pointer.over_controls() || self.viewer.controls.dragging();
+        if held {
+            self.viewer.visibility.timer_done();
+            return;
+        }
         if controls_should_hide(idle, held) {
             let end = self.viewer_fade_end(cx);
             self.viewer.visibility.hide(end);
             cx.notify();
             return;
         }
-        let wait = Duration::from_millis(if held {
-            VIEWER_WAIT_HIDE_MS
-        } else {
-            controls_hide_wait_ms(idle).max(16)
-        });
+        let due = self.viewer.last_activity + Duration::from_millis(VIEWER_WAIT_HIDE_MS);
         let timer = self.spawn_scoped(cx, async move |this, cx| {
+            let wait = due
+                .saturating_duration_since(std::time::Instant::now())
+                .max(Duration::from_millis(16));
             cx.background_executor().timer(wait).await;
             let _ = this.update(cx, |this, cx| this.viewer_idle_check(cx));
         });
@@ -641,7 +651,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {
-            self.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::Closed;
+            self.close_sticker_set_dialog(cx);
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULD_NOT_LOAD_THE_ATTACHED,
             )));

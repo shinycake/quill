@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use crate::ids::{ChatId, MessageId};
+use crate::ids::{ChatId, ChatMessage, MessageId};
 use crate::state::HistoryMessage;
 use crate::telegram::envelope::ReplyMarkup;
 
@@ -20,7 +20,7 @@ use crate::telegram::envelope::ReplyMarkup;
 /// target. Pure logic: unit-tested.
 pub fn active_force_reply(
     messages: &BTreeMap<i64, HistoryMessage>,
-    dismissed: &HashSet<(i64, i64)>,
+    dismissed: &HashSet<ChatMessage>,
 ) -> Option<(ChatId, MessageId, String)> {
     let mut active: Option<(ChatId, MessageId, String)> = None;
     for message in messages.values() {
@@ -28,7 +28,9 @@ pub fn active_force_reply(
             active = Some((message.chat_id, message.id, placeholder.clone()));
         }
     }
-    active.filter(|(chat_id, message_id, _)| !dismissed.contains(&(chat_id.0, message_id.0)))
+    active.filter(|(chat_id, message_id, _)| {
+        !dismissed.contains(&ChatMessage::new(*chat_id, *message_id))
+    })
 }
 
 #[cfg(test)]
@@ -98,7 +100,7 @@ mod tests {
             &force_reply_json(306, "Type your name"),
         );
         apply_json(&mut session, &seq, &sink, &force_reply_json(307, ""));
-        let none: HashSet<(i64, i64)> = HashSet::new();
+        let none: HashSet<ChatMessage> = HashSet::new();
         let active = active_force_reply(messages(&session), &none).expect("force-reply");
         assert_eq!(active.0, ChatId(21));
         assert_eq!(active.1, MessageId(307));
@@ -111,7 +113,9 @@ mod tests {
         let (mut session, sink) = session();
         let seq = AtomicU64::new(1);
         apply_json(&mut session, &seq, &sink, &force_reply_json(306, "hi"));
-        let dismissed: HashSet<(i64, i64)> = [(21, 306)].into_iter().collect();
+        let dismissed: HashSet<ChatMessage> = [ChatMessage::new(ChatId(21), MessageId(306))]
+            .into_iter()
+            .collect();
         assert!(active_force_reply(messages(&session), &dismissed).is_none());
     }
 
@@ -132,7 +136,7 @@ mod tests {
                 r#"{"@type":"replyMarkupRemoveKeyboard","is_personal":false}"#,
             ),
         );
-        let none: HashSet<(i64, i64)> = HashSet::new();
+        let none: HashSet<ChatMessage> = HashSet::new();
         assert!(active_force_reply(messages(&session), &none).is_none());
     }
 }

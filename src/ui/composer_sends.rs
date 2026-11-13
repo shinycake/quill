@@ -16,10 +16,10 @@
 
 use super::app::QuillApp;
 use super::composer::LeftSend;
-use super::composer_state::DraftClear;
+use super::composer_state::{DraftClear, Reservation};
 use quill::composer::{
-    ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
-    RenderToken,
+    AttachmentId, ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice,
+    PreviewMediaSize, RenderToken,
 };
 use quill::ids::{AccountKey, ChatId, MessageId, RequestId};
 use quill::telegram::envelope::AuthorizationState;
@@ -264,11 +264,11 @@ pub(crate) struct SendSlot {
 
 /// A tray item as it was when a step that answers later started (a
 /// picker, an editor). Its result lands only in that slot, and only while
-/// the item at `index` is still the same file.
+/// the entry with that `id` is still in its tray, wherever it moved to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TrayItem {
     pub(super) slot: SendSlot,
-    pub(super) index: usize,
+    pub(super) id: AttachmentId,
     pub(super) path: PathBuf,
 }
 
@@ -316,6 +316,47 @@ pub(crate) struct ComposerSends {
 }
 
 impl ComposerSends {
+    /// A recording's Send was tapped: the slot's draft clear is held for
+    /// it until its file is ready (`arm_draft_clear`), replacing the
+    /// earlier send's, as any send of the slot does. A send made after the
+    /// tap replaces this one, so the recording's ack can never clear what
+    /// that send owns.
+    pub(super) fn reserve_draft_clear(&mut self, slot: &SendSlot, chat: ChatId) -> Reservation {
+        let claim = Reservation::new();
+        self.set_draft_clear(slot, Some(DraftClear::reserved(chat, claim.clone())));
+        claim
+    }
+
+    /// The recording `claim` was sent as `request`: its clear waits for the
+    /// ack, unless a newer send of the slot took it over meanwhile.
+    pub(super) fn arm_draft_clear(
+        &mut self,
+        slot: &SendSlot,
+        claim: &Reservation,
+        request: RequestId,
+    ) {
+        if let Some(clear) = self
+            .accounts
+            .get_mut(&slot.account)
+            .and_then(|account| account.draft_clears.get_mut(&slot.draft))
+        {
+            clear.arm(claim, request);
+        }
+    }
+
+    /// The recording `claim` was not sent: its held clear goes, and a newer
+    /// send's stays.
+    pub(super) fn release_draft_clear(&mut self, slot: &SendSlot, claim: &Reservation) {
+        let held = self
+            .accounts
+            .get(&slot.account)
+            .and_then(|account| account.draft_clears.get(&slot.draft))
+            .is_some_and(|clear| clear.is_reserved_by(claim));
+        if held {
+            self.set_draft_clear(slot, None);
+        }
+    }
+
     /// A send whose chat view went waits on its own. Returns the oldest one
     /// when the account holds too many: the caller forgets its ack.
     pub(super) fn keep_left_send(&mut self, send: LeftSend) -> Option<LeftSend> {
@@ -372,7 +413,7 @@ impl ComposerSends {
     }
 
     /// Change the tray item `item` names, if it is still there: `None`
-    /// when that slot's tray no longer holds the same file at that place.
+    /// when that slot's tray no longer holds that entry.
     pub(super) fn update_item<R>(
         &mut self,
         item: &TrayItem,
@@ -384,17 +425,22 @@ impl ComposerSends {
             .slots
             .get_mut(&item.slot.draft)?;
         send.attachments
-            .get_mut(item.index)
-            .filter(|attachment| attachment.path == item.path)
+            .iter_mut()
+            .find(|attachment| attachment.id == item.id)
             .map(f)
     }
 
-    /// Whether `item` is still in its tray, as the same file.
+    /// Whether `item` is still in its tray.
     pub(super) fn holds_item(&self, item: &TrayItem) -> bool {
+        self.tray_index_of(item).is_some()
+    }
+
+    /// Where the entry `item` names is in its slot's tray now.
+    pub(super) fn tray_index_of(&self, item: &TrayItem) -> Option<usize> {
         self.get(&item.slot)
             .attachments
-            .get(item.index)
-            .is_some_and(|attachment| attachment.path == item.path)
+            .iter()
+            .position(|attachment| attachment.id == item.id)
     }
 
     /// The slot's send went: hand back what it held.
@@ -542,6 +588,25 @@ impl ComposerSends {
         };
         self.drop_if_empty(account);
         taken
+    }
+
+    /// Upkeep of `account`'s clears: an entry that waits only for messages
+    /// that cannot answer any more (see [`DraftClear::forget_lost`]) goes,
+    /// so a deleted album part does not keep it until a newer send of the
+    /// slot replaces it.
+    pub(super) fn forget_lost_clears(
+        &mut self,
+        account: &AccountKey,
+        message_exists: impl Fn(ChatId, MessageId) -> bool,
+        request_waits: impl Fn(RequestId) -> bool,
+    ) {
+        let Some(sends) = self.accounts.get_mut(account) else {
+            return;
+        };
+        sends
+            .draft_clears
+            .retain(|_, clear| !clear.forget_lost(&message_exists, &request_waits));
+        self.drop_if_empty(account);
     }
 
     /// The send of `message` failed: its draft stays, and no later ack of
@@ -704,14 +769,12 @@ impl QuillApp {
     /// The open slot's tray item at `index`, for a step that answers later.
     pub(super) fn tray_item(&self, index: usize) -> Option<TrayItem> {
         let slot = self.send_slot()?;
-        let path = self
-            .composer_sends
-            .get(&slot)
-            .attachments
-            .get(index)?
-            .path
-            .clone();
-        Some(TrayItem { slot, index, path })
+        let attachment = self.composer_sends.get(&slot).attachments.get(index)?;
+        Some(TrayItem {
+            id: attachment.id,
+            path: attachment.path.clone(),
+            slot,
+        })
     }
 
     /// A screenshot demo starts with these in the open chat's tray.

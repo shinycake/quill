@@ -95,3 +95,43 @@ fn fresh_session_shows_no_indicator_until_first_update() {
         Some(ConnectionIndicator::Offline)
     );
 }
+
+/// Translations that ran out of attempts offline are asked for again once
+/// the connection is back (the chat stays open the whole time).
+#[test]
+fn reconnecting_gives_failed_translations_their_attempts_back() {
+    use crate::state::{TRANSLATE_PUMP_ATTEMPTS, TranslateTarget, Translation};
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let (chat, message) = (ChatId(5), MessageId(9));
+    for _ in 0..TRANSLATE_PUMP_ATTEMPTS {
+        let job = session.begin_translation(
+            TranslateTarget::Message {
+                chat_id: chat.0,
+                message_id: message.0,
+            },
+            "en",
+            Some(chat),
+        );
+        session.finish_translation(job, Translation::failed("offline"));
+    }
+    assert!(!session.needs_translation(chat, message, "en"), "gave up");
+    assert!(session.translation_unsettled(chat, message, "en"));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateWaitingForNetwork"}}"#,
+    );
+    assert!(!session.needs_translation(chat, message, "en"), "still off");
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateConnectionState","state":{"@type":"connectionStateReady"}}"#,
+    );
+    assert!(
+        session.needs_translation(chat, message, "en"),
+        "back online"
+    );
+}

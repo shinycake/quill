@@ -40,9 +40,9 @@ impl QuillApp {
             let Some(dialog_state) = this.dialogs.import_contacts_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
-            let state = dialog_state.stage.state();
-            let can_import = state.can_import();
-            let body = Self::import_contacts_body(&state, cx).into_any_element();
+            let view = dialog_state.stage.view();
+            let can_import = view.can_import();
+            let body = Self::import_contacts_body(view, cx).into_any_element();
             let footer = div()
                 .flex()
                 .justify_end()
@@ -231,7 +231,7 @@ impl QuillApp {
     }
 
     /// The Contacts tab is open over a list a contact change invalidated
-    /// (add, delete, import, clear set it to `None`): fetch it again, so
+    /// (add, delete, import, clear outdate it): fetch it again, so
     /// the tab does not sit on "Loading contacts..." with nothing in
     /// flight. Without sync the tab keeps its last list, but it still
     /// needs one. A send that fails ends the loading with Retry.
@@ -516,9 +516,16 @@ impl QuillApp {
         else {
             return false;
         };
-        let answer = self
-            .session_mut()
-            .and_then(|s| s.chat_list.dialog_answers.take(request));
+        // A request the session no longer knows, with no answer kept, is
+        // lost (a reset, or more than the kept answers came meanwhile): the
+        // box shows the refusal and Add tries again, never a spinner.
+        let answer = self.session_mut().and_then(|s| {
+            s.chat_list.dialog_answers.take(request).or_else(|| {
+                s.requests.get(request).is_none().then(|| {
+                    quill::state::DialogAnswer::Failed(tr(keys::Q_OPS_ERR_REQUEST_LOST).to_string())
+                })
+            })
+        });
         let Some(answer) = answer else {
             return false;
         };

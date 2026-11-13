@@ -290,7 +290,7 @@ impl QuillApp {
             }
             let restart = match &entry.lifecycle {
                 // Already waiting for a sandbox, or running, or past saving.
-                Lifecycle::Waiting { .. }
+                Lifecycle::Due { .. }
                 | Lifecycle::Loading { .. }
                 | Lifecycle::Running(_)
                 | Lifecycle::Failed { .. } => None,
@@ -299,7 +299,7 @@ impl QuillApp {
             };
             if let Some(streak) = restart {
                 redraw |= entry.lifecycle.is_stopped();
-                entry.lifecycle = Lifecycle::Waiting { streak };
+                entry.lifecycle = Lifecycle::Due { streak };
             }
         }
         if resume {
@@ -335,16 +335,19 @@ impl QuillApp {
         }
     }
 
-    /// Starts the widgets waiting for a sandbox, releasing hidden ones to stay in the limit.
+    /// Starts the due widgets, releasing hidden ones to stay in the limit.
     fn start_waiting_widgets(&mut self, cx: &mut Context<Self>) {
+        // Every shown due widget starts in this pass when there is room (the
+        // capacity grows with the shown ones), so the order decides nothing
+        // but which of them a release makes room for first: by key.
         let mut waiting: Vec<WidgetKey> = self
             .widgets
             .entries
             .iter()
-            .filter(|(_, entry)| {
-                matches!(entry.lifecycle, Lifecycle::Waiting { .. }) && entry.presence.is_shown()
+            .filter_map(|(key, entry)| match entry.lifecycle {
+                Lifecycle::Due { .. } if entry.presence.is_shown() => Some(*key),
+                _ => None,
             })
-            .map(|(key, _)| *key)
             .collect();
         waiting.sort();
         let visible = self
@@ -609,33 +612,47 @@ impl QuillApp {
                 }
             }
             RuntimeEvent::Request { token, data } => {
-                let ours = super::widgets_state::next_query_token();
                 // A runtime that is gone (stopped or failed earlier in this
                 // batch) has nobody to answer: nothing goes to TDLib.
-                let Some(live) = self
+                if self
                     .widgets
                     .entries
                     .get_mut(&key)
                     .and_then(|entry| entry.live_mut())
-                else {
+                    .is_none()
+                {
                     return;
-                };
-                live.queries.insert(ours, token);
+                }
+                // The query is known by the request it went out as; a send
+                // that failed answers the widget at once.
                 let sent = self
                     .live
                     .as_mut()
-                    .map(|live| {
-                        live.driver
-                            .send_widget_query(key, ours, data.as_bytes())
-                            .is_ok()
-                    })
-                    .unwrap_or(false);
-                if !sent {
-                    self.answer_widget_query(
-                        key,
-                        ours,
-                        Err(quill::message_widget::QueryFailure::Failed.code()),
-                    );
+                    .and_then(|live| live.driver.send_widget_query(key, data.as_bytes()).ok());
+                match sent {
+                    Some(request) => {
+                        if let Some(live) = self
+                            .widgets
+                            .entries
+                            .get_mut(&key)
+                            .and_then(|entry| entry.live_mut())
+                        {
+                            live.queries.insert(request, token);
+                        }
+                    }
+                    None => {
+                        if let Some(live) = self
+                            .widgets
+                            .entries
+                            .get_mut(&key)
+                            .and_then(|entry| entry.live_mut())
+                        {
+                            live.runtime.respond(
+                                token,
+                                Err(quill::message_widget::QueryFailure::Failed.code()),
+                            );
+                        }
+                    }
                 }
             }
             RuntimeEvent::Copy(text) => self.copy_widget_text(text, cx),
@@ -692,11 +709,11 @@ impl QuillApp {
             match answer {
                 WidgetAnswer::Query {
                     key,
-                    token,
+                    request,
                     outcome,
                 } => self.answer_widget_query(
                     key,
-                    token,
+                    request,
                     match outcome {
                         QueryOutcome::Answered(data) => Ok(data),
                         QueryOutcome::Failed(failure) => Err(failure.code()),
@@ -709,7 +726,7 @@ impl QuillApp {
                     };
                     // Only the poll that is out: a restart or a replaced
                     // widget forgot it, and its late answer is not ours.
-                    if entry.poll != Poll::Asking(request) {
+                    if !matches!(entry.poll, Poll::Asking { request: out, .. } if out == request) {
                         continue;
                     }
                     let period = match data {
@@ -727,24 +744,57 @@ impl QuillApp {
         self.schedule_widget_polls(cx);
     }
 
-    /// The answer to Quill's query `token`, for the runtime that asked:
+    /// The answer to Quill's query `request`, for the runtime that asked:
     /// dropped when that runtime is gone (a restart starts a new list).
-    fn answer_widget_query(&mut self, key: WidgetKey, token: u64, outcome: Result<String, i32>) {
+    fn answer_widget_query(
+        &mut self,
+        key: WidgetKey,
+        request: quill::ids::RequestId,
+        outcome: Result<String, i32>,
+    ) {
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return;
         };
         let Some(live) = entry.live_mut() else {
             return;
         };
-        let Some(theirs) = live.queries.remove(&token) else {
+        let Some(theirs) = live.queries.remove(&request) else {
             return;
         };
         live.runtime.respond(theirs, outcome);
     }
 
     /// Polls what is due on screen and sets the timer for the next one.
-    fn schedule_widget_polls(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn schedule_widget_polls(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
+        // A poll whose request left flight with no answer was dropped: its
+        // widget polls again after a period, as after a refused ask.
+        let dropped: Vec<WidgetKey> = self
+            .widgets
+            .entries
+            .iter()
+            .filter_map(|(key, entry)| match entry.poll {
+                // An answered request also left flight: its answer waits in
+                // `bots.widget_answers` until the drain lands it (held back
+                // while the app is locked), and is not a dropped one.
+                Poll::Asking { request, .. }
+                    if self.session().is_some_and(|session| {
+                        session.requests.get(request).is_none()
+                            && !session.bots.widget_answers.iter().any(|answer| {
+                                matches!(answer, WidgetAnswer::PublicData { request: asked, .. } if *asked == request)
+                            })
+                    }) =>
+                {
+                    Some(*key)
+                }
+                _ => None,
+            })
+            .collect();
+        for key in dropped {
+            if let Some(entry) = self.widgets.entries.get_mut(&key) {
+                entry.poll = Poll::Due(now + quill::message_widget::DEFAULT_POLL_PERIOD);
+            }
+        }
         let due: Vec<WidgetKey> = self
             .widgets
             .entries
@@ -759,7 +809,10 @@ impl QuillApp {
                 .and_then(|live| live.driver.poll_widget_public_data(key).ok());
             if let Some(entry) = self.widgets.entries.get_mut(&key) {
                 entry.poll = match asked {
-                    Some(request) => Poll::Asking(request),
+                    Some(request) => Poll::Asking {
+                        request,
+                        asked: now,
+                    },
                     None => Poll::Due(now + quill::message_widget::DEFAULT_POLL_PERIOD),
                 };
             }
@@ -771,7 +824,16 @@ impl QuillApp {
             .filter(|e| e.presence.is_shown())
             .filter_map(|e| match e.poll {
                 Poll::Due(at) => Some(at),
-                _ => None,
+                // Looked at again when a normal poll period has passed
+                // without the answer.
+                Poll::Asking { asked, .. } => {
+                    let period = quill::message_widget::DEFAULT_POLL_PERIOD;
+                    asked
+                        .checked_add(period)
+                        .filter(|look| *look > now)
+                        .or_else(|| now.checked_add(period))
+                }
+                Poll::Off => None,
             })
             .min();
         let Some(next) = next else {

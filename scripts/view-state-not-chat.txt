@@ -18,9 +18,7 @@
 ComposerUi.draft_load | carries its own chat and topic (the draft shown, the slot a restore asked for): a draft or restore for another slot never matches
 ComposerUi.draft_load.Restoring.slot | the slot that asked for its draft to be restored next frame; the restore runs only if that slot is still the open one
 
-ComposerUi.slow_mode_tick | the running 1 s tick task and its chat; it exits by itself when the chat changes and a newer chat's tick drops it, so resetting it would start a second task
 
-ComposerUi.slow_mode_tick.Ticking.chat | names the chat of the running 1 s tick task, which owns it and exits by itself when the chat changes; the next gated frame replaces it
 HistoryUi.painted_ids | rebuilt by every paint of the history list
 HistoryUi.seen | carries its chat; read once at the next render
 HistoryUi.on_screen | rebuilt by every paint of the history list
@@ -30,7 +28,7 @@ HistoryUi.ends | compared with the history synced next; a new chat's ends differ
 HistoryUi.anchor.Anchoring.landed | compared with the session's highlight, which is the open chat's; the anchor starts a new chat with none
 HistoryUi.anchor.Anchored.landed | compared with the session's highlight, which is the open chat's; the anchor starts a new chat with none
 
-HistoryUi.live_location_tick | the running tick task and the chat it ticks for, as slow_mode_tick
+HistoryUi.live_location_tick | the running tick task and the chat it ticks for; the task ends itself once that chat is no longer open (live_location_wait), and the next chat's tick replaces it
 
 ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats on purpose (dismiss_forward_for_view)
 ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
@@ -48,7 +46,6 @@ HistoryUi.row_hover.painted | the rows' hitboxes, rebuilt by every paint
 HistoryUi.stream_reveal.Finishing.message | the bot reply finishing its reveal: the reveal names its chat and starts over in another
 ShareUi.forward.Picking.share_at.chat_id | the viewer message the share box was opened at a position for; it lives as long as the box and `take_share_at` hands it out only for that very chat and message
 ShareUi.forward.Picking.share_at.message_id | as `ShareUi.forward.Picking.share_at.chat_id`
-ViewerUi.extra.caption.key | carries its chat and message: the caption built for another never matches
 # Round 7: walked through `Option`, `Vec`, map values and enums. Each of
 # these carries the chat it acts on, or holds no chat's ids at all (a time,
 # a sticker set, an effect).

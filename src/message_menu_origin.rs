@@ -222,7 +222,7 @@ mod tests {
             content: MessageContent::Unsupported {
                 type_name: String::new(),
             },
-            send: crate::state::SendState::Sent,
+            send: crate::state::SendState::Delivered,
             reply_to: None,
             forward_info: None,
             extras: Default::default(),

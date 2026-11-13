@@ -48,9 +48,10 @@ impl<K: Hash + Eq + Clone, V: Clone> OffRender<K, V> {
     }
 }
 
+/// What a draw gets from the cache: the value to return now (`None` while
+/// the picture is out, or when it failed), or the order to start making it.
 enum Lookup<V> {
-    Made(Option<V>),
-    Waiting,
+    Now(Option<V>),
     Start,
 }
 
@@ -71,14 +72,14 @@ where
     let view = window.current_view();
     let lookup = cache.with_borrow_mut(|cache| {
         if let Some(made) = cache.made.get(&key) {
-            return Lookup::Made(made);
+            return Lookup::Now(made);
         }
         match cache.waiting.entry(key.clone()) {
             Entry::Occupied(mut waiting) => {
                 if !waiting.get().contains(&view) {
                     waiting.get_mut().push(view);
                 }
-                Lookup::Waiting
+                Lookup::Now(None)
             }
             Entry::Vacant(waiting) => {
                 waiting.insert(SmallVec::from_elem(view, 1));
@@ -87,8 +88,7 @@ where
         }
     });
     match lookup {
-        Lookup::Made(made) => made,
-        Lookup::Waiting => None,
+        Lookup::Now(made) => made,
         Lookup::Start => {
             let task = cx.background_spawn(async move { make() });
             cx.spawn(async move |cx| {

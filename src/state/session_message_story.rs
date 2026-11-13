@@ -8,7 +8,7 @@ use crate::telegram::envelope::ServiceAction;
 
 /// What a story card shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StoryCardState {
+pub enum StoryCardView {
     /// `getStory` has not answered yet.
     Loading,
     /// The story is cached and can be opened.
@@ -82,13 +82,13 @@ impl Session {
     }
 
     /// The state of the story behind a story message.
-    pub fn story_card_state(&self, chat_id: i64, story_id: i32) -> StoryCardState {
+    pub fn story_card_state(&self, chat_id: i64, story_id: i32) -> StoryCardView {
         if self.stories.stories.contains_key(&(chat_id, story_id)) {
-            StoryCardState::Ready
+            StoryCardView::Ready
         } else if self.stories.story_fetch.is_gone((chat_id, story_id)) {
-            StoryCardState::Expired
+            StoryCardView::Expired
         } else {
-            StoryCardState::Loading
+            StoryCardView::Loading
         }
     }
 

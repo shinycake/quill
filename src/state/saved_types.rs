@@ -34,8 +34,8 @@ pub struct SavedMessagesState {
     /// Tags of all Saved Messages (`saved_messages_topic_id` 0). A failed
     /// fetch waits for the connection like a failed first sublist page.
     pub tags: Fetch<Vec<SavedMessagesTag>>,
-    /// Tags of one sublist, by sublist id.
-    pub topic_tags: HashMap<i64, Vec<SavedMessagesTag>>,
+    /// Tags of one sublist, by sublist id, each under its own request.
+    pub topic_tags: HashMap<i64, Fetch<Vec<SavedMessagesTag>>>,
     pub sublist: Option<SavedSublistView>,
     pub tag_search: Option<SavedTagSearch>,
     /// A one-shot line for the status bar (a refused action).

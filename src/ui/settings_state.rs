@@ -84,6 +84,8 @@ pub(crate) enum SettingsBox {
     LogOut,
     /// Chats > "Manage sticker sets".
     Stickers,
+    /// The archive auto-settings box (chat list menu).
+    ArchiveSettings,
 }
 
 impl SettingsBox {
@@ -160,17 +162,20 @@ impl super::on_screen::Farewell for SettingsUi {
         if app.settings.box_open(SettingsBox::Stickers) {
             app.close_stickers_manager(cx);
         }
-        // The proxy-link box (its draft and check) is the session's.
+        // The proxy-link box (its draft and check) is the session's, and
+        // so is the editor's wait for its save: it ends with the account.
         app.close_proxy_link(cx);
-        // These boxes keep their open flags in the session, which goes to
-        // the background with the account.
-        let (masks, emoji, archive) = app.session().map_or((false, false, false), |session| {
+        app.close_proxy_editor(cx);
+        // The masks and emoji boxes keep their open flags in the session,
+        // which goes to the background with the account (the archive box
+        // is this screen's own, closed with it).
+        let (masks, emoji) = app.session().map_or((false, false), |session| {
             (
                 session.stickers.masks.dialog_open(),
                 session.stickers.emoji.open,
-                session.chat_list.archive_settings_open,
             )
         });
+        let archive = app.settings.box_open(SettingsBox::ArchiveSettings);
         if masks {
             app.close_mask_sets(cx);
         }
@@ -179,6 +184,16 @@ impl super::on_screen::Farewell for SettingsUi {
         }
         if archive {
             app.set_archive_settings_open(false);
+        }
+        // The sticker panel and the manager's flag may outlive the box that
+        // set them (the business start page's sticker pick opens the panel
+        // too): neither stays open in the background session.
+        if let Some(live) = app.live.as_mut() {
+            live.driver.close_sticker_panel();
+            live.driver.set_sticker_manager_open(false);
+        } else if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.stickers.close();
+            session.stickers.manager.covers.hide();
         }
         if let Some(page) = app.settings.page() {
             app.leave_settings_page(page);
@@ -225,6 +240,8 @@ pub(crate) struct PreferencesUi {
     /// bar's toast are the screen's (`OnScreen::translate`).
     pub(super) translate: super::translate_ui::TranslateUi,
     pub(super) update_state: quill::updater::UpdateState,
+    /// The timer of the next release recheck (`updates.rs`).
+    pub(super) update_recheck: Option<Task<()>>,
     /// The What's New window and the release notes it shows.
     pub(super) whats_new: super::whats_new::WhatsNewUi,
     /// Advanced and experimental settings, the secret codes, the test
@@ -260,6 +277,7 @@ impl PreferencesUi {
             } else {
                 quill::updater::UpdateState::Idle
             },
+            update_recheck: None,
             whats_new: Default::default(),
             advanced: super::advanced_state::AdvancedUi::new(cx, demo.is_none()),
             emoji_style: Default::default(),

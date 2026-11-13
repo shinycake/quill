@@ -211,7 +211,7 @@ fn a_window_clicked_under_the_pointer_lets_the_others_fade(cx: &mut TestAppConte
         app.delivery.windows.platform = NotifyPlatform::Windows;
         app.show_custom_notification(&me, message(7), None, None, false, false, cx);
         app.show_custom_notification(&me, message(8), None, None, false, false, cx);
-        let now = std::time::Instant::now();
+        let now = cx.background_executor().now();
         let later = now + std::time::Duration::from_secs(600);
         // The user was back at the computer: both are due later.
         for shown in app.delivery.windows.shown.iter_mut() {
@@ -360,5 +360,167 @@ fn a_cleared_window_does_not_count_as_replying(cx: &mut TestAppContext) {
         // Replying again in a window that is leaving does not hold either.
         app.notify_window_event(id, ViewEvent::ReplyOpened, cx);
         assert!(!app.delivery.windows.any_replying());
+    });
+}
+
+/// tdesktop `checkLastInput`: a notification that waits for the user looks
+/// at the OS idle clock every `INPUT_CHECK_MS` with nothing else to wake it,
+/// so input after it appeared starts the hide within one check, however long
+/// the wait has been.
+#[gpui_kit::test]
+fn a_waiting_notification_sees_the_next_input_within_one_check(cx: &mut TestAppContext) {
+    use quill::notify::custom::INPUT_CHECK_MS;
+    use std::time::Duration;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        // Nobody has touched the computer for ages.
+        app.delivery.windows.idle_ms = || Some(u64::MAX >> 20);
+        app.show_custom_notification(&me, message(7), None, None, false, false, cx);
+    });
+    let waiting = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.delivery.windows.shown.first().map(|s| s.hold.waiting())
+        })
+    };
+    // A long wait with no input: it keeps waiting, and the clock goes on.
+    let frame = Duration::from_millis(16);
+    for _ in 0..(120_000 / 16) {
+        vcx.executor().advance_clock(frame);
+        vcx.run_until_parked();
+    }
+    assert_eq!(waiting(&app, vcx), Some(true), "no cap ends the wait");
+    // The user types in another app; nothing else wakes the clock.
+    app.update(vcx, |app, _| app.delivery.windows.idle_ms = || Some(0));
+    let mut spent = Duration::ZERO;
+    while waiting(&app, vcx) == Some(true) && spent < Duration::from_secs(5) {
+        vcx.executor().advance_clock(frame);
+        vcx.run_until_parked();
+        spent += frame;
+    }
+    assert_eq!(waiting(&app, vcx), Some(false), "the input was seen");
+    assert!(
+        spent <= Duration::from_millis(INPUT_CHECK_MS) + frame,
+        "within one check period: {spent:?}"
+    );
+}
+
+/// tdesktop's `_inputCheckTimer` runs only while a notification waits for
+/// input. A popup the pointer holds, with no deadline due, wakes nothing.
+#[gpui_kit::test]
+fn a_hovered_popup_that_is_not_waiting_leaves_the_clock_stopped(cx: &mut TestAppContext) {
+    use super::Hold;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, false, cx);
+        let id = shown_id(app, 7);
+        let now = cx.background_executor().now();
+        let windows = &mut app.delivery.windows;
+        assert!(matches!(windows.clock, super::Clock::Running { .. }));
+        for shown in windows.shown.iter_mut() {
+            shown.hold = Hold::Lingering { hide_at: now };
+        }
+        windows.hovered = Some(id);
+        assert_eq!(windows.next_step(now), None);
+        assert!(matches!(windows.clock, super::Clock::Stopped));
+    });
+}
+
+/// A corner sample alone does not need the clock's input poll either.
+#[gpui_kit::test]
+fn a_corner_sample_alone_leaves_the_clock_stopped(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.notify_corner_preview(Some(quill::notify::custom::ScreenCorner::TopLeft), cx);
+        let now = cx.background_executor().now();
+        let windows = &mut app.delivery.windows;
+        assert_eq!(windows.next_step(now), None);
+        assert!(matches!(windows.clock, super::Clock::Stopped));
+    });
+}
+
+/// The same state with the popup waiting for input keeps the poll.
+#[gpui_kit::test]
+fn a_waiting_popup_keeps_the_input_poll(cx: &mut TestAppContext) {
+    use quill::notify::custom::INPUT_CHECK_MS;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, false, cx);
+        let id = shown_id(app, 7);
+        let windows = &mut app.delivery.windows;
+        windows.hovered = Some(id);
+        assert_eq!(
+            windows.next_step(cx.background_executor().now()),
+            Some(std::time::Duration::from_millis(INPUT_CHECK_MS))
+        );
+        assert!(matches!(windows.clock, super::Clock::Running { .. }));
+    });
+}
+
+impl super::NotifyWindows {
+    /// The (account, chat) of every notification shown and not unlinked.
+    pub(in crate::ui) fn shown_keys(&self) -> Vec<(quill::ids::AccountKey, ChatId)> {
+        self.shown
+            .iter()
+            .filter(|s| !s.unlinked())
+            .map(|s| s.key.clone())
+            .collect()
+    }
+}
+
+/// Two popups that close in one step leave the "Hide all" window fading:
+/// the clock keeps running until that fade ends, then stops.
+#[gpui_kit::test]
+fn the_step_that_closes_the_last_popups_keeps_the_clock_for_hide_all(cx: &mut TestAppContext) {
+    use super::Hold;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, false, cx);
+        app.show_custom_notification(&me, message(8), None, None, false, false, cx);
+        // Both waited for the user and share one deadline; their slow
+        // fades began long enough ago to be done.
+        let start = cx.background_executor().now();
+        let began = start
+            .checked_sub(std::time::Duration::from_secs(60))
+            .unwrap_or(start);
+        let windows = &mut app.delivery.windows;
+        assert!(windows.hide_all.is_some(), "two popups show Hide all");
+        // The entrance slides and fades are over.
+        for popup in app.all_popups_mut() {
+            popup.shift.start = began;
+            popup.opacity.start = began;
+        }
+        let windows = &mut app.delivery.windows;
+        for shown in windows.shown.iter_mut() {
+            shown.hold = Hold::Lingering { hide_at: start };
+            shown.popup.hide(true, began);
+        }
+        assert!(app.notify_windows_tick(cx).is_some());
+        let windows = &mut app.delivery.windows;
+        assert!(windows.shown.is_empty());
+        assert!(windows.hide_all.as_ref().is_some_and(|p| p.hiding()));
+        assert!(
+            matches!(windows.clock, super::Clock::Running { .. }),
+            "Hide all is still fading"
+        );
+        if let Some(hide_all) = windows.hide_all.as_mut() {
+            hide_all.hide(false, began);
+        }
+        assert!(app.notify_windows_tick(cx).is_some());
+        assert!(app.delivery.windows.hide_all.is_none());
+        assert_eq!(app.notify_windows_tick(cx), None);
+        assert!(matches!(app.delivery.windows.clock, super::Clock::Stopped));
     });
 }

@@ -12,7 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use quill::lang::trn;
 use quill::local_path::sandboxed_display_path;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// tdesktop `boxWidth`.
@@ -22,12 +22,9 @@ const BOX_WIDTH: f32 = 380.;
 pub(super) fn once(
     body: AnyElement,
 ) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static {
-    let body = Rc::new(RefCell::new(Some(body)));
+    let body = Rc::new(Cell::new(Some(body)));
     move |content, _, _| {
-        let body = body
-            .borrow_mut()
-            .take()
-            .unwrap_or_else(|| div().into_any_element());
+        let body = body.take().unwrap_or_else(|| div().into_any_element());
         content.child(body)
     }
 }
@@ -248,16 +245,9 @@ impl QuillApp {
             let dialog = dialog.overlay(true).w(px(BOX_WIDTH));
             let session = this.session();
             let (hidden, busy, confirm) = match &this.admin.community.flow.open {
-                Some(CommunityBox::Visibility {
-                    community_id,
-                    chat_id,
-                    hidden,
-                    ..
-                }) => (
-                    *hidden,
-                    session.is_some_and(|s| s.community_add_in_flight(*community_id, *chat_id)),
-                    tr(keys::COMMUNITY_ADD_TO),
-                ),
+                Some(CommunityBox::Visibility { hidden, ask, .. }) => {
+                    (*hidden, ask.busy(session), tr(keys::COMMUNITY_ADD_TO))
+                }
                 Some(CommunityBox::CreateVisibility { hidden, create, .. }) => (
                     *hidden,
                     matches!(create, CreateStep::Creating { .. }),
@@ -348,11 +338,7 @@ impl QuillApp {
     fn community_confirm_copy(&self) -> Option<(Option<String>, String, String, bool, bool)> {
         let session = self.session();
         Some(match self.admin.community.flow.open.as_ref()? {
-            CommunityBox::ConfirmAdd {
-                community_id,
-                chat_id,
-                ..
-            } => (
+            CommunityBox::ConfirmAdd { chat_id, ask, .. } => (
                 Some(tr(keys::COMMUNITY_ADD_TO).to_string()),
                 by_kind(
                     self.community_chat_kind(*chat_id),
@@ -363,7 +349,7 @@ impl QuillApp {
                 .to_string(),
                 tr(keys::COMMUNITY_ADD_CONFIRM_ADD).to_string(),
                 false,
-                session.is_some_and(|s| s.community_add_in_flight(*community_id, *chat_id)),
+                ask.busy(session),
             ),
             CommunityBox::ConfirmRemove { chat_id, .. } => (
                 None,
@@ -381,19 +367,22 @@ impl QuillApp {
                     keys::COMMUNITY_JOIN_SURE,
                     &[("group", &self.community_chat_title(*chat_id))],
                 ),
-                tr(if self.community_chat_kind(*chat_id) == CommunityChatKind::Channel {
-                    keys::PROFILE_JOIN_CHANNEL
-                } else {
-                    keys::PROFILE_JOIN_GROUP
-                })
+                tr(
+                    if self.community_chat_kind(*chat_id) == CommunityChatKind::Channel {
+                        keys::PROFILE_JOIN_CHANNEL
+                    } else {
+                        keys::PROFILE_JOIN_GROUP
+                    },
+                )
                 .to_string(),
                 false,
                 false,
             ),
             CommunityBox::ConfirmProcessAll {
-                community_id,
                 approve,
                 count,
+                ask,
+                ..
             } => (
                 Some(
                     tr(if *approve {
@@ -418,20 +407,23 @@ impl QuillApp {
                 })
                 .to_string(),
                 !approve,
-                session.is_some_and(|s| s.community_requests_processing(*community_id)),
+                ask.busy(session),
             ),
-            CommunityBox::Ungroup { community_id } => (
+            // Closes at once on confirm, as tdesktop does: no request to
+            // wait on.
+            CommunityBox::Ungroup { .. } => (
                 Some(tr(keys::COMMUNITY_UNGROUP_TITLE).to_string()),
                 tr(keys::COMMUNITY_UNGROUP_TEXT).to_string(),
                 tr(keys::COMMUNITY_UNGROUP).to_string(),
                 true,
-                session.is_some_and(|s| s.community_collapse_in_flight(*community_id)),
+                false,
             ),
+            // The ban box closes at once on confirm, as tdesktop does (the
+            // toast comes with the answer): no request is held to wait on.
             CommunityBox::BanWarning {
-                community_id,
-                member,
                 name,
                 owned_chat_ids,
+                ..
             } => (
                 Some(tr(keys::COMMUNITY_BAN_WARNING_TITLE).to_string()),
                 quill::lang::trn_with(
@@ -441,11 +433,7 @@ impl QuillApp {
                 ),
                 tr(keys::COMMUNITY_BAN_BUTTON).to_string(),
                 true,
-                session.is_some_and(|s| {
-                    s.community_request_in_flight(*community_id, |purpose| {
-                        matches!(purpose, quill::state::CommunitiesPurpose::ToggleMemberBanned { member: m, .. } if m == *member)
-                    })
-                }),
+                false,
             ),
             _ => return None,
         })
@@ -462,13 +450,13 @@ impl QuillApp {
                 community_id,
                 chat_id,
                 hidden,
+                ..
             }) => self.send_add_community_chat(community_id, chat_id, hidden, cx),
             Some(CommunityBox::ConfirmRemove { .. }) => self.confirm_remove_from_community(cx),
             Some(CommunityBox::ConfirmJoin { .. }) => self.confirm_join_community_chat(cx),
             Some(CommunityBox::ConfirmProcessAll { .. }) => self.confirm_process_all_requests(cx),
-            Some(CommunityBox::Ungroup { community_id }) => {
-                self.admin.community.flow.open = None;
-                self.set_community_collapsed(community_id, false, cx);
+            Some(CommunityBox::Ungroup { community_id, .. }) => {
+                self.confirm_ungroup(community_id, cx)
             }
             Some(CommunityBox::BanWarning { .. }) => self.confirm_community_ban(cx),
             _ => {}

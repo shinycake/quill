@@ -93,17 +93,7 @@ pub enum TonTxKind {
     Unsupported,
 }
 
-/// `RevenueWithdrawalState`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WithdrawalState {
-    Pending,
-    /// Done; `url` opens the transaction in a blockchain explorer.
-    Succeeded {
-        date: i32,
-        url: String,
-    },
-    Failed,
-}
+pub use crate::premium_hub::ton::WithdrawalState;
 
 /// `chatRevenueTransaction`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,14 +115,10 @@ impl TonTx {
                 user_id: int(ty.get("user_id")),
             },
             "chatRevenueTransactionTypeFragmentWithdrawal" => {
-                let state = ty.get("state");
-                let state = match state.and_then(|s| s.get("@type")).and_then(Value::as_str) {
-                    Some("revenueWithdrawalStateSucceeded") => WithdrawalState::Succeeded {
-                        date: state.map_or(0, |s| int(s.get("date")) as i32),
-                        url: state.map(|s| text(s, "url")).unwrap_or_default(),
-                    },
-                    Some("revenueWithdrawalStateFailed") => WithdrawalState::Failed,
-                    _ => WithdrawalState::Pending,
+                // A withdrawal with no state yet is still pending here.
+                let state = match WithdrawalState::parse(ty.get("state")) {
+                    WithdrawalState::Unknown => WithdrawalState::Unsettled,
+                    known => known,
                 };
                 TonTxKind::Withdrawal {
                     date: int(ty.get("withdrawal_date")) as i32,
@@ -178,7 +164,7 @@ impl TonTx {
         matches!(
             self.kind,
             TonTxKind::Withdrawal {
-                state: WithdrawalState::Pending,
+                state: WithdrawalState::Unsettled,
                 ..
             }
         )
@@ -209,7 +195,7 @@ impl TonTx {
                 state: WithdrawalState::Failed,
             } => format!("{} \u{2014} Not Completed", date(*when)),
             TonTxKind::Withdrawal {
-                state: WithdrawalState::Pending,
+                state: WithdrawalState::Unsettled,
                 ..
             } => "Pending".into(),
             TonTxKind::Withdrawal { date: when, .. } | TonTxKind::Refund { date: when } => {

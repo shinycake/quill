@@ -196,6 +196,7 @@ fn seed_communities_session(sink: Arc<MemorySink>) -> Session {
             ],
             total_count: 2,
             next_offset: None,
+            handled: Default::default(),
         }),
     );
     session.users_state.profile_chat_lists.insert(
@@ -255,11 +256,13 @@ impl QuillApp {
                 back: Some(Back::Pick {
                     chat_id: OWN_CHANNEL,
                 }),
+                ask: Ask::Idle,
             }),
             "confirm-add" => Some(CommunityBox::ConfirmAdd {
                 community_id: RUSTACEANS,
                 chat_id: OWN_CHANNEL,
                 hidden: false,
+                ask: Ask::Idle,
             }),
             "remove" => Some(CommunityBox::ConfirmRemove {
                 community_id: GUILD,

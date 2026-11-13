@@ -174,11 +174,34 @@ impl Session {
         // the link stays busy and no further export request goes out.
         self.settings.fail_lost_export(pending.purpose, extra);
         self.acks.settle_lost(extra);
+        self.settle_lost_instant_view(&pending);
         self.apply_payload_in_asking_view(
             EnvelopePayload::Error(error),
             Some(&pending),
             Some(extra),
             seq,
         );
+    }
+
+    /// A lost `getWebPageInstantView` is a refusal like any other: the link
+    /// opens in the browser instead of staying in the asks for good (the
+    /// answer path does the same in `take_instant_view_fallback`).
+    fn settle_lost_instant_view(&mut self, pending: &PendingRequest) {
+        if pending.purpose != RequestPurpose::GetWebPageInstantView {
+            return;
+        }
+        let Some(ask) = self.messages.instant_view_requests.remove(&pending.id) else {
+            return;
+        };
+        let window = pending.asked_in.chat();
+        if window.is_none_or(|chat| self.window_chats.contains(&chat)) {
+            self.messages
+                .instant_view_fallbacks
+                .push(InstantViewFallback {
+                    window,
+                    url: ask.url,
+                    from_agent: ask.from_agent,
+                });
+        }
     }
 }

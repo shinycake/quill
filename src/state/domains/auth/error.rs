@@ -42,7 +42,9 @@ impl Session {
             // user action, never a frame), instead of "Loading countries"
             // for good.
             Some(RequestPurpose::GetCountries) => {
-                self.auth_state.countries.fail(error_reason(err));
+                self.auth_state
+                    .countries
+                    .failed(pending.map(|p| p.id), error_reason(err), false);
             }
             // The default guess stays unknown; the picker needs none.
             Some(RequestPurpose::GetCountryCode) => {

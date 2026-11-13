@@ -41,29 +41,68 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if running.is_none() {
-            self.payments
-                .marketplace_name_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            self.payments
-                .marketplace_comment_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            if let Some(live) = self.live.as_mut() {
-                live.driver.session.payments.marketplace_gift = None;
-            } else if let Some(session) = self.demo_session.as_mut() {
-                session.payments.marketplace_gift = None;
+        // The kept draft resumes when the session's purchase is the one it
+        // asked for, whatever stage that is in and however the box closed
+        // (the window, the chat left or blocked): a failure that landed
+        // meanwhile shows.
+        let resume = self.payments.marketplace.resumes(
+            self.session()
+                .and_then(|s| s.payments.marketplace_gift.as_ref()),
+        );
+        if self.payments.marketplace.open_for(chat, resume) {
+            self.reset_marketplace_inputs(window, cx);
+        }
+        if running.is_some() {
+            // The box is shown again over the purchase it closed on.
+            if let Some(live) = self.live.as_mut()
+                && let Some(gift) = live.driver.session.payments.marketplace_gift.as_mut()
+            {
+                gift.reopen();
+            } else if let Some(gift) = self
+                .demo_session
+                .as_mut()
+                .and_then(|session| session.payments.marketplace_gift.as_mut())
+            {
+                gift.reopen();
             }
         }
-        self.payments.marketplace.open_for(chat, running.is_some());
         self.open_box(DialogKind::Marketplace);
         cx.notify();
+    }
+
+    /// The Marketplace box closed: a purchase on its way carries on and tells
+    /// its outcome in a notice.
+    fn close_marketplace_box(&mut self) {
+        self.payments.marketplace.close();
+        if let Some(live) = self.live.as_mut()
+            && let Some(gift) = live.driver.session.payments.marketplace_gift.as_mut()
+        {
+            gift.close();
+        } else if let Some(gift) = self
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.payments.marketplace_gift.as_mut())
+        {
+            gift.close();
+        }
+    }
+
+    /// A fresh draft starts with empty inputs: the one reset, tied to
+    /// `MarketplaceBox::open_for`'s fresh branch.
+    fn reset_marketplace_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for input in [
+            &self.payments.marketplace_name_input,
+            &self.payments.marketplace_comment_input,
+        ] {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
     }
 
     /// The Send Gift box's recipient, as the chat a purchase for it goes
     /// to (a user's private chat has the user's id).
     pub(super) fn send_gift_recipient_chat(&self) -> Option<ChatId> {
         let send = &self.session()?.payments.gifts_manage.send;
-        let recipient = send.recipient.as_ref().filter(|_| send.is_open())?;
+        let recipient = send.recipient().filter(|_| send.is_open())?;
         Some(match recipient.sender {
             MessageSender::User { user_id } => ChatId(user_id),
             MessageSender::Chat { chat_id } => ChatId(chat_id),
@@ -80,18 +119,18 @@ impl QuillApp {
             .to_string();
         // Each cause says its own reason: no chat to buy for, no connection
         // (a demo, or signed out), a request that could not be sent.
-        let error = match (self.payments.marketplace.chat(), self.live.as_mut()) {
-            (None, _) => Some(tr(keys::Q_OPS_CHOOSE_A_PRIVATE_CHAT_OR)),
-            (Some(_), None) => Some(tr(keys::Q_MONEY_BUYING_GIFTS_NEEDS_A_SIGNED)),
+        let asked = match (self.payments.marketplace.chat(), self.live.as_mut()) {
+            (None, _) => Err(tr(keys::Q_OPS_CHOOSE_A_PRIVATE_CHAT_OR)),
+            (Some(_), None) => Err(tr(keys::Q_MONEY_BUYING_GIFTS_NEEDS_A_SIGNED)),
             (Some(chat), Some(live)) => live
                 .driver
                 .fetch_marketplace_gift(chat, &name)
-                .is_err()
-                .then(|| tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS)),
+                .map_err(|_| tr(keys::Q_MONEY_COULD_NOT_LOAD_GIFTS)),
         };
-        self.payments
-            .marketplace
-            .set_error(error.map(|text| text.to_string()));
+        match asked {
+            Ok(request) => self.payments.marketplace.asked(request),
+            Err(text) => self.payments.marketplace.set_error(Some(text.to_string())),
+        }
         cx.notify();
     }
     pub(super) fn build_marketplace_dialog(
@@ -102,13 +141,17 @@ impl QuillApp {
     ) -> Dialog {
         let close =
             QuillShell::on_close_kind(app, shell, DialogKind::Marketplace, |this, _, cx| {
-                this.payments.marketplace.close();
+                this.close_marketplace_box();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
+            // The quote is the one this box's draft asked for, for its chat:
+            // a purchase of another chat or an earlier box never shows here.
+            let draft = this.payments.marketplace.draft().cloned();
             let gift = this
                 .session()
-                .and_then(|s| s.payments.marketplace_gift.clone());
+                .and_then(|s| s.payments.marketplace_gift.clone())
+                .filter(|gift| draft.as_ref().is_some_and(|d| d.shows(gift)));
             let limit = this.session().and_then(|s| s.payments.gift_text_length_max);
             let marketplace_private = this.payments.marketplace.draft().is_none_or(|d| d.private);
             let busy = gift
@@ -136,12 +179,9 @@ impl QuillApp {
                         .disabled(busy)
                         .on_click(cx.listener(|this, _, _, cx| this.load_marketplace_gift(cx))),
                 );
-            if let Some(error) = this
-                .payments
-                .marketplace
-                .draft()
-                .and_then(|d| d.error.clone())
-            {
+            // This box's own refusal (nothing was sent), apart from the
+            // note a purchase's own try leaves.
+            if let Some(error) = draft.as_ref().and_then(|d| d.error.clone()) {
                 body = body.child(
                     div()
                         .id("gift-error")
@@ -270,16 +310,12 @@ impl QuillApp {
                                         .to_string();
                                     let private =
                                         this.payments.marketplace.draft().is_none_or(|d| d.private);
+                                    // A refusal says why in the purchase's note.
+                                    this.payments.marketplace.set_error(None);
                                     if let Some(live) = this.live.as_mut() {
-                                        let refused = live
+                                        let _ = live
                                             .driver
-                                            .buy_marketplace_gift(price, &comment, private)
-                                            .is_err()
-                                            .then(|| {
-                                                tr(keys::Q_OPS_PURCHASE_REFUSED_REVIEW_THE_QUOTE)
-                                                    .into()
-                                            });
-                                        this.payments.marketplace.set_error(refused);
+                                            .buy_marketplace_gift(price, &comment, private);
                                     }
                                     cx.notify();
                                 })),
@@ -294,6 +330,11 @@ impl QuillApp {
                 )))
                 .child(body)
                 .on_close(close)
+                // A quote or a purchase on its way: the box stays until the
+                // answer, whatever way closes it.
+                .close_button(!busy)
+                .overlay_closable(!busy)
+                .keyboard(!busy)
         })
     }
 }
@@ -304,5 +345,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.payments.marketplace.is_open(),
         QuillApp::build_marketplace_dialog,
     )
-    .close(|app, _, cx| { app.payments.marketplace.close(); cx.notify(); }),
+    .close(|app, _, cx| { app.close_marketplace_box(); cx.notify(); }),
 }

@@ -196,7 +196,7 @@ impl Session {
                             draft_id,
                             keep_on_stop,
                             content,
-                            stop: carried.unwrap_or(BotStopStage::Running { can_stop }),
+                            stop: carried.unwrap_or(BotStopStage::Streaming { can_stop }),
                             expires_at_ms: unix_ms_now().saturating_add(
                                 self.messages.pending_bot_period_secs.saturating_mul(1000),
                             ),
@@ -230,10 +230,10 @@ impl Session {
                     crate::telegram::envelope::MessageSendState::Sent,
                 );
                 self.remember_files(&message.files);
-                self.stickers
-                    .effects
-                    .watch
-                    .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
+                self.stickers.effects.watch.renamed(
+                    crate::ids::ChatMessage::new(chat_id, old_message_id),
+                    crate::ids::ChatMessage::new(chat_id, message.id),
+                );
                 self.stickers
                     .interactions
                     .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
@@ -297,10 +297,10 @@ impl Session {
                 };
                 self.note_last_message_send_state(chat_id, old_message_id, message.id, failed);
                 self.remember_files(&message.files);
-                self.stickers
-                    .effects
-                    .watch
-                    .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
+                self.stickers.effects.watch.renamed(
+                    crate::ids::ChatMessage::new(chat_id, old_message_id),
+                    crate::ids::ChatMessage::new(chat_id, message.id),
+                );
                 self.stickers
                     .interactions
                     .renamed((chat_id.0, old_message_id.0), (chat_id.0, message.id.0));
@@ -363,16 +363,19 @@ impl Session {
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.is_pinned = is_pinned;
                 });
-                // An unpin leaves the pinned list at once; a pin is added
-                // by the refetch the driver sends for the open chat.
-                if !is_pinned
-                    && let Some(list) = self
-                        .messages
-                        .pinned_messages
-                        .get_mut(&chat_id.0)
-                        .and_then(|fetch| fetch.data_mut())
+                // An unpin leaves the pinned list at once, also from the
+                // answer a fetch in flight is holding; a pin is added by the
+                // refetch the driver sends for the open chat. A fetch in
+                // flight asked before the unpin: its answer would bring the
+                // message back, so it is outdated and asked again.
+                if !is_pinned && let Some(fetch) = self.messages.pinned_messages.get_mut(&chat_id.0)
                 {
-                    list.retain(|message| message.id != message_id);
+                    if let Some(list) = fetch.data_mut() {
+                        list.retain(|message| message.id != message_id);
+                    }
+                    if fetch.is_loading() {
+                        fetch.outdate();
+                    }
                 }
             }
             MessagesPayload::UpdateMessageContentOpened {
@@ -561,12 +564,13 @@ impl Session {
                     if let Some(slot) = self
                         .messages
                         .scheduled_messages
+                        .rows
                         .iter_mut()
                         .find(|m| m.chat_id == message.chat_id && m.id == message.id)
                     {
                         *slot = message;
                     } else {
-                        self.messages.scheduled_messages.push(message);
+                        self.messages.scheduled_messages.rows.push(message);
                     }
                 } else if let Some(request) =
                     pending.filter(|p| p.purpose == RequestPurpose::SendMessage)
@@ -670,7 +674,7 @@ impl Session {
                     && menu.message_id == message_id
                     && poll_option_key(&menu.option_id) == option_key
                 {
-                    menu.properties = crate::state::fetch::Fetch::Ready(properties);
+                    menu.properties.answered(pending.map(|p| p.id), properties);
                 }
             }
             MessagesPayload::MessageProperties(actions) => match pending.map(|p| p.purpose) {
@@ -678,11 +682,17 @@ impl Session {
                     chat_id,
                     message_id,
                 })) => {
+                    let landed = pending.is_some_and(|p| {
+                        self.messages
+                            .menu_actions
+                            .answered(chat_id, message_id, p.id, actions)
+                    });
                     // A ticked gallery row learns its answer as it lands.
-                    self.media
-                        .shared_media
-                        .refresh_from_answer(Some((chat_id, message_id, actions)));
-                    self.messages.menu_actions.set(chat_id, message_id, actions);
+                    if landed {
+                        self.media
+                            .shared_media
+                            .refresh_from_answer(Some((chat_id, message_id, actions)));
+                    }
                 }
                 Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection {
                     ..

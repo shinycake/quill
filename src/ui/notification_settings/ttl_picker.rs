@@ -27,10 +27,9 @@ impl QuillApp {
             0
         };
         self.set_step_slider(StepSlider::AutoDelete, start, cx);
-        // One of a chat's setting dialogs at a time.
-        self.close_mute_menu(cx);
-        self.folders.menu_chat = None;
-        self.notify.ttl_picker = Some(chat_id);
+        // One of a chat's setting dialogs at a time: opening this one is the
+        // others closing.
+        self.notify.open_ttl(chat_id);
         self.open_box(crate::ui::shell::DialogKind::TtlPicker);
         cx.notify();
     }
@@ -48,7 +47,7 @@ impl QuillApp {
     pub(in crate::ui) fn ttl_picker_title(&self) -> &'static str {
         let secret = self
             .session()
-            .and_then(|s| self.notify.ttl_picker.and_then(|id| s.chats.get(&id.0)))
+            .and_then(|s| self.notify.ttl_picker().and_then(|id| s.chats.get(&id.0)))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
         if secret {
             tr(keys::SETTINGS_TTL_AFTER_SUBTITLE)
@@ -61,7 +60,7 @@ impl QuillApp {
         let session = self.session();
         // The chat it was opened for (the header, a profile's menu), kept
         // with the picker: Save never sets another chat's timer.
-        let open_chat = self.notify.ttl_picker;
+        let open_chat = self.notify.ttl_picker();
         let open_chat_summary: Option<&ChatSummary> =
             open_chat.and_then(|id| session.as_ref()?.chats.get(&id.0));
         let is_secret =
@@ -133,7 +132,7 @@ impl QuillApp {
                             .ghost()
                             .label(tr(keys::CANCEL))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.notify.ttl_picker = None;
+                                this.notify.close_ttl();
                                 cx.notify();
                             })),
                     )

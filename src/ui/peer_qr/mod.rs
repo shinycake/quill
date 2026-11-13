@@ -34,7 +34,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::peer_qr::free::FreeMode;
-use quill::peer_qr::link::OwnLinkState;
+use quill::peer_qr::link::OwnLinkView;
 use quill::peer_qr::session::PeerQrData;
 use quill::peer_qr::state::{PeerQrBox, QrAction, QrEffect, QrPanel, QrPeer, QrSubject, QrToast};
 use quill::peer_qr::theme::ThemeChoice;
@@ -45,8 +45,14 @@ use std::time::{Duration, Instant};
 
 /// tdesktop `kToastDuration`.
 const TOAST: Duration = Duration::from_millis(2800);
-/// How often a countdown on the box moves.
-const CLOCK: Duration = Duration::from_secs(1);
+/// Time to the next whole second of the wall clock, when the `m:ss`
+/// countdown on the box moves (a deadline, never less than a frame).
+fn qr_clock_wait() -> Duration {
+    let into = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.subsec_millis());
+    Duration::from_millis(u64::from(1000u32.saturating_sub(into)).max(16))
+}
 
 /// The panel's open or close motion, for drawing only: the reducer's
 /// `panel` says what is open. A panel change replaces it whole; a close
@@ -236,7 +242,19 @@ pub(super) struct OpenQr {
     pub(super) gifts_scroll: gpui_kit::base::VirtualListScrollHandle,
     /// The countdown clock, ticking while a countdown shows. Dropped with
     /// the box, or by the clock itself when nothing counts down.
-    clock: Option<Task<()>>,
+    clock: QrClock,
+}
+
+/// The countdown clock of an open box: stopped, or the task that ticks it.
+pub(super) enum QrClock {
+    Stopped,
+    Running { _task: Task<()> },
+}
+
+impl QrClock {
+    pub(super) fn is_running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
 }
 
 /// The card image behind Copy and Share. The render's task is kept here,
@@ -254,13 +272,19 @@ impl Export {
     }
 }
 
+#[cfg(test)]
+impl PeerQrUi {
+    /// How many gift gradient tiles are held.
+    fn gift_art_tiles(&self) -> usize {
+        self.gift_art.tile_count()
+    }
+}
+
 /// The QR box's part of the app.
 pub(crate) struct PeerQrUi {
     pub(super) open: Option<Box<OpenQr>>,
     art: art::Art,
     gift_art: gift_art::GiftArt,
-    /// The last box's id; each box gets the next one.
-    last_box: u64,
     /// A shared card waiting for its chat's composer.
     pub(super) pending_attach: Option<(ChatId, PathBuf)>,
 }
@@ -287,7 +311,6 @@ impl PeerQrUi {
             open: None,
             art: art::Art::default(),
             gift_art: gift_art::GiftArt::default(),
-            last_box: 0,
             pending_attach: None,
         }
     }
@@ -325,10 +348,9 @@ impl QuillApp {
             QrSubject::Custom(_) => None,
         };
         self.drop_shared_card(cx);
-        self.peer_qr.last_box += 1;
         let now = Instant::now();
         self.peer_qr.open = Some(Box::new(OpenQr {
-            state: PeerQrBox::new(subject, self.peer_qr.last_box),
+            state: PeerQrBox::new(subject),
             opened: now,
             motion: PanelMotion::IDLE,
             toast: ToastStage::Hidden,
@@ -337,7 +359,7 @@ impl QuillApp {
             share: QrShare::Idle,
             export: Export::Idle,
             gifts_scroll: gpui_kit::base::VirtualListScrollHandle::new(),
-            clock: None,
+            clock: QrClock::Stopped,
         }));
         self.open_box(crate::ui::shell::DialogKind::PeerQr);
         if own && let Some(data) = self.qr_data_mut() {
@@ -588,50 +610,65 @@ impl QuillApp {
         matches!(open.state.free.mode, FreeMode::Temporary { .. })
             || matches!(
                 self.qr_own_link(&open.state.subject),
-                Some(OwnLinkState::Ready(link)) if link.expires_at != 0
+                Some(OwnLinkView::Ready(link)) if link.expires_at != 0
             )
     }
 
-    /// Start the once-a-second clock when a countdown shows; it stops
-    /// itself when none does or the box closes.
-    fn sync_qr_clock(&mut self, cx: &mut Context<Self>) {
-        if self.lock_waits() || !self.qr_counts_down() {
+    /// Start the clock when a countdown shows and a window is in front; it
+    /// stops itself when none does, the box closes or the app goes to the
+    /// background (`resume_qr_clock` starts it again).
+    pub(in crate::ui) fn sync_qr_clock(&mut self, cx: &mut Context<Self>) {
+        if self.lock_waits() || !self.frame.window_active.get() || !self.qr_counts_down() {
             return;
         }
-        let Some(open) = self.peer_qr.open.as_mut() else {
+        let Some(open) = self.peer_qr.open.as_ref() else {
             return;
         };
-        if open.clock.is_some() {
+        if open.clock.is_running() {
             return;
         }
-        let id = open.state.id;
+        self.arm_qr_clock(cx);
+    }
+
+    /// The app came to the front: a countdown that stopped in the
+    /// background runs again.
+    pub(in crate::ui) fn resume_qr_clock(&mut self, cx: &mut Context<Self>) {
+        self.sync_qr_clock(cx);
+    }
+
+    /// One tick of the open box's clock at the next countdown second
+    /// ([`qr_clock_wait`]); a tick that finds a countdown still showing
+    /// arms the next. The box holds the one task (a box that closed or was
+    /// replaced drops it with its clock), and each tick replaces the task
+    /// that ran it.
+    fn arm_qr_clock(&mut self, cx: &mut Context<Self>) {
         let clock = self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(CLOCK).await;
-                let Ok(going) = this.update(cx, |this, cx| this.qr_clock(id, cx)) else {
-                    return;
-                };
-                if !going {
-                    return;
+            let due = Instant::now() + qr_clock_wait();
+            let wait = due.saturating_duration_since(Instant::now());
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.qr_clock(cx) {
+                    this.arm_qr_clock(cx);
                 }
-            }
+            });
         });
         if let Some(open) = self.peer_qr.open.as_mut() {
-            open.clock = Some(clock);
+            open.clock = QrClock::Running { _task: clock };
         }
     }
 
-    /// One clock tick for box `id`: a code may have run out, a countdown
+    /// One clock tick of the open box: a code may have run out, a countdown
     /// moved. `false` once nothing counts down or the box is gone.
-    fn qr_clock(&mut self, id: u64, cx: &mut Context<Self>) -> bool {
-        if self.peer_qr.open.as_ref().map(|open| open.state.id) != Some(id) {
+    fn qr_clock(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.peer_qr.open.is_none() {
             return false;
         }
-        // The box stays open under the lock, but nothing is asked or run
-        // for it; the first poll after the unlock starts the clock again.
-        if self.lock_waits() {
+        // The box stays open under the lock, or behind another app, but
+        // nothing is asked or run for it; the first poll after the unlock
+        // and the next activation start the clock again.
+        if self.lock_waits() || !self.frame.window_active.get() {
             if let Some(open) = self.peer_qr.open.as_mut() {
-                open.clock = None;
+                open.clock = QrClock::Stopped;
             }
             return false;
         }
@@ -640,7 +677,7 @@ impl QuillApp {
         cx.notify();
         let going = self.qr_counts_down();
         if !going && let Some(open) = self.peer_qr.open.as_mut() {
-            open.clock = None;
+            open.clock = QrClock::Stopped;
         }
         going
     }

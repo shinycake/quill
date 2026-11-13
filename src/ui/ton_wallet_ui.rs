@@ -316,7 +316,7 @@ pub(super) fn connect_review_button(
     let ServiceAction::TonConnectRequest(request) = action.as_ref() else {
         return None;
     };
-    if !matches!(request.state, TonConnectRequestState::Pending { .. }) {
+    if !matches!(request.state, TonConnectRequestState::Unanswered { .. }) {
         return None;
     }
     Some(notice_button(

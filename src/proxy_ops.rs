@@ -7,39 +7,63 @@ use std::time::{Duration, Instant};
 /// ingest sends it again.
 pub const UNSENT_RETRY_AFTER: Duration = Duration::from_secs(5);
 
+/// How long a `getProxies` that answered with an error waits before the next
+/// ingest asks again (the box's error line says it failed meanwhile).
+pub const FAILED_RETRY_AFTER: Duration = Duration::from_secs(30);
+
+/// The longest wait between two asks of a `getProxies` that keeps failing.
+pub const FAILED_RETRY_MAX: Duration = Duration::from_secs(15 * 60);
+
+/// The wait after `tries` failed asks in a row: [`FAILED_RETRY_AFTER`],
+/// doubled for each further failure, up to [`FAILED_RETRY_MAX`].
+pub fn failed_retry_after(tries: u8) -> Duration {
+    FAILED_RETRY_AFTER
+        .saturating_mul(1 << tries.saturating_sub(1).min(10))
+        .min(FAILED_RETRY_MAX)
+}
+
 /// Where the proxy list's `getProxies` is.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ProxyFetch {
     /// No `getProxies` has been sent yet: the first one goes out.
     #[default]
     NotAsked,
-    /// The last one answered or failed (a failed one is not retried in a
-    /// tight loop: the box's error line says so).
+    /// The last one answered.
     Idle,
     /// The list changed under us (an add / edit / enable / remove
     /// succeeded, dropping any fetch out, whose answer may predate the
     /// change): the authoritative list is asked for again.
     Stale,
-    /// This request is the one whose answer replaces the list.
-    Loading(RequestId),
-    /// The request's answer was an error: nothing asks again by itself,
-    /// only the dialog's open / Refresh (`Retry`); the box's error line
-    /// says so.
-    Failed,
+    /// This request is the one whose answer replaces the list. `tries` is
+    /// how many asks failed in a row before it (0 for the first).
+    Loading { request: RequestId, tries: u8 },
+    /// As `Loading`, for a list that is out of date: if it fails, the list
+    /// stays out of date ([`Self::FailedStale`]).
+    LoadingStale { request: RequestId, tries: u8 },
+    /// The request's answer was an error at `at`: the box's error line says
+    /// so, and the next ingest after [`failed_retry_after`] `tries` (or the
+    /// dialog's open / Refresh) asks again, so a first list that failed is
+    /// not lost for the session. `tries` counts the failures in a row, and
+    /// the wait doubles with it up to [`FAILED_RETRY_MAX`].
+    Failed { at: Instant, tries: u8 },
+    /// The refetch of a stale list failed at `at`. Retried like `Failed`, but
+    /// the held list is still out of date, so the state stays busy and
+    /// nothing plans on it.
+    FailedStale { at: Instant, tries: u8 },
     /// The request could not be sent (the client is closing, a native
     /// error) at `at`: the next ingest after [`UNSENT_RETRY_AFTER`] sends
     /// it again, so a background account or a box nobody opens still
     /// settles.
-    NotSent { at: Instant },
+    NotSent { at: Instant, tries: u8 },
     /// The refetch of a stale list could not be sent at `at`. Retried like
     /// `NotSent`, but the held list is still out of date, so the state stays
     /// busy and nothing plans on it.
-    NotSentStale { at: Instant },
+    NotSentStale { at: Instant, tries: u8 },
 }
 
 impl ProxyFetch {
     pub fn loading(self) -> bool {
-        matches!(self, Self::Loading(_))
+        matches!(self, Self::Loading { .. } | Self::LoadingStale { .. })
     }
 
     /// The list is out of date and no request is on its way for it.
@@ -48,26 +72,73 @@ impl ProxyFetch {
     }
 
     /// A `getProxies` should go out at `now`: never asked, invalidated, or
-    /// one that could not be sent has waited out its retry.
+    /// one that could not be sent or failed has waited out its retry.
     pub fn wanted(self, now: Instant) -> bool {
         match self {
             Self::NotAsked | Self::Stale => true,
-            Self::NotSent { at } | Self::NotSentStale { at } => {
+            Self::NotSent { at, .. } | Self::NotSentStale { at, .. } => {
                 now.saturating_duration_since(at) >= UNSENT_RETRY_AFTER
+            }
+            Self::Failed { at, tries } | Self::FailedStale { at, tries } => {
+                now.saturating_duration_since(at) >= failed_retry_after(tries)
             }
             _ => false,
         }
     }
 
-    /// The last send was refused (a retry is owed).
-    pub fn unsent(self) -> bool {
-        matches!(self, Self::NotSent { .. } | Self::NotSentStale { .. })
+    /// The held list is out of date and the last ask for it did not land.
+    fn owes_fresh_list(self) -> bool {
+        matches!(
+            self,
+            Self::Stale
+                | Self::LoadingStale { .. }
+                | Self::NotSentStale { .. }
+                | Self::FailedStale { .. }
+        )
+    }
+
+    /// The last ask was refused or answered with an error (a retry is owed).
+    fn retry_owed(self) -> bool {
+        matches!(
+            self,
+            Self::NotSent { .. }
+                | Self::NotSentStale { .. }
+                | Self::Failed { .. }
+                | Self::FailedStale { .. }
+        )
     }
 
     /// `request` is the fetch the list waits for.
     pub fn answers(self, request: RequestId) -> bool {
-        self == Self::Loading(request)
+        matches!(
+            self,
+            Self::Loading { request: asked, .. } | Self::LoadingStale { request: asked, .. }
+                if asked == request
+        )
     }
+
+    /// The failures in a row this state carries.
+    fn tries(self) -> u8 {
+        match self {
+            Self::Loading { tries, .. }
+            | Self::LoadingStale { tries, .. }
+            | Self::Failed { tries, .. }
+            | Self::FailedStale { tries, .. }
+            | Self::NotSent { tries, .. }
+            | Self::NotSentStale { tries, .. } => tries,
+            _ => 0,
+        }
+    }
+}
+
+/// Where the `prefer_ipv6` option's write is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Ipv6Set {
+    #[default]
+    Idle,
+    /// `setOption("prefer_ipv6", on)` is in flight as `request`; only its
+    /// answer or error leaves the stage.
+    Setting { on: bool, request: RequestId },
 }
 
 /// The proxy list's two requests: the `getProxies` its list waits for and
@@ -79,6 +150,7 @@ impl ProxyFetch {
 pub struct ProxyListOps {
     fetch: ProxyFetch,
     change: Option<RequestId>,
+    ipv6: Ipv6Set,
 }
 
 impl ProxyListOps {
@@ -89,10 +161,7 @@ impl ProxyListOps {
     /// The list is changing or about to: a change is out, or a fetch is
     /// owed or on its way.
     pub fn busy(&self) -> bool {
-        self.changing()
-            || self.fetch.loading()
-            || self.fetch.stale()
-            || matches!(self.fetch, ProxyFetch::NotSentStale { .. })
+        self.changing() || self.fetch.loading() || self.fetch.owes_fresh_list()
     }
 
     /// A change is in flight.
@@ -105,10 +174,11 @@ impl ProxyListOps {
         self.fetch.wanted(now)
     }
 
-    /// A fetch should go out because it is owed or its last send was
-    /// refused and has waited out its retry (what `ingest` checks).
+    /// A fetch should go out because it is owed, or its last send was
+    /// refused or failed and has waited out its retry (what `ingest`
+    /// checks).
     pub fn refetch_due(&self, now: Instant) -> bool {
-        (self.fetch.stale() || self.fetch.unsent()) && self.fetch.wanted(now)
+        (self.fetch.stale() || self.fetch.retry_owed()) && self.fetch.wanted(now)
     }
 
     /// The list is out of date and no request is on its way for it.
@@ -123,7 +193,9 @@ impl ProxyListOps {
     /// The fetch in flight, if one is.
     pub fn fetch_out(&self) -> Option<RequestId> {
         match self.fetch {
-            ProxyFetch::Loading(request) => Some(request),
+            ProxyFetch::Loading { request, .. } | ProxyFetch::LoadingStale { request, .. } => {
+                Some(request)
+            }
             _ => None,
         }
     }
@@ -136,36 +208,47 @@ impl ProxyListOps {
 
     /// `getProxies` went out as `request`.
     pub fn fetch_sent(&mut self, request: RequestId) {
-        self.fetch = ProxyFetch::Loading(request);
+        let tries = self.fetch.tries();
+        self.fetch = if self.fetch.owes_fresh_list() {
+            ProxyFetch::LoadingStale { request, tries }
+        } else {
+            ProxyFetch::Loading { request, tries }
+        };
     }
 
     /// `getProxies` could not be sent at `now`: the next ingest after the
     /// retry wait sends it again. A list that was owed a refetch stays busy
     /// (`NotSentStale`).
     pub fn fetch_unsent(&mut self, now: Instant) {
-        self.fetch = match self.fetch {
-            ProxyFetch::Stale | ProxyFetch::NotSentStale { .. } => {
-                ProxyFetch::NotSentStale { at: now }
-            }
-            _ => ProxyFetch::NotSent { at: now },
+        let tries = self.fetch.tries();
+        self.fetch = if self.fetch.owes_fresh_list() {
+            ProxyFetch::NotSentStale { at: now, tries }
+        } else {
+            ProxyFetch::NotSent { at: now, tries }
         };
     }
 
     /// The answer of `request`: whether it is the fetch the list waits for
     /// (an older one says nothing about the list as it is now).
     pub fn fetch_answered(&mut self, request: RequestId) -> bool {
-        let is_it = self.fetch == ProxyFetch::Loading(request);
+        let is_it = self.fetch.answers(request);
         if is_it {
             self.fetch = ProxyFetch::Idle;
         }
         is_it
     }
 
-    /// The error of `request`: whether it is the fetch the list waits for.
-    pub fn fetch_failed(&mut self, request: RequestId) -> bool {
-        let is_it = self.fetch == ProxyFetch::Loading(request);
+    /// The error of `request` at `now`: whether it is the fetch the list
+    /// waits for. A list that was out of date stays so.
+    pub fn fetch_failed(&mut self, request: RequestId, now: Instant) -> bool {
+        let is_it = self.fetch.answers(request);
         if is_it {
-            self.fetch = ProxyFetch::Failed;
+            let tries = self.fetch.tries().saturating_add(1);
+            self.fetch = if self.fetch.owes_fresh_list() {
+                ProxyFetch::FailedStale { at: now, tries }
+            } else {
+                ProxyFetch::Failed { at: now, tries }
+            };
         }
         is_it
     }
@@ -186,6 +269,26 @@ impl ProxyListOps {
     /// The change `request` failed: the list stays as it was.
     pub fn change_failed(&mut self, request: Option<RequestId>) {
         self.change_ended(request);
+    }
+
+    /// Writing the IPv6 option to `on` went out as `request`.
+    pub fn ipv6_sent(&mut self, on: bool, request: RequestId) {
+        self.ipv6 = Ipv6Set::Setting { on, request };
+    }
+
+    /// A write of the IPv6 option to `on` is in flight.
+    pub fn ipv6_setting(&self, on: bool) -> bool {
+        matches!(self.ipv6, Ipv6Set::Setting { on: asked, .. } if asked == on)
+    }
+
+    /// The IPv6 write `request` came back (answer or error). Only the write
+    /// in flight leaves it.
+    pub fn ipv6_ended(&mut self, request: Option<RequestId>) {
+        if let Ipv6Set::Setting { request: asked, .. } = self.ipv6
+            && request == Some(asked)
+        {
+            self.ipv6 = Ipv6Set::Idle;
+        }
     }
 
     fn change_ended(&mut self, request: Option<RequestId>) {
@@ -217,17 +320,101 @@ mod tests {
         // A refetch that cannot be sent keeps the list busy until it is
         // asked again after the wait.
         ops.fetch_unsent(now);
-        assert_eq!(ops.fetch(), ProxyFetch::NotSentStale { at: now });
+        assert_eq!(ops.fetch(), ProxyFetch::NotSentStale { at: now, tries: 0 });
         assert!(ops.busy() && !ops.wanted(now));
         assert!(!ops.refetch_due(now + UNSENT_RETRY_AFTER / 2));
         assert!(ops.refetch_due(now + UNSENT_RETRY_AFTER));
         ops.fetch_sent(RequestId(3));
-        assert!(ops.fetch_failed(RequestId(3)));
-        assert_eq!(ops.fetch(), ProxyFetch::Failed);
-        assert!(
-            !ops.refetch_due(now + UNSENT_RETRY_AFTER * 9),
-            "an error answer waits for Refresh"
-        );
+        assert!(ops.fetch_failed(RequestId(3), now));
+        assert_eq!(ops.fetch(), ProxyFetch::FailedStale { at: now, tries: 1 });
+        assert!(ops.busy(), "the held list is still out of date");
+        assert!(!ops.refetch_due(now + FAILED_RETRY_AFTER / 2));
+        assert!(ops.refetch_due(now + FAILED_RETRY_AFTER));
+    }
+
+    /// Sweep r4-04 fix 3: a failed refetch keeps the stale mark, and a failed
+    /// first fetch is asked again after the wait.
+    #[test]
+    fn a_failed_fetch_keeps_what_it_owed_and_is_retried() {
+        let now = Instant::now();
+        let mut ops = ProxyListOps::default();
+        ops.change_succeeded(None);
+        assert!(ops.stale());
+        ops.fetch_sent(RequestId(1));
+        assert!(!ops.stale() && ops.loading() && ops.busy());
+        assert!(!ops.fetch_failed(RequestId(9), now), "another request");
+        assert!(ops.fetch_failed(RequestId(1), now));
+        assert!(ops.busy(), "plans must not use the old list");
+        ops.fetch_sent(RequestId(2));
+        assert!(ops.fetch_answered(RequestId(2)));
+        assert!(!ops.busy());
+        // A first fetch that fails is not final.
+        let mut first = ProxyListOps::default();
+        first.fetch_sent(RequestId(3));
+        assert!(first.fetch_failed(RequestId(3), now));
+        assert_eq!(first.fetch(), ProxyFetch::Failed { at: now, tries: 1 });
+        assert!(!first.busy());
+        assert!(!first.refetch_due(now));
+        assert!(first.refetch_due(now + FAILED_RETRY_AFTER));
+    }
+
+    /// Sweep r4-04: a `getProxies` that keeps failing is asked after a
+    /// growing wait, capped, and an answer starts the count over.
+    #[test]
+    fn a_failing_fetch_waits_longer_each_time_up_to_a_cap() {
+        let mut now = Instant::now();
+        let mut ops = ProxyListOps::default();
+        let mut waits = Vec::new();
+        for n in 1..=12u64 {
+            ops.fetch_sent(RequestId(n));
+            assert!(ops.fetch_failed(RequestId(n), now));
+            let wait = failed_retry_after(u8::try_from(n).unwrap_or(u8::MAX));
+            waits.push(wait);
+            assert!(!ops.refetch_due(now + (wait / 2)), "try {n}");
+            assert!(ops.refetch_due(now + wait), "try {n}");
+            now += wait;
+        }
+        assert_eq!(waits[0], FAILED_RETRY_AFTER);
+        assert_eq!(waits[1], FAILED_RETRY_AFTER * 2);
+        assert_eq!(waits[2], FAILED_RETRY_AFTER * 4);
+        assert!(waits.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(*waits.last().unwrap_or(&Duration::ZERO), FAILED_RETRY_MAX);
+        ops.fetch_sent(RequestId(99));
+        assert!(ops.fetch_answered(RequestId(99)));
+        ops.fetch_sent(RequestId(100));
+        assert!(ops.fetch_failed(RequestId(100), now));
+        assert_eq!(ops.fetch(), ProxyFetch::Failed { at: now, tries: 1 });
+    }
+
+    /// A retry that could not be sent keeps the failures counted so far.
+    #[test]
+    fn an_unsent_retry_keeps_the_failure_count() {
+        let now = Instant::now();
+        let mut ops = ProxyListOps::default();
+        for n in 0..3u64 {
+            ops.fetch_sent(RequestId(n));
+            assert!(ops.fetch_failed(RequestId(n), now));
+        }
+        ops.fetch_unsent(now);
+        assert_eq!(ops.fetch(), ProxyFetch::NotSent { at: now, tries: 3 });
+        ops.fetch_sent(RequestId(10));
+        assert!(ops.fetch_failed(RequestId(10), now));
+        assert_eq!(ops.fetch(), ProxyFetch::Failed { at: now, tries: 4 });
+        ops.fetch_sent(RequestId(11));
+        assert!(ops.fetch_answered(RequestId(11)));
+        ops.fetch_unsent(now);
+        assert_eq!(ops.fetch(), ProxyFetch::NotSent { at: now, tries: 0 });
+    }
+
+    #[test]
+    fn an_ipv6_write_is_one_stage_left_by_its_own_answer() {
+        let mut ops = ProxyListOps::default();
+        ops.ipv6_sent(true, RequestId(4));
+        assert!(ops.ipv6_setting(true) && !ops.ipv6_setting(false));
+        ops.ipv6_ended(Some(RequestId(3)));
+        assert!(ops.ipv6_setting(true), "an older answer leaves it");
+        ops.ipv6_ended(Some(RequestId(4)));
+        assert!(!ops.ipv6_setting(true));
     }
 
     #[test]

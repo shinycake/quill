@@ -53,6 +53,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 
 fn photo(name: &str) -> ComposerAttachment {
     ComposerAttachment {
+        id: Default::default(),
         path: std::env::temp_dir().join(name),
         kind: AttachmentKind::Photo,
         file_name: name.into(),
@@ -294,6 +295,7 @@ fn picture(name: &str) -> PathBuf {
 
 fn attachment_at(path: PathBuf, kind: AttachmentKind) -> ComposerAttachment {
     ComposerAttachment {
+        id: Default::default(),
         file_name: path
             .file_name()
             .and_then(|name| name.to_str())
@@ -1168,4 +1170,158 @@ fn album_failures_from_one_slot_never_drop_the_texts_clear() {
             .take_draft_clear(&account, MessageId(-3), slot.draft)
             .is_some()
     );
+}
+
+/// Sweep r4-10 (20-003/20-004): a recording holds its slot's draft clear
+/// from the tap. A text sent from the slot before the file is ready takes
+/// the slot over; the recording's arming then changes nothing, and the
+/// text's ack still clears the text's draft.
+#[test]
+fn a_recording_finished_after_a_text_send_leaves_the_texts_clear() {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let slot = forum_slot(1);
+    let account = slot.account.clone();
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    let claim = sends.reserve_draft_clear(&slot, chat);
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::of_text(chat, "text").asked([RequestId(1)])),
+    );
+    // The file is ready; the voice goes out as request 2.
+    sends.arm_draft_clear(&slot, &claim, RequestId(2));
+    sends.note_send_answer(&account, RequestId(2), MessageId(-2));
+    sends.note_send_answer(&account, RequestId(1), MessageId(-1));
+    // The voice failing releases nothing of the text's.
+    sends.release_draft_clear(&slot, &claim);
+    let taken = sends.take_draft_clear(&account, MessageId(-1), slot.draft);
+    assert_eq!(
+        taken.map(|(_, clear)| clear.sent),
+        Some(Some("text".to_string()))
+    );
+}
+
+/// The recording alone in its slot: arming makes its ack clear the draft,
+/// and a send that never goes releases the held clear.
+#[test]
+fn a_recording_alone_in_its_slot_clears_on_its_ack_or_releases() {
+    let chat = ChatId(7);
+    let slot = forum_slot(1);
+    let account = slot.account.clone();
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    let claim = sends.reserve_draft_clear(&slot, chat);
+    assert!(sends.has_draft_clear(&slot));
+    sends.arm_draft_clear(&slot, &claim, RequestId(5));
+    sends.note_send_answer(&account, RequestId(5), MessageId(-5));
+    let taken = sends.take_draft_clear(&account, MessageId(-5), slot.draft);
+    assert_eq!(taken.map(|(_, clear)| clear.sent), Some(None));
+
+    let claim = sends.reserve_draft_clear(&slot, chat);
+    sends.release_draft_clear(&slot, &claim);
+    assert!(!sends.has_draft_clear(&slot), "a send that never went");
+    // An ack with nothing held finds nothing.
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-9), slot.draft),
+        None
+    );
+}
+
+/// Sweep r4-10: a tile is found by the identity of its tray entry. The same
+/// photo attached twice is two entries, so after another window removes the
+/// first file the tile drawn for the original does not act on the twin that
+/// slid into its place.
+#[test]
+fn a_tile_finds_its_entry_by_identity_not_by_index_or_path() {
+    use crate::ui::composer_sends::TrayItem;
+    let slot = forum_slot(1);
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    sends.update(&slot, |send| {
+        for name in ["a.jpg", "b.jpg", "b.jpg"] {
+            ComposerAttachment::push_attachment(&mut send.attachments, photo(name));
+        }
+    });
+    let tile = |index: usize| {
+        let attachment = sends.get(&slot).attachments.get(index).expect("an entry");
+        TrayItem {
+            slot: slot.clone(),
+            id: attachment.id,
+            path: attachment.path.clone(),
+        }
+    };
+    let (original, twin) = (tile(1), tile(2));
+    assert_ne!(original, twin, "one file twice is two entries");
+    assert_eq!(sends.tray_index_of(&original), Some(1));
+    sends.update(&slot, |send| {
+        send.attachments.remove(0);
+    });
+    assert_eq!(
+        sends.tray_index_of(&original),
+        Some(0),
+        "found where it moved"
+    );
+    assert_eq!(sends.tray_index_of(&twin), Some(1));
+    sends.update(&slot, |send| {
+        send.attachments.remove(0);
+    });
+    assert_eq!(sends.tray_index_of(&original), None, "gone: no stand-in");
+    assert_eq!(sends.update_item(&original, |_| ()), None);
+    assert!(sends.holds_item(&twin));
+}
+
+/// Sweep r4-07 round 4 (item 5): a send answered in a background account
+/// has its answer queued until the account is back on screen. The first
+/// frame's upkeep prunes clears whose request is gone; a queued answer is
+/// not gone, so the clear stays for the ack that follows.
+#[test]
+fn an_armed_clear_whose_answer_is_queued_is_not_pruned() {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let slot = forum_slot(1);
+    let account = slot.account.clone();
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    let request = RequestId(11);
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::of_text(chat, "hello").asked([request])),
+    );
+    let mut session = quill::state::Session::new(
+        account.clone(),
+        std::sync::Arc::new(quill::diagnostics::MemorySink::new()),
+    );
+    // The answer was ingested: the request left the table, the answer waits.
+    session
+        .messages
+        .sent_answers
+        .push(quill::state::SendAnswered {
+            request,
+            chat_id: chat,
+            message_id: MessageId(-5),
+        });
+    let prune = |sends: &mut crate::ui::composer_sends::ComposerSends,
+                 session: &quill::state::Session| {
+        sends.forget_lost_clears(
+            &account,
+            |_, _| true,
+            |request| crate::ui::composer::sent_text::request_waits(session, request),
+        )
+    };
+    prune(&mut sends, &session);
+    assert!(sends.has_draft_clear(&slot), "a queued answer still waits");
+    // The poll pass notes the answer, and the ack finds the clear.
+    for sent in std::mem::take(&mut session.messages.sent_answers) {
+        sends.note_send_answer(&account, sent.request, sent.message_id);
+    }
+    let taken = sends.take_draft_clear(&account, MessageId(-5), slot.draft);
+    assert_eq!(
+        taken.map(|(_, clear)| clear.sent),
+        Some(Some("hello".to_string())),
+        "the ack clears the draft"
+    );
+    // Without the queued answer the request is lost, and the clear goes.
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::of_text(chat, "again").asked([RequestId(12)])),
+    );
+    prune(&mut sends, &session);
+    assert!(!sends.has_draft_clear(&slot), "a lost request settles it");
 }

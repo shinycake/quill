@@ -12,6 +12,7 @@ use super::gift_manage_ui::{hint, panel, stars};
 use super::payments_state::SendGiftInputs;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::gift_market_state::OpeningFrom;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -94,11 +95,8 @@ impl QuillApp {
                 let Some(recipient) = session.gift_recipient_user(user_id) else {
                     return false;
                 };
-                session.payments.gifts_manage.send = quill::gift_manage::SendGiftState {
-                    stage: quill::gift_manage::SendStage::Idle,
-                    recipient: Some(recipient),
-                    ..Default::default()
-                };
+                session.payments.gifts_manage.send =
+                    quill::gift_manage::SendGiftState::opened_for(recipient);
                 true
             }),
         };
@@ -160,7 +158,7 @@ impl QuillApp {
         }
         let is_self = self
             .session()
-            .and_then(|s| s.payments.gifts_manage.send.recipient.as_ref())
+            .and_then(|s| s.payments.gifts_manage.send.recipient())
             .is_some_and(|r| r.is_self);
         self.reset_gift_inputs(is_self, window, cx);
         cx.notify();
@@ -212,7 +210,7 @@ impl QuillApp {
                 return dialog.overlay(true).on_close(on_close);
             };
             let send = &session.payments.gifts_manage.send;
-            let title = match send.recipient.as_ref() {
+            let title = match send.recipient() {
                 Some(r) if r.is_self => tr(keys::Q_MONEY_SEND_A_GIFT_TO_YOURSELF).to_string(),
                 Some(r) => tr_with(
                     keys::Q_MONEY_SEND_A_GIFT_TO_2,
@@ -255,7 +253,7 @@ impl QuillApp {
             if let Some(selected) = send.selected_gift() {
                 body = body.child(selected_gift_panel(this, session, selected, &roots, cx));
             } else {
-                if !send.premium_options.is_empty() {
+                if !send.premium_options().is_empty() {
                     body = body.child(premium_section(this, session, cx));
                 }
                 body = body.child(
@@ -270,16 +268,14 @@ impl QuillApp {
                         &[("stars", &(stars(balance.stars)).to_string())],
                     )));
                 }
-                if send.gifts_fetch.is_loading() {
+                if send.gifts_loading() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
                             .child(tr(keys::Q_MONEY_LOADING_GIFTS)),
                     );
-                } else if send.gifts.is_empty()
-                    && send.gifts_fetch == quill::gift_manage::GiftListFetch::Answered
-                {
+                } else if send.gifts_answered_empty() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -288,7 +284,7 @@ impl QuillApp {
                     );
                 }
                 let mut grid = div().flex().flex_wrap().gap_2();
-                for (ix, gift) in send.gifts.iter().enumerate() {
+                for (ix, gift) in send.gifts().iter().enumerate() {
                     grid = grid.child(gift_tile(session, ix, gift, &roots, cx));
                 }
                 body = body.child(grid).child(
@@ -336,11 +332,10 @@ fn gift_tile(
     let send = &session.payments.gifts_manage.send;
     let now = now_unix();
     let gate = send
-        .recipient
-        .as_ref()
+        .recipient()
         .map(|r| gift.gate(r, session.payments.premium_option == Some(true), now))
         .unwrap_or(SendGate::SoldOut);
-    let to_channel = send.recipient.as_ref().is_some_and(|r| r.is_channel);
+    let to_channel = send.recipient().is_some_and(|r| r.is_channel);
     let market = match gift.auction.as_ref() {
         // Auction bids go to people only (`placeGiftAuctionBid.user_id`).
         Some(info) if !to_channel => {
@@ -463,7 +458,7 @@ fn gift_tile(
         .tab_index(0)
         .on_click(cx.listener(move |this, _, window, cx| {
             if let Some(auction_id) = auction_id.as_deref() {
-                this.open_gift_auction(id, auction_id, cx);
+                this.open_gift_auction(id, auction_id, OpeningFrom::SendBox, cx);
             } else if resale {
                 this.open_gift_resale(id, &title, cx);
             } else {
@@ -481,7 +476,7 @@ fn selected_gift_panel(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let send = &session.payments.gifts_manage.send;
-    let Some(recipient) = send.recipient.as_ref() else {
+    let Some(recipient) = send.recipient() else {
         return div().into_any_element();
     };
     let pay_upgrade = this.payments.gift_inputs.pay_upgrade && gift.upgrade_star_count > 0;
@@ -614,8 +609,7 @@ fn selected_gift_panel(
 fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp>) -> AnyElement {
     let send = &session.payments.gifts_manage.send;
     let can_pay = send
-        .recipient
-        .as_ref()
+        .recipient()
         .is_some_and(|r| !r.is_self && !r.is_channel);
     let mut col = div().flex().flex_col().gap_1().child(
         div()
@@ -637,7 +631,7 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
                 cx,
             ));
     }
-    let stars_offered = can_pay && send.premium_options.iter().any(|o| o.star_count > 0);
+    let stars_offered = can_pay && send.premium_options().iter().any(|o| o.star_count > 0);
     let by_stars = stars_offered && this.payments.gift_inputs.by_stars;
     if stars_offered {
         col = col.child(
@@ -659,7 +653,7 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
             ));
         }
     }
-    for (ix, option) in send.premium_options.iter().enumerate() {
+    for (ix, option) in send.premium_options().iter().enumerate() {
         let paid_in_stars = by_stars && option.star_count > 0;
         let price = if paid_in_stars {
             stars(option.star_count)

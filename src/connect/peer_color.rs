@@ -10,6 +10,7 @@ use crate::telegram::requests::{
     set_upgraded_gift_colors,
 };
 use crate::telegram::requests_premium::get_wearable_gifts;
+use std::collections::HashSet;
 
 impl<S: JsonSender> ConnectDriver<S> {
     fn my_user_is_premium(&self) -> bool {
@@ -70,8 +71,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_json_request(extra, &json).map(Some);
         if sent.is_ok() {
             let gifts = &mut self.session.users_state.wearable_gifts;
-            gifts.begin();
-            gifts.sent(extra);
+            gifts.begin_with(extra);
         }
         sent
     }
@@ -117,14 +117,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_json_request(extra, &json).map(Some);
         if sent.is_ok() {
             let icons = &mut self.session.users_state.background_emoji_icons;
-            icons.begin();
-            icons.sent(extra);
+            icons.begin_with(extra);
         }
         sent
     }
 
     /// Download the stickers of the wearable gifts that are not local yet.
-    pub fn download_wearable_gift_stickers(&mut self) {
+    /// `asked` holds the files already asked for: a file is asked once,
+    /// and one whose request failed is asked again next time. `true` when a
+    /// file was asked for now.
+    pub fn download_wearable_gift_stickers(&mut self, asked: &mut HashSet<FileId>) -> bool {
         let files: Vec<FileId> = self
             .session
             .users_state
@@ -135,13 +137,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .flat_map(|sticker| std::iter::once(sticker.file_id).chain(sticker.thumb_file_id))
             .filter(|id| id.0 != 0)
             .collect();
-        for file in files {
-            let _ = self.download_file(file, THUMB_DOWNLOAD_PRIORITY);
-        }
+        self.download_once(files, asked)
     }
 
-    /// Download the icon thumbnails that are not local yet.
-    pub fn download_background_emoji_icons(&mut self) {
+    /// Download the icon thumbnails that are not local yet; see
+    /// [`Self::download_wearable_gift_stickers`] for `asked`.
+    pub fn download_background_emoji_icons_once(&mut self, asked: &mut HashSet<FileId>) -> bool {
         let files: Vec<FileId> = self
             .session
             .users_state
@@ -150,8 +151,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .filter_map(|sticker| sticker.display_file_id())
             .collect();
+        self.download_once(files, asked)
+    }
+
+    /// Download the icon thumbnails that are not local yet (asked every time).
+    pub fn download_background_emoji_icons(&mut self) {
+        self.download_background_emoji_icons_once(&mut HashSet::new());
+    }
+
+    fn download_once(&mut self, files: Vec<FileId>, asked: &mut HashSet<FileId>) -> bool {
+        let mut any = false;
         for file in files {
-            let _ = self.download_file(file, THUMB_DOWNLOAD_PRIORITY);
+            if asked.contains(&file) {
+                continue;
+            }
+            if self.download_file(file, THUMB_DOWNLOAD_PRIORITY).is_ok() {
+                asked.insert(file);
+                any = true;
+            }
         }
+        any
     }
 }

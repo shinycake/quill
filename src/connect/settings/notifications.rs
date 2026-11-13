@@ -41,7 +41,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::SetChatNotificationSettings, Some(chat_id));
         let json = set_chat_notification_settings(extra, chat_id, settings);
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session.show_chat_save(chat_id, extra, settings);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -60,50 +63,42 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // The entry exists from the moment its request went out (or failed
+        // to): one ask per scope, answered by its own request.
         if self
             .session
             .settings
             .notification_exceptions
             .contains_key(&scope)
-            || self
-                .session
-                .requests
-                .has_purpose_for_scope(RequestPurpose::GetChatNotificationSettingsExceptions, scope)
         {
             return Ok(());
         }
         let extra = self
             .session
             .request_for_scope(RequestPurpose::GetChatNotificationSettingsExceptions, scope);
-        self.session
-            .settings
-            .notification_exceptions
-            .entry(scope)
-            .or_default()
-            .begin();
-        if let Err(err) = self
+        let sent = self
             .sender
             .send_json(&get_chat_notification_settings_exceptions(
                 extra, scope, true,
-            ))
-        {
-            self.session.requests.take(extra);
-            // The list says so with its Retry; nothing asks again by itself.
-            self.session
-                .settings
-                .notification_exceptions
-                .entry(scope)
-                .or_default()
-                .fail("could not send the request");
-            return Err(err);
-        }
-        self.session
+            ));
+        let list = self
+            .session
             .settings
             .notification_exceptions
             .entry(scope)
-            .or_default()
-            .sent(extra);
-        Ok(())
+            .or_default();
+        match sent {
+            Ok(()) => {
+                list.begin_with(extra);
+                Ok(())
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                // The list says so with its Retry; nothing asks again by itself.
+                list.fail("could not send the request");
+                Err(err)
+            }
+        }
     }
 
     /// The exceptions list's Retry after a failed fetch.
@@ -261,22 +256,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // Asked when never asked, or owed again; a failed fetch waits for
-        // the next change of the list.
-        let saved = &self.session.settings.saved_sounds;
-        if !saved.wants_fetch()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetSavedNotificationSounds)
-        {
+        // Asked when never asked, or owed again; a fetch in flight or a
+        // failed one waits (a failed fetch for the next change of the list).
+        if !self.session.settings.saved_sounds.wants_fetch() {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetSavedNotificationSounds, None);
-        self.session.settings.saved_sounds.begin();
-        self.session.settings.saved_sounds.sent(extra);
+        self.session.settings.saved_sounds.begin_with(extra);
         match self.sender.send_json(&get_saved_notification_sounds(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
@@ -326,10 +314,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .settings
                     .scope_notification_settings
                     .contains_key(&scope)
-                || self
-                    .session
-                    .requests
-                    .has_purpose_for_scope(RequestPurpose::GetScopeNotificationSettings, scope)
             {
                 continue;
             }
@@ -440,10 +424,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Parity slice: resolve a notification sound to a playable form.
     /// A custom id missing from the saved list falls back to the default
     /// tone (per the `getSavedNotificationSounds` schema comment).
-    pub fn resolve_notification_sound(&mut self, kind: NotificationSoundKind) -> SoundResolution {
+    pub fn resolve_notification_sound(
+        &mut self,
+        kind: NotificationSoundKind,
+    ) -> Option<SoundResolution> {
         use SoundResolution as R;
         let sound_id = match kind {
-            NotificationSoundKind::Default => return R::DefaultTone,
+            NotificationSoundKind::Default => return Some(R::DefaultTone),
             NotificationSoundKind::Custom(id) => id,
         };
         let Some(entry) = self
@@ -453,11 +440,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .find(|s| s.id == sound_id)
         else {
-            return R::DefaultTone;
+            return Some(R::DefaultTone);
         };
         let file_id = entry.sound.id;
         if let Some(path) = self.session.file(file_id).and_then(|f| f.usable_path()) {
-            return R::FilePath(path.into());
+            return Some(R::FilePath(path.into()));
         }
         // Not local yet: mark the file as a notification sound, request
         // playback on completion, and start the download (deduped).
@@ -481,6 +468,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .pending_sound_downloads
                 .remove(&sound_id);
         }
-        R::Pending
+        None
     }
 }

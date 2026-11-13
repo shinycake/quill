@@ -227,41 +227,46 @@ pub enum PressAction {
 }
 
 /// The press bookkeeping of `handleMousePress` / `handleMouseRelease` /
-/// `handleDoubleClick`.
+/// `handleDoubleClick`: nothing, a press held over a part, or the part a
+/// release just acted on (a double click on it undoes that).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Presses {
-    pressed: Option<OverState>,
-    last_handled: Option<OverState>,
+pub enum Presses {
+    #[default]
+    Idle,
+    Held(OverState),
+    Handled(OverState),
 }
 
 impl Presses {
     /// The left button went down over `over`.
     pub fn press(&mut self, over: OverState) {
-        self.pressed = Some(over);
+        *self = Self::Held(over);
     }
 
     /// What is held, if a press is in progress.
     pub fn pressed(&self) -> Option<OverState> {
-        self.pressed
+        match self {
+            Self::Held(over) => Some(*over),
+            Self::Idle | Self::Handled(_) => None,
+        }
     }
 
     /// The press took the window drag or the lines: no window drag starts
     /// from them (`setDragDisabled`).
     pub fn drag_disabled(&self) -> bool {
         matches!(
-            self.pressed,
-            Some(OverState::Playback | OverState::VolumeController)
+            self,
+            Self::Held(OverState::Playback | OverState::VolumeController)
         )
     }
 
     /// The button came up over `over`; `dragged` when the press moved the
     /// window.
     pub fn release(&mut self, over: OverState, dragged: bool) -> Option<PressAction> {
-        let pressed = self.pressed.take();
-        match pressed {
-            Some(OverState::Playback | OverState::VolumeController) => None,
-            Some(held) if !dragged && held == over => {
-                self.last_handled = Some(over);
+        match std::mem::take(self) {
+            Self::Held(OverState::Playback | OverState::VolumeController) => None,
+            Self::Held(held) if !dragged && held == over => {
+                *self = Self::Handled(over);
                 match over {
                     OverState::Close => Some(PressAction::Close),
                     OverState::Enlarge => Some(PressAction::Enlarge),
@@ -270,16 +275,13 @@ impl Presses {
                     _ => None,
                 }
             }
-            _ => {
-                self.last_handled = None;
-                None
-            }
+            _ => None,
         }
     }
 
     /// A double click came over `over`.
     pub fn double_click(&mut self, over: OverState) -> Option<PressAction> {
-        (over == OverState::Other && self.last_handled == Some(OverState::Other))
+        (over == OverState::Other && *self == Self::Handled(OverState::Other))
             .then_some(PressAction::UndoToggleAndEnlarge)
     }
 }

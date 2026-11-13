@@ -168,7 +168,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut engine_error = None;
         match applied {
             Some(Ok(())) => {
-                self.group_mute_state.insert(group_call_id, muted);
+                self.group_engine
+                    .entry(group_call_id)
+                    .or_default()
+                    .mute
+                    .applied(muted);
             }
             Some(Err(err)) if !muted => return Err(SelfMuteError::Engine(err)),
             Some(Err(err)) => engine_error = Some(err),
@@ -277,6 +281,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session
+            .begin_participant_mute_toggle(group_call_id, participant_id, extra);
         Ok(extra)
     }
 

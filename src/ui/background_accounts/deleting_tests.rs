@@ -298,6 +298,37 @@ fn a_quit_before_the_clients_closed_still_removes_and_logs_out_on_the_next_start
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Sweep r4 13-007: the passcode is forgotten when the lock-screen log out
+/// starts, so a client that only closes slowly (a large database, past the
+/// wait's cap) must not leave the wipe deferred for the whole run.
+#[gpui_kit::test]
+fn a_slow_close_does_not_leave_the_lock_screen_wipe_deferred(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[]);
+    let slow = Fake::default();
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.background
+            .closing
+            .push(AccountKey::primary(), slow.boxed(), false);
+        app.begin_local_wipe(root.clone(), cx).unwrap();
+    });
+    // The close outlasts the wait's cap: the wipe waits again.
+    vcx.executor().advance_clock(Duration::from_secs(61));
+    vcx.run_until_parked();
+    assert!(
+        folder(&root, &AccountKey::primary()),
+        "nothing under it yet"
+    );
+    slow.close();
+    run_for(&mut vcx, 400);
+    assert!(
+        !folder(&root, &AccountKey::primary()),
+        "wiped once the client closed"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[gpui_kit::test]
 fn the_startup_sweep_skips_accounts_this_run_still_has_open(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
@@ -393,6 +424,49 @@ fn an_unconfirmed_log_out_tells_the_user_to_restart_quill(cx: &mut TestAppContex
             "Restart Quill to finish logging out. Nothing connects until then."
         );
     });
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A deletion whose client's close cannot be confirmed is deferred to the
+/// next start: its entry holds no task (`Deferred`), the account does not
+/// start, and a second Remove is refused.
+#[gpui_kit::test]
+fn an_unconfirmed_close_defers_the_deletion_with_no_task(cx: &mut TestAppContext) {
+    use super::deleting::AccountDeletion;
+    let (app, mut vcx) = new_app(cx);
+    let root = temp_root();
+    isolate(&app, &mut vcx, &root, &[account(1)]);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let started = Instant::now();
+        app.background
+            .closing
+            .push(account(1), Fake::default().boxed(), false);
+        app.remove_account_in(root.clone(), &account(1), cx);
+        assert!(matches!(
+            app.background.deleting.get(&account(1)),
+            Some(AccountDeletion::Running { .. })
+        ));
+        app.close_all_for_quit(started + Duration::from_millis(100));
+    });
+    run_for(&mut vcx, 100);
+    app.update_in(&mut vcx, |app, _, cx| {
+        assert!(
+            matches!(
+                app.background.deleting.get(&account(1)),
+                Some(AccountDeletion::Deferred)
+            ),
+            "the entry stays, with no task"
+        );
+        assert!(app.background.client(&account(1)).is_none());
+        // A second Remove changes nothing.
+        app.remove_account_in(root.clone(), &account(1), cx);
+        assert!(matches!(
+            app.background.deleting.get(&account(1)),
+            Some(AccountDeletion::Deferred)
+        ));
+    });
+    assert!(folder(&root, &account(1)), "nothing deleted this run");
+    assert_eq!(pending_deletes(&root), vec![account(1)]);
     let _ = std::fs::remove_dir_all(&root);
 }
 

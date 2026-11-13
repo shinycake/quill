@@ -52,7 +52,7 @@ impl QuillApp {
         let hidden = self
             .message_ui
             .collapsed_keyboards
-            .contains(&(chat.0, message.0));
+            .contains(&quill::ids::ChatMessage::new(chat, message));
         (!hidden || keyboard.force_reply).then_some(message)
     }
 
@@ -64,7 +64,7 @@ impl QuillApp {
             let hidden = self
                 .message_ui
                 .collapsed_keyboards
-                .contains(&(chat.0, message.0));
+                .contains(&quill::ids::ChatMessage::new(chat, message));
             return if hidden && !keyboard.force_reply {
                 String::new()
             } else {

@@ -66,7 +66,7 @@ impl CallContext {
 /// tgcalls' `State` as Quill's transport state.
 pub(super) fn transport_state(state: i32) -> Option<TransportState> {
     match state {
-        QC_P2P_WAIT_INIT | QC_P2P_WAIT_INIT_ACK => Some(TransportState::Connecting),
+        QC_P2P_WAIT_INIT | QC_P2P_WAIT_INIT_ACK => Some(TransportState::Establishing),
         QC_P2P_ESTABLISHED => Some(TransportState::Connected),
         QC_P2P_RECONNECTING => Some(TransportState::Reconnecting),
         QC_P2P_FAILED => Some(TransportState::Failed),
@@ -335,11 +335,11 @@ mod tests {
     fn tgcalls_states_map_to_transport_states() {
         assert_eq!(
             transport_state(QC_P2P_WAIT_INIT),
-            Some(TransportState::Connecting)
+            Some(TransportState::Establishing)
         );
         assert_eq!(
             transport_state(QC_P2P_WAIT_INIT_ACK),
-            Some(TransportState::Connecting)
+            Some(TransportState::Establishing)
         );
         assert_eq!(
             transport_state(QC_P2P_ESTABLISHED),

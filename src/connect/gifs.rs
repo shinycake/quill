@@ -16,14 +16,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
         let search = matches!(
             purpose,
             RequestPurpose::ResolveGifSearchBot
                 | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
         );
+        // The search waits on its own request; a save or remove on the one
+        // the panel's `save` stage holds.
+        let busy = if search {
+            self.gif_search_out()
+        } else {
+            self.session.gif_save_in_flight()
+        };
+        if busy {
+            return Ok(None);
+        }
         if search {
             self.session.stickers.gifs.search_failure_cleared();
         } else {
@@ -45,14 +52,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// The request the search waits for (the bot's lookup or a results page)
+    /// is still out: one the registry no longer holds was answered.
+    fn gif_search_out(&self) -> bool {
+        self.session
+            .stickers
+            .gifs
+            .search_request()
+            .is_some_and(|request| self.session.requests.get(request).is_some())
+    }
+
     pub(crate) fn cancel_gif_search_requests(&mut self) {
-        for purpose in [
-            RequestPurpose::ResolveGifSearchBot,
-            RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: true }),
-            RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
-        ] {
-            drop(self.session.requests.take_purpose(purpose));
-        }
+        let asked = self.session.stickers.gifs.search_request();
+        self.drop_request(asked);
     }
 
     pub fn search_gifs(
@@ -97,11 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.stickers.gifs.search_failed_now();
             return Ok(None);
         }
-        if self.session.requests.has_purpose(RequestPurpose::Stickers(
-            StickersPurpose::GetGifSearchResults { first_page: true },
-        )) || self.session.requests.has_purpose(RequestPurpose::Stickers(
-            StickersPurpose::GetGifSearchResults { first_page: false },
-        )) {
+        if self.gif_search_out() {
             return Ok(None);
         }
         let Some(bot_id) = self.session.stickers.gifs.search_bot_user_id else {
@@ -148,15 +156,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || file_id.0 <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::AddSavedAnimation)
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::RemoveSavedAnimation)
-        {
+        if self.session.gif_save_in_flight() {
             return Ok(None);
         }
         let purpose = if saved {
@@ -164,12 +164,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             RequestPurpose::RemoveSavedAnimation
         };
-        self.gif_request(purpose, |id| {
+        let sent = self.gif_request(purpose, |id| {
             if saved {
                 add_saved_animation(id, file_id)
             } else {
                 remove_saved_animation(id, file_id)
             }
-        })
+        })?;
+        if let Some(request) = sent {
+            self.session.stickers.gifs.save_sent(request);
+        }
+        Ok(sent)
     }
 }

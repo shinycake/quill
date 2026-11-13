@@ -1098,6 +1098,7 @@ fn a_photo_edit_whose_chat_window_closed_still_lands_in_its_tray(cx: &mut TestAp
             app.in_window_of(window, cx, |app, window, cx| {
                 app.update_pending_attachments(|tray| {
                     tray.push(ComposerAttachment {
+                        id: Default::default(),
                         file_name: "closing.png".into(),
                         path: path.clone(),
                         kind: AttachmentKind::Photo,
@@ -1153,8 +1154,7 @@ fn a_message_photo_edit_whose_chat_window_closed_leaves_no_png(cx: &mut TestAppC
                 let pixels = image::RgbaImage::from_pixel(59, 11, image::Rgba([4, 5, 6, 255]));
                 app.viewer.photo_editor.open(PhotoEditor::new(
                     EditorPurpose::MessageEdit {
-                        chat: ChatId(1),
-                        message: MessageId(2),
+                        edit: crate::ui::chat_ui_state::EditId::next(),
                     },
                     pixels,
                 ));
@@ -1201,6 +1201,7 @@ fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppConte
             app.in_window_of(window, cx, |app, window, cx| {
                 app.update_pending_attachments(|tray| {
                     tray.push(ComposerAttachment {
+                        id: Default::default(),
                         file_name: "held-closing.png".into(),
                         path: path.clone(),
                         kind: AttachmentKind::Photo,
@@ -1461,4 +1462,42 @@ fn a_chat_window_the_platform_destroys_frees_its_chat(cx: &mut TestAppContext) {
     .unwrap();
     cx.run_until_parked();
     assert_eq!(h.other_windows(cx).len(), 1, "asking again opens a window");
+}
+
+/// The recording's timer wakes for the capture's own deadlines, with no window
+/// drawing: it is not re-armed on a fixed short period, and the chat action's
+/// refresh falls at the right moment.
+#[gpui_kit::test]
+fn a_recording_wakes_only_at_its_deadlines_while_no_window_draws(cx: &mut TestAppContext) {
+    use crate::ui::record_wake::ACTION_REFRESH;
+    use std::time::Duration;
+    let h = new_app(cx);
+    record_in_window(&h, None, CaptureFor::Message, cx);
+    let armed_at = h.app.update(cx, |app, cx| {
+        app.begin_record_tick(cx);
+        cx.background_executor().now()
+    });
+    // The first step runs at once and arms the chat action's refresh.
+    cx.run_until_parked();
+    let due = h.app.update(cx, |app, _| app.recording.wake_due());
+    assert_eq!(due, Some(armed_at + ACTION_REFRESH));
+    // Time passes with nothing due: the timer is not re-armed.
+    cx.executor().advance_clock(Duration::from_millis(350));
+    cx.run_until_parked();
+    assert_eq!(
+        h.app.update(cx, |app, _| app.recording.wake_due()),
+        due,
+        "no wake-up on a fixed period"
+    );
+    // The deadline arrives: the step runs and arms the next deadline.
+    cx.executor()
+        .advance_clock(ACTION_REFRESH.saturating_sub(Duration::from_millis(350)));
+    cx.run_until_parked();
+    let next = h.app.update(cx, |app, _| app.recording.wake_due());
+    assert_eq!(next, Some(armed_at + ACTION_REFRESH * 2));
+    // Cancelling the recording drops its timer with it.
+    h.app.update(cx, |app, cx| app.cancel_recording(cx));
+    cx.executor().advance_clock(ACTION_REFRESH);
+    cx.run_until_parked();
+    assert_eq!(h.app.update(cx, |app, _| app.recording.wake_due()), None);
 }

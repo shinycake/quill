@@ -140,7 +140,7 @@ fn removing_a_row_keeps_the_media_with_its_option(cx: &mut TestAppContext) {
         app.open_poll_dialog(window, cx);
         app.add_poll_option_row(window, cx);
         let link_input = |url: &str| PollOptionInput::Link { url: url.into() };
-        let link = |url: &str| OptionMediaSlot::Ready(link_input(url));
+        let link = |url: &str| OptionMediaSlot::Ready(link_input(url), None);
         {
             let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
             dialog.options[0].attach.media = link("a");

@@ -47,6 +47,13 @@ fn ask_gallery_stories(session: &mut Session, chat: i64) -> RequestId {
         .media
         .shared_media
         .begin_profile_fetch(SharedMediaTab::Stories, request);
+    // The driver's ask also puts the list's page out under this request.
+    session
+        .stories
+        .chat_page_stories
+        .entry(chat)
+        .or_default()
+        .ask(request, 0);
     request
 }
 
@@ -95,11 +102,16 @@ fn a_stories_page_asked_before_the_gallery_reopened_is_dropped() {
     let stories = tab(&session, SharedMediaTab::Stories);
     assert!(stories.items.is_empty());
     assert!(stories.status.is_loading());
-    assert!(!session.stories.chat_page_stories.contains_key(&6));
+    assert!(
+        session
+            .stories
+            .chat_page_stories
+            .get(&6)
+            .is_none_or(|list| list.story_ids.is_empty())
+    );
 }
 
-/// A page the stories page asked for is not the request the tab waits for: it fills the list
-/// the stories page draws but never answers the gallery tab that waits for
+/// A page the stories page asked for is not the request the tab waits for: it never answers the gallery tab that waits for
 /// its own request, open or reopened.
 #[test]
 fn a_stories_page_the_tab_does_not_wait_for_never_fills_the_gallery_tab() {

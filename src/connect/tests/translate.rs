@@ -224,10 +224,13 @@ fn chat_translated_to_toggles_and_bumps_the_revision() {
 fn hiding_the_bar_sends_toggle_chat_is_translatable_and_rolls_back() {
     let mut h = Harness::new();
     h.ingest(r#"{"@type":"updateChatIsTranslatable","chat_id":7,"is_translatable":true}"#);
-    h.driver
+    let request = h
+        .driver
         .toggle_chat_is_translatable(ChatId(7), false)
         .expect("request");
+    h.driver.session.acks.expect(request);
     let v = sent_request(&h.recorder, "toggleChatIsTranslatable");
+    assert_eq!(v["@extra"].as_str(), Some(request.as_extra().as_str()));
     assert_eq!(v["chat_id"], 7);
     assert_eq!(v["is_translatable"], false);
     assert!(!h.driver.session.chat_is_translatable(ChatId(7)));
@@ -236,6 +239,13 @@ fn hiding_the_bar_sends_toggle_chat_is_translatable_and_rolls_back() {
         id = v["@extra"].as_str().unwrap(),
     );
     h.ingest(&json);
+    assert!(
+        matches!(
+            h.driver.session.acks.take(request),
+            Some(crate::state::Answer::Failed(_))
+        ),
+        "the refusal is the answer to the hide's own request"
+    );
     assert!(
         h.driver.session.chat_is_translatable(ChatId(7)),
         "a refused hide puts the bar back"
@@ -278,6 +288,7 @@ fn channel_auto_translate_is_parsed_gated_and_toggled() {
         .groups
         .info_edit_errors
         .get(&13)
+        .and_then(|errors| errors.first())
         .expect("the refusal is recorded for the Edit box");
     assert_eq!(error.field, crate::state::GroupInfoField::Settings);
 }

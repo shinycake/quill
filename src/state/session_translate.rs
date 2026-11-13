@@ -201,7 +201,7 @@ impl Session {
 
     /// Record the answer (or failure) of `request`; an entry another
     /// request has replaced ignores it.
-    pub(crate) fn finish_translation(&mut self, request: RequestId, result: Translation) {
+    pub fn finish_translation(&mut self, request: RequestId, result: Translation) {
         let translate = &mut self.messages.translate;
         let is_mine = |slot: &Translation| matches!(slot, Translation::Pending { request: asked, .. } if *asked == request);
         let slot = match translate.texts.get_mut(&request) {
@@ -348,6 +348,37 @@ impl Session {
             self.messages.translate.messages.remove(&key);
         }
         self.messages.translate.revision += 1;
+    }
+
+    /// Whether `message_id` has no finished translation into `to`: what
+    /// the pump keeps in its scan. A `Pending` ask is kept too, so a
+    /// failure that ran out of attempts is tested again once they are
+    /// given back ([`Self::translations_back_online`]); `needs_translation`
+    /// keeps the pending ask from being sent twice.
+    pub fn translation_unsettled(&self, chat_id: ChatId, message_id: MessageId, to: &str) -> bool {
+        !matches!(
+            self.message_translation(chat_id, message_id, to),
+            Some(Translation::Done { .. })
+        )
+    }
+
+    /// The connection came back: every failed translation gets its
+    /// attempts again, so the pump of a chat that stayed open asks once
+    /// more (a failure that ran out of attempts offline is not final).
+    pub fn translations_back_online(&mut self) {
+        let translate = &mut self.messages.translate;
+        let mut changed = false;
+        for translation in translate.messages.values_mut() {
+            if let Translation::Failed { attempts, .. } = translation
+                && *attempts != 0
+            {
+                *attempts = 0;
+                changed = true;
+            }
+        }
+        if changed {
+            translate.revision += 1;
+        }
     }
 
     /// Whether the translated chat's pump should ask for `message_id` into

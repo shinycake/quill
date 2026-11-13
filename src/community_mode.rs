@@ -45,5 +45,5 @@ pub fn retain_community_chats<C: std::borrow::Borrow<ChatSummary>>(
         return;
     };
     let members = community_member_ids(full_infos.get(&community_id));
-    chats.retain(|chat| members.contains(&chat.borrow().id.0));
+    chats.retain(|chat| members.contains(&std::borrow::Borrow::<ChatSummary>::borrow(chat).id.0));
 }

@@ -66,7 +66,6 @@ fn user_download_send_failure_marks_failed_download() {
 #[test]
 fn a_sound_whose_download_cannot_be_sent_is_not_left_waiting() {
     // 02-210: the pending marker is kept only while the download is out.
-    use crate::connect::SoundResolution;
     use crate::notify::NotificationSoundKind;
     use crate::telegram::envelope::{NotificationSound, ParsedFile};
     let store = MemorySecretStore::new();
@@ -116,7 +115,7 @@ fn a_sound_whose_download_cannot_be_sent_is_not_left_waiting() {
             },
         }]);
     let resolved = driver.resolve_notification_sound(NotificationSoundKind::Custom(7));
-    assert!(matches!(resolved, SoundResolution::Pending));
+    assert!(resolved.is_none());
     assert!(driver.session.settings.pending_sound_downloads.is_empty());
     assert!(driver.session.settings.sound_file_ids.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
@@ -782,14 +781,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
     assert!(!driver.session.settings.sessions_op.is_mutating());
     // The screen that asked went away: nobody takes the answer.
     driver.session.settings.device_login.discard();
-    assert_eq!(
-        driver
-            .session
-            .settings
-            .device_login
-            .take_result_for(request),
-        None
-    );
+    assert_eq!(driver.session.settings.device_login.take_result(), None);
     assert!(
         recorder.snapshot()[sent..]
             .iter()
@@ -825,20 +817,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         }
     );
     assert_eq!(
-        driver
-            .session
-            .settings
-            .device_login
-            .take_result_for(crate::ids::RequestId(request.0 + 1)),
-        None,
-        "another request's result is not this asker's"
-    );
-    assert_eq!(
-        driver
-            .session
-            .settings
-            .device_login
-            .take_result_for(request),
+        driver.session.settings.device_login.take_result(),
         Some(crate::auth::DeviceLoginResult::PasswordRequired)
     );
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
@@ -947,6 +926,11 @@ fn an_account_ttl_write_goes_out_while_the_read_is_in_flight_but_not_beside_anot
     // The read does not block the write.
     let sent = recorder.snapshot().len();
     driver.set_account_ttl(180).expect("the write is sent");
+    assert!(
+        driver.session.settings.account_ttl.is_loading(),
+        "the read keeps its place beside the write"
+    );
+    assert!(driver.session.settings.account_write.is_out());
     let snapshot = recorder.snapshot();
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"setAccountTtl\""));

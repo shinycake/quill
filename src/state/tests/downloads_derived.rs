@@ -10,7 +10,7 @@ fn update_file(id: i32, active: bool, completed: bool, downloaded: i64) -> Strin
     )
 }
 
-fn status(session: &Session, id: i32) -> DownloadStatus {
+fn status(session: &Session, id: i32) -> DownloadStatusView {
     session.media.downloads.status(id, &session.media.files)
 }
 
@@ -18,27 +18,27 @@ fn status(session: &Session, id: i32) -> DownloadStatus {
 fn file_updates_alone_drive_the_shown_status() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    assert_eq!(status(&session, 60), DownloadStatus::Idle);
+    assert_eq!(status(&session, 60), DownloadStatusView::Idle);
     // A transfer nobody here asked for (another device, TDLib resuming).
     apply_json(&mut session, &seq, &sink, &update_file(60, true, false, 10));
-    assert_eq!(status(&session, 60), DownloadStatus::Downloading);
+    assert_eq!(status(&session, 60), DownloadStatusView::Downloading);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &update_file(60, false, true, 100),
     );
-    assert_eq!(status(&session, 60), DownloadStatus::Done);
+    assert_eq!(status(&session, 60), DownloadStatusView::Done);
     // TDLib drops the file from the cache.
     apply_json(&mut session, &seq, &sink, &update_file(60, false, false, 0));
-    assert_eq!(status(&session, 60), DownloadStatus::Idle);
+    assert_eq!(status(&session, 60), DownloadStatusView::Idle);
 }
 
 #[test]
 fn a_stale_request_never_shows_over_a_finished_file() {
     let (mut session, _sink) = session();
     session.begin_user_download(FileId(61));
-    assert_eq!(status(&session, 61), DownloadStatus::Downloading);
+    assert_eq!(status(&session, 61), DownloadStatusView::Downloading);
     // The completed snapshot lands without passing the update path.
     session.media.files.insert(ParsedFile {
         id: FileId(61),
@@ -46,7 +46,7 @@ fn a_stale_request_never_shows_over_a_finished_file() {
         expected_size: 100,
         local: LocalFileState::from_parts("/tmp/derived.bin", true, false, true, 100),
     });
-    assert_eq!(status(&session, 61), DownloadStatus::Done);
+    assert_eq!(status(&session, 61), DownloadStatusView::Done);
 }
 
 #[test]
@@ -56,14 +56,14 @@ fn cancel_hides_progress_at_once_and_is_never_a_failure() {
     let extra = session.request_download(FileId(62));
     session.begin_user_download(FileId(62));
     apply_json(&mut session, &seq, &sink, &update_file(62, true, false, 20));
-    assert_eq!(status(&session, 62), DownloadStatus::Downloading);
+    assert_eq!(status(&session, 62), DownloadStatusView::Downloading);
     session.abort_download(FileId(62));
     // TDLib has not confirmed yet: the file still reports active.
-    assert_eq!(status(&session, 62), DownloadStatus::Idle);
+    assert_eq!(status(&session, 62), DownloadStatusView::Idle);
     assert!(!session.media.downloads.is_user(62));
     // A late progress update does not bring the row back.
     apply_json(&mut session, &seq, &sink, &update_file(62, true, false, 30));
-    assert_eq!(status(&session, 62), DownloadStatus::Idle);
+    assert_eq!(status(&session, 62), DownloadStatusView::Idle);
     // The cancelled request answers with an error, then the idle update.
     apply_json(
         &mut session,
@@ -80,12 +80,12 @@ fn cancel_hides_progress_at_once_and_is_never_a_failure() {
         &sink,
         &update_file(62, false, false, 30),
     );
-    assert_eq!(status(&session, 62), DownloadStatus::Idle);
+    assert_eq!(status(&session, 62), DownloadStatusView::Idle);
     assert!(!session.media.downloads.is_failed(62));
     assert!(!session.media.downloads.is_stalled_auto(62));
     // Asking again works.
     session.begin_user_download(FileId(62));
-    assert_eq!(status(&session, 62), DownloadStatus::Downloading);
+    assert_eq!(status(&session, 62), DownloadStatusView::Downloading);
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn a_failed_row_follows_tdlib_when_the_transfer_resumes() {
         &sink,
         &update_file(63, false, false, 10),
     );
-    assert_eq!(status(&session, 63), DownloadStatus::Failed);
+    assert_eq!(status(&session, 63), DownloadStatusView::Failed);
     assert_eq!(
         session
             .media
@@ -111,7 +111,7 @@ fn a_failed_row_follows_tdlib_when_the_transfer_resumes() {
     );
     // TDLib resumes the transfer (another device, restart).
     apply_json(&mut session, &seq, &sink, &update_file(63, true, false, 40));
-    assert_eq!(status(&session, 63), DownloadStatus::Downloading);
+    assert_eq!(status(&session, 63), DownloadStatusView::Downloading);
     assert_eq!(
         session
             .media
@@ -126,7 +126,7 @@ fn a_failed_row_follows_tdlib_when_the_transfer_resumes() {
         &sink,
         &update_file(63, false, true, 100),
     );
-    assert_eq!(status(&session, 63), DownloadStatus::Done);
+    assert_eq!(status(&session, 63), DownloadStatusView::Done);
     assert!(!session.media.downloads.is_failed(63));
 }
 
@@ -155,7 +155,7 @@ fn recent_list_drops_a_file_removed_from_the_cache() {
         session.media.downloads.recent(&session.media.files).count(),
         0
     );
-    assert_eq!(status(&session, 64), DownloadStatus::Idle);
+    assert_eq!(status(&session, 64), DownloadStatusView::Idle);
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn an_auto_download_failure_never_shows_failed() {
         ),
     );
     apply_json(&mut session, &seq, &sink, &update_file(77, false, false, 5));
-    assert_ne!(status(&session, 77), DownloadStatus::Failed);
+    assert_ne!(status(&session, 77), DownloadStatusView::Failed);
     assert!(!session.media.downloads.is_failed(77));
     assert!(session.media.downloads.is_stalled_auto(77));
     assert_eq!(
@@ -286,7 +286,7 @@ fn an_ended_automatic_download_reads_as_ended_without_a_file() {
     session.media.downloads.end(70);
     // `status` only fails user downloads; the wait on an automatic one
     // needs this to leave.
-    assert_eq!(status(&session, 70), DownloadStatus::Idle);
+    assert_eq!(status(&session, 70), DownloadStatusView::Idle);
     assert!(ended(&session, 70));
     // A retry clears the end; a finished file is not an end.
     session.begin_download(FileId(70));
@@ -299,6 +299,23 @@ fn an_ended_automatic_download_reads_as_ended_without_a_file() {
         &update_file(70, false, true, 100),
     );
     assert!(!ended(&session, 70));
+}
+
+#[test]
+fn a_download_waiter_leaves_when_the_transfer_is_cancelled_or_never_registered() {
+    let (mut session, _sink) = session();
+    let gave_up = |s: &Session, id| s.media.downloads.gave_up(id, &s.media.files);
+    // Nothing asked for the file: a waiter has nothing to wait on.
+    assert!(gave_up(&session, 71));
+    session.begin_download(FileId(71));
+    assert!(!gave_up(&session, 71));
+    // Cancelled from another surface: the waiter leaves too.
+    session.media.downloads.cancel(71);
+    assert!(gave_up(&session, 71));
+    session.begin_download(FileId(71));
+    assert!(!gave_up(&session, 71));
+    session.media.downloads.end(71);
+    assert!(gave_up(&session, 71));
 }
 
 #[test]

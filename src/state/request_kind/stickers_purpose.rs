@@ -37,10 +37,8 @@ impl StickersPurpose {
             | Self::GetKeywordEmojis
             | Self::GetAttachedStickerSets { .. }
             | Self::GetGreetingStickers
-            | Self::GetEmojiCategories
             | Self::GetStickerCategories
             | Self::GetInstalledEmojiSets
-            | Self::GetArchivedEmojiSets { .. }
             | Self::GetTrendingEmojiSets
             | Self::SearchEmojiSets
             | Self::GetSavedAnimations

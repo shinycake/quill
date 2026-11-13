@@ -9,7 +9,7 @@
 use super::app::QuillApp;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The wait before the next redraw: the label's own pace, but never a
 /// busy loop.
@@ -38,67 +38,61 @@ impl QuillApp {
         {
             return;
         }
-        if self
+        let Some(refresh_in) = self
             .session()
             .and_then(|session| session.open_chat_live_location_refresh(now))
-            .is_none()
-        {
+        else {
             return;
-        }
+        };
+        self.arm_live_location_wake(chat_id, Instant::now() + wait_for(refresh_in), cx);
+    }
+
+    /// Wake once at `due`: redraw, and arm the next wake while a share
+    /// still runs. The stage holds the one task, so closing the chat or the
+    /// window ends it, and each wake replaces the task that ran it.
+    fn arm_live_location_wake(&mut self, chat_id: ChatId, due: Instant, cx: &mut Context<Self>) {
         let task = self.spawn_scoped(cx, async move |this, cx| {
-            loop {
-                let wait = this
-                    .update(cx, |this, _| this.live_location_wait(chat_id))
-                    .ok()
-                    .flatten();
-                let Some(wait) = wait else {
-                    break;
-                };
-                cx.background_executor().timer(wait).await;
-                let keep = this
-                    .update(cx, |this, cx| {
-                        if this.live_location_wait(chat_id).is_none() {
-                            return false;
-                        }
+            let wait = due.saturating_duration_since(Instant::now());
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |this, cx| {
+                match this.live_location_due(chat_id) {
+                    Some(next) => {
                         // A window behind another app catches up when it
                         // is activated again.
                         if this.frame.window_active.get() {
                             cx.notify();
                         }
-                        true
-                    })
-                    .unwrap_or(false);
-                if !keep {
-                    break;
+                        this.arm_live_location_wake(chat_id, next, cx);
+                    }
+                    None => {
+                        if this
+                            .history
+                            .live_location_tick
+                            .as_ref()
+                            .map(|(chat, _)| *chat)
+                            == Some(chat_id)
+                        {
+                            this.history.live_location_tick = None;
+                        }
+                        // The last share ended: draw its "ended" state.
+                        cx.notify();
+                    }
                 }
-            }
-            let _ = this.update(cx, |this, cx| {
-                if this
-                    .history
-                    .live_location_tick
-                    .as_ref()
-                    .map(|(chat, _)| *chat)
-                    == Some(chat_id)
-                {
-                    this.history.live_location_tick = None;
-                }
-                // The last share ended: draw its "ended" state.
-                cx.notify();
             });
         });
         self.history.live_location_tick = Some((chat_id, task));
     }
 
-    /// How long to wait before `chat_id`'s next refresh, or `None` when
-    /// it is no longer the open chat or shows no running live location.
-    fn live_location_wait(&self, chat_id: ChatId) -> Option<Duration> {
+    /// When `chat_id`'s next refresh is due, or `None` when it is no longer
+    /// the open chat or shows no running live location.
+    fn live_location_due(&self, chat_id: ChatId) -> Option<Instant> {
         let session = self.session()?;
         if session.open_chat_id() != Some(chat_id) {
             return None;
         }
         session
             .open_chat_live_location_refresh(quill::local_time::now_unix())
-            .map(wait_for)
+            .map(|refresh_in| Instant::now() + wait_for(refresh_in))
     }
 }
 

@@ -314,7 +314,7 @@ pub(super) fn tx_details(
     let url = tx
         .tx_hash
         .as_deref()
-        .and_then(|hash| transaction_explorer_url(wallet.explorer_url.as_deref(), hash));
+        .and_then(|hash| transaction_explorer_url(wallet.explorer_url(), hash));
     col.when_some(url, |col, url| {
         col.child(
             Button::new("money-tx-explorer")

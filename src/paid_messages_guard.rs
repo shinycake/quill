@@ -71,6 +71,26 @@ struct State {
     /// Prices the user agreed to for good, by chat id (`>=` price passes).
     trusted: HashMap<i64, i64>,
     held: VecDeque<HeldSend>,
+    /// How the last held sends ended, by request, until read
+    /// ([`PaidGuard::outcome`]); the oldest go first past [`SETTLED_KEPT`].
+    settled: VecDeque<(String, PaidOutcome)>,
+}
+
+/// How many ended holds are kept for their asker to read.
+const SETTLED_KEPT: usize = 16;
+
+/// Where a request the guard took stands: the asker of a held send learns
+/// from this whether the send went out or was dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaidOutcome {
+    /// Waiting for the user's confirmation.
+    Held,
+    /// The user confirmed and the send went out.
+    Released,
+    /// The user cancelled; nothing went out.
+    Discarded,
+    /// Not held, and no hold of it ended here (already read, or never held).
+    Unknown,
 }
 
 /// Shared between the driver (which feeds prices and trust) and the sender
@@ -169,6 +189,15 @@ impl PaidGuard {
         None
     }
 
+    /// Whether the request sent as `extra` is among the held ones.
+    pub fn holds(&self, extra: &str) -> bool {
+        self.state
+            .lock_or_recover()
+            .held
+            .iter()
+            .any(|held| held.extra().as_deref() == Some(extra))
+    }
+
     /// The oldest held request.
     pub fn held(&self) -> Option<HeldSend> {
         self.state.lock_or_recover().held.front().cloned()
@@ -177,6 +206,40 @@ impl PaidGuard {
     /// Takes the oldest held request out.
     pub fn take_held(&self) -> Option<HeldSend> {
         self.state.lock_or_recover().held.pop_front()
+    }
+
+    /// Takes the oldest held request out because it `ended` (`Released` or
+    /// `Discarded`), and keeps how for the asker to read.
+    pub fn end_held(&self, ended: PaidOutcome) -> Option<HeldSend> {
+        let mut state = self.state.lock_or_recover();
+        let held = state.held.pop_front()?;
+        if let Some(extra) = held.extra() {
+            state.settled.push_back((extra, ended));
+            while state.settled.len() > SETTLED_KEPT {
+                state.settled.pop_front();
+            }
+        }
+        Some(held)
+    }
+
+    /// Where the request sent as `extra` stands. An ended hold is read
+    /// once: the answer is taken with it.
+    pub fn outcome(&self, extra: &str) -> PaidOutcome {
+        let mut state = self.state.lock_or_recover();
+        if state
+            .held
+            .iter()
+            .any(|held| held.extra().as_deref() == Some(extra))
+        {
+            return PaidOutcome::Held;
+        }
+        match state.settled.iter().position(|(name, _)| name == extra) {
+            Some(index) => state
+                .settled
+                .remove(index)
+                .map_or(PaidOutcome::Unknown, |(_, ended)| ended),
+            None => PaidOutcome::Unknown,
+        }
     }
 }
 

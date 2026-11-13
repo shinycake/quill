@@ -375,6 +375,21 @@ fn a_phone_without_ctap_is_refused() {
     assert!(phone.join().unwrap(), "closed without a request");
 }
 
+/// Bluetooth going away after the code was shown (bluetoothd stopped)
+/// ends the ceremony with the phone error, not a code that does nothing.
+#[test]
+fn bluetooth_lost_after_the_code_ends_the_ceremony() {
+    let (env, rig) = environment(Some(true), None, None);
+    let mut ceremony = watch(register(creation(), env));
+    let _ = qr_of(next(&mut ceremony));
+    let sender = rig.events.lock().unwrap().clone().unwrap();
+    sender.send(ScanEvent::Available(false)).unwrap();
+    assert_eq!(
+        next(&mut ceremony),
+        CeremonyEvent::Failed(CeremonyError::Phone)
+    );
+}
+
 #[test]
 fn bluetooth_off_shows_no_code() {
     let (env, _rig) = environment(Some(false), None, None);

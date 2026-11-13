@@ -70,8 +70,9 @@ pub enum PinTarget {
     Text(String),
     /// A media phrase ("a photo", "a voice message"…).
     Media(String),
-    /// Not loaded (yet).
-    Loading,
+    /// The message is not in the cache: a lookup result, nothing is asked
+    /// for here.
+    NotLoaded,
 }
 
 /// Lookups the wording needs; implemented by the session.
@@ -415,7 +416,7 @@ fn pin_text(target: PinTarget) -> (String, bool) {
             }
         }
         PinTarget::Media(phrase) => (phrase, true),
-        PinTarget::Loading => ("a message".into(), true),
+        PinTarget::NotLoaded => ("a message".into(), true),
     }
 }
 
@@ -506,7 +507,7 @@ impl ServiceNames for NoNames {
         None
     }
     fn pinned(&self, _: i64) -> PinTarget {
-        PinTarget::Loading
+        PinTarget::NotLoaded
     }
     fn game_title(&self, _: i64) -> Option<String> {
         None

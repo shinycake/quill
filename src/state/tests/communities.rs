@@ -60,7 +60,7 @@ fn a_first_page_replaces_the_list() {
         let stale = fetch.take_data();
         *fetch = Fetch::Loading {
             stale,
-            request: Some(extra),
+            request: extra,
         };
         apply_json(
             &mut session,
@@ -181,7 +181,7 @@ fn owned_bots_come_from_our_own_ask() {
     let extra = session.request(purpose, None);
     session.communities.owned_bots = Fetch::Loading {
         stale: None,
-        request: Some(extra),
+        request: extra,
     };
     apply_json(
         &mut session,
@@ -197,7 +197,7 @@ fn owned_bots_come_from_our_own_ask() {
     let stale = session.communities.owned_bots.take_data();
     session.communities.owned_bots = Fetch::Loading {
         stale,
-        request: Some(extra),
+        request: extra,
     };
     apply_json(
         &mut session,
@@ -231,6 +231,16 @@ fn add_all_counts_the_requests_left_once_single_answers_are_out() {
         }),
         42,
     );
+    session.communities.sent.begin(
+        extra,
+        (
+            42,
+            CommunitiesPurpose::ProcessAddChatRequest {
+                chat_id: 7,
+                approve: true,
+            },
+        ),
+    );
     assert_eq!(
         session.community_add_chat_requests_left(42),
         2,
@@ -262,6 +272,10 @@ fn show_as_one_chat_is_busy_while_its_toggle_is_in_flight() {
     let extra = session.request_for_community(
         RequestPurpose::Communities(CommunitiesPurpose::ToggleCollapsed { collapsed: true }),
         42,
+    );
+    session.communities.sent.begin(
+        extra,
+        (42, CommunitiesPurpose::ToggleCollapsed { collapsed: true }),
     );
     assert!(session.community_collapse_in_flight(42));
     assert!(!session.community_collapse_in_flight(43));
@@ -387,7 +401,7 @@ fn a_late_answer_of_a_replaced_ask_does_not_land_on_the_newer_one() {
     let second = session.request(purpose, None);
     session.communities.owned_bots = Fetch::Loading {
         stale: None,
-        request: Some(second),
+        request: second,
     };
     apply_json(
         &mut session,
@@ -435,8 +449,7 @@ fn r2_an_older_requests_page_never_lands_on_the_list_that_replaced_it() {
     let older = session.request_for_community(purpose(false), 42);
     let newer = session.request_for_community(purpose(true), 42);
     let fetch = session.communities.add_chat_requests.entry(42).or_default();
-    fetch.begin();
-    fetch.sent(newer);
+    fetch.begin_with(newer);
     let page = |extra: RequestId, chat_id: i64, offset: &str| {
         format!(
             r#"{{"@type":"communityAddChatRequests","@extra":"{}","total_count":1,"requests":[{{"@type":"communityAddChatRequest","chat_id":{chat_id},"is_hidden":false,"sender_user_id":5,"date":1}}],"next_offset":"{offset}"}}"#,

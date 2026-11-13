@@ -7,7 +7,10 @@ use super::super::image_budget::{
     take_unshowable,
 };
 use super::display::{WindowDisplay, display_of, set_display};
-use super::{CLOSE_AFTER, ClipSpec, HEAD_TTL, HeadId, Leaving, Part, Place, Player, ViewAsk};
+use super::opening::OPEN_GIVE_UP;
+use super::{
+    CLOSE_AFTER, ClipSpec, HEAD_TTL, HeadId, Leaving, OPENING_FPS, Part, Place, Player, ViewAsk,
+};
 use gpui_kit::EntityId;
 use quill::ids::{ChatId, FileId};
 use quill::sticker_playback::FitzType;
@@ -639,4 +642,122 @@ fn a_view_with_no_frame_up_never_lets_a_tick_pass() {
     view.player
         .prepare(&other, EDGE, Place::of(view.head, None));
     assert!(!view.plays_on(draw), "open, or opening, with no frame up");
+}
+
+/// An open the engine never answers is not a view that ticks for good: it
+/// ticks at the opening rate until the give-up, then rests like a failed one.
+#[test]
+fn an_open_nobody_answers_stops_asking_for_ticks_after_the_give_up() {
+    let (player, spec) = player(8);
+    let other = ClipSpec {
+        file: FileId(8),
+        ..spec
+    };
+    player.set_fixture(
+        8,
+        Arc::new(|edge| DecodedFrames {
+            frames: vec![vec![1; (edge as usize).pow(2) * 4]],
+            fps: FPS,
+        }),
+    );
+    let view = super::StickerView {
+        player: std::rc::Rc::new(player),
+        spec: std::rc::Rc::new(other.clone()),
+        head: head("never-answered"),
+        mode: PlayMode::Loop,
+        edge: EDGE,
+        max_fps: 120,
+        active: false,
+        window: None,
+    };
+    let draw = TickDraw::Within(ms(8));
+    view.player
+        .prepare(&other, EDGE, Place::of(view.head, None));
+    assert_eq!(
+        view.fps(),
+        OPENING_FPS,
+        "opening: ticks at the opening rate"
+    );
+    assert!(view.changes_in(draw));
+    view.player.skip(OPEN_GIVE_UP.saturating_sub(ms(1)));
+    assert_eq!(view.fps(), OPENING_FPS, "still inside the give-up");
+    view.player.skip(ms(1));
+    assert_eq!(view.fps(), 0, "given up: it rests");
+    assert!(!view.changes_in(draw));
+}
+
+/// The engine always answers an open, so a clip that opened late (queued
+/// behind frames on a slow machine) plays once it opens: the view's give-up
+/// only stops its ticks, it never fails the clip.
+#[test]
+fn a_clip_that_opens_after_the_give_up_still_plays() {
+    let (player, spec) = player(8);
+    let other = ClipSpec {
+        file: FileId(8),
+        ..spec
+    };
+    player.set_fixture(
+        8,
+        Arc::new(|edge| DecodedFrames {
+            frames: vec![vec![5; (edge as usize).pow(2) * 4]],
+            fps: FPS,
+        }),
+    );
+    let at_head = head("slow");
+    let now = || player.now();
+    assert!(
+        player
+            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
+            .is_none(),
+        "asked, not open"
+    );
+    player.skip(OPEN_GIVE_UP + ms(1));
+    // Whether the engine has opened it by now is up to its worker; the
+    // clip must not have been failed either way.
+    let _ = player.frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now());
+    player.settle();
+    assert!(
+        player
+            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
+            .is_some(),
+        "the engine opened it: it shows"
+    );
+}
+
+/// The engine's wake for an open reaches the pump after the views gave up
+/// ticking: the pump redraws when an open is answered, so the view shows the
+/// clip without any other input.
+#[test]
+fn an_open_that_lands_after_the_give_up_is_reported_to_the_pump() {
+    let (player, spec) = player(9);
+    let other = ClipSpec {
+        file: FileId(9),
+        ..spec
+    };
+    player.set_fixture(
+        9,
+        Arc::new(|edge| DecodedFrames {
+            frames: vec![vec![5; (edge as usize).pow(2) * 4]],
+            fps: FPS,
+        }),
+    );
+    let at_head = head("slow-pump");
+    let now = || player.now();
+    assert!(
+        player
+            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
+            .is_none(),
+        "asked, not open"
+    );
+    player.skip(OPEN_GIVE_UP + ms(1));
+    // The views no longer call `frame`: only the engine's answer is left.
+    player.settle();
+    assert!(player.settle_opens(), "the answered open is reported once");
+    assert!(!player.settle_opens(), "and not again");
+    assert!(
+        player
+            .frame(&other, at_head, PlayMode::Loop, EDGE, false, None, now())
+            .is_some(),
+        "the redraw shows the clip"
+    );
 }

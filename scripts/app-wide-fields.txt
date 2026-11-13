@@ -19,7 +19,6 @@ players.speed | the playback speed preference
 players.volume * | the playback volume preference, and the level the unmute click comes back to
 delivery.notify_clicks | OS notification clicks; each `ChatClick` names its account
 delivery.notify_inflight | how many notification previews are being built, for the process
-delivery.next_preview_wait | the delay before the next preview build, for the process
 delivery.avatar_decodes | avatar decodes in flight by photo path; each waiting notification names its account
 delivery.avatar_decodes._job | the decode's task, owned by its entry: dropping the entry ends the wait
 delivery.avatar_decodes.waiting | the notifications waiting on the decode, each with its own account
@@ -89,13 +88,6 @@ auth_demo.demo_inputs | the synthetic mode shows its inputs
 start_files.choosing | files handed to the app at start, waiting for a chat on whichever account
 start_files.choosing.Choosing.files | the files waiting for a chat
 start_files.search | the chat search field of that chooser
-update_pill.fill | the update pill's glide: settled, or easing between two shares
-update_pill.fill.Settled.0 | the share the glide rests at
-update_pill.fill.Easing.from | the update pill's glide start
-update_pill.fill.Easing.to | the update pill's glide end
-update_pill.fill.Easing.since | when that glide began
-update_pill.phase | the last control: downloading, or ready and since when its percentage began to fade
-agent_bridge.ui_send | the channel agents send UI commands on; a command stops when the screen's epoch changes (`agent_driver.rs`)
 agent_bridge.driver | the UI driver runs agents' input commands one at a time for whichever account is on screen; a command stops when the screen's epoch changes and the next one starts (`agent_driver.rs`)
 takeover.wake | the timer that redraws the takeover banner at its next phase change
 connect.generation | which prepared connection may open
@@ -108,8 +100,6 @@ disk.floors | the floors for that level
 disk.waited | how long the disk has been short
 disk._watcher | the disk poll, which ends with the disk state
 disk.full_notices | how many full-disk notices were shown
-disk.cache_folder | the cache folder measured
-disk.database_bytes | the database size measured
 disk.main_window | the window the space notice opens on
 demo_ui.call_devices | the screenshot demos' call devices
 demo_ui.selected_devices | the screenshot demos' chosen devices
@@ -128,7 +118,6 @@ calls.window | the call window, opened and closed by the sync with the session o
 calls.sounds * | the call sound output and the loop playing; what a call has already played is the screen's (`call_screen.sound_marks`)
 background.clients * | the accounts running in the background, each with its key: the ids inside are that client's
 background.screen_workers * | the workers preparing a screen client, each held by its own claim, and the task per worker that wakes the waiting work when it ends: the process's, before any account is on screen
-background.generation | which background start may land
 background.poll | the background poll task; dropping it ends the loop
 background.prepare | the accounts whose database key is being read, by key, and the workers still running
 background.restarts | failures in a row and the next start of each background account, keyed by its AccountKey
@@ -149,7 +138,6 @@ spell.info * | the engine kind and dictionaries: languages, not accounts
 spell.dict_manager * | the dictionary manager box and its download
 spell.dict_filter_input | that box's filter field
 spell.engine_builder | builds the engine
-spell.engine_task | the engine build
 slices.sidebar * | cached child views of the sidebar: entities that render from the app, holding no state of their own
 slices.window * | the same for the conversation, composer and panel, with measured heights
 slices.viewer | the same for the media viewer
@@ -165,7 +153,6 @@ group_call.ptt | push-to-talk key settings
 group_call.ptt_clock | the push-to-talk clock
 group_call.global_ptt * | the OS-wide push-to-talk hook with its listener and permission re-check tasks
 group_call.level_anim | the own voice level animation
-group_call.level_seen | the level last drawn
 group_call.panel_scroll | the window's participant list scroll
 group_call.rows_place * | where the participant rows sit in the window
 group_call.players | tile players by `LiveKey`; the sync drops every one whose call is not the call shown
@@ -182,7 +169,6 @@ main_window.handle | the main window's handle
 main_window.place * | the main window's place
 main_window.cascade | the chat window cascade count
 main_window.quit_gate | the Quit held behind the Stop and quit alert, which is the window's
-main_window.quit_gate.Asking.exit | the exit a Quit left behind the Stop and quit alert, which is the window's
 main_window._key_scope | the key-scope interceptor
 first_run.Writing * | the first-run intro's clip write and timing, before any account
 first_run.Playing * | the first-run intro's player and timing, before any account
@@ -197,3 +183,18 @@ main_window.shown_dialogs | each window's shown kit dialog by window id, so a cl
 preferences.link_handler_recheck * | the re-reads of the operating system's tg: link handler after "Make Quill the default": the handler is one per OS user, so the stage is the process's; leaving Settings' System page or a second click drops its task
 calls.tick * | the 1 s call clock: one task for the process, which reads the screen and every background account's ring on each beat and ends by itself when neither wants it
 background.close_waiters * | the work waiting on closing clients of every account (`after_closing`): each task is held here, ends by itself and gives up after its cap
+agent_bridge.reads | the read commands (a tree, a screenshot) in flight for whichever account is on screen; each task leaves when it answers, and the bridge drops them with the app (`agent_driver.rs`)
+agent_bridge._wake | the task that wakes the UI for agent state and requests; agents drive whichever account is on screen, and the bridge owns it for the life of the app (`agent_state.rs`)
+spell.engine_build | the engine build stage: which build is out
+spell.engine_build.Building._task | the engine build, owned by the stage: a newer build or the install drops it
+main_window.quit_gate.Held.exit | the exit a Quit left behind the Stop and quit alert, which is the window's
+main_window.quit_gate.Held.alert | the id of the Stop and quit alert dialog, which is the window's
+preferences.update_recheck | the one timer to the next release recheck; the update check belongs to the app, not to an account
+update_pill.Other.share | the update pill's fill share when no download is shown
+update_pill.Percent.from | the update pill's glide start while the download shows
+update_pill.Percent.to | the update pill's glide end while the download shows
+update_pill.Percent.since | when that glide began
+update_pill.Ready.from | the update pill's glide start once the update is ready
+update_pill.Ready.to | the update pill's glide end once the update is ready
+update_pill.Ready.since | when that glide began
+update_pill.Ready.swap | when the percentage began to fade into the restart label

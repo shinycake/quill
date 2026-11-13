@@ -131,10 +131,8 @@ pub struct MessagesState {
     /// user action (send, edit, join, ...) hit a rate limit. The UI drains
     /// it into the status note; the composer text is left untouched.
     pub flood_notice: Notes,
-    /// M1: `getChatScheduledMessages` results — scheduled sends, with
-    /// `scheduling_state` showing the planned send time. Rows of every chat
-    /// asked for: read one chat's through `Session::scheduled_in`.
-    pub scheduled_messages: Vec<ParsedMessage>,
+    /// M1: `getChatScheduledMessages` results and the asks out for them.
+    pub scheduled_messages: ScheduledMessages,
     /// Replied-to messages outside the loaded window, keyed by the
     /// replying message `(chat_id, message_id)`.
     pub reply_targets: HashMap<(i64, i64), ReplyTarget>,
@@ -159,10 +157,6 @@ pub struct MessagesState {
     /// fetch stays `Failed` and is not asked again by the next pull, only by
     /// the chat opening.
     pub pinned_messages: HashMap<i64, crate::state::fetch::Fetch<Vec<HistoryMessage>>>,
-    /// The oldest unread mention/reaction found for the corner buttons,
-    /// for the window and chat that asked; the driver takes it and jumps
-    /// in that window (`ConnectDriver::ingest`).
-    pub(crate) unread_jump: Option<ViewJump>,
     /// B4: `getPollVoters` fetch state for the poll-voters dialog, keyed
     /// by (chat id, message id, 0-based option index). One page per key.
     pub poll_voters: HashMap<(i64, i64, i32), PollVotersFetch>,
@@ -217,7 +211,7 @@ impl MessagesState {
         self.pinned_messages
             .entry(chat_id)
             .or_default()
-            .succeed(Vec::new());
+            .pushed(Vec::new());
     }
 
     pub(crate) fn new() -> Self {
@@ -246,7 +240,7 @@ impl MessagesState {
             resend_error: Notes::default(),
             send_permission_error: Notes::default(),
             flood_notice: Notes::default(),
-            scheduled_messages: Vec::new(),
+            scheduled_messages: ScheduledMessages::default(),
             reply_targets: HashMap::new(),
             composer_reply_fetch: Default::default(),
             pending_bot_messages: HashMap::new(),
@@ -255,7 +249,6 @@ impl MessagesState {
             forwards: Forwards::default(),
             share_search: ShareSearch::default(),
             pinned_messages: HashMap::new(),
-            unread_jump: None,
             poll_voters: HashMap::new(),
             poll_stats: HashMap::new(),
             draft_dirty: HashSet::new(),

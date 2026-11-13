@@ -44,10 +44,19 @@ enum Writer {
     #[default]
     Idle,
     Running {
+        /// Who drains: a thread whose end is seen even if it never cleared
+        /// the stage, or the caller of `flush`.
+        drainer: Drainer,
         /// The path the writer is writing now, so a discard can wait for
         /// it.
         in_flight: Option<PathBuf>,
     },
+}
+
+enum Drainer {
+    Thread(std::thread::JoinHandle<()>),
+    /// `flush` drains on its own thread when none could start.
+    Caller,
 }
 
 enum Queued {
@@ -82,28 +91,42 @@ impl State {
         }
     }
 
+    /// A writer is draining: its thread is still alive, or `flush` drains.
     fn writer_running(&self) -> bool {
-        matches!(self.writer, Writer::Running { .. })
+        match &self.writer {
+            Writer::Running {
+                drainer: Drainer::Thread(thread),
+                ..
+            } => !thread.is_finished(),
+            Writer::Running {
+                drainer: Drainer::Caller,
+                ..
+            } => true,
+            Writer::Idle => false,
+        }
     }
 
-    /// The one place a writer starts or stops.
-    fn set_writer_running(&mut self, running: bool) {
-        self.writer = if running {
-            Writer::Running { in_flight: None }
-        } else {
-            Writer::Idle
+    /// The places a writer starts or stops.
+    fn start_writer(&mut self, drainer: Drainer) {
+        self.writer = Writer::Running {
+            drainer,
+            in_flight: None,
         };
+    }
+
+    fn stop_writer(&mut self) {
+        self.writer = Writer::Idle;
     }
 
     fn in_flight(&self) -> Option<&Path> {
         match &self.writer {
-            Writer::Running { in_flight } => in_flight.as_deref(),
+            Writer::Running { in_flight, .. } => in_flight.as_deref(),
             Writer::Idle => None,
         }
     }
 
     fn set_in_flight(&mut self, path: Option<PathBuf>) {
-        if let Writer::Running { in_flight } = &mut self.writer {
+        if let Writer::Running { in_flight, .. } = &mut self.writer {
             *in_flight = path;
         }
     }
@@ -153,8 +176,10 @@ impl DeferredWriter {
             // queued (reads still see them), so the UI thread never waits
             // for the disk. The next submit tries a thread again, and
             // `flush` writes them at quit.
-            let started = self.spawn_writer();
-            state.set_writer_running(started);
+            match self.spawn_writer() {
+                Some(thread) => state.start_writer(Drainer::Thread(thread)),
+                None => state.stop_writer(),
+            }
         }
     }
 
@@ -173,12 +198,12 @@ impl DeferredWriter {
         self.shared.lock().failure.take()
     }
 
-    fn spawn_writer(&self) -> bool {
+    fn spawn_writer(&self) -> Option<std::thread::JoinHandle<()>> {
         let this = self.clone();
         std::thread::Builder::new()
             .name("quill-settings-writer".into())
             .spawn(move || this.drain())
-            .is_ok()
+            .ok()
     }
 
     /// Write what is queued until nothing is left, then mark the writer
@@ -190,7 +215,7 @@ impl DeferredWriter {
             let batch = {
                 let mut state = self.shared.lock();
                 if !state.has_work() {
-                    state.set_writer_running(false);
+                    state.stop_writer();
                     self.shared.idle.notify_all();
                     return;
                 }
@@ -250,7 +275,7 @@ impl DeferredWriter {
             if !state.writer_running() {
                 // Queued with no writer (its thread never started): write
                 // here, the one place that is allowed to wait for the disk.
-                state.set_writer_running(true);
+                state.start_writer(Drainer::Caller);
                 drop(state);
                 self.drain();
                 state = self.shared.lock();
@@ -322,7 +347,7 @@ impl Drop for WriterExit<'_> {
             )));
             state.finished += 1;
         }
-        state.set_writer_running(false);
+        state.stop_writer();
         self.0.shared.idle.notify_all();
     }
 }

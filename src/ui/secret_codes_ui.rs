@@ -87,7 +87,7 @@ impl QuillApp {
     ) {
         match code {
             Code::DebugMode => {
-                self.preferences.advanced.debug_confirm = DebugConfirm::Asking {
+                self.preferences.advanced.debug_confirm = DebugConfirm::Open {
                     logs_on: debug_mode::enabled(),
                 };
                 self.open_box(DialogKind::DebugModeConfirm);
@@ -247,7 +247,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let text = debug_mode::confirm_text(
-                this.preferences.advanced.debug_confirm == DebugConfirm::Asking { logs_on: true },
+                this.preferences.advanced.debug_confirm == DebugConfirm::Open { logs_on: true },
             );
             let footer = div()
                 .flex()

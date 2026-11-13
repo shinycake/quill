@@ -16,7 +16,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::lang::{Key, keys, tr, tr_with, trn, trn_decimal, trn_with};
 use quill::stars_rating::{PendingRating, StarsRating, bubble_count};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// One row of "What affects it": the icon, the title, and the text with an
@@ -135,15 +135,12 @@ impl QuillApp {
                             })),
                     ),
             );
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

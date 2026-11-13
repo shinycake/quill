@@ -26,7 +26,7 @@ impl Session {
                     match self
                         .chats
                         .get(&chat.chat_id)
-                        .filter(|summary| summary.in_main_list)
+                        .filter(|summary| summary.in_main_list())
                     {
                         Some(summary) => joined.push(CommunityMemberChat {
                             chat_id: summary.id.0,

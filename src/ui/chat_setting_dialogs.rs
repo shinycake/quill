@@ -40,7 +40,7 @@ impl QuillApp {
     /// The one closer of the auto-delete picker: its own close, Esc, a
     /// picked timer and leaving its chat all end here.
     pub(super) fn close_ttl_picker(&mut self) {
-        self.notify.ttl_picker = None;
+        self.notify.close_ttl();
     }
 
     fn build_mute_menu_dialog(
@@ -105,14 +105,14 @@ crate::ui::shell::register_dialogs! {
     /// A chat's notification settings (tdesktop `MuteSettingsBox`).
     MuteMenu => DialogSpec::new(
         2932,
-        |app| app.notify.mute_box.is_some(),
+        |app| app.notify.mute_box().is_some(),
         QuillApp::build_mute_menu_dialog,
     )
     .close(|app, _, cx| app.close_mute_menu(cx)),
     /// The auto-delete timer (tdesktop `TTLBox`).
     TtlPicker => DialogSpec::new(
         2933,
-        |app| app.notify.ttl_picker.is_some(),
+        |app| app.notify.ttl_picker().is_some(),
         QuillApp::build_ttl_picker_dialog,
     )
     .close(|app, _, cx| {
@@ -122,7 +122,7 @@ crate::ui::shell::register_dialogs! {
     /// The chat's folders.
     FolderMenu => DialogSpec::new(
         2934,
-        |app| app.folders.menu_chat.is_some(),
+        |app| app.notify.folder_menu_chat().is_some(),
         QuillApp::build_folder_menu_dialog,
     )
     .close(|app, _, cx| app.close_folder_menu(cx)),

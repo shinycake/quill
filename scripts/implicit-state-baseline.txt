@@ -1,7 +1,6 @@
 
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 
-AppearancePrefs::ignore_battery_saving
 
 
 
@@ -25,7 +24,6 @@ AppearancePrefs::ignore_battery_saving
 
 
 
-PlaybackHealth::output_failed
 
 
 

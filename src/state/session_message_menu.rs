@@ -226,19 +226,29 @@ pub enum SetChangeStage {
 
 impl StickerSetView {
     /// A view that is still loading its set.
-    pub fn loading(set_id: i64) -> Self {
+    pub fn loading(set_id: i64, request: RequestId) -> Self {
         Self {
             set_id,
-            stage: StickerSetViewStage::Loading,
+            stage: StickerSetViewStage::Loading { request },
             edits: StickerSetEdits::default(),
             change: SetChangeStage::Idle,
         }
+    }
+
+    /// The first load of the set is out as `request` and nothing else.
+    pub fn waits_for_load(&self, request: Option<RequestId>) -> bool {
+        matches!(self.stage, StickerSetViewStage::Loading { request: asked } if Some(asked) == request)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StickerSetViewStage {
-    Loading,
+    /// `request` is the `getStickerSet` (or, for the attached sets of a
+    /// photo, `getAttachedStickerSets`) the box waits for; only its answer
+    /// or failure leaves the stage.
+    Loading {
+        request: RequestId,
+    },
     Ready {
         title: String,
         /// The set's short name, for its `t.me` link (empty if unknown).
@@ -250,19 +260,8 @@ pub enum StickerSetViewStage {
         /// box offers editing.
         is_owned: bool,
         stickers: Vec<StickerItem>,
-        /// Whether the sticker previews were asked to download. A set
-        /// that arrives anew (an edit refreshed it) starts unasked.
-        files: SetFiles,
     },
     Failed,
-}
-
-/// Whether the viewed set's sticker previews were asked to download.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SetFiles {
-    #[default]
-    Unasked,
-    Asked,
 }
 
 /// What a tapped emoji's pack lookup came back with.
@@ -362,27 +361,41 @@ impl Session {
     }
 
     /// The set's contents arrived (`stage` is the `Ready` stage).
-    pub(crate) fn accept_sticker_set_view(&mut self, set_id: i64, stage: StickerSetViewStage) {
-        if let Some(view) = self.stickers.sticker_set_view.as_mut()
-            && view.set_id == set_id
-        {
-            view.stage = stage;
-            // An edit still in flight (a move applied locally) may have
-            // changed the set after this answer was built: ask again once
-            // it is answered.
-            view.edits.set_arrived();
+    pub(crate) fn accept_sticker_set_view(
+        &mut self,
+        request: RequestId,
+        set_id: i64,
+        stage: StickerSetViewStage,
+    ) {
+        let Some(view) = self.stickers.sticker_set_view.as_mut() else {
+            return;
+        };
+        if view.set_id != set_id {
+            return;
         }
+        // The load the box waits for, or the refresh after an edit: any
+        // other answer (an older load, an older refresh) is not this box's.
+        let loading = matches!(view.stage, StickerSetViewStage::Loading { request: waiting } if waiting == request);
+        if loading {
+            view.edits.load_arrived();
+        } else if !view.edits.refresh_arrived(request) {
+            return;
+        }
+        view.stage = stage;
     }
 
     /// The box's load failed. A refetch after an edit (a rename, an add,
     /// a remove) that took is not a failed load: the box keeps what it
     /// shows.
-    pub(crate) fn fail_sticker_set_view(&mut self, set_id: i64) {
+    pub(crate) fn fail_sticker_set_view(&mut self, request: RequestId) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
-            && view.set_id == set_id
-            && matches!(view.stage, StickerSetViewStage::Loading)
+            && matches!(view.stage, StickerSetViewStage::Loading { request: waiting } if waiting == request)
         {
             view.stage = StickerSetViewStage::Failed;
+        } else if let Some(view) = self.stickers.sticker_set_view.as_mut() {
+            // A refresh after an edit that failed: the box keeps what it
+            // shows.
+            view.edits.refresh_failed(request);
         }
     }
 
@@ -541,21 +554,22 @@ impl Session {
         }
     }
 
-    /// The poll option the menu opens on; its properties are asked next.
+    /// The poll option the menu opens on, with its properties asked as
+    /// `request`.
     pub fn begin_poll_option_menu(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
         option_id: &str,
+        request: RequestId,
     ) {
+        let mut properties = crate::state::fetch::Fetch::default();
+        properties.begin_with(request);
         self.messages.poll_option_menu = Some(PollOptionMenu {
             chat_id,
             message_id,
             option_id: option_id.to_string(),
-            properties: crate::state::fetch::Fetch::Loading {
-                stale: None,
-                request: None,
-            },
+            properties,
         });
     }
 
@@ -664,10 +678,11 @@ impl Session {
             } else {
                 a.filtered.get_mut(&filter)
             };
-            if let Some(slot) = slot
-                && let Audience::Ready(page) = std::mem::take(slot)
-            {
-                *slot = Audience::Paging { page, request };
+            if let Some(slot) = slot {
+                *slot = match std::mem::take(slot) {
+                    Audience::Ready(page) => Audience::Paging { page, request },
+                    other => other,
+                };
             }
         }
     }

@@ -16,7 +16,6 @@ use gpui_kit::*;
 use quill::auth::AuthView;
 use quill::lang::{keys, tr};
 use quill::state::ForumColumn;
-use std::time::Instant;
 
 impl QuillApp {
     /// The main window's columns this frame.
@@ -49,7 +48,7 @@ impl QuillApp {
             topic_open: session.is_some_and(|s| s.open_forum_topic().is_some()),
             panels: side_panels_width(self.drawn_panels()),
             docked: if self.pane_mode() == PaneMode::Ready {
-                self.frame.sidebar.docked(Instant::now())
+                self.frame.sidebar.docked(self.frame.sidebar.now())
             } else {
                 1.
             },

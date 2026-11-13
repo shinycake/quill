@@ -91,8 +91,8 @@ impl QuillApp {
 
     /// A lock asked while a passcode job ran lands now that it answered.
     /// After a Turn off there is no passcode, so nothing locks.
-    pub(super) fn lock_held_for_job(&mut self, job: super::PasscodeJob, cx: &mut Context<Self>) {
-        if job == super::PasscodeJob::RunningThenLock {
+    pub(super) fn lock_held_for_job(&mut self, fate: super::JobFate, cx: &mut Context<Self>) {
+        if fate == super::JobFate::ThenLock {
             self.lock_by_passcode(cx);
         }
     }

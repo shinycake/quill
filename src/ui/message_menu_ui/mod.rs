@@ -11,6 +11,7 @@ use super::context_menu_keys::{ContextMenuItems, MenuKeyTarget, row_key};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::vanish::Deletion;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -21,7 +22,7 @@ use gpui_kit::{TestSupportExt, *};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::message_menu::{
-    MediaAction, MediaFacts, MediaFile, MediaKind, MediaTarget, SeenKind, media_actions,
+    MediaAction, MediaFacts, MediaFileView, MediaKind, MediaTarget, SeenKind, media_actions,
     media_target, order, reacted_label, read_date_label, seen_kind, seen_label,
 };
 use quill::state::{Audience, MessageReportStage, Session};
@@ -218,11 +219,11 @@ impl QuillApp {
         };
         MediaFacts {
             file: if downloading {
-                MediaFile::Downloading
+                MediaFileView::Downloading
             } else if local_media_path(session, content, target).is_some() {
-                MediaFile::Local
+                MediaFileView::Local
             } else {
-                MediaFile::Remote
+                MediaFileView::Remote
             },
             can_save: !protected && actions.is_none_or(|a| a.can_be_saved),
             set_installed: session
@@ -555,16 +556,20 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note_for(
-                &self.screen.windows,
-                match live.driver.cancel_upload(chat_id, message_id) {
-                    Ok(_) => {
-                        self.begin_vanish(chat_id, &[message_id]);
-                        StatusNote::silent(tr(keys::Q_CHAT_UPLOAD_CANCELED))
+            let note = match live.driver.cancel_upload(chat_id, message_id) {
+                Ok(request) => {
+                    if self.begin_vanish(chat_id, &[message_id], Deletion::Sent(request))
+                        && let Some(live) = self.live.as_mut()
+                    {
+                        live.driver.session.acks.expect(request);
                     }
-                    Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_CANCEL_THE_UPLOAD)),
-                },
-            );
+                    StatusNote::silent(tr(keys::Q_CHAT_UPLOAD_CANCELED))
+                }
+                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_CANCEL_THE_UPLOAD)),
+            };
+            self.screen
+                .connection
+                .set_note_for(&self.screen.windows, note);
         } else {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_UPLOADS_CANCEL_WITH_LIVE,

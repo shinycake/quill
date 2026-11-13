@@ -54,15 +54,15 @@ pub(super) fn row_glyph(name: IconName, color: Hsla) -> impl IntoElement {
 /// Whether the chat is pinned in the list this row belongs to.
 pub(super) fn pinned_here(chat: &ChatSummary, archived: bool) -> bool {
     if archived {
-        chat.archive_is_pinned
+        chat.archive_is_pinned()
     } else {
-        chat.is_pinned
+        chat.is_pinned()
     }
 }
 
 /// Trailing title-line stamp: `(status mark for an outgoing last
 /// message, local time/day label)`, or `None` for an empty chat.
-pub(super) fn row_stamp(chat: &ChatSummary) -> Option<(RowStatus, String)> {
+pub(super) fn row_stamp(chat: &ChatSummary) -> Option<(RowStatusIcon, String)> {
     let last = chat.last_message().filter(|last| last.date > 0)?;
     let now = quill::local_time::civil_local(quill::local_time::now_unix());
     let date = quill::local_time::civil_local(i64::from(last.date));
@@ -74,13 +74,13 @@ pub(super) fn row_stamp(chat: &ChatSummary) -> Option<(RowStatus, String)> {
 
 /// The mark beside the date: a clock while sending, a red "!" when the
 /// send failed, one check when delivered, two when read.
-pub(super) fn row_status_mark(status: RowStatus, cx: &App) -> AnyElement {
+pub(super) fn row_status_mark(status: RowStatusIcon, cx: &App) -> AnyElement {
     match status {
-        RowStatus::None => div().into_any_element(),
-        RowStatus::Sending => {
+        RowStatusIcon::None => div().into_any_element(),
+        RowStatusIcon::Sending => {
             row_glyph(IconName::Clock, cx.theme().muted_foreground).into_any_element()
         }
-        RowStatus::Failed => div()
+        RowStatusIcon::Failed => div()
             .id("row-send-failed")
             .flex_none()
             .size(px(14.))
@@ -96,8 +96,8 @@ pub(super) fn row_status_mark(status: RowStatus, cx: &App) -> AnyElement {
             .aria_label(tr(keys::Q_CHATLIST_FAILED_TO_SEND))
             .child("!")
             .into_any_element(),
-        RowStatus::Sent => row_glyph(IconName::Check, accent().into()).into_any_element(),
-        RowStatus::Read => row_glyph(IconName::CheckCheck, accent().into()).into_any_element(),
+        RowStatusIcon::Sent => row_glyph(IconName::Check, accent().into()).into_any_element(),
+        RowStatusIcon::Read => row_glyph(IconName::CheckCheck, accent().into()).into_any_element(),
     }
 }
 

@@ -32,7 +32,7 @@ use rodio::buffer::SamplesBuffer;
 use rodio::{Decoder, Source};
 
 use super::call_tones;
-pub(super) use engine::{AudioEngine, EngineState, Simulation};
+pub(super) use engine::{AudioEngine, EngineView, Simulation};
 pub(super) use output::{Hold, Outlet, OutputPlayer, SharedOutput};
 use tempo::{SharedSpeed, Tempo};
 
@@ -359,11 +359,10 @@ pub(super) enum NotificationSound {
 /// Map the driver's sound resolution to something playable now. A sound
 /// still downloading plays when the download completes
 /// (`Session::pending_sound_plays`), not now.
-pub(super) fn notification_sound(resolution: SoundResolution) -> Option<NotificationSound> {
-    match resolution {
+pub(super) fn notification_sound(resolution: Option<SoundResolution>) -> Option<NotificationSound> {
+    match resolution? {
         SoundResolution::DefaultTone => Some(NotificationSound::DefaultTone),
         SoundResolution::FilePath(path) => Some(NotificationSound::File(path)),
-        SoundResolution::Pending => None,
     }
 }
 
@@ -680,16 +679,16 @@ mod tests {
     #[test]
     fn notification_sound_follows_the_resolution() {
         assert_eq!(
-            notification_sound(SoundResolution::DefaultTone),
+            notification_sound(Some(SoundResolution::DefaultTone)),
             Some(NotificationSound::DefaultTone)
         );
         let path = std::path::PathBuf::from("/tmp/ding.mp3");
         assert_eq!(
-            notification_sound(SoundResolution::FilePath(path.clone())),
+            notification_sound(Some(SoundResolution::FilePath(path.clone()))),
             Some(NotificationSound::File(path))
         );
         // Still downloading: nothing now, it plays when the file lands.
-        assert_eq!(notification_sound(SoundResolution::Pending), None);
+        assert_eq!(notification_sound(None), None);
     }
 
     /// An endless silent soundtrack that counts its seeks.

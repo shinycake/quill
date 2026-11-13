@@ -45,15 +45,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
-    fn earn_in_flight(&self, earn: EarnPurpose) -> bool {
-        self.session.requests.has_purpose(purpose(earn))
-    }
-
     /// `getApplicationConfig` once, for the affiliate switches.
     pub fn ensure_earn_app_config(&mut self) -> Result<(), ConnectSendError> {
         self.earn_ready()?;
         if !self.session.payments.earn.limits.app_config.can_ask()
-            || self.earn_in_flight(EarnPurpose::AppConfig)
             || self.session.groups.boosts_per_gift.is_loading()
         {
             return Ok(());
@@ -63,8 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             crate::telegram::requests::get_application_config,
         )?;
         let app_config = &mut self.session.payments.earn.limits.app_config;
-        app_config.begin();
-        app_config.sent(request);
+        app_config.begin_with(request);
         Ok(())
     }
 
@@ -90,15 +84,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         };
         let peer = EarnPeer::User(me);
-        if !self.session.payments.earn.self_stats.is_idle()
-            || self.earn_in_flight(EarnPurpose::StarStats { peer })
-        {
+        if !self.session.payments.earn.self_stats.can_ask() {
             return Ok(());
         }
-        self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
+        let request = self.send_earn(EarnPurpose::StarStats { peer }, |extra| {
             get_star_revenue_statistics(extra, peer, false)
         })?;
-        self.session.payments.earn.self_stats.begin();
+        let stats = &mut self.session.payments.earn.self_stats;
+        stats.begin_with(request);
         Ok(())
     }
 
@@ -803,19 +796,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             get_created_public_chats,
             Self::wait_for_recipients,
         );
-        let bots = if chats.is_ok() {
+        let sent = chats.and_then(|_| {
             self.send_earn_tracked(
                 EarnPurpose::RecipientBots,
                 get_owned_bots,
                 Self::wait_for_recipients,
             )
-        } else {
-            chats
-        };
-        if bots.is_err() {
-            let earn = &mut self.session.payments.earn;
-            earn.recipients = Recipients::Failed;
-            return Err(ConnectSendError::InvalidRequest);
+        });
+        if let Err(err) = sent {
+            self.session.payments.earn.recipients = Recipients::Failed;
+            return Err(err);
         }
         Ok(())
     }

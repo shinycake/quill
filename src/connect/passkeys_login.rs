@@ -39,8 +39,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let state = &self.session.settings.passkeys;
         let blocked = !self.passkey_login_state()
             || !state.login_link_shown()
-            || matches!(state.login.stage, LoginStage::Checking(_))
-            || self.session.requests.has_auth_submit();
+            || matches!(state.login.stage, LoginStage::Checking(_));
         if blocked {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -132,8 +131,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A send that failed leaves the ask open for the next ingest.
         if self.send_json_request(extra, &json).is_ok() {
             let config = &mut self.session.settings.passkeys.login.config;
-            config.begin();
-            config.sent(extra);
+            config.begin_with(extra);
         }
     }
 }

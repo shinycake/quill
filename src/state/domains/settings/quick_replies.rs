@@ -8,6 +8,15 @@ use crate::state::fetch::Fetch;
 use crate::state::*;
 use std::collections::HashMap;
 
+/// What a quick-reply request out is for: its purpose and chat, and the
+/// subject (the change's body, or the shortcut an album sends).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuickReplySend {
+    pub purpose: RequestPurpose,
+    pub chat_id: Option<ChatId>,
+    pub subject: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QuickRepliesState {
     /// Shortcut ids in the order TDLib sent (`updateQuickReplyShortcuts`).
@@ -27,6 +36,9 @@ pub struct QuickRepliesState {
     /// `quick_reply_shortcut_message_count_max`, once reported.
     pub shortcut_count_max: Option<usize>,
     pub message_count_max: Option<usize>,
+    /// The changes and quick-reply sends out, each by its own request: the
+    /// same change is not sent twice while the first is on its way.
+    pub sent: crate::state::held::Holds<QuickReplySend>,
     /// Counter for `sendQuickReplyShortcutMessages.sending_id`.
     pub next_sending_id: i32,
 }
@@ -188,7 +200,10 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) =
             pending.map(|p| p.purpose)
         {
-            self.settings.quick_replies.shortcuts_load.succeed(());
+            self.settings
+                .quick_replies
+                .shortcuts_load
+                .answered(pending.map(|p| p.id), ());
         }
         // TDLib reports the messages as an update before this answer: a load
         // still waiting here had nothing to report.
@@ -210,22 +225,28 @@ impl Session {
         request: Option<RequestId>,
     ) -> bool {
         let state = &mut self.settings.quick_replies;
-        match purpose {
-            Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) => {
-                state.shortcuts_load.fail(error_reason(err));
-            }
+        // Only a fetch that waits for this request takes its failure (an
+        // older load's error is nothing the page awaits).
+        let took = match purpose {
+            Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) => state
+                .shortcuts_load
+                .failed(request, error_reason(err), false),
             Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyMessages {
                 shortcut_id,
             })) => {
                 // Marked failed, not un-requested: a poll waiting for the
                 // messages stops instead of asking again on every tick.
                 // Only the load that is waited for fails.
-                if let Some(fetch) = state.messages.get_mut(&shortcut_id) {
-                    fetch.failed(request, error_reason(err), false);
-                }
+                state
+                    .messages
+                    .get_mut(&shortcut_id)
+                    .is_some_and(|fetch| fetch.failed(request, error_reason(err), false))
             }
-            Some(RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies)) => {}
+            Some(RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies)) => true,
             _ => return false,
+        };
+        if !took {
+            return true;
         }
         state.error = Some(format!("Quick replies: {}", error_reason(err)));
         true

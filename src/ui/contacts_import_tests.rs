@@ -2,7 +2,7 @@
 //! for a ready file and a failed file leaves the box open (needs the
 //! `demo-capture` feature for gpui-kit's test support).
 use crate::ui::app::QuillApp;
-use crate::ui::contacts_import::ImportStage;
+use crate::ui::contacts_import::{BoxView, ImportStage};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
@@ -111,7 +111,10 @@ fn a_read_started_in_a_closed_box_never_reaches_the_next_one(cx: &mut TestAppCon
     app.read_with(vcx, |app, _| {
         let dialog = app.dialogs.import_contacts_dialog.as_ref();
         assert!(
-            dialog.is_some_and(|dialog| *dialog.stage.state() == VcardImport::Empty),
+            dialog.is_some_and(|dialog| matches!(
+                dialog.stage.view(),
+                BoxView::Shown(VcardImport::Empty)
+            )),
             "the new box is still empty"
         );
     });
@@ -134,14 +137,14 @@ fn choosing_again_replaces_the_read_in_flight(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        let state = app
+        let view = app
             .dialogs
             .import_contacts_dialog
             .as_ref()
-            .map(|dialog| dialog.stage.state().into_owned());
+            .map(|dialog| dialog.stage.view());
         assert!(
-            matches!(&state, Some(VcardImport::Ready(preview)) if preview.file_name == "b.vcf"),
-            "the second file, got {state:?}"
+            matches!(&view, Some(BoxView::Shown(VcardImport::Ready(preview))) if preview.file_name == "b.vcf"),
+            "the second file"
         );
     });
 }

@@ -241,6 +241,7 @@
 "qll_people_channel_boosts" = "Channel boosts";
 "qll_people_channel_membership_is_unknown" = "Channel membership is unknown.";
 "qll_people_chat_actions_need_a_live" = "chat actions need a live connection (demo)";
+"qll_people_chat_still_being_created" = "The chat is still being created.";
 "qll_people_check" = "Check";
 "qll_people_check_availability_first_the_text" = "Check availability first — the text changed since the last check.";
 "qll_people_checking" = "Checking…";

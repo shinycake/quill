@@ -201,6 +201,23 @@ fn star_taps_add_up_then_commit_after_the_undo_window() {
 }
 
 #[test]
+fn a_refused_commit_names_the_send_not_missing_stars() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    h.driver.add_live_story_reaction(1, 1_000).unwrap();
+    h.recorder.refuse(Some("commitPendingLiveStoryReactions"));
+    assert!(h.driver.live_story_reaction_tick(1_000 + ACCUMULATE_MS));
+    let live = h.driver.session.stories.live.clone().unwrap();
+    assert!(
+        live.pending_reaction.is_some(),
+        "the taps wait for the next commit"
+    );
+    let note = live.note.unwrap_or_default();
+    assert_ne!(note, crate::paid_reaction::Refusal::NotEnough.message());
+    assert!(!note.is_empty());
+}
+
+#[test]
 fn no_stars_on_your_own_live_story_or_past_the_balance() {
     let mut h = watching();
     h.ingest(&LIVE_CALL.replace("JOINED", "true").replace(

@@ -137,12 +137,15 @@ pub(in crate::ui) type LiveTarget = (ChatId, i32);
 pub(in crate::ui) enum LiveJoin {
     Idle,
     /// The join is out; the call is not seen tracked yet. `request` is the
-    /// `getGroupCall` that makes the tracker (`None`: no driver, as in the
-    /// demo): when it is gone and no tracker came, the join failed.
+    /// `getGroupCall` that makes the tracker: when it is gone and no
+    /// tracker came, the join failed.
     Joining {
         target: LiveTarget,
-        request: Option<RequestId>,
+        request: RequestId,
     },
+    /// Watching with no connection to join through (the demo): nothing is
+    /// out, so nothing can fail; a call the demo feeds is still seen.
+    Offline(LiveTarget),
     /// Joined: the call was seen tracked since the join, so its end is
     /// noticed.
     Joined(LiveTarget),
@@ -155,7 +158,9 @@ impl LiveStoryUi {
     /// The live story the viewer joined.
     pub(in crate::ui) fn watching(&self) -> Option<LiveTarget> {
         match self.join {
-            LiveJoin::Joining { target, .. } | LiveJoin::Joined(target) => Some(target),
+            LiveJoin::Joining { target, .. }
+            | LiveJoin::Offline(target)
+            | LiveJoin::Joined(target) => Some(target),
             _ => None,
         }
     }
@@ -171,18 +176,20 @@ impl LiveStoryUi {
         matches!(self.join, LiveJoin::Joined(_))
     }
 
-    pub(in crate::ui) fn start_watching(&mut self, target: LiveTarget, request: Option<RequestId>) {
+    pub(in crate::ui) fn start_watching(&mut self, target: LiveTarget, request: RequestId) {
         self.join = LiveJoin::Joining { target, request };
+    }
+
+    /// Watch `target` with no driver to join through.
+    pub(in crate::ui) fn watch_offline(&mut self, target: LiveTarget) {
+        self.join = LiveJoin::Offline(target);
     }
 
     /// The story whose join waits for the tracker, and the request that
     /// makes it.
     pub(super) fn joining(&self) -> Option<(LiveTarget, RequestId)> {
         match self.join {
-            LiveJoin::Joining {
-                target,
-                request: Some(request),
-            } => Some((target, request)),
+            LiveJoin::Joining { target, request } => Some((target, request)),
             _ => None,
         }
     }
@@ -199,7 +206,7 @@ impl LiveStoryUi {
     }
 
     pub(super) fn mark_call_seen(&mut self) {
-        if let LiveJoin::Joining { target, .. } = self.join {
+        if let LiveJoin::Joining { target, .. } | LiveJoin::Offline(target) = self.join {
             self.join = LiveJoin::Joined(target);
         }
     }

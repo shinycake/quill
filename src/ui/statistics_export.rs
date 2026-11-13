@@ -188,9 +188,27 @@ fn page_sheets(
     }
 }
 
+/// The statistics page's "Export to File…": a save dialog and a write run
+/// in the task the stage holds. The stage lives in the account's boxes, so
+/// leaving the screen drops the task with it.
+#[derive(Default)]
+pub(super) enum StatsExport {
+    #[default]
+    Idle,
+    /// Choosing the file, then writing it (the task covers both); a second
+    /// press does nothing.
+    Exporting { _task: Task<()> },
+}
+
 impl QuillApp {
     /// "Export to File…": ask where, then write the workbook there.
     pub(super) fn export_statistics(&mut self, chat_id: i64, cx: &mut Context<Self>) {
+        if matches!(
+            self.dialogs.statistics_export,
+            StatsExport::Exporting { .. }
+        ) {
+            return;
+        }
         let Some((sheets, name)) = self.session().and_then(|s| page_workbook(s, chat_id)) else {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_MONEY_THE_STATISTICS_ARE_STILL_LOADING,
@@ -200,9 +218,12 @@ impl QuillApp {
         };
         let dir = quill::media_viewer::downloads_dir().unwrap_or_else(|| PathBuf::from("."));
         let picker = cx.prompt_for_new_path(&dir, Some(&name));
-        // screen-scope: the note reports a local file save to whichever account is on screen.
-        cx.spawn(async move |this, cx| {
+        let task = self.spawn_screen(cx, async move |this, cx| {
             let Ok(Ok(Some(dest))) = picker.await else {
+                let _ = this.update(cx, |this, cx| {
+                    this.dialogs.statistics_export = StatsExport::Idle;
+                    cx.notify();
+                });
                 return;
             };
             let written = cx
@@ -216,6 +237,7 @@ impl QuillApp {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                this.dialogs.statistics_export = StatsExport::Idle;
                 this.set_note(match written {
                     Ok(dest) => StatusNote::info(tr_with(
                         keys::STATS_EXPORT_DONE,
@@ -231,8 +253,8 @@ impl QuillApp {
                 });
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.dialogs.statistics_export = StatsExport::Exporting { _task: task };
     }
 }
 

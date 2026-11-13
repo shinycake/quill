@@ -72,6 +72,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // late with no Undo on return.
         let now_ms = crate::state::unix_ms_now();
         let committed = self.paid_reaction_tick(now_ms);
+        self.paid_trust_tick(now_ms);
         // A live story's Stars too: the story may play on in
         // Picture-in-Picture, or in another account, with no viewer tick
         // to commit them; held, they would be dropped when it is left.

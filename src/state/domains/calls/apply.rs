@@ -66,6 +66,19 @@ impl Session {
             // All signaling-only — no media transport until Phase C2.
             CallsPayload::UpdateGroupCall { group_call } => {
                 self.accept_group_call_update(&group_call);
+                // The answer to the handover's own `getGroupCall` with no
+                // link ends the handover; an update never does.
+                if let Some(pending) = pending
+                    && matches!(
+                        pending.purpose,
+                        RequestPurpose::Calls(CallsPurpose::GetGroupCall { .. })
+                    )
+                {
+                    let linked = self.calls.active_group_call.as_ref().is_some_and(|call| {
+                        call.id == group_call.id && !call.invite_link.is_empty()
+                    });
+                    self.group_call_fetch_ended(pending.id, linked);
+                }
             }
             CallsPayload::UpdateGroupCallParticipant {
                 group_call_id,
@@ -174,7 +187,7 @@ impl Session {
             // on the group-call overlay).
             CallsPayload::InviteGroupCallParticipantResult(result) => {
                 // One of "Add People"'s invitations: its toast tells.
-                if let Some(results) = self.calls.invite_results.as_mut()
+                if let Some(results) = self.calls.invite_results_mut()
                     && let Some(pending) = pending
                     && results.owns(Some(pending.id))
                 {

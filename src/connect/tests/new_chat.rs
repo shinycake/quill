@@ -129,6 +129,7 @@ fn a_channel_is_created_then_gets_photo_link_and_subscribers() {
     let stage = NewChatStage::Creating {
         request: extra,
         back: crate::new_chat::NewChatBack::Info,
+        title: "Channel".into(),
     };
     assert_eq!(
         rig.driver
@@ -362,6 +363,7 @@ fn an_answered_type_save_moves_the_stage_on() {
     let lost = NewChatStage::Creating {
         request: RequestId(9_999),
         back: crate::new_chat::NewChatBack::Info,
+        title: "Channel".into(),
     };
     assert_eq!(
         rig.driver
@@ -406,10 +408,11 @@ fn a_lost_type_save_request_lands_in_refused() {
     rig.driver.watch_new_chat_type_save(&sent);
     rig.driver.session.groups.info_edit_errors.insert(
         chat.0,
-        crate::state::GroupInfoEditError {
+        vec![crate::state::GroupInfoEditError {
+            request: crate::ids::RequestId(u64::MAX),
             field: crate::state::GroupInfoField::Username,
             reason: "old".into(),
-        },
+        }],
     );
     for id in &sent {
         rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, id.0));

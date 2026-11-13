@@ -184,3 +184,108 @@ fn the_calendar_goes_when_its_chat_is_left_and_a_stale_one_jumps_nowhere() {
     assert_eq!(h.driver.jump_to_date(19_000).unwrap(), None);
     assert_eq!(h.sent("getChatMessageByDate", ALICE).len(), sent);
 }
+
+#[test]
+fn a_date_lookup_that_fails_says_so_after_the_box_closed() {
+    let mut h = bob_main_alice_window();
+    let asked = pick_date_in_alice_window(&mut h);
+    // The box closed when the day was picked.
+    assert!(h.driver.session.search.history_calendar.is_none());
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":420,"message":"FLOOD_WAIT_3"}}"#,
+        asked.0
+    ));
+    assert_eq!(
+        h.driver.session.take_failed_date_jumps(),
+        vec![Some(ALICE)],
+        "the failure goes to the window that asked, not the main window"
+    );
+    assert!(h.driver.session.chats_state.chat_action_error.is_empty());
+    assert!(
+        h.driver.session.take_failed_date_jumps().is_empty(),
+        "and says so once"
+    );
+}
+
+#[test]
+fn a_date_lookup_the_chat_left_does_not_say_anything_when_it_fails() {
+    let mut h = bob_main_alice_window();
+    let asked = pick_date_in_alice_window(&mut h);
+    h.driver.close_chat_window(ALICE).unwrap();
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":420,"message":"FLOOD_WAIT_3"}}"#,
+        asked.0
+    ));
+    assert!(h.driver.session.take_failed_date_jumps().is_empty());
+}
+
+#[test]
+fn the_main_window_leaving_a_chat_keeps_a_chat_windows_no_media_note() {
+    use crate::state::JumpLookup;
+    let mut h = bob_main_alice_window();
+    let jumps = &mut h.driver.session.search.jump_lookups;
+    jumps.set(Some(ALICE), JumpLookup::NoMedia);
+    jumps.set(None, JumpLookup::NoMedia);
+    h.driver.session.clear_date_jump_ui(Some(BOB));
+    let search = &h.driver.session.search;
+    assert!(search.date_jump_note(Some(ALICE)).is_some());
+    assert!(search.date_jump_note(None).is_none());
+}
+
+#[test]
+fn a_chat_windows_reply_strip_gets_its_senders_background_emoji() {
+    let mut h = Harness::two_chats();
+    let main_page = h.driver.select_chat(BOB).unwrap().unwrap();
+    h.answer(BOB, main_page, &(1..=3).collect::<Vec<_>>());
+    let window_page = h.driver.open_chat_window(ALICE).unwrap().unwrap();
+    h.ingest(
+        r#"{"@type":"updateUser","user":{"@type":"user","id":31,"first_name":"Ada","last_name":"","accent_color_id":0,"background_custom_emoji_id":777,"is_contact":true,"type":{"@type":"userTypeRegular"}}}"#,
+    );
+    let from_ada = message_json(ALICE.0, 55, false).replacen(
+        r#""is_outgoing""#,
+        r#""sender_id":{"@type":"messageSenderUser","user_id":31},"is_outgoing""#,
+        1,
+    );
+    let reply = message_json(ALICE.0, 56, false).replacen(
+        r#""is_outgoing""#,
+        &format!(
+            r#""reply_to":{{"@type":"messageReplyToMessage","chat_id":{},"message_id":55,"quote":null,"checklist_task_id":0,"poll_option_id":""}},"is_outgoing""#,
+            ALICE.0
+        ),
+        1,
+    );
+    h.ingest(&format!(
+        r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{reply},{from_ada}]}}"#,
+        window_page.0
+    ));
+    assert_eq!(
+        h.driver.session.reply_background_emoji_ids(),
+        vec![777],
+        "the window's reply strip is resolved though the main window shows another chat"
+    );
+}
+
+#[test]
+fn the_mention_button_is_not_refused_by_the_same_chat_asking_in_another_window() {
+    let mut h = Harness::two_chats();
+    let main_page = h.driver.select_chat(ALICE).unwrap().unwrap();
+    h.answer(ALICE, main_page, &(50..=60).collect::<Vec<_>>());
+    let window_page = h.driver.open_chat_window(ALICE).unwrap().unwrap();
+    h.answer(ALICE, window_page, &(50..=60).collect::<Vec<_>>());
+    h.driver
+        .with_window_chat(ALICE, |driver| {
+            driver.jump_to_unread_marker(UnreadJumpKind::Mention)
+        })
+        .unwrap();
+    let asked = h.sent("searchChatMessages", ALICE).len();
+    // The window's press is out; the main window's own press still asks.
+    h.driver
+        .jump_to_unread_marker(UnreadJumpKind::Mention)
+        .unwrap();
+    assert_eq!(h.sent("searchChatMessages", ALICE).len(), asked + 1);
+    // A second press in the same window waits for the first.
+    h.driver
+        .jump_to_unread_marker(UnreadJumpKind::Mention)
+        .unwrap();
+    assert_eq!(h.sent("searchChatMessages", ALICE).len(), asked + 1);
+}

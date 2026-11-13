@@ -50,7 +50,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize)]
 pub struct InstallPlan {
@@ -135,8 +135,9 @@ pub enum Unavailable {
     /// Another user owns the install, or the update folder beside it, so
     /// this user could not clear a backup or trust the update files.
     OwnedByAnother,
-    /// The startup thread has not answered yet; the switch waits.
-    Checking,
+    /// The startup thread has not answered yet; the switch waits. The
+    /// answer is read from a process-wide cell, so nothing is held here.
+    Undecided,
 }
 
 impl Unavailable {
@@ -149,7 +150,7 @@ impl Unavailable {
             Self::PackageManager => keys::Q_OPS_SELF_UPDATE_PACKAGE_MANAGER,
             Self::NotWritable => keys::Q_OPS_SELF_UPDATE_NOT_WRITABLE,
             Self::OwnedByAnother => keys::Q_OPS_SELF_UPDATE_OWNED_BY_ANOTHER,
-            Self::Checking => keys::Q_OPS_SELF_UPDATE_CHECKING,
+            Self::Undecided => keys::Q_OPS_SELF_UPDATE_CHECKING,
         }
     }
 
@@ -164,7 +165,7 @@ impl Unavailable {
             "package-manager" => Self::PackageManager,
             "not-writable" => Self::NotWritable,
             "owned-by-another" => Self::OwnedByAnother,
-            "checking" => Self::Checking,
+            "checking" => Self::Undecided,
             _ => return None,
         })
     }
@@ -181,9 +182,12 @@ fn finish_previous_update() {
         .ok()
         .and_then(|p| fs::canonicalize(p).ok())
     else {
+        // No path to clean: still answer, so the Settings rows leave
+        // "checking" (the probe finds the same failure and says so).
+        let _ = can_install_here();
         return;
     };
-    let _ = crate::thread_guard::spawn_guarded("quill-update-cleanup", move || {
+    let spawned = crate::thread_guard::spawn_guarded("quill-update-cleanup", move || {
         // First, so the Settings rows stop saying "checking" at once; render
         // never computes it (`availability_now`).
         let _ = can_install_here();
@@ -197,6 +201,10 @@ fn finish_previous_update() {
             let _ = swap::recover_or_clear_backup(&layout.install, &exe, &backup);
         }
     });
+    if spawned.is_err() {
+        // No thread to probe on: answer here, once.
+        let _ = can_install_here();
+    }
 }
 
 /// What the last update left for this start, shown once: the receipt is
@@ -314,21 +322,12 @@ pub(crate) fn valid_release(release: &ReleaseInfo) -> bool {
 /// Waits for `child` up to `limit`, then kills it. Output is read after this
 /// returns, so a child that floods a pipe blocks until the deadline and dies.
 fn wait_with_timeout(child: &mut Child, limit: Duration) -> std::io::Result<ExitStatus> {
-    let deadline = Instant::now() + limit;
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok(status);
-        }
-        if Instant::now() >= deadline {
+    crate::child_timeout::wait_within(child, limit).inspect_err(|err| {
+        if crate::child_timeout::is_timeout(err) {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "Process did not finish in time",
-            ));
         }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    })
 }
 
 fn probe_binary(path: &Path, version: &str) -> std::io::Result<()> {
@@ -424,14 +423,14 @@ pub fn can_install_here() -> bool {
 }
 
 /// Whether "Install updates automatically" can work here, or the reason it
-/// cannot (the hint under the switch), `Unavailable::Checking` until the
+/// cannot (the hint under the switch), `Unavailable::Undecided` until the
 /// startup thread has answered.
 pub fn self_update_availability() -> Result<(), Unavailable> {
     #[cfg(any(test, feature = "demo-capture"))]
     if let Some(forced) = FORCED_AVAILABLE.lock().ok().and_then(|guard| *guard) {
         return forced;
     }
-    availability_now().unwrap_or(Err(Unavailable::Checking))
+    availability_now().unwrap_or(Err(Unavailable::Undecided))
 }
 
 pub fn self_update_available() -> bool {
@@ -443,6 +442,40 @@ pub fn self_update_available() -> bool {
 #[cfg(any(test, feature = "demo-capture"))]
 static FORCED_AVAILABLE: std::sync::Mutex<Option<Result<(), Unavailable>>> =
     std::sync::Mutex::new(None);
+
+/// The forced answers here and in the updater are process-wide: the tests
+/// that set them hold this lock, through [`ForcedAnswers`].
+#[cfg(any(test, feature = "demo-capture"))]
+static FORCE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// One test's hold on the forced answers. Taking it waits for any other
+/// test that forces them; dropping it, also when an assert fails, clears
+/// every forced answer here and in the updater, so none leaks into the
+/// next test.
+#[cfg(any(test, feature = "demo-capture"))]
+pub struct ForcedAnswers {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+/// Take the forced answers for a test (see [`ForcedAnswers`]).
+#[cfg(any(test, feature = "demo-capture"))]
+pub fn force_answers() -> ForcedAnswers {
+    ForcedAnswers {
+        _lock: FORCE_LOCK.lock().unwrap_or_else(|e| e.into_inner()),
+    }
+}
+
+#[cfg(any(test, feature = "demo-capture"))]
+impl Drop for ForcedAnswers {
+    fn drop(&mut self) {
+        force_self_update_available(None);
+        #[cfg(feature = "ui")]
+        {
+            crate::updater::force_latest_release(None);
+            crate::updater::force_check_failure(None);
+        }
+    }
+}
 
 #[cfg(any(test, feature = "demo-capture"))]
 pub fn force_self_update_available(answer: Option<Result<(), Unavailable>>) {

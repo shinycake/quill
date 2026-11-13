@@ -1,4 +1,4 @@
-use super::{GeoOutcome, GeoPoint, LocationSharing, PickerRequest, Venue, VenueList};
+use super::{GeoOutcome, GeoPoint, LocationSharing, PickerRequest, Venue, VenueView};
 use crate::ids::{ChatId, FileId, RequestId};
 
 fn point(lat: f64, lon: f64) -> GeoPoint {
@@ -92,10 +92,8 @@ fn no_bot_means_nothing_found_not_a_spinner() {
     sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
     assert!(sharing.next_requests().is_empty());
     assert_eq!(
-        sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::NothingFound {
-            query: String::new()
-        })
+        sharing.picker().map(|p| p.venues()),
+        Some(VenueView::NothingFound { query: "" })
     );
     sharing.set_venue_bot_username("bot".into());
     assert!(sharing.next_requests().is_empty());
@@ -120,8 +118,8 @@ fn a_failed_bot_lookup_is_asked_again_by_the_next_picker() {
         "not again in this picker"
     );
     assert_eq!(
-        sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::Failed)
+        sharing.picker().map(|p| p.venues()),
+        Some(VenueView::Failed)
     );
     sharing.retry_venues();
     assert_eq!(
@@ -157,8 +155,8 @@ fn unsent_requests_roll_back() {
     let resolve = sharing.next_requests();
     sharing.request_unsent(&resolve[0]);
     assert_eq!(
-        sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::Failed)
+        sharing.picker().map(|p| p.venues()),
+        Some(VenueView::Failed)
     );
     if let Some(picker) = sharing.picker_mut() {
         picker.set_map_size(super::MapSize::new(364., 220., 2.));
@@ -194,14 +192,14 @@ fn a_closed_pickers_late_answer_is_dropped_by_the_next_picker() {
     sharing.request_sent(&new, RequestId(21));
     sharing.venues_answered(RequestId(20), vec![cafe()]);
     assert_eq!(
-        sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::Loading),
+        sharing.picker().map(|p| p.venues()),
+        Some(VenueView::Loading),
         "the old picker's venues are not shown"
     );
     sharing.venues_answered(RequestId(21), vec![cafe()]);
     assert!(matches!(
-        sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::Found(_))
+        sharing.picker().map(|p| p.venues()),
+        Some(VenueView::Found(_))
     ));
 }
 
@@ -324,8 +322,8 @@ fn dropped_requests_fail_instead_of_waiting_for_good() {
     // The lookup was dropped: the list fails (Retry looks the bot up again).
     sharing.forget_dropped(&HashSet::new());
     assert_eq!(
-        sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::Failed)
+        sharing.picker().map(|p| p.venues()),
+        Some(VenueView::Failed)
     );
     sharing.retry_venues();
     let resolve = sharing.next_requests();
@@ -339,13 +337,13 @@ fn dropped_requests_fail_instead_of_waiting_for_good() {
     sharing.request_sent(&query, RequestId(9));
     sharing.forget_dropped(&HashSet::from([RequestId(9)]));
     assert_eq!(
-        sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::Loading)
+        sharing.picker().map(|p| p.venues()),
+        Some(VenueView::Loading)
     );
     sharing.forget_dropped(&HashSet::new());
     assert_eq!(
-        sharing.picker().map(|p| p.venues().clone()),
-        Some(VenueList::Failed)
+        sharing.picker().map(|p| p.venues()),
+        Some(VenueView::Failed)
     );
     // A dropped icon request is asked again by the next picker.
     sharing.retry_venues();

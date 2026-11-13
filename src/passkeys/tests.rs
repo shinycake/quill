@@ -172,6 +172,21 @@ fn a_failed_or_unreadable_add_leaves_the_sending_stage() {
 }
 
 #[test]
+fn a_lost_registration_request_ends_the_stage() {
+    let mut state = known(vec![]);
+    state.add = PasskeyAdd::FetchingOptions(RequestId(1));
+    state.drop_lost_register(|id| id == RequestId(1));
+    assert!(state.add_busy());
+    state.drop_lost_register(|_| false);
+    assert!(!state.add_busy());
+    // A lost add may have landed: the list is fetched again.
+    state.add = PasskeyAdd::Sending(RequestId(2));
+    state.drop_lost_register(|_| false);
+    assert!(!state.add_busy());
+    assert!(state.is_stale());
+}
+
+#[test]
 fn a_list_asked_before_a_removal_does_not_bring_the_passkey_back() {
     let mut state = known(vec![key("a", "x"), key("b", "y")]);
     let asked = RequestId(5);

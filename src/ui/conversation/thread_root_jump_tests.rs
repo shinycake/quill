@@ -109,10 +109,12 @@ impl Sim {
     /// Ask for the next older thread page and answer it with `ids`.
     fn page(&mut self, ids: std::ops::RangeInclusive<i64>) {
         let request = self.session(|s| {
-            s.request(
+            let request = s.request(
                 RequestPurpose::GetMessageThreadHistory { message_id: POST.0 },
                 Some(CHANNEL),
-            )
+            );
+            s.thread_older_asked(request);
+            request
         });
         let messages: Vec<String> = ids.rev().map(reply).collect();
         self.apply(&[format!(
@@ -184,4 +186,29 @@ fn the_page_that_reaches_the_root_lands_the_view_on_it(cx: &mut TestAppContext) 
         .app
         .update(&mut sim.vcx, |app, _| app.history.aim.goal().is_some());
     assert!(!pending);
+}
+
+/// Sweep r4-08 round 3: a jump-to-root goal belongs to the thread that
+/// asked; with another thread open it ends instead of scrolling that one.
+#[gpui_kit::test]
+fn a_goal_for_another_thread_ends_without_scrolling(cx: &mut TestAppContext) {
+    use crate::ui::history_state::{ScrollAim, ScrollGoal};
+    let mut sim = Sim::new(cx);
+    sim.wheel(300.);
+    let (before, _) = sim.top();
+    sim.app.update(&mut sim.vcx, |app, cx| {
+        app.history.aim = ScrollAim::Goal(ScrollGoal::ThreadRoot {
+            thread_id: i64::MIN,
+        });
+        cx.notify();
+    });
+    sim.frames();
+    sim.page(ROOT..=530);
+    assert!(sim.loaded_complete());
+    assert_ne!(sim.top().0, Some(MessageId(ROOT)), "no jump to its root");
+    assert!(before.is_some());
+    let pending = sim
+        .app
+        .update(&mut sim.vcx, |app, _| app.history.aim.goal().is_some());
+    assert!(!pending, "the goal ended");
 }

@@ -267,7 +267,7 @@ fn a_busy_lines_window_stays_until_it_is_dismissed(cx: &mut TestAppContext) {
         .advance_clock(std::time::Duration::from_millis(1600) * 3);
     call.run_until_parked();
     app.read_with(call, |app, _| {
-        assert!(matches!(app.call_screen.end, CallEnd::Busy { call_id: 6 }));
+        assert!(matches!(app.call_screen.end, CallEnd::NotEnded));
         assert!(app.calls.window.handle().is_some(), "no timer closes it");
     });
     app.update(call, |app, cx| {
@@ -275,7 +275,52 @@ fn a_busy_lines_window_stays_until_it_is_dismissed(cx: &mut TestAppContext) {
         app.sync_call_window(cx);
     });
     app.read_with(call, |app, _| {
-        assert!(matches!(app.call_screen.end, CallEnd::Running));
+        assert!(matches!(app.call_screen.end, CallEnd::NotEnded));
         assert!(app.calls.window.handle().is_none());
+    });
+}
+
+/// A summary the session already holds when a screen is built (a switch
+/// back to the account) is not a new ending: no window opens for it, a
+/// busy line's included.
+#[gpui_kit::test]
+fn a_summary_seen_first_by_a_new_screen_opens_no_window(cx: &mut TestAppContext) {
+    use crate::ui::calls_state::CallEnd;
+    for busy in [false, true] {
+        let (app, mut call) = open_box(cx);
+        let call = &mut call;
+        app.update(call, |app, cx| {
+            if let Some(session) = app.session_mut() {
+                session.calls.active_call = None;
+                session.calls.summary = Some(ended_summary(5, busy));
+            }
+            // What `replace_screen` builds.
+            app.call_screen.end = CallEnd::Unobserved;
+            app.sync_call_window(cx);
+        });
+        app.read_with(call, |app, _| {
+            assert!(matches!(app.call_screen.end, CallEnd::Over { call_id: 5 }));
+            assert!(app.calls.window.handle().is_none(), "busy: {busy}");
+        });
+    }
+}
+
+/// TDLib numbers calls per account: the call a device menu was opened for
+/// is named with its account, so another account's call of the same id
+/// (the window is reused across a switch) is not the same call.
+#[gpui_kit::test]
+fn the_shown_call_is_named_with_its_account(cx: &mut TestAppContext) {
+    let (app, mut call) = open_box(cx);
+    let call = &mut call;
+    app.update(call, |app, _| {
+        let first = app.shown_call().expect("a call shows");
+        let (account, id) = first.clone();
+        assert_eq!(Some(&account), app.session().map(|s| &s.account));
+        if let Some(session) = app.session_mut() {
+            session.account = quill::ids::AccountKey("other".to_string());
+        }
+        let second = app.shown_call().expect("a call shows");
+        assert_eq!(second.1, id, "the same call id");
+        assert_ne!(second, first, "another account's call is another call");
     });
 }

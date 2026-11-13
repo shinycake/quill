@@ -144,7 +144,7 @@ enum Waker {
     Idle,
     Armed(LiveWaker),
     /// Something changed while no waker was armed.
-    Pending,
+    Missed,
 }
 
 #[derive(Default)]
@@ -162,12 +162,12 @@ impl Latest {
     /// The waker to call once the lock is released, or a note for the
     /// next arm.
     fn wake(&mut self) -> Option<LiveWaker> {
-        match std::mem::replace(&mut self.waker, Waker::Pending) {
+        match std::mem::replace(&mut self.waker, Waker::Missed) {
             Waker::Armed(waker) => {
                 self.waker = Waker::Idle;
                 Some(waker)
             }
-            Waker::Idle | Waker::Pending => None,
+            Waker::Idle | Waker::Missed => None,
         }
     }
 }
@@ -260,7 +260,7 @@ impl LiveSink {
         let now = {
             let mut latest = self.0.lock_or_recover();
             match std::mem::replace(&mut latest.waker, Waker::Idle) {
-                Waker::Pending => Some(waker),
+                Waker::Missed => Some(waker),
                 Waker::Idle | Waker::Armed(_) => {
                     latest.waker = Waker::Armed(waker);
                     None

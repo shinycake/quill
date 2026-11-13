@@ -3,6 +3,19 @@
 //! with `new`.
 use crate::state::*;
 
+/// Where a song stands against the current user's saved music.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileAudioMark {
+    /// `isProfileAudio` went out as `request`; only its answer settles the
+    /// song (a local save or remove replaces the mark, so a late answer
+    /// finds nothing to change).
+    Checking {
+        request: RequestId,
+    },
+    Saved,
+    NotSaved,
+}
+
 pub struct MediaState {
     /// The emoji/sticker panel's set contents (`getStickerSet`, lazily).
     pub media_library: MediaLibrary,
@@ -10,16 +23,14 @@ pub struct MediaState {
     pub files: FileMap,
     /// How the disk stands: a low or full one holds automatic downloads.
     pub disk: DiskPressure,
-    /// Listed downloads the low disk paused, resumed when it is healthy.
-    pub disk_paused: HashSet<i32>,
+    /// Listed downloads the low disk paused, resumed when it is healthy, and
+    /// the saved set of their messages (`DiskPauses`).
+    pub disk_paused: DiskPauses,
     /// The search for downloads paused by the disk before this TDLib
     /// instance went out (once per session).
     pub disk_search: DiskSearch,
     /// Downloads that search found, waiting for their resume.
     pub disk_resume_due: Vec<i32>,
-    /// The `settings.data_storage.disk_paused` last written to the
-    /// preferences; the set is saved again when it differs.
-    pub disk_paused_persisted: BTreeSet<(i64, i64)>,
     /// What was asked to download and how each request ended; the status
     /// rows show is `downloads.status(id, &files)`.
     pub downloads: DownloadIntents,
@@ -47,8 +58,8 @@ pub struct MediaState {
     /// music button and the Playlist page.
     pub playlists: HashMap<i64, Playlist>,
     /// Songs checked against the current user's saved music
-    /// (`isProfileAudio`), by file id: `true` when saved.
-    pub profile_audio_ids: HashMap<i32, bool>,
+    /// (`isProfileAudio`), by file id.
+    pub profile_audio_ids: HashMap<i32, ProfileAudioMark>,
     /// Thumbnails of the Stories and Gifts grids waiting for a download.
     pub(crate) profile_thumbs_due: Vec<FileId>,
 }
@@ -115,19 +126,63 @@ impl AvatarDue {
 }
 
 /// The once-per-session search for downloads an earlier TDLib instance's
-/// disk pause left. A failed search goes back to `NotAsked`, so the next
-/// healthy reading asks again.
+/// disk pause left. A failed search waits out a pause that doubles with each
+/// failure, so a healthy reading does not send it again at the poll's pace
+/// while TDLib keeps refusing it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum DiskSearch {
     #[default]
     NotAsked,
     /// Out, as `request`. `keys` are the saved pauses it asks about: one
-    /// saved after it went out is not part of its answer.
+    /// saved after it went out is not part of its answer. `wait` is the
+    /// pause of the failure this ask follows, so the next one doubles it.
     Asked {
         request: RequestId,
         keys: BTreeSet<(i64, i64)>,
+        wait: Option<std::time::Duration>,
+    },
+    /// The last ask failed: none goes out before `until`.
+    Failed {
+        until: std::time::Instant,
+        wait: std::time::Duration,
     },
     Done,
+}
+
+impl DiskSearch {
+    /// A search may go out at `now`: never asked, or its pause is over.
+    pub fn due(&self, now: std::time::Instant) -> bool {
+        match self {
+            Self::NotAsked => true,
+            Self::Failed { until, .. } => now >= *until,
+            Self::Asked { .. } | Self::Done => false,
+        }
+    }
+
+    /// `request` failed at `now`: only the ask that is out acts.
+    pub(crate) fn failed(&mut self, request: RequestId, now: std::time::Instant) {
+        let Self::Asked {
+            request: asked,
+            wait,
+            ..
+        } = self
+        else {
+            return;
+        };
+        if *asked != request {
+            return;
+        }
+        let (until, wait) = crate::state::next_retry(wait.map(|wait| (now, wait)), now);
+        *self = Self::Failed { until, wait };
+    }
+
+    /// The pause of the last failure, to carry into the next ask.
+    pub(crate) fn pause(&self) -> Option<std::time::Duration> {
+        match self {
+            Self::Failed { wait, .. } => Some(*wait),
+            _ => None,
+        }
+    }
 }
 
 impl MediaState {
@@ -136,10 +191,9 @@ impl MediaState {
             media_library: MediaLibrary::default(),
             files: FileMap::default(),
             disk: DiskPressure::Healthy,
-            disk_paused: HashSet::new(),
+            disk_paused: DiskPauses::default(),
             disk_search: DiskSearch::NotAsked,
             disk_resume_due: Vec::new(),
-            disk_paused_persisted: BTreeSet::new(),
             downloads: DownloadIntents::default(),
             avatar_file_refs: HashMap::new(),
             avatar_due: AvatarDue::Everything,

@@ -26,7 +26,7 @@ pub(crate) fn ban_step(fetch: &Fetch<quill::telegram::envelope::CommunityMemberC
         Fetch::Loading { .. } => BanStep::Wait,
         Fetch::Idle => BanStep::Cancel,
         Fetch::Failed { .. } => BanStep::BanNow,
-        Fetch::Outdated(_) => BanStep::Cancel,
+        Fetch::Outdated { .. } => BanStep::Cancel,
         Fetch::Ready(chats) if chats.owned_chat_ids.is_empty() => BanStep::BanNow,
         Fetch::Ready(chats) => BanStep::Warn(chats.owned_chat_ids.clone()),
     }
@@ -52,7 +52,7 @@ pub(crate) fn answer_coming(
     member: CommunityMember,
 ) -> Option<quill::ids::RequestId> {
     match session.communities.member_chats(community_id, member) {
-        Fetch::Loading { request, .. } => *request,
+        Fetch::Loading { request, .. } => Some(*request),
         _ => None,
     }
 }
@@ -82,10 +82,7 @@ impl QuillApp {
                 .member_chats(pending.community_id, pending.member);
             // A newer ask for the same member took the entry over: this
             // wait follows it, since only the newest ask can answer.
-            if let Fetch::Loading {
-                request: Some(newer),
-                ..
-            } = fetch
+            if let Fetch::Loading { request: newer, .. } = fetch
                 && *newer != pending.request
             {
                 settled = Some((index, Err(*newer)));

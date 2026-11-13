@@ -59,7 +59,7 @@ impl MentionSearch {
     /// The `searchChatMembers` request the search waits for.
     pub fn asking(&self) -> Option<RequestId> {
         match self.members {
-            Fetch::Loading { request, .. } => request,
+            Fetch::Loading { request, .. } => Some(request),
             _ => None,
         }
     }
@@ -224,6 +224,7 @@ impl Session {
         for pending in dropped {
             // The mute toggle only guards a local flag: dropping it is
             // the whole settlement, its errors would be user-facing.
+            self.settle_participant_mute_toggle(Some(&pending));
             if pending.purpose.is_sweepable() {
                 self.settle_lost_request(pending);
             }

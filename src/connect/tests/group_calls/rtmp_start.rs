@@ -315,7 +315,7 @@ fn a_join_in_flight_counts_as_being_in_the_call_and_leaving_sends_leave() {
         CurrentCall::None,
         "only looked at"
     );
-    driver.join_video_chat(77).expect("the join goes out");
+    let join = driver.join_video_chat(77).expect("the join goes out");
     assert_eq!(last(&recorder)["@type"], "joinVideoChat");
     assert!(matches!(
         driver.session.current_call_for_create(None),
@@ -325,7 +325,12 @@ fn a_join_in_flight_counts_as_being_in_the_call_and_leaving_sends_leave() {
         }
     ));
     // The UI's own join flag counts too.
+    // The join's own stage reads as joining until its request ends.
+    assert!(driver.session.group_call_joined_or_joining(None));
     driver.session.requests.drain_all();
+    if let Some(call) = driver.session.calls.group_call_mut(77) {
+        call.transport.join_failed(join);
+    }
     assert!(driver.session.group_call_joined_or_joining(Some(77)));
     assert!(!driver.session.group_call_joined_or_joining(None));
     // Leaving it before creating sends `leaveGroupCall` for that call.

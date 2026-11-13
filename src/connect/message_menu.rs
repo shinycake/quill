@@ -102,8 +102,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session
-                    .fail_message_report(extra, "Could not send the report.".into());
+                self.session.fail_message_report(extra, err.stage_line());
                 Err(err)
             }
         }
@@ -320,8 +319,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || option_id.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session
-            .begin_poll_option_menu(chat_id, message_id, option_id);
         let extra = self.session.request(
             RequestPurpose::Messages(MessagesPurpose::GetPollOptionProperties {
                 chat_id,
@@ -330,10 +327,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             Some(chat_id),
         );
-        self.send_audience(
+        self.session
+            .begin_poll_option_menu(chat_id, message_id, option_id, extra);
+        if let Err(err) = self.send_audience(
             extra,
             &get_poll_option_properties(extra, chat_id, message_id, option_id),
-        )?;
+        ) {
+            // The menu ends in the error its page draws, not in "Loading".
+            if let Some(menu) = self.session.messages.poll_option_menu.as_mut() {
+                menu.properties.failed(Some(extra), err.stage_line(), true);
+            }
+            return Err(err);
+        }
         Ok(extra)
     }
 
@@ -434,39 +439,54 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(ChatKind::Supergroup { supergroup_id, .. }) => *supergroup_id,
             _ => return Err(ConnectSendError::InvalidRequest),
         };
+        // A refusal after a step went out is a note, not a failure of the
+        // whole call: the report or the delete is already running.
+        let mut went = false;
         for step in crate::moderation::plan_moderation(choice) {
-            match step {
+            let sent = match step {
                 ModerationStep::ReportSpam => {
                     let extra = self
                         .session
                         .request(RequestPurpose::ReportSupergroupSpam, Some(chat_id));
                     let json = report_supergroup_spam(extra, supergroup_id, message_ids);
-                    self.send_audience(extra, &json)?;
+                    self.send_audience(extra, &json).map(|()| true)
                 }
                 ModerationStep::DeleteAllFromSender => {
                     let extra = self
                         .session
                         .request(RequestPurpose::DeleteChatMessagesBySender, Some(chat_id));
                     let json = delete_chat_messages_by_sender(extra, chat_id, user_id);
-                    self.send_audience(extra, &json)?;
+                    self.send_audience(extra, &json).map(|()| true)
                 }
-                ModerationStep::DeleteReactionsFromSender => {
-                    if let Some(message_id) = message_ids.first() {
-                        self.delete_message_reactions_from(
+                ModerationStep::DeleteReactionsFromSender => match message_ids.first() {
+                    Some(message_id) => self
+                        .delete_message_reactions_from(
                             chat_id,
                             *message_id,
                             MessageSender::User { user_id },
-                        )?;
-                    }
-                }
+                        )
+                        .map(|sent| sent.is_some()),
+                    None => Ok(false),
+                },
                 // Reports and deletes name the user's messages, so the ban
                 // goes last; both are gated on `can_restrict_members`.
-                ModerationStep::Ban => {
-                    self.ban_chat_member(chat_id, user_id, 0)?;
-                }
-                ModerationStep::Restrict => {
-                    // View-only: the member stays and can read, nothing else.
-                    self.restrict_chat_member(chat_id, user_id, 0, &ChatPermissions::default())?;
+                ModerationStep::Ban => self
+                    .ban_chat_member(chat_id, user_id, 0)
+                    .map(|sent| sent.is_some()),
+                // View-only: the member stays and can read, nothing else.
+                ModerationStep::Restrict => self
+                    .restrict_chat_member(chat_id, user_id, 0, &ChatPermissions::default())
+                    .map(|sent| sent.is_some()),
+            };
+            match sent {
+                Ok(sent) => went |= sent,
+                Err(err) if !went => return Err(err),
+                Err(err) => {
+                    self.session
+                        .chats_state
+                        .chat_action_error
+                        .push(err.stage_line());
+                    return Ok(());
                 }
             }
         }
@@ -582,17 +602,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id == 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.sticker_set_view =
-            Some(crate::state::StickerSetView::loading(set_id));
         let extra = self.session.request(
             RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id }),
             None,
         );
         match self.sender.send_json(&get_sticker_set(extra, set_id)) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                // The box waits for its set only once the ask went out: a
+                // refused send leaves the box that was open as it was.
+                self.session.stickers.sticker_set_view =
+                    Some(crate::state::StickerSetView::loading(set_id, extra));
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.fail_sticker_set_view(set_id);
                 Err(err)
             }
         }
@@ -604,14 +627,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id == 0 {
             return Ok(());
         }
-        // The title is known, or its own ask is still out (an ask whose
-        // request is gone with no answer is asked again).
-        let settled = match self.session.stickers.emoji_pack_titles.get(&set_id) {
-            Some(PackTitle::Known(_)) => true,
-            Some(PackTitle::Asking(asked)) => self.session.requests.get(*asked).is_some(),
-            None => false,
-        };
-        if settled {
+        // The title is known, or its own ask is still out: the entry holds
+        // the request, and the error path takes it out when it fails.
+        if self
+            .session
+            .stickers
+            .emoji_pack_titles
+            .contains_key(&set_id)
+        {
             return Ok(());
         }
         let extra = self.session.request(
@@ -657,34 +680,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Download the sticker previews of the open set view, once.
+    /// Download the sticker previews of the open set view. `download_file`
+    /// skips a file already local, in flight or stalled, so the upkeep may
+    /// call this every frame; a refused send is asked again at the next one.
     pub fn ensure_sticker_set_view_files(&mut self) -> Result<(), ConnectSendError> {
-        let Some(view) = self.session.stickers.sticker_set_view.as_mut() else {
+        let Some(view) = self.session.stickers.sticker_set_view.as_ref() else {
             return Ok(());
         };
-        let crate::state::StickerSetViewStage::Ready {
-            stickers, files, ..
-        } = &mut view.stage
-        else {
+        let crate::state::StickerSetViewStage::Ready { stickers, .. } = &view.stage else {
             return Ok(());
         };
-        if *files == crate::state::SetFiles::Asked {
-            return Ok(());
-        }
         let wanted: Vec<crate::ids::FileId> = stickers
             .iter()
             .filter_map(|s| s.display_file_id())
             .take(60)
             .collect();
-        // Asked only once the downloads left: a refused send leaves the view
-        // to ask again at the next upkeep.
-        self.ensure_media_files(&wanted)?;
-        if let Some(view) = self.session.stickers.sticker_set_view.as_mut()
-            && let crate::state::StickerSetViewStage::Ready { files, .. } = &mut view.stage
-        {
-            *files = crate::state::SetFiles::Asked;
-        }
-        Ok(())
+        self.ensure_media_files(&wanted)
     }
 
     /// What a sticker message's menu needs to word its sticker items:
@@ -693,12 +704,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stickers.stickers.installed_loaded()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetInstalledStickerSets)
-        {
+        if !self.session.stickers.stickers.installed_loaded() {
             self.sticker_request(
                 RequestPurpose::GetInstalledStickerSets,
                 get_installed_sticker_sets,
@@ -706,12 +712,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // "Add to Emoji Set" lists the owned emoji sets, which only the
         // media panel loaded so far.
-        if self.session.stickers.emoji.installed_sets.is_empty()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetInstalledEmojiSets)
-        {
+        let installed = &self.session.stickers.emoji.lists.installed;
+        if installed.can_ask() || installed.is_outdated() {
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,

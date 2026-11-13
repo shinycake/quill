@@ -44,12 +44,14 @@ fn flag(value: &Value, key: &str) -> bool {
     value.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-/// `RevenueWithdrawalState` of a Fragment withdrawal.
+/// `RevenueWithdrawalState` of a Fragment withdrawal, as Fragment reports
+/// it in the list; Quill started none of it, so no request waits behind it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WithdrawalState {
     /// Null: a refund from Fragment.
     Unknown,
-    Pending,
+    /// `revenueWithdrawalStatePending`: Fragment has not settled it yet.
+    Unsettled,
     Succeeded {
         date: i32,
         url: String,
@@ -58,12 +60,12 @@ pub enum WithdrawalState {
 }
 
 impl WithdrawalState {
-    fn parse(value: Option<&Value>) -> Self {
+    pub(crate) fn parse(value: Option<&Value>) -> Self {
         let Some(value) = value else {
             return Self::Unknown;
         };
         match value.get("@type").and_then(Value::as_str) {
-            Some("revenueWithdrawalStatePending") => Self::Pending,
+            Some("revenueWithdrawalStatePending") => Self::Unsettled,
             Some("revenueWithdrawalStateSucceeded") => Self::Succeeded {
                 date: i32::try_from(int(value.get("date"))).unwrap_or(0),
                 url: text(value, "url"),
@@ -248,7 +250,7 @@ impl TonTx {
         }
         match &self.kind {
             TonTxKind::FragmentWithdrawal {
-                state: WithdrawalState::Pending,
+                state: WithdrawalState::Unsettled,
             } => tr(keys::CHANNEL_EARN_HISTORY_PENDING),
             TonTxKind::FragmentWithdrawal {
                 state: WithdrawalState::Failed,
@@ -534,10 +536,27 @@ impl<'a> IntoIterator for &'a TxRows {
     }
 }
 
+/// Which part of the Grams screen shows: one value, so closing it cannot
+/// leave a receipt or Collect's box behind.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum GramsView {
+    /// The screen is closed.
+    #[default]
+    Closed,
+    /// The balance and the list of transactions.
+    List,
+    /// The receipt of the row with this key ([`TonTx::key`]).
+    Receipt(String),
+    /// Collect's password box, security check or finished outcome, over the
+    /// list.
+    Withdraw(GramWithdraw),
+}
+
 /// The Grams screen and the Settings row's balance.
 #[derive(Debug, Clone, Default)]
 pub struct GramsHub {
-    pub open: bool,
+    /// What shows ([`GramsView`]).
+    pub view: GramsView,
     /// Known after the first answer (probe or page).
     pub balance_nano: Option<i64>,
     /// The Settings probe of the balance: asked on a Settings open, never
@@ -555,15 +574,12 @@ pub struct GramsHub {
     /// tabs only when both directions exist).
     pub has_in: bool,
     pub has_out: bool,
-    /// Key of the transaction whose receipt is showing.
-    pub selected: Option<String>,
-    pub revenue: Option<GramRevenue>,
+    /// `getGramRevenueStatistics` for the withdrawal section: only the
+    /// answer of the request named in the stage lands; a failure says so.
+    pub revenue: Fetch<GramRevenue>,
     /// Users and chats the history names that the session did not know:
     /// each asked once per session, then refused or learned.
     pub peers: BTreeMap<PeerKey, PeerAsk>,
-    /// Collect's password box, security check or finished outcome, while
-    /// open.
-    pub withdraw: Option<GramWithdraw>,
     /// What the withdrawal box's window acts on once (`take_events`).
     events: Vec<GramsEvent>,
 }
@@ -583,7 +599,67 @@ impl GramsHub {
         if stage.can_submit() {
             self.events.push(GramsEvent::PasswordReady);
         }
-        self.withdraw = Some(stage);
+        self.view = GramsView::Withdraw(stage);
+    }
+
+    /// The screen shows.
+    pub fn is_open(&self) -> bool {
+        self.view != GramsView::Closed
+    }
+
+    /// Key of the transaction whose receipt is showing.
+    pub fn selected(&self) -> Option<&str> {
+        match &self.view {
+            GramsView::Receipt(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// Collect's box, while it shows.
+    pub fn withdraw(&self) -> Option<&GramWithdraw> {
+        match &self.view {
+            GramsView::Withdraw(stage) => Some(stage),
+            _ => None,
+        }
+    }
+
+    pub fn withdraw_mut(&mut self) -> Option<&mut GramWithdraw> {
+        match &mut self.view {
+            GramsView::Withdraw(stage) => Some(stage),
+            _ => None,
+        }
+    }
+
+    /// The screen opens on its list; a screen already open (a receipt or
+    /// Collect's box over the list) keeps what it shows.
+    pub fn open_list(&mut self) {
+        if self.view == GramsView::Closed {
+            self.view = GramsView::List;
+        }
+    }
+
+    /// Show the receipt of the row with `key`, or the list. The screen
+    /// must be open on its list or a receipt: Collect's box and a closed
+    /// screen stay as they are.
+    pub fn select(&mut self, key: Option<String>) {
+        if matches!(self.view, GramsView::List | GramsView::Receipt(_)) {
+            self.view = key.map_or(GramsView::List, GramsView::Receipt);
+        }
+    }
+
+    /// Collect's box takes `stage` without queueing the keyboard for its
+    /// field (an answer moving it on; [`Self::enter_withdraw`] is a move
+    /// into the idle box).
+    pub fn put_withdraw(&mut self, stage: GramWithdraw) {
+        self.view = GramsView::Withdraw(stage);
+    }
+
+    /// Collect's box goes away (Cancel, an OK, the end of the outcome): the
+    /// list shows again. A URL that still arrives for it is dropped.
+    pub fn cancel_withdraw(&mut self) {
+        if matches!(self.view, GramsView::Withdraw(_)) {
+            self.view = GramsView::List;
+        }
     }
 
     /// The events queued since the last call.
@@ -602,15 +678,15 @@ impl GramsHub {
         self.rows.clear();
         self.next_offset.clear();
         self.load = crate::gift_market::PageLoad::Idle;
-        self.selected = None;
+        if matches!(self.view, GramsView::Receipt(_)) {
+            self.view = GramsView::List;
+        }
     }
 
     /// The Grams screen was closed: the receipt and Collect's box (with an
     /// outcome it had not acted on) go with it, in one place.
     pub fn close(&mut self) {
-        self.open = false;
-        self.selected = None;
-        self.withdraw = None;
+        self.view = GramsView::Closed;
     }
 
     /// Settings closed: a failed balance probe may be asked again the next
@@ -635,10 +711,13 @@ impl GramsHub {
 
     /// Collect's finished outcome, once: the box is done with it.
     pub fn take_withdraw_outcome(&mut self) -> Option<WithdrawOutcome> {
-        match self.withdraw.take() {
-            Some(GramWithdraw::Finished(outcome)) => Some(outcome),
+        match std::mem::take(&mut self.view) {
+            GramsView::Withdraw(GramWithdraw::Finished(outcome)) => {
+                self.view = GramsView::List;
+                Some(outcome)
+            }
             other => {
-                self.withdraw = other;
+                self.view = other;
                 None
             }
         }
@@ -678,14 +757,14 @@ impl GramsHub {
     }
 
     pub fn selected_tx(&self) -> Option<&TonTx> {
-        let key = self.selected.as_deref()?;
+        let key = self.selected()?;
         self.rows.iter().find(|tx| tx.key == key)
     }
 
     /// The withdrawal section shows while revenue is available
     /// (tdesktop `BuildCurrencyWithdrawalSection`).
     pub fn withdrawable(&self) -> Option<&GramRevenue> {
-        self.revenue.as_ref().filter(|r| r.available_nano > 0)
+        self.revenue.data().filter(|r| r.available_nano > 0)
     }
 }
 

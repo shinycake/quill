@@ -117,11 +117,29 @@ pub enum GiftPurchaseStage {
         price: GiftPrice,
         request: crate::ids::RequestId,
     },
+    /// The box was closed while `sendResoldGift` is out as `request`: the
+    /// purchase carries on, and its answer is told in a notice. Reopening the
+    /// box goes back to [`Self::Sending`].
+    SendingClosed {
+        quote: GiftQuote,
+        price: GiftPrice,
+        request: crate::ids::RequestId,
+    },
     /// The gift was sent.
-    Sent(GiftQuote),
+    Completed(GiftQuote),
     /// No quote to buy from: the load failed, the answer was not the gift
     /// asked for, or the price went away. Load again.
     Failed(String),
+}
+
+/// The outcome of a purchase whose box was closed while it was out: Stars
+/// may have moved, so the user is told.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoxlessAnswer {
+    /// The gift was bought: the line says so.
+    Bought(String),
+    /// It was refused, failed or repriced: the line says why.
+    Refused(String),
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +148,9 @@ pub struct GiftPurchase {
     pub recipient: MessageSender,
     pub recipient_name: String,
     pub requested_name: String,
+    /// The request that asked for this quote: the box that sent it shows
+    /// this purchase and no other.
+    pub asked: crate::ids::RequestId,
     pub stage: GiftPurchaseStage,
 }
 
@@ -147,6 +168,7 @@ impl GiftPurchase {
             recipient,
             recipient_name,
             requested_name,
+            asked: request,
             stage: GiftPurchaseStage::Loading(request),
         }
     }
@@ -155,8 +177,46 @@ impl GiftPurchase {
         matches!(self.stage, GiftPurchaseStage::Loading(_))
     }
 
+    /// `sendResoldGift` is out, with the box open or closed.
     pub fn is_sending(&self) -> bool {
-        matches!(self.stage, GiftPurchaseStage::Sending { .. })
+        matches!(
+            self.stage,
+            GiftPurchaseStage::Sending { .. } | GiftPurchaseStage::SendingClosed { .. }
+        )
+    }
+
+    /// The box was closed: a send in flight carries on without it.
+    pub fn close(&mut self) {
+        self.stage =
+            match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
+                GiftPurchaseStage::Sending {
+                    quote,
+                    price,
+                    request,
+                } => GiftPurchaseStage::SendingClosed {
+                    quote,
+                    price,
+                    request,
+                },
+                other => other,
+            };
+    }
+
+    /// The box is shown again over the send it closed on.
+    pub fn reopen(&mut self) {
+        self.stage =
+            match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
+                GiftPurchaseStage::SendingClosed {
+                    quote,
+                    price,
+                    request,
+                } => GiftPurchaseStage::Sending {
+                    quote,
+                    price,
+                    request,
+                },
+                other => other,
+            };
     }
 
     /// A request of this purchase is out.
@@ -165,14 +225,15 @@ impl GiftPurchase {
     }
 
     pub fn is_completed(&self) -> bool {
-        matches!(self.stage, GiftPurchaseStage::Sent(_))
+        matches!(self.stage, GiftPurchaseStage::Completed(_))
     }
 
     pub fn quote(&self) -> Option<&GiftQuote> {
         match &self.stage {
             GiftPurchaseStage::Quoted { quote, .. }
             | GiftPurchaseStage::Sending { quote, .. }
-            | GiftPurchaseStage::Sent(quote) => Some(quote),
+            | GiftPurchaseStage::SendingClosed { quote, .. }
+            | GiftPurchaseStage::Completed(quote) => Some(quote),
             GiftPurchaseStage::Loading(_) | GiftPurchaseStage::Failed(_) => None,
         }
     }
@@ -181,7 +242,8 @@ impl GiftPurchase {
     pub fn price(&self) -> Option<GiftPrice> {
         match &self.stage {
             GiftPurchaseStage::Quoted { price, .. } => *price,
-            GiftPurchaseStage::Sending { price, .. } => Some(*price),
+            GiftPurchaseStage::Sending { price, .. }
+            | GiftPurchaseStage::SendingClosed { price, .. } => Some(*price),
             _ => None,
         }
     }
@@ -191,8 +253,10 @@ impl GiftPurchase {
         match &self.stage {
             GiftPurchaseStage::Loading(_) => None,
             GiftPurchaseStage::Quoted { note, .. } => note.clone(),
-            GiftPurchaseStage::Sending { .. } => Some("Sending the gift…".into()),
-            GiftPurchaseStage::Sent(_) => Some("Gift sent successfully.".into()),
+            GiftPurchaseStage::Sending { .. } | GiftPurchaseStage::SendingClosed { .. } => {
+                Some("Sending the gift…".into())
+            }
+            GiftPurchaseStage::Completed(_) => Some("Gift sent successfully.".into()),
             GiftPurchaseStage::Failed(note) => Some(note.clone()),
         }
     }
@@ -214,16 +278,17 @@ impl GiftPurchase {
     /// The request this purchase waits for.
     pub fn waits_for(&self, request: crate::ids::RequestId) -> bool {
         match &self.stage {
-            GiftPurchaseStage::Loading(held) | GiftPurchaseStage::Sending { request: held, .. } => {
-                *held == request
-            }
+            GiftPurchaseStage::Loading(held)
+            | GiftPurchaseStage::Sending { request: held, .. }
+            | GiftPurchaseStage::SendingClosed { request: held, .. } => *held == request,
             _ => false,
         }
     }
 
-    /// The quote answered: it must be the gift asked for.
-    pub fn accept_quote(&mut self, quote: Option<GiftQuote>) {
-        if !self.is_loading() {
+    /// The quote `request` answered: it must be the request this purchase
+    /// waits for, and the gift asked for.
+    pub fn accept_quote(&mut self, request: crate::ids::RequestId, quote: Option<GiftQuote>) {
+        if !self.is_loading() || !self.waits_for(request) {
             return;
         }
         self.stage = match quote.filter(|q| q.name == self.requested_name) {
@@ -245,18 +310,26 @@ impl GiftPurchase {
 
     /// The send answered. A higher price never submits by itself: it goes
     /// back to the quote with the new amount.
-    pub fn accept_result(&mut self, result: GiftPurchaseResult) {
-        if !matches!(self.stage, GiftPurchaseStage::Sending { .. }) {
-            return;
+    /// An answer that lands with the box closed comes back as a
+    /// [`BoxlessAnswer`] for a notice.
+    pub fn accept_result(
+        &mut self,
+        request: crate::ids::RequestId,
+        result: GiftPurchaseResult,
+    ) -> Option<BoxlessAnswer> {
+        if !self.is_sending() || !self.waits_for(request) {
+            return None;
         }
-        let GiftPurchaseStage::Sending { quote, .. } =
+        let closed = matches!(self.stage, GiftPurchaseStage::SendingClosed { .. });
+        let (GiftPurchaseStage::Sending { quote, .. }
+        | GiftPurchaseStage::SendingClosed { quote, .. }) =
             std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new()))
         else {
-            return;
+            return None;
         };
         self.stage = match result {
             // The receipt id is intentionally empty for gifts sent to others.
-            GiftPurchaseResult::Sent(_) => GiftPurchaseStage::Sent(quote),
+            GiftPurchaseResult::Sent(_) => GiftPurchaseStage::Completed(quote),
             GiftPurchaseResult::PriceIncreased(None) => GiftPurchaseStage::Failed(
                 "The price increased. Review the new amount and confirm again; nothing was purchased."
                     .into(),
@@ -277,27 +350,41 @@ impl GiftPurchase {
                 }
             }
         };
+        closed.then(|| self.boxless_answer())
     }
 
-    /// A request failed: loading ends with no quote, a send goes back to the
-    /// quote it was sent from. A quote, a receipt or an earlier failure has
-    /// no request to fail and stays as it is.
-    pub fn fail(&mut self, line: String) {
-        if !matches!(
-            self.stage,
-            GiftPurchaseStage::Loading(_) | GiftPurchaseStage::Sending { .. }
-        ) {
-            return;
+    fn boxless_answer(&self) -> BoxlessAnswer {
+        let line = self.note().unwrap_or_default();
+        if self.is_completed() {
+            BoxlessAnswer::Bought(line)
+        } else {
+            BoxlessAnswer::Refused(line)
         }
+    }
+
+    /// `request` failed: loading ends with no quote, a send goes back to the
+    /// quote it was sent from (with the box closed, the answer comes back for
+    /// a notice). A quote, a receipt or an earlier failure has
+    /// no request to fail and stays as it is, and so does an answer of a
+    /// request this purchase does not wait for.
+    pub fn fail(&mut self, request: crate::ids::RequestId, line: String) -> Option<BoxlessAnswer> {
+        if !self.waits_for(request) {
+            return None;
+        }
+        let closed = matches!(self.stage, GiftPurchaseStage::SendingClosed { .. });
         self.stage =
             match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
-                GiftPurchaseStage::Sending { quote, price, .. } => GiftPurchaseStage::Quoted {
-                    quote,
-                    price: Some(price),
-                    note: Some(line),
-                },
+                GiftPurchaseStage::Sending { quote, price, .. }
+                | GiftPurchaseStage::SendingClosed { quote, price, .. } => {
+                    GiftPurchaseStage::Quoted {
+                        quote,
+                        price: Some(price),
+                        note: Some(line),
+                    }
+                }
                 _ => GiftPurchaseStage::Failed(line),
             };
+        closed.then(|| self.boxless_answer())
     }
 }
 
@@ -329,18 +416,27 @@ mod stage_tests {
     fn a_failed_load_leaves_loading_and_a_failed_send_returns_to_the_quote() {
         let mut gift = purchase();
         assert!(gift.is_loading() && gift.waits_for(RequestId(1)));
-        gift.fail("no".into());
+        gift.fail(RequestId(9), "other".into());
+        assert!(
+            gift.is_loading(),
+            "another request's failure changes nothing"
+        );
+        gift.fail(RequestId(1), "no".into());
         assert!(!gift.is_loading() && gift.quote().is_none());
 
         let mut gift = purchase();
-        gift.accept_quote(Some(quote()));
+        gift.accept_quote(RequestId(9), Some(quote()));
+        assert!(gift.is_loading(), "another request's quote is dropped");
+        gift.accept_quote(RequestId(1), Some(quote()));
         gift.stage = GiftPurchaseStage::Sending {
             quote: quote(),
             price: GiftPrice::Stars(25),
             request: RequestId(2),
         };
         assert!(gift.is_sending() && gift.waits_for(RequestId(2)));
-        gift.fail("refused".into());
+        gift.accept_result(RequestId(9), GiftPurchaseResult::Sent(String::new()));
+        assert!(gift.is_sending(), "another request's result is dropped");
+        gift.fail(RequestId(2), "refused".into());
         assert!(!gift.is_sending());
         assert_eq!(gift.price(), Some(GiftPrice::Stars(25)));
         assert_eq!(gift.note().as_deref(), Some("refused"));
@@ -349,12 +445,12 @@ mod stage_tests {
     #[test]
     fn a_higher_price_asks_again_and_a_late_answer_changes_nothing() {
         let mut gift = purchase();
-        gift.accept_quote(Some(quote()));
+        gift.accept_quote(RequestId(1), Some(quote()));
         // An answer with nothing sent is ignored.
-        gift.accept_result(GiftPurchaseResult::Sent(String::new()));
+        gift.accept_result(RequestId(2), GiftPurchaseResult::Sent(String::new()));
         assert!(!gift.is_completed());
         assert_eq!(gift.price(), Some(GiftPrice::Stars(25)), "the quote stays");
-        gift.fail("stray".into());
+        gift.fail(RequestId(2), "stray".into());
         assert_eq!(
             gift.price(),
             Some(GiftPrice::Stars(25)),
@@ -366,10 +462,56 @@ mod stage_tests {
             price: GiftPrice::Stars(25),
             request: RequestId(2),
         };
-        gift.accept_result(GiftPurchaseResult::PriceIncreased(Some(GiftPrice::Stars(
-            40,
-        ))));
+        gift.accept_result(
+            RequestId(2),
+            GiftPurchaseResult::PriceIncreased(Some(GiftPrice::Stars(40))),
+        );
         assert_eq!(gift.price(), Some(GiftPrice::Stars(40)));
         assert!(!gift.is_sending() && !gift.is_completed());
+    }
+
+    fn sending() -> GiftPurchase {
+        let mut gift = purchase();
+        gift.stage = GiftPurchaseStage::Sending {
+            quote: quote(),
+            price: GiftPrice::Stars(25),
+            request: RequestId(2),
+        };
+        gift
+    }
+
+    /// Sweep r4-04 fix 3: a purchase whose box closed tells its outcome.
+    #[test]
+    fn an_answer_with_the_box_closed_comes_back_for_a_notice() {
+        let mut gift = sending();
+        assert_eq!(
+            gift.accept_result(RequestId(2), GiftPurchaseResult::Sent(String::new())),
+            None,
+            "the box is open and shows it"
+        );
+        let mut gift = sending();
+        gift.close();
+        assert!(gift.is_sending() && gift.waits_for(RequestId(2)));
+        let answer = gift
+            .accept_result(RequestId(2), GiftPurchaseResult::Sent(String::new()))
+            .expect("nobody shows it");
+        assert_eq!(
+            answer,
+            BoxlessAnswer::Bought("Gift sent successfully.".into())
+        );
+        let mut gift = sending();
+        gift.close();
+        let answer = gift.fail(RequestId(2), "refused".into()).expect("told");
+        assert_eq!(answer, BoxlessAnswer::Refused("refused".into()));
+        // A box shown again over the send shows the answer itself.
+        let mut gift = sending();
+        gift.close();
+        gift.reopen();
+        assert_eq!(gift.fail(RequestId(2), "refused".into()), None);
+        // Closing a quote changes nothing.
+        let mut gift = purchase();
+        gift.accept_quote(RequestId(1), Some(quote()));
+        gift.close();
+        assert!(!gift.is_sending());
     }
 }

@@ -38,7 +38,8 @@ fn new_app_with_shell(
 
 fn grams_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
     app.read_with(vcx, |app, _| {
-        app.session().is_some_and(|s| s.payments.hub.grams.open)
+        app.session()
+            .is_some_and(|s| s.payments.hub.grams.is_open())
     })
 }
 
@@ -162,7 +163,7 @@ fn an_unknown_peer_shows_a_placeholder_then_a_name(cx: &mut TestAppContext) {
 fn withdraw(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<GramWithdraw> {
     app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.grams.withdraw.clone())
+            .and_then(|s| s.payments.hub.grams.withdraw().cloned())
     })
 }
 
@@ -201,7 +202,7 @@ fn collect_opens_the_password_box_over_the_screen(cx: &mut TestAppContext) {
     // An error stays on screen under the field.
     app.update_in(vcx, |app, _, cx| {
         if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-            grams.withdraw = Some(GramWithdraw::idle(Some(ExportError::WrongPassword)));
+            grams.put_withdraw(GramWithdraw::idle(Some(ExportError::WrongPassword)));
         }
         cx.notify();
     });
@@ -227,7 +228,7 @@ fn collect_opens_the_password_box_over_the_screen(cx: &mut TestAppContext) {
     // The security check replaces the box when there is no password.
     app.update_in(vcx, |app, _, cx| {
         if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-            grams.withdraw = Some(GramWithdraw::SecurityCheck { later: false });
+            grams.put_withdraw(GramWithdraw::SecurityCheck { later: false });
         }
         cx.notify();
     });
@@ -247,7 +248,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
         let url = url.to_string();
         app.update_in(vcx, |app, _, cx| {
             if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-                grams.withdraw = Some(GramWithdraw::Finished(WithdrawOutcome::Url(url)));
+                grams.put_withdraw(GramWithdraw::Finished(WithdrawOutcome::Url(url)));
             }
             cx.notify();
         });
@@ -280,7 +281,32 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
     );
     let left = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.grams.withdraw.clone())
+            .and_then(|s| s.payments.hub.grams.withdraw().cloned())
     });
     assert_eq!(left, None);
+}
+
+/// Sweep r4-10: a page that failed is drawn with a Retry (the box was only
+/// closable), and a receipt asked for while the box is shut shows nothing.
+#[gpui_kit::test]
+fn a_failed_page_is_drawn_with_a_retry_and_a_shut_box_takes_no_receipt(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        app.close_grams(cx);
+        app.select_grams_tx(Some("tx-sale".into()), cx);
+    });
+    assert!(!grams_open(&app, vcx), "a receipt does not open the box");
+    app.update_in(vcx, |app, _, cx| app.open_grams(cx));
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("grams-retry").is_none());
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.hub.grams.load =
+                quill::gift_market::PageLoad::Failed("Couldn't load.".into());
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    assert!(vcx.debug_bounds("grams-retry").is_some());
 }

@@ -138,7 +138,8 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::MutateProxy) => self.proxy_mutation_succeeded(pending),
             Some(RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { on })) => {
-                self.settings.proxy.prefer_ipv6 = on
+                self.settings.proxy.prefer_ipv6 = on;
+                self.settings.proxy.ops.ipv6_ended(pending.map(|p| p.id));
             }
             _ => {}
         }
@@ -153,7 +154,12 @@ impl Session {
     ) {
         match purpose {
             RequestPurpose::GetProxies => {
-                if pending.is_some_and(|p| self.settings.proxy.ops.fetch_failed(p.id)) {
+                if pending.is_some_and(|p| {
+                    self.settings
+                        .proxy
+                        .ops
+                        .fetch_failed(p.id, std::time::Instant::now())
+                }) {
                     self.settings.proxy.error =
                         Some(sessions_error_line("load the proxy list", err));
                 }
@@ -181,6 +187,7 @@ impl Session {
                 }
             }
             RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { .. }) => {
+                self.settings.proxy.ops.ipv6_ended(pending.map(|p| p.id));
                 self.settings.proxy.error =
                     Some(sessions_error_line("change the IPv6 setting", err));
             }

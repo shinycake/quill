@@ -82,6 +82,16 @@ pub(super) struct PolledRedraw {
     last_full: std::time::Instant,
     /// The last chat-list redraw (or full redraw, which includes it).
     last_list: std::time::Instant,
+    /// What is owed and not drawn yet.
+    owed: Owed,
+}
+
+/// The redraws owed, three slots: `record` adds to them by what was
+/// ingested, a full redraw subsumes the other two (`clear`), and a
+/// chat-list or conversation one is settled alone (`take_list`,
+/// `take_conversation`).
+#[derive(Debug)]
+struct Owed {
     /// The most urgent full redraw not drawn yet (`Nothing`, `Later` or
     /// `Now`).
     full: RedrawNeed,
@@ -90,6 +100,27 @@ pub(super) struct PolledRedraw {
     /// A conversation redraw is owed (only in front: behind another app
     /// it waits as an urgent full redraw does, folded into `full`).
     conversation: bool,
+}
+
+impl Owed {
+    const NONE: Self = Self {
+        full: RedrawNeed::Nothing,
+        list: false,
+        conversation: false,
+    };
+
+    /// A full redraw was drawn: it covers everything owed.
+    fn clear(&mut self) {
+        *self = Self::NONE;
+    }
+
+    fn take_list(&mut self) {
+        self.list = false;
+    }
+
+    fn take_conversation(&mut self) -> bool {
+        std::mem::take(&mut self.conversation)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,15 +140,13 @@ impl PolledRedraw {
         Self {
             last_full: now,
             last_list: now,
-            full: RedrawNeed::Nothing,
-            list: false,
-            conversation: false,
+            owed: Owed::NONE,
         }
     }
 
     /// How long the owed full redraw may wait after the last one.
     fn full_gap(&self, active: bool) -> Option<Duration> {
-        match self.full {
+        match self.owed.full {
             RedrawNeed::Now if active => Some(Duration::ZERO),
             RedrawNeed::Now => Some(INACTIVE_REDRAW),
             RedrawNeed::Later => Some(gap_for(LATER_REDRAW, active)),
@@ -127,7 +156,7 @@ impl PolledRedraw {
 
     /// How long the owed chat-list redraw may wait after the last one.
     fn list_gap(&self, active: bool) -> Option<Duration> {
-        self.list.then(|| gap_for(CHAT_LIST_REDRAW, active))
+        self.owed.list.then(|| gap_for(CHAT_LIST_REDRAW, active))
     }
 
     /// When the soonest owed redraw comes due, from `now`.
@@ -136,7 +165,7 @@ impl PolledRedraw {
             |gap: Duration, last: std::time::Instant| gap.saturating_sub(now.duration_since(last));
         let full = self.full_gap(active).map(|gap| left(gap, self.last_full));
         let list = self.list_gap(active).map(|gap| left(gap, self.last_list));
-        let conversation = self.conversation.then_some(Duration::ZERO);
+        let conversation = self.owed.conversation.then_some(Duration::ZERO);
         full.into_iter().chain(list).chain(conversation).min()
     }
 
@@ -146,10 +175,10 @@ impl PolledRedraw {
     pub(super) fn record(&mut self, need: RedrawNeed, active: bool) {
         match need {
             RedrawNeed::Nothing => {}
-            RedrawNeed::ChatList => self.list = true,
-            RedrawNeed::Conversation if active => self.conversation = true,
-            RedrawNeed::Conversation => self.full = self.full.max(RedrawNeed::Now),
-            RedrawNeed::Later | RedrawNeed::Now => self.full = self.full.max(need),
+            RedrawNeed::ChatList => self.owed.list = true,
+            RedrawNeed::Conversation if active => self.owed.conversation = true,
+            RedrawNeed::Conversation => self.owed.full = self.owed.full.max(RedrawNeed::Now),
+            RedrawNeed::Later | RedrawNeed::Now => self.owed.full = self.owed.full.max(need),
         }
     }
 
@@ -172,11 +201,11 @@ impl PolledRedraw {
             .list_gap(active)
             .is_some_and(|gap| since(self.last_list) >= gap)
         {
-            self.list = false;
+            self.owed.take_list();
             self.last_list = now;
             return PolledAction::ChatList;
         }
-        if std::mem::take(&mut self.conversation) {
+        if self.owed.take_conversation() {
             return PolledAction::Conversation;
         }
         PolledAction::Wait
@@ -186,9 +215,7 @@ impl PolledRedraw {
     /// window drew: for what only a render hands out (a forced reply),
     /// which must not wait for the inactive window's interval.
     pub(super) fn drawn(&mut self, now: std::time::Instant) -> PolledAction {
-        self.full = RedrawNeed::Nothing;
-        self.list = false;
-        self.conversation = false;
+        self.owed.clear();
         self.last_full = now;
         self.last_list = now;
         PolledAction::Full
@@ -517,6 +544,9 @@ impl QuillApp {
         if !self.lock_waits() && self.poll_drains(cx) {
             progressed = true;
         }
+        // Under the lock too: a locked settle shows the generic text, and a
+        // photo that landed should not wait out the deadline for it.
+        progressed |= self.settle_preview_waits(cx);
         self.finish_successful_sends(cx);
         if progressed || send_failed || self.polled_chrome() != shown_before {
             need = RedrawNeed::Now;
@@ -617,6 +647,7 @@ mod linux_dbus;
 pub(in crate::ui) use linux_dbus::linux_service_capabilities;
 mod native_extras;
 mod photo_preview;
+pub(in crate::ui) use photo_preview::PreviewWait;
 mod poll_drains;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
@@ -627,7 +658,7 @@ mod ringtone_tests;
 mod spawn_call_notification;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
-mod viewer_progress_tests;
+pub(in crate::ui) mod viewer_progress_tests;
 
 #[cfg(test)]
 mod tests {

@@ -8,7 +8,6 @@ use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use std::time::Duration;
 
 /// Where macOS stands on one kind of capture device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,23 +65,46 @@ fn access(_camera: bool) -> Access {
     Access::Granted
 }
 
+/// The two OS questions behind a recording's start. The app's own value
+/// asks the OS; a test sets its own, to put a prompt on screen without one.
+#[derive(Clone)]
+pub(super) struct DeviceOs {
+    pub(super) access: std::sync::Arc<dyn Fn(bool) -> Access + Send + Sync>,
+    pub(super) request:
+        std::sync::Arc<dyn Fn(bool, futures_channel::oneshot::Sender<bool>) + Send + Sync>,
+}
+
+impl Default for DeviceOs {
+    fn default() -> Self {
+        Self {
+            access: std::sync::Arc::new(access),
+            request: std::sync::Arc::new(request),
+        }
+    }
+}
+
 /// Show the system prompt; `done` gets the answer on an arbitrary thread.
 #[cfg(target_os = "macos")]
-fn request(camera: bool, done: std::sync::mpsc::Sender<bool>) {
+fn request(camera: bool, done: futures_channel::oneshot::Sender<bool>) {
     use objc2_av_foundation::AVCaptureDevice;
     let Some(kind) = media_type(camera) else {
         let _ = done.send(true);
         return;
     };
+    // The block is called once, but the type says `Fn`: the sender waits in
+    // a slot it is taken from.
+    let done = std::sync::Mutex::new(Some(done));
     let block = block2::RcBlock::new(move |granted: objc2::runtime::Bool| {
-        let _ = done.send(granted.as_bool());
+        if let Some(done) = done.lock().ok().and_then(|mut slot| slot.take()) {
+            let _ = done.send(granted.as_bool());
+        }
     });
     // SAFETY: AVFoundation copies the block and calls it once.
     unsafe { AVCaptureDevice::requestAccessForMediaType_completionHandler(kind, &block) };
 }
 
 #[cfg(not(target_os = "macos"))]
-fn request(_camera: bool, done: std::sync::mpsc::Sender<bool>) {
+fn request(_camera: bool, done: futures_channel::oneshot::Sender<bool>) {
     let _ = done.send(true);
 }
 
@@ -158,7 +180,7 @@ impl QuillApp {
             return;
         }
         for &device in devices {
-            match access(device) {
+            match (self.recording.device_os.access)(device) {
                 Access::Granted => {}
                 Access::Denied => {
                     self.set_note(StatusNote::error(denied_note(device)));
@@ -166,9 +188,9 @@ impl QuillApp {
                     return;
                 }
                 Access::Undetermined => {
-                    // Another recording is starting or running: this press
-                    // would only queue a second start behind it.
-                    if self.recording.starting() {
+                    // Another recording is starting or running: nobody would
+                    // wait for this prompt's answer, so none is shown.
+                    if self.recording.busy() {
                         self.set_note(StatusNote::silent(tr(
                             keys::Q_MISC_FINISH_THE_RECORDING_FIRST,
                         )));
@@ -182,24 +204,16 @@ impl QuillApp {
                     } else {
                         keys::Q_LEFTOVERS_ALLOW_MICROPHONE
                     })));
-                    let (sender, answer) = std::sync::mpsc::channel();
-                    request(device, sender);
+                    let (sender, answer) = futures_channel::oneshot::channel();
+                    (self.recording.device_os.request)(device, sender);
                     // The wait belongs to the account on screen, so the stage
                     // ends whichever window asked; the recording starts in
                     // the window that asked, or not at all once it closed.
                     let asker = self.scoped_app(cx);
                     let wait = self.spawn_screen(cx, async move |this, cx| {
-                        let granted = loop {
-                            match answer.try_recv() {
-                                Ok(granted) => break granted,
-                                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                                    cx.background_executor()
-                                        .timer(Duration::from_millis(100))
-                                        .await;
-                                }
-                                Err(_) => break false,
-                            }
-                        };
+                        // The prompt's answer wakes this; a prompt that went
+                        // away without one counts as a refusal.
+                        let granted = answer.await.unwrap_or(false);
                         let ended = this.update(cx, |this, cx| {
                             let mine = this.recording.finish_asking(ask);
                             if mine {

@@ -288,8 +288,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetPremiumStickerExamples, None);
-        self.session.payments.hub.premium_stickers.begin();
-        self.session.payments.hub.premium_stickers.sent(extra);
+        self.session.payments.hub.premium_stickers.begin_with(extra);
         if let Err(err) = self.send_json_request(extra, &get_premium_sticker_examples(extra)) {
             // The next look at the preview asks again.
             self.session.payments.hub.premium_stickers.cancel();
@@ -341,22 +340,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self
                 .session
                 .request(RequestPurpose::GetPremiumFeatures, None);
-            self.session.payments.hub.premium.begin();
             if let Err(err) = self.send_json_request(extra, &get_premium_features(extra)) {
                 self.session.payments.hub.premium.cancel();
                 return Err(err);
             }
-            self.session.payments.hub.premium.sent(extra);
+            self.session.payments.hub.premium.begin_with(extra);
             asked = Some(extra);
         }
         if state {
             let state_extra = self.session.request(RequestPurpose::GetPremiumState, None);
-            let hub = &mut self.session.payments.hub;
-            hub.premium_state.begin();
             // The state text is optional decoration: a send that fails
             // leaves the plans out, and the next opening asks again.
             match self.send_json_request(state_extra, &get_premium_state(state_extra)) {
-                Ok(_) => self.session.payments.hub.premium_state.sent(state_extra),
+                Ok(_) => self
+                    .session
+                    .payments
+                    .hub
+                    .premium_state
+                    .begin_with(state_extra),
                 Err(_) => self.session.payments.hub.premium_state.fail("not sent"),
             }
         }
@@ -375,12 +376,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetBusinessFeatures, None);
-        self.session.payments.hub.business_features.begin();
         if let Err(err) = self.send_json_request(extra, &get_business_features(extra)) {
             self.session.payments.hub.business_features.cancel();
             return Err(err);
         }
-        self.session.payments.hub.business_features.sent(extra);
+        self.session
+            .payments
+            .hub
+            .business_features
+            .begin_with(extra);
         Ok(Some(extra))
     }
 }

@@ -54,5 +54,16 @@ fn a_save_in_flight_keeps_its_topic_editor(cx: &mut TestAppContext) {
             .expect("the editor stays");
         assert_eq!(editor.target, None, "still the new-topic form");
         assert_eq!(editor.submit, Submit::Sending(vec![request]));
+        // Opening the manage dialog again keeps the sending editor: the same
+        // forum's box stays, another forum's is refused.
+        assert!(app.open_forum_manage_dialog(chat, window, cx));
+        assert!(!app.open_forum_manage_dialog(ChatId(-1002), window, cx));
+        let dialog = app.admin.forum_manage_dialog.as_ref().expect("the box");
+        assert_eq!(dialog.chat_id, chat, "still this forum's box");
+        assert_eq!(
+            dialog.editor.as_ref().map(|editor| editor.submit.clone()),
+            Some(Submit::Sending(vec![request])),
+            "the answer still lands in it"
+        );
     });
 }

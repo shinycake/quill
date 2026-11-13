@@ -38,6 +38,7 @@ impl crate::ui::on_screen::Farewell for PrivacyState {
         cx: &mut gpui_kit::Context<QuillApp>,
     ) {
         app.close_passkey_ceremony(window, cx);
+        app.close_websites(cx);
     }
 }
 

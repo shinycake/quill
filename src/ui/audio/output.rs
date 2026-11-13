@@ -16,6 +16,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use quill::advanced::debug_mode::debug_log;
@@ -103,12 +104,12 @@ enum DeviceLink {
         /// When the last open failed, so a retry waits [`RETRY_AFTER`].
         failed_at: Option<Instant>,
     },
-    Opening,
-    /// The device plays the app mixer, and its watch looks after it.
-    Up {
-        device: Device,
-        watch: Watch,
+    Opening {
+        /// The thread opening it ([`reopen`]); it installs the device.
+        _open: JoinHandle<Option<()>>,
     },
+    /// The device plays the app mixer, and its watch looks after it.
+    Up { device: Device, watch: Watch },
 }
 
 impl Default for DeviceLink {
@@ -123,7 +124,7 @@ impl DeviceLink {
     }
 
     fn is_opening(&self) -> bool {
-        matches!(self, Self::Opening)
+        matches!(self, Self::Opening { .. })
     }
 
     fn device(&self) -> Option<&Device> {
@@ -147,8 +148,8 @@ impl DeviceLink {
 }
 
 /// The watch thread of an open device. It is owned by the device's stage:
-/// dropping the device drops the handle, and the thread ends at its next
-/// look.
+/// dropping the device drops the handle, which wakes the thread at once to
+/// end.
 enum Watch {
     /// None runs (it failed to start, or it panicked): the next use of the
     /// device starts one.
@@ -156,12 +157,49 @@ enum Watch {
     Running(WatchHandle),
 }
 
-/// Stops its watch thread when dropped.
-struct WatchHandle(Arc<AtomicBool>);
+/// Tells a watch thread to end, and wakes it if it waits.
+#[derive(Default)]
+struct WatchStop {
+    stopped: AtomicBool,
+    wake: Mutex<()>,
+    asleep: Condvar,
+}
+
+impl WatchStop {
+    fn stop(&self) {
+        self.stopped.store(true, Ordering::Relaxed);
+        let _held = self.wake.lock().unwrap_or_else(PoisonError::into_inner);
+        self.asleep.notify_all();
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Relaxed)
+    }
+
+    /// Wait up to `limit`, or until stopped.
+    fn wait(&self, limit: Duration) {
+        let held = self.wake.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.is_stopped() {
+            return;
+        }
+        drop(
+            self.asleep
+                .wait_timeout(held, limit)
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+    }
+}
+
+/// Stops its watch thread when dropped; holds the thread it stops.
+struct WatchHandle {
+    stop: Arc<WatchStop>,
+    /// `None` only for a test's stand-in.
+    _thread: Option<JoinHandle<Option<()>>>,
+}
 
 impl Drop for WatchHandle {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::Relaxed);
+        self.stop.stop();
     }
 }
 
@@ -485,7 +523,7 @@ impl OutputState {
                 self.start_watch(output);
                 return true;
             }
-            DeviceLink::Opening => return true,
+            DeviceLink::Opening { .. } => return true,
             DeviceLink::Down {
                 failed_at: Some(at),
             } if at.elapsed() < RETRY_AFTER => return false,
@@ -495,12 +533,11 @@ impl OutputState {
         let spawned = quill::thread_guard::spawn_guarded("quill-audio-open", move || {
             reopen(&opener, stale);
         });
-        self.link = if spawned.is_ok() {
-            DeviceLink::Opening
-        } else {
-            DeviceLink::Down {
+        self.link = match spawned {
+            Ok(open) => DeviceLink::Opening { _open: open },
+            Err(_) => DeviceLink::Down {
                 failed_at: Some(Instant::now()),
-            }
+            },
         };
         self.link.is_opening()
     }
@@ -538,13 +575,16 @@ impl OutputState {
         if matches!(watch, Watch::Running(_)) {
             return;
         }
-        let stop = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(WatchStop::default());
         let (watched, ends) = (output.clone(), stop.clone());
         let spawned = quill::thread_guard::spawn_guarded("quill-audio-idle", move || {
             watch_device(&watched, &ends)
         });
-        if spawned.is_ok() {
-            *watch = Watch::Running(WatchHandle(stop));
+        if let Ok(thread) = spawned {
+            *watch = Watch::Running(WatchHandle {
+                stop,
+                _thread: Some(thread),
+            });
         }
     }
 }
@@ -664,11 +704,12 @@ impl Device {
 /// Looks after the open device: closes it once nothing has played for
 /// [`QUIET_FOR`], and moves the app mixer to the new default device when
 /// the stream ended while something plays. Ends with the device.
-fn watch_device(output: &Arc<Output>, stop: &Arc<AtomicBool>) {
+fn watch_device(output: &Arc<Output>, stop: &Arc<WatchStop>) {
     let _ended = WatchEnded(output, stop);
     let mut quiet = Quiet::default();
     loop {
-        std::thread::sleep(LOOK_EVERY);
+        // Dropping the device's watch wakes it at once.
+        stop.wait(LOOK_EVERY);
         if !look(output, stop, &mut quiet, Instant::now()) {
             return;
         }
@@ -678,7 +719,7 @@ fn watch_device(output: &Arc<Output>, stop: &Arc<AtomicBool>) {
 /// A watch that panics in `look` leaves its device without a watch, and
 /// none would ever start; this marks the device as unwatched on the way
 /// out. A watch that was stopped has no device to mark.
-struct WatchEnded<'a>(&'a Arc<Output>, &'a Arc<AtomicBool>);
+struct WatchEnded<'a>(&'a Arc<Output>, &'a Arc<WatchStop>);
 
 impl Drop for WatchEnded<'_> {
     fn drop(&mut self) {
@@ -686,7 +727,7 @@ impl Drop for WatchEnded<'_> {
             return;
         }
         if let DeviceLink::Up { watch, .. } = &mut self.0.lock().link
-            && matches!(watch, Watch::Running(handle) if Arc::ptr_eq(&handle.0, self.1))
+            && matches!(watch, Watch::Running(handle) if Arc::ptr_eq(&handle.stop, self.1))
         {
             *watch = Watch::Unstarted;
         }
@@ -695,9 +736,9 @@ impl Drop for WatchEnded<'_> {
 
 /// One look of the watch at `now`: whether to look again. A watch whose
 /// device is gone (`stop`) has nothing to look after.
-fn look(output: &Arc<Output>, stop: &AtomicBool, quiet: &mut Quiet, now: Instant) -> bool {
+fn look(output: &Arc<Output>, stop: &WatchStop, quiet: &mut Quiet, now: Instant) -> bool {
     let mut state = output.lock();
-    if stop.load(Ordering::Relaxed) {
+    if stop.is_stopped() {
         return false;
     }
     let sounded = output.sounded();
@@ -1074,7 +1115,7 @@ mod gate {
 mod tests {
     use super::{
         DeviceLink, Feed, Heard, QUIET_FOR, Quiet, SharedOutput, Watch, WatchEnded, WatchHandle,
-        look,
+        WatchStop, look,
     };
     use rodio::buffer::SamplesBuffer;
     use rodio::mixer::mixer;
@@ -1325,7 +1366,7 @@ mod tests {
         std::thread::spawn(move || {
             look(
                 &watched,
-                &AtomicBool::new(false),
+                &WatchStop::default(),
                 &mut Quiet::default(),
                 Instant::now(),
             )
@@ -1346,7 +1387,7 @@ mod tests {
         let _player = output.outlet().unwrap().player();
         gate.answer(true);
         output.settle_device();
-        let stop = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(WatchStop::default());
         let running = |output: &SharedOutput| {
             matches!(
                 output.0.lock().link,
@@ -1358,7 +1399,10 @@ mod tests {
         };
         let watching = |output: &SharedOutput| {
             if let DeviceLink::Up { watch, .. } = &mut output.0.lock().link {
-                *watch = Watch::Running(WatchHandle(stop.clone()));
+                *watch = Watch::Running(WatchHandle {
+                    stop: stop.clone(),
+                    _thread: None,
+                });
             }
         };
         watching(&output);
@@ -1378,13 +1422,16 @@ mod tests {
         let _player = output.outlet().unwrap().player();
         gate.answer(true);
         output.settle_device();
-        let stop = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(WatchStop::default());
         if let DeviceLink::Up { watch, .. } = &mut output.0.lock().link {
-            *watch = Watch::Running(WatchHandle(stop.clone()));
+            *watch = Watch::Running(WatchHandle {
+                stop: stop.clone(),
+                _thread: None,
+            });
         }
         let closed = output.0.lock().link.take_device();
         drop(closed);
-        assert!(stop.load(Ordering::Relaxed), "the device took its watch");
+        assert!(stop.is_stopped(), "the device took its watch");
         assert!(!look(
             &output.0,
             &stop,

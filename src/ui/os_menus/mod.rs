@@ -112,9 +112,9 @@ impl QuillApp {
                 } else {
                     self.background.client(key).is_some_and(|client| {
                         matches!(
-                            client.status,
+                            client.stage.status(),
                             quill::notify_accounts::BackgroundStatus::Ready
-                                | quill::notify_accounts::BackgroundStatus::Connecting
+                                | quill::notify_accounts::BackgroundStatus::Connecting { .. }
                         )
                     })
                 };
@@ -409,7 +409,7 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
     .detach();
     // screen-scope: the menu sync follows whichever account is on screen; each pass
     // reads the current state and rebuilds the Dock and Window menus from it.
-    cx.spawn(async move |this, cx| {
+    let task = cx.spawn(async move |this, cx| {
         let mut sync = sync::MenuSync::default();
         loop {
             // Taken before the work: a poke during it runs the loop again.
@@ -460,20 +460,30 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
             if !alive {
                 break;
             }
-            // Event-driven: applied updates, activation, lock changes,
-            // notification toggles and player changes poke `CHROME`. The
-            // timeout covers what nothing announces (the account registry
-            // on disk).
-            super::wake_wait::sleep_or_wake(
+            // Event-driven, no timer: applied updates, activation, lock
+            // changes, notification toggles and player changes poke
+            // `CHROME`. The registry another process wrote is read on the
+            // first poke after its age limit (activation is one), never on
+            // a clock. A burst of pokes rebuilds the menus at most once a
+            // second.
+            super::wake_wait::wake_paced(
                 cx.background_executor(),
                 &quill::wake::CHROME,
                 seen,
-                Duration::from_secs(10),
+                Duration::from_secs(1),
             )
             .await;
-            // A burst of pokes rebuilds the menus at most once a second.
-            cx.background_executor().timer(Duration::from_secs(1)).await;
         }
-    })
-    .detach();
+    });
+    // The app holds the task: it ends with the app, not detached.
+    cx.set_global(MenuSyncTask { _task: task });
 }
+
+/// The macOS menu sync's task, held by the app for its whole life.
+#[cfg(target_os = "macos")]
+struct MenuSyncTask {
+    _task: Task<()>,
+}
+
+#[cfg(target_os = "macos")]
+impl Global for MenuSyncTask {}

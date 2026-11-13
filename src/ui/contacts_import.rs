@@ -15,7 +15,6 @@ use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with, trn, trn_with};
 use quill::telegram::requests::{ImportedContact, VCARD_IMPORT_LIMIT};
 use quill::vcard_import::{VcardError, VcardImport, VcardPreview, display_name, read_vcard_file};
-use std::borrow::Cow;
 use std::path::PathBuf;
 
 /// The preview lists this many contacts before "and N more".
@@ -44,14 +43,25 @@ impl Default for ImportStage {
     }
 }
 
+/// What the box draws: a file being read, or what a read produced.
+pub(crate) enum BoxView<'a> {
+    Reading { file_name: &'a str },
+    Shown(&'a VcardImport),
+}
+
+impl BoxView<'_> {
+    /// Whether the Import button is on: a file is ready.
+    pub(crate) fn can_import(&self) -> bool {
+        matches!(self, Self::Shown(state) if state.can_import())
+    }
+}
+
 impl ImportStage {
     /// What the box draws.
-    pub(crate) fn state(&self) -> Cow<'_, VcardImport> {
+    pub(crate) fn view(&self) -> BoxView<'_> {
         match self {
-            Self::Showing(state) | Self::Choosing { before: state, .. } => Cow::Borrowed(state),
-            Self::Reading { file_name, .. } => Cow::Owned(VcardImport::Reading {
-                file_name: file_name.clone(),
-            }),
+            Self::Showing(state) | Self::Choosing { before: state, .. } => BoxView::Shown(state),
+            Self::Reading { file_name, .. } => BoxView::Reading { file_name },
         }
     }
 
@@ -228,7 +238,7 @@ impl QuillApp {
 
     /// The box's content for `state`.
     pub(super) fn import_contacts_body(
-        state: &VcardImport,
+        view: BoxView<'_>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let choose = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
@@ -238,6 +248,15 @@ impl QuillApp {
         };
         let note = |text: String, color: Rgba| div().text_sm().text_color(color).child(text);
         let mut body = div().flex().flex_col().gap_3();
+        let state = match view {
+            BoxView::Reading { file_name } => {
+                return body.child(note(
+                    tr_with(keys::Q_PEOPLE_IMPORT_READING, &[("file", file_name)]),
+                    text_muted(),
+                ));
+            }
+            BoxView::Shown(state) => state,
+        };
         match state {
             VcardImport::Empty => {
                 body = body
@@ -250,12 +269,6 @@ impl QuillApp {
                         tr(keys::Q_PEOPLE_IMPORT_CHOOSE_FILE),
                         cx,
                     )));
-            }
-            VcardImport::Reading { file_name } => {
-                body = body.child(note(
-                    tr_with(keys::Q_PEOPLE_IMPORT_READING, &[("file", file_name)]),
-                    text_muted(),
-                ));
             }
             VcardImport::Failed { file_name, error } => {
                 body = body

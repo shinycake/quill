@@ -18,7 +18,7 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::rich::RichBlock;
-use quill::state::{OutboxReceipt, Session, message_time_hhmm};
+use quill::state::{OutboxReceiptView, Session, message_time_hhmm};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{MessageContent, ParsedFile};
 use quill::text::{
@@ -240,22 +240,22 @@ pub(super) fn caption_above_media(content: &MessageContent) -> bool {
 /// the footer hides instead of inventing a time.
 pub(super) fn message_footer(
     date: i32,
-    delivery: Delivery,
+    delivery: DeliveryView,
     drag: Option<quill::forward_drag::ForwardDrag>,
 ) -> Option<AnyElement> {
     use gpui_kit::assets::IconName;
     let time = message_time_hhmm(date)?;
     let mark = match delivery {
-        Delivery::Sending => Some(IconName::Clock),
-        Delivery::Read => Some(IconName::CheckCheck),
-        Delivery::Sent => Some(IconName::Check),
-        Delivery::Incoming => None,
+        DeliveryView::Sending => Some(IconName::Clock),
+        DeliveryView::Read => Some(IconName::CheckCheck),
+        DeliveryView::Sent => Some(IconName::Check),
+        DeliveryView::Incoming => None,
     };
     let status = match delivery {
-        Delivery::Sending => "sending",
-        Delivery::Read => "read",
-        Delivery::Sent => "sent",
-        Delivery::Incoming => "",
+        DeliveryView::Sending => "sending",
+        DeliveryView::Read => "read",
+        DeliveryView::Sent => "sent",
+        DeliveryView::Incoming => "",
     };
     let outgoing = delivery.is_outgoing();
     let accessible = format!("{time} {status}");
@@ -276,10 +276,11 @@ pub(super) fn message_footer(
     Some(crate::ui::forward_drag_source::draggable(footer, drag).into_any_element())
 }
 
-/// Where an outgoing message stands, as the footer draws it: one value for
+/// Where an outgoing message stands as the footer draws it (a view derived
+/// from the message each time, never stored): one value for
 /// what was a `pending` flag beside the server's receipt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Delivery {
+pub(super) enum DeliveryView {
     /// Incoming, or an outgoing message with no receipt yet.
     Incoming,
     /// Not yet accepted by the server.
@@ -290,16 +291,16 @@ pub(super) enum Delivery {
     Read,
 }
 
-impl Delivery {
+impl DeliveryView {
     /// A message still pending is sending whatever its receipt says.
-    pub(super) fn of(pending: bool, receipt: OutboxReceipt) -> Self {
+    pub(super) fn of(pending: bool, receipt: OutboxReceiptView) -> Self {
         if pending {
             return Self::Sending;
         }
         match receipt {
-            OutboxReceipt::Read => Self::Read,
-            OutboxReceipt::Sent => Self::Sent,
-            OutboxReceipt::None => Self::Incoming,
+            OutboxReceiptView::Read => Self::Read,
+            OutboxReceiptView::Sent => Self::Sent,
+            OutboxReceiptView::None => Self::Incoming,
         }
     }
 
@@ -312,7 +313,7 @@ impl Delivery {
 #[derive(Clone)]
 pub(super) struct FooterMeta {
     pub(super) date: i32,
-    pub(super) delivery: Delivery,
+    pub(super) delivery: DeliveryView,
     pub(super) views: Option<i32>,
     pub(super) signature: Option<String>,
     /// "edited" before the time (`lng_edited`).
@@ -479,7 +480,7 @@ pub(in crate::ui) fn avatar_initials(name: &str) -> String {
 /// avatar slot / footer) from row inputs.
 pub(super) fn message_chrome(
     sender: Option<super::history_row::SenderLabel>,
-    receipt: OutboxReceipt,
+    receipt: OutboxReceiptView,
     sender_avatar: Option<super::history_row::SenderAvatar>,
     date: i32,
     pending: bool,
@@ -504,7 +505,7 @@ pub(super) fn message_chrome(
                 )
             }
         }),
-        footer: message_footer(date, Delivery::of(pending, receipt), None),
+        footer: message_footer(date, DeliveryView::of(pending, receipt), None),
         footer_inline: false,
         footer_overlay: false,
         footer_rebuild: None,
@@ -743,7 +744,7 @@ fn pre_block(run: &TextRun, id: &str, font: Pixels, cx: &mut Context<QuillApp>) 
         run.style.language.as_deref().unwrap_or_default(),
         &code,
     ) {
-        (super::code_highlight::Lookup::Ready(spans), _) => {
+        (super::code_highlight::LookupView::Ready(spans), _) => {
             super::code_highlight::styled(&code, &spans, background).into_any_element()
         }
         (_, job) => {

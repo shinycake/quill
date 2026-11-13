@@ -365,6 +365,55 @@ fn report_error_ends_the_flow_instead_of_spinning() {
     ));
 }
 
+fn admin_group() -> (
+    ConnectDriver<Recorder>,
+    Recorder,
+    Arc<dyn DiagnosticSink>,
+    AtomicU64,
+) {
+    let (mut driver, recorder, sink, seq) = group_driver();
+    feed(&mut driver, &seq, &sink, GROUP_CHAT);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":100,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_restrict_members":true,"can_delete_messages":true}}}}"#,
+    );
+    (driver, recorder, sink, seq)
+}
+
+fn spam_and_ban() -> ModerationChoice {
+    ModerationChoice {
+        report_spam: true,
+        ban: true,
+        ..ModerationChoice::default()
+    }
+}
+
+/// A later step the sender refuses, after the report went out, is a note:
+/// the call did not fail as a whole.
+#[test]
+fn a_later_refused_moderation_step_is_a_note_not_a_failure() {
+    let (mut driver, recorder, _sink, _seq) = admin_group();
+    recorder.refuse(Some("setChatMemberStatus"));
+    driver
+        .moderate_message(ChatId(-100), &[MessageId(50)], 8, spam_and_ban())
+        .unwrap();
+    assert!(!driver.session.chats_state.chat_action_error.is_empty());
+}
+
+/// Only when the first step is refused does the call fail.
+#[test]
+fn a_refused_first_moderation_step_fails_the_call() {
+    let (mut driver, recorder, _sink, _seq) = admin_group();
+    recorder.refuse(Some("reportSupergroupSpam"));
+    assert!(
+        driver
+            .moderate_message(ChatId(-100), &[MessageId(50)], 8, spam_and_ban())
+            .is_err()
+    );
+}
+
 #[test]
 fn admin_moderation_sends_each_checked_action() {
     let (mut driver, recorder, sink, seq) = group_driver();
@@ -631,4 +680,42 @@ fn a_late_report_answer_does_not_touch_a_newer_report() {
         stage(&driver).map(|(_, stage)| stage),
         Some(MessageReportStage::Reported)
     );
+}
+
+/// Sweep 08-017: a failed `getMessageProperties` does not outlast the next
+/// time the menu opens: opening asks again and forgets the fail-closed
+/// answer, so a reconnected client gets its full menu.
+#[test]
+fn a_failed_menu_ask_is_forgotten_when_the_menu_opens_again() {
+    let (mut driver, recorder, sink, seq) = group_driver();
+    feed(&mut driver, &seq, &sink, GROUP_CHAT);
+    feed(&mut driver, &seq, &sink, REACTED_MESSAGE);
+    driver
+        .fetch_message_menu_actions(ChatId(-100), MessageId(50))
+        .unwrap();
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "getMessageProperties",
+        r#"{"@type":"error","code":500,"message":"offline"}"#,
+    );
+    let menu = &driver.session.messages.menu_actions;
+    assert!(menu.is_failed(ChatId(-100), MessageId(50)));
+    driver
+        .fetch_message_menu_actions(ChatId(-100), MessageId(50))
+        .unwrap();
+    let menu = &driver.session.messages.menu_actions;
+    assert!(!menu.is_failed(ChatId(-100), MessageId(50)));
+    answer(
+        &mut driver,
+        &recorder,
+        &seq,
+        &sink,
+        "getMessageProperties",
+        r#"{"@type":"messageProperties","can_be_deleted_for_all_users":true}"#,
+    );
+    let menu = &driver.session.messages.menu_actions;
+    assert!(menu.allows_revoke(ChatId(-100), MessageId(50), false));
 }

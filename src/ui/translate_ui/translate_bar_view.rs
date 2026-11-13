@@ -179,7 +179,9 @@ impl QuillApp {
                             this.translate.toast = ToastStage::None;
                             match action {
                                 ToastAction::ShowBar => {
-                                    this.set_translate_bar_hidden(chat_id, false, cx)
+                                    // Undone: the Hide's answer no longer matters.
+                                    this.forget_hide();
+                                    this.set_translate_bar_hidden(chat_id, false, cx);
                                 }
                                 ToastAction::OpenSkipList => {
                                     this.open_translate_skip_list(window, cx);
@@ -265,25 +267,27 @@ impl QuillApp {
     /// Hide or show the chat's translate bar. A live account sends
     /// `toggleChatIsTranslatable` (the server flag, as in tdesktop); the
     /// demo keeps the choice locally.
+    /// The request that went out, for a live account.
     pub(in crate::ui) fn set_translate_bar_hidden(
         &mut self,
         chat_id: ChatId,
         hidden: bool,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<RequestId> {
         let account = self
             .session()
             .map_or_else(quill::ids::AccountKey::primary, |s| s.account.clone());
-        if let Some(live) = self.live.as_mut()
-            && live
-                .driver
+        let sent = self.live.as_mut().and_then(|live| {
+            live.driver
                 .toggle_chat_is_translatable(chat_id, !hidden)
-                .is_ok()
-        {
+                .ok()
+        });
+        if sent.is_some() {
             self.set_translate_prefs(cx, |p| p.set_bar_hidden(&account, chat_id.0, false));
-            return;
+            return sent;
         }
         self.set_translate_prefs(cx, |p| p.set_bar_hidden(&account, chat_id.0, hidden));
+        None
     }
 
     /// Bar menu → Hide.
@@ -301,7 +305,8 @@ impl QuillApp {
             }
             _ => tr(keys::TRANSLATE_HIDDEN_GROUP),
         };
-        self.set_translate_bar_hidden(chat_id, true, cx);
+        let sent = self.set_translate_bar_hidden(chat_id, true, cx);
+        self.await_hide(sent);
         self.show_translate_toast(
             chat_id,
             phrase.to_string(),
@@ -342,6 +347,69 @@ impl QuillApp {
     /// is missing, follow a changed target language, stop when the bar is
     /// no longer offered). Returns whether anything changed.
     pub(in crate::ui) fn pump_translation(&mut self) -> bool {
+        let refused = self.end_refused_hide();
+        self.pump_translation_pass() || refused
+    }
+
+    /// The answer to the Hide the bar sent: a refusal (TDLib put the bar
+    /// back, `RequestRollback::ChatIsTranslatable`) ends the "hidden, Undo"
+    /// toast if it is still up, and the note says the hide failed; a done
+    /// or a lost request just ends the wait. True when a refusal ended it.
+    fn end_refused_hide(&mut self) -> bool {
+        let HideStage::Sent(request) = self.translate.hide else {
+            return false;
+        };
+        let answer = match self.session_mut() {
+            Some(session) => match session.acks.take(request) {
+                Some(answer) => Some(answer),
+                None if session.requests.get(request).is_none() => {
+                    // Left flight with no answer (dropped by the stale
+                    // sweep or a reconnect): nobody is left to tell.
+                    session.acks.forget(request);
+                    Some(quill::state::Answer::Done)
+                }
+                None => return false,
+            },
+            None => Some(quill::state::Answer::Done),
+        };
+        self.translate.hide = HideStage::Idle;
+        if !matches!(answer, Some(quill::state::Answer::Failed(_))) {
+            return false;
+        }
+        if self
+            .translate
+            .toast
+            .toast()
+            .is_some_and(|toast| matches!(toast.action, ToastAction::ShowBar))
+        {
+            self.translate.toast = ToastStage::None;
+        }
+        self.set_note(StatusNote::error(tr(keys::Q_TRANSLATE_HIDE_FAILED)));
+        true
+    }
+
+    /// The Hide's request is no longer waited on (Undo, or a newer Hide):
+    /// forgotten, so its answer is not kept for nobody.
+    pub(in crate::ui) fn forget_hide(&mut self) {
+        if let HideStage::Sent(old) = std::mem::take(&mut self.translate.hide)
+            && let Some(session) = self.session_mut()
+        {
+            session.acks.forget(old);
+        }
+    }
+
+    /// Wait for the answer to the Hide just sent as `request`.
+    fn await_hide(&mut self, request: Option<RequestId>) {
+        self.forget_hide();
+        if let Some(request) = request
+            && let Some(session) = self.session_mut()
+        {
+            session.acks.expect(request);
+            self.translate.hide = HideStage::Sent(request);
+        }
+    }
+
+    fn pump_translation_pass(&mut self) -> bool {
         // Only the chats some window shows keep their scan. This runs before
         // every early return: a chat that was closed, or left for one that
         // is not translated, must lose its scan, or coming back to it would
@@ -443,11 +511,17 @@ impl QuillApp {
                             && text.chars().any(char::is_alphabetic)
                     })
                 })
-                .filter(|m| session.needs_translation(chat_id, m.id, model.to))
+                .filter(|m| session.translation_unsettled(chat_id, m.id, model.to))
                 .map(|m| m.id)
                 .collect();
+            // The scan keeps every unsettled message, failed ones that ran
+            // out of attempts included: a reconnect gives them back.
             scan.record(key, revision, found.iter().map(|id| id.0).collect());
-            found.into_iter().take(room).collect()
+            found
+                .into_iter()
+                .filter(|id| session.needs_translation(chat_id, *id, model.to))
+                .take(room)
+                .collect()
         };
         self.translate.pump.insert(chat_id.0, scan);
         let Some(live) = self.live.as_mut() else {

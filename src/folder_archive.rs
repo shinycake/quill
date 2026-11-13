@@ -263,10 +263,14 @@ fn unique_name() -> String {
 
 /// Delete archive folders in `dir` older than `age`.
 pub fn remove_stale(dir: &Path, age: Duration) {
+    remove_stale_at(dir, age, SystemTime::now());
+}
+
+/// [`remove_stale`] as of `now`, so a test sets the clock.
+fn remove_stale_at(dir: &Path, age: Duration, now: SystemTime) {
     let Ok(read) = std::fs::read_dir(dir) else {
         return;
     };
-    let now = SystemTime::now();
     for entry in read.flatten() {
         let old = entry
             .metadata()
@@ -718,10 +722,14 @@ mod tests {
     fn stale_archives_are_removed() {
         let out = scratch("stale");
         std::fs::create_dir_all(out.join("old")).unwrap();
-        remove_stale(&out, Duration::from_secs(3600));
+        let now = SystemTime::now();
+        remove_stale_at(&out, Duration::from_secs(3600), now);
         assert!(out.join("old").exists());
-        std::thread::sleep(Duration::from_millis(20));
-        remove_stale(&out, Duration::from_millis(1));
+        remove_stale_at(
+            &out,
+            Duration::from_secs(3600),
+            now + Duration::from_secs(3601),
+        );
         assert!(!out.join("old").exists());
         let _ = std::fs::remove_dir_all(out);
     }

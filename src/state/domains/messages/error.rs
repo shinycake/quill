@@ -37,6 +37,19 @@ impl Session {
             );
         }
         if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetChatScheduledMessages
+        {
+            self.messages.scheduled_messages.failed(pending);
+        }
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Messages(MessagesPurpose::JumpToUnread { .. })
+            )
+        {
+            self.fail_unread_jump(Some(pending));
+        }
+        if let Some(pending) = pending
             && let RequestPurpose::GetRepliedMessage {
                 chat_id,
                 message_id,
@@ -70,10 +83,8 @@ impl Session {
             && menu.message_id == message_id
             && poll_option_key(&menu.option_id) == option_key
         {
-            menu.properties = crate::state::fetch::Fetch::Failed {
-                error: format!("{:?}", err.class),
-                stale: None,
-            };
+            menu.properties
+                .failed(pending.map(|p| p.id), format!("{:?}", err.class), true);
         }
         // A caption over the limit opens its box (tdesktop `CaptionLimitBox`).
         if matches!(
@@ -157,7 +168,13 @@ impl Session {
             Some(RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
                 chat_id,
                 message_id,
-            })) => self.messages.menu_actions.fail(chat_id, message_id),
+            })) => {
+                if let Some(pending) = pending {
+                    self.messages
+                        .menu_actions
+                        .fail(chat_id, message_id, pending.id);
+                }
+            }
             Some(RequestPurpose::SetChatMessageSender) => {
                 self.messages.message_action_note.push(format!(
                     "could not change the sender: {}",

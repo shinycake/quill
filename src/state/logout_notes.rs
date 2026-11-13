@@ -37,7 +37,7 @@ impl Session {
                 self.calls.group_call_error.clone(),
                 self.calls.error.clone(),
                 self.settings.account_ttl.error().map(str::to_string),
-                self.settings.account_delete.error().map(str::to_string),
+                self.settings.account_write.error().map(str::to_string),
             ],
             [
                 self.chats_state.chat_action_error.clone(),
@@ -59,7 +59,7 @@ impl Session {
                 group_call,
                 calls,
                 account_ttl,
-                account_delete,
+                account_write,
             ],
             [
                 chat_action,
@@ -83,7 +83,12 @@ impl Session {
         self.calls.group_call_error = group_call;
         self.calls.error = calls;
         restore_error(&mut self.settings.account_ttl, account_ttl);
-        restore_error(&mut self.settings.account_delete, account_delete);
+        match account_write {
+            Some(line) => {
+                self.settings.account_write = crate::state::AccountWrite::Refused(line);
+            }
+            None => self.settings.account_write.clear_error(),
+        }
     }
 }
 

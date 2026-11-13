@@ -345,7 +345,7 @@ impl QuillApp {
                 this.folders.recommended_adds.keys().cloned().collect();
             let recommended: Vec<(String, String, String, bool)> = session
                 .as_ref()
-                .and_then(|s| s.chat_list.recommended_folders.as_ref())
+                .and_then(|s| s.chat_list.recommended_folders.data())
                 .map(|list| {
                     list.iter()
                         .filter(|r| !folders.iter().any(|(_, name, _, _)| *name == r.spec.name))

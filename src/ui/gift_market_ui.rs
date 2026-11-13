@@ -8,7 +8,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
-use super::gift_market_state::MarketBox;
+use super::gift_market_state::{MarketBox, OpeningFrom};
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -198,19 +198,22 @@ impl QuillApp {
         &mut self,
         gift_id: i64,
         auction_id: &str,
+        from: OpeningFrom,
         cx: &mut Context<Self>,
     ) {
-        if self.gift_market.stack.is_empty() {
-            let recipient = self
+        // Every open sets its recipient: the send box's, or the user.
+        let recipient = match from {
+            OpeningFrom::SendBox => self
                 .session()
                 .map(|s| &s.payments.gifts_manage.send)
                 .filter(|send| send.is_open())
-                .and_then(|send| send.recipient.clone());
-            self.gift_market.flow.set_recipient(recipient);
-        }
+                .and_then(|send| send.recipient().cloned()),
+            OpeningFrom::Elsewhere => None,
+        };
+        self.gift_market.flow.set_recipient(recipient);
         match self.live.as_mut() {
             Some(live) => match live.driver.fetch_gift_auction(auction_id) {
-                Ok(request) => self.gift_market.flow.begin_opening(request),
+                Ok(request) => self.gift_market.flow.begin_opening(request, from),
                 Err(_) => {
                     self.set_note(StatusNote::error(tr(
                         keys::Q_MONEY_COULDNT_LOAD_THE_AUCTION,
@@ -250,7 +253,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some((request, from_send_box)) = self.gift_market.flow.opening() {
+        if let Some((request, from)) = self.gift_market.flow.opening() {
             // Only the answer to this ask opens its box: a newer fetch
             // (another window, a link) replaced the session's stage, and
             // this ask is over.
@@ -273,7 +276,7 @@ impl QuillApp {
             let send_box_open = self
                 .session()
                 .is_some_and(|s| s.payments.gifts_manage.send.is_open());
-            if from_send_box && !send_box_open {
+            if from == OpeningFrom::SendBox && !send_box_open {
                 // The send box the auction was asked from is closed: the
                 // box does not open over whatever the user does now.
                 self.gift_market.flow.end_opening();

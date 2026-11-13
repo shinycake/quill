@@ -18,13 +18,13 @@ use quill::settings::{
 pub(super) enum Restore {
     /// Not looked at yet (the account was not ready).
     #[default]
-    Pending,
+    Unlooked,
     /// Waiting for the answer to the offer, holding what it would restore.
     Offered(Vec<SavedChatWindow>),
-    /// Windows to open as their chats load; the rest is dropped once the
+    /// Windows still to open as their chats load; the rest is dropped once the
     /// chat list is complete. `refused` are the ones whose open was
     /// refused: they are not tried again this launch and stay in the file.
-    Opening {
+    ToOpen {
         waiting: Vec<SavedChatWindow>,
         refused: Vec<SavedChatWindow>,
     },
@@ -101,9 +101,9 @@ pub(super) fn windows_to_save(
     restore: &Restore,
 ) -> Option<Vec<SavedChatWindow>> {
     let not_back = match restore {
-        Restore::Pending => return None,
+        Restore::Unlooked => return None,
         Restore::Offered(saved) | Restore::Done(saved) => saved.clone(),
-        Restore::Opening { waiting, refused } => waiting.iter().chain(refused).cloned().collect(),
+        Restore::ToOpen { waiting, refused } => waiting.iter().chain(refused).cloned().collect(),
     };
     let mut all = open;
     for window in not_back {
@@ -160,7 +160,7 @@ impl QuillApp {
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
             });
         }
-        self.windows.restore = Restore::Pending;
+        self.windows.restore = Restore::Unlooked;
     }
 
     /// Write the open chat windows after a short quiet period (a window
@@ -231,7 +231,7 @@ impl QuillApp {
             return;
         };
         match std::mem::take(&mut self.windows.restore) {
-            Restore::Pending => {
+            Restore::Unlooked => {
                 let state = load_chat_windows();
                 let saved = state.windows_of(&account);
                 self.windows.restore = if saved.is_empty() {
@@ -241,7 +241,7 @@ impl QuillApp {
                     Restore::Offered(saved)
                 } else {
                     match to_restore(&state, &account) {
-                        Some(waiting) => Restore::Opening {
+                        Some(waiting) => Restore::ToOpen {
                             waiting,
                             refused: Vec::new(),
                         },
@@ -258,7 +258,7 @@ impl QuillApp {
                 }
                 self.windows.restore = Restore::Offered(saved);
             }
-            Restore::Opening {
+            Restore::ToOpen {
                 waiting,
                 mut refused,
             } => {
@@ -287,7 +287,7 @@ impl QuillApp {
                 self.windows.restore = if waiting.is_empty() || exhausted {
                     Restore::Done(refused)
                 } else {
-                    Restore::Opening { waiting, refused }
+                    Restore::ToOpen { waiting, refused }
                 };
             }
             Restore::Done(kept) => self.windows.restore = Restore::Done(kept),
@@ -329,7 +329,7 @@ impl QuillApp {
         state.answer(restore);
         save_chat_windows(&state);
         self.windows.restore = match std::mem::take(&mut self.windows.restore) {
-            Restore::Offered(waiting) if restore => Restore::Opening {
+            Restore::Offered(waiting) if restore => Restore::ToOpen {
                 waiting,
                 refused: Vec::new(),
             },
@@ -402,11 +402,11 @@ mod tests {
         };
         assert_eq!(kept(Restore::Offered(vec![saved(1)]).dismissed()), Some(1));
         // The box closes after an answer too: that changes nothing.
-        let opening = Restore::Opening {
+        let opening = Restore::ToOpen {
             waiting: vec![saved(1)],
             refused: Vec::new(),
         };
-        assert!(matches!(opening.dismissed(), Restore::Opening { .. }));
+        assert!(matches!(opening.dismissed(), Restore::ToOpen { .. }));
         assert_eq!(kept(Restore::Done(vec![saved(2)]).dismissed()), Some(1));
     }
 
@@ -417,7 +417,7 @@ mod tests {
         };
         let waiting = vec![saved(1), saved(2), saved(3)];
         // Chat 1 is open; 2 and 3 still wait for their chats.
-        let opening = Restore::Opening {
+        let opening = Restore::ToOpen {
             waiting: waiting.clone(),
             refused: Vec::new(),
         };
@@ -432,7 +432,7 @@ mod tests {
             Some(vec![1, 2, 3])
         );
         // Not looked at: the file stays as it is.
-        assert_eq!(windows_to_save(vec![saved(1)], &Restore::Pending), None);
+        assert_eq!(windows_to_save(vec![saved(1)], &Restore::Unlooked), None);
         // Done with nothing kept: what is open is what is saved.
         assert_eq!(
             chats(windows_to_save(vec![saved(1)], &Restore::Done(Vec::new()))),

@@ -17,8 +17,20 @@ impl QuillApp {
         + 'static,
         cx: &mut Context<Self>,
     ) {
+        self.decode_image_task(path, done, cx).detach();
+    }
+
+    /// [`Self::decode_image_then`] for a stage that owns the job: dropping
+    /// the returned task cancels the decode and its answer.
+    pub(super) fn decode_image_task(
+        &mut self,
+        path: PathBuf,
+        done: impl FnOnce(&mut Self, Result<image::RgbaImage, DecodeError>, &mut Context<Self>)
+        + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
         // The editor it opens is drawn in the window that asked.
-        self.run_off_ui_scoped_then(move || decode_file(&path, DecodeSize::FULL), done, cx);
+        self.run_off_ui_scoped_task(move || decode_file(&path, DecodeSize::FULL), done, cx)
     }
 
     /// Run `work` on the background executor and hand its result to `done`

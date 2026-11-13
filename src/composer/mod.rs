@@ -35,8 +35,9 @@ mod shortcuts;
 
 pub use actions::{DeleteConfirm, ForwardDraft, cancel_forward_draft};
 pub use attachments::{
-    AttachmentKind, ComposerAttachment, clipboard_image_attachment, direct_media_kind_for,
-    media_dimensions_valid, media_kind_for, photo_needs_jpeg, without_sound_track,
+    AttachmentId, AttachmentKind, ComposerAttachment, clipboard_image_attachment,
+    direct_media_kind_for, media_dimensions_valid, media_kind_for, photo_needs_jpeg,
+    without_sound_track,
 };
 pub use bar_click::{BarAction, BarClick, BarKind, bar_click_action};
 pub use commands::{
@@ -50,7 +51,7 @@ pub use draft_content::DraftContent;
 pub use draft_topic::{DraftKey, DraftTopic};
 pub use edit::{
     ComposerEdit, ComposerEditKind, EDIT_MEDIA_ALBUM_ERROR, EDIT_MEDIA_INVALID_FILE, EditMediaKind,
-    EditMediaReplacement, EditRender, EditableMedia, LinkPreviewChoice, MediaEdit, ProbeJob,
+    EditMediaReplacement, EditRender, EditableMedia, LinkPreviewChoice, MediaEdit,
     ReplacementProbe, begin_edit_draft, begin_edit_keeping_reply, cancel_edit_draft,
     cancel_edit_keeping_reply,
 };
@@ -158,7 +159,7 @@ pub fn draft_text_to_store(text: &str, has_reply: bool) -> Option<&str> {
 pub enum SendContent {
     #[default]
     Text,
-    Single(ComposerAttachment),
+    Single(Box<ComposerAttachment>),
     /// 2–10 photos and/or videos, or files.
     Album(Vec<ComposerAttachment>),
 }
@@ -177,7 +178,7 @@ impl SendContent {
     pub fn attachments(&self) -> &[ComposerAttachment] {
         match self {
             Self::Text => &[],
-            Self::Single(attachment) => std::slice::from_ref(attachment),
+            Self::Single(attachment) => std::slice::from_ref(&**attachment),
             Self::Album(list) => list,
         }
     }
@@ -232,7 +233,9 @@ impl ComposerSnapshot {
             chat_id: chat_id.0,
             view_generation: view_generation.0,
             text: text.into(),
-            content: attachment.map_or(SendContent::Text, SendContent::Single),
+            content: attachment.map_or(SendContent::Text, |attachment| {
+                SendContent::Single(Box::new(attachment))
+            }),
             reply_to: None,
             self_destruct: None,
             send_options: SendOptions::default(),

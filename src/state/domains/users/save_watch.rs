@@ -3,20 +3,26 @@
 //! request and stay open, saving, until it is answered. The request is
 //! watched here by its id, so an answer for another request (or an earlier
 //! box) never closes this one.
-use std::collections::HashMap;
-
 use crate::ids::RequestId;
 use crate::state::RequestRegistry;
 
-/// What the watched request has met so far.
+/// What the watched request has met so far; each stage names its request.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SaveAnswer {
+enum SaveAnswer {
     /// Sent, not answered.
-    Waiting,
+    Waiting(RequestId),
     /// TDLib answered it (not with an error).
-    Answered,
+    Answered(RequestId),
     /// TDLib refused it; the reason as the box shows it.
-    Failed(String),
+    Failed(RequestId, String),
+}
+
+impl SaveAnswer {
+    fn request(&self) -> RequestId {
+        match self {
+            Self::Waiting(request) | Self::Answered(request) | Self::Failed(request, _) => *request,
+        }
+    }
 }
 
 /// What became of a watched request, as the box that watched it asks.
@@ -38,32 +44,40 @@ pub enum SaveOutcome {
 /// outcome.
 #[derive(Debug, Default)]
 pub struct SaveWatch {
-    entries: HashMap<RequestId, SaveAnswer>,
+    entries: Vec<SaveAnswer>,
 }
 
 impl SaveWatch {
     /// Start watching `request`, just sent.
     pub fn watch(&mut self, request: RequestId) {
-        self.entries.insert(request, SaveAnswer::Waiting);
+        self.forget(request);
+        self.entries.push(SaveAnswer::Waiting(request));
+    }
+
+    /// The entry of `request`, if it is watched.
+    fn entry_mut(&mut self, request: RequestId) -> Option<&mut SaveAnswer> {
+        self.entries
+            .iter_mut()
+            .find(|entry| entry.request() == request)
     }
 
     /// `request` was answered. Only a watched, unanswered one records it.
     pub fn answered(&mut self, request: RequestId) {
-        if let Some(answer @ SaveAnswer::Waiting) = self.entries.get_mut(&request) {
-            *answer = SaveAnswer::Answered;
+        if let Some(entry @ SaveAnswer::Waiting(_)) = self.entry_mut(request) {
+            *entry = SaveAnswer::Answered(request);
         }
     }
 
     /// `request` was refused. Only a watched, unanswered one records it.
     pub fn failed(&mut self, request: RequestId, reason: String) {
-        if let Some(answer @ SaveAnswer::Waiting) = self.entries.get_mut(&request) {
-            *answer = SaveAnswer::Failed(reason);
+        if let Some(entry @ SaveAnswer::Waiting(_)) = self.entry_mut(request) {
+            *entry = SaveAnswer::Failed(request, reason);
         }
     }
 
     /// The box stopped waiting (closed, or took its outcome).
     pub fn forget(&mut self, request: RequestId) {
-        self.entries.remove(&request);
+        self.entries.retain(|entry| entry.request() != request);
     }
 
     /// Where `request` stands. Saved only on its answer: a watched request
@@ -76,16 +90,16 @@ impl SaveWatch {
     }
 
     fn outcome(&mut self, request: RequestId, in_flight: bool) -> SaveOutcome {
-        let Some(answer) = self.entries.get(&request) else {
+        let Some(answer) = self.entry_mut(request) else {
             return SaveOutcome::Unknown;
         };
         let outcome = match answer {
-            SaveAnswer::Waiting if in_flight => return SaveOutcome::Saving,
-            SaveAnswer::Waiting => SaveOutcome::Unknown,
-            SaveAnswer::Answered => SaveOutcome::Saved,
-            SaveAnswer::Failed(reason) => SaveOutcome::Failed(reason.clone()),
+            SaveAnswer::Waiting(_) if in_flight => return SaveOutcome::Saving,
+            SaveAnswer::Waiting(_) => SaveOutcome::Unknown,
+            SaveAnswer::Answered(_) => SaveOutcome::Saved,
+            SaveAnswer::Failed(_, reason) => SaveOutcome::Failed(reason.clone()),
         };
-        self.entries.remove(&request);
+        self.forget(request);
         outcome
     }
 }

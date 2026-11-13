@@ -63,12 +63,8 @@ fn an_emoji_list_failure_stays_on_its_tab_until_that_list_is_asked_again() {
 #[test]
 fn a_refused_view_of_trending_sets_keeps_their_unread_dots() {
     let mut t = Flaky::new();
-    t.driver
-        .session
-        .stickers
-        .stickers
-        .trending
-        .push(crate::telegram::envelope::StickerSetInfo {
+    t.driver.session.stickers.stickers.trending.sets.push(
+        crate::telegram::envelope::StickerSetInfo {
             id: 5,
             title: "Set".into(),
             name: "set".into(),
@@ -79,13 +75,14 @@ fn a_refused_view_of_trending_sets_keeps_their_unread_dots() {
             covers: Vec::new(),
             cover_files: Vec::new(),
             is_viewed: false,
-        });
+        },
+    );
     t.sender.refuse(&["viewTrendingStickerSets"]);
     assert!(t.driver.view_shown_trending_stickers().is_err());
-    assert!(!t.driver.session.stickers.stickers.trending[0].is_viewed);
+    assert!(!t.driver.session.stickers.stickers.trending.sets[0].is_viewed);
     t.sender.refuse(&[]);
     assert!(t.driver.view_shown_trending_stickers().unwrap().is_some());
-    assert!(t.driver.session.stickers.stickers.trending[0].is_viewed);
+    assert!(t.driver.session.stickers.stickers.trending.sets[0].is_viewed);
 }
 
 #[test]
@@ -158,7 +155,10 @@ fn two_callback_answers_between_polls_both_reach_the_poll() {
 fn a_sticker_set_edit_answer_ends_only_its_own_edit_and_every_toast_shows() {
     let mut t = Flaky::new();
     let session = &mut t.driver.session;
-    session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(77));
+    session.stickers.sticker_set_view = Some(crate::state::StickerSetView::loading(
+        77,
+        crate::ids::RequestId(700),
+    ));
     let rename = |session: &mut crate::state::Session| {
         let id = session.request(
             RequestPurpose::Stickers(StickersPurpose::Creator(
@@ -208,12 +208,13 @@ fn a_mask_list_asked_before_a_change_does_not_land_after_it() {
         installed: false,
         archived: false,
     });
-    session.finish_mask_mutation(Some(change));
-    assert!(
-        !session
-            .requests
-            .has_purpose(StickersPurpose::GetInstalledMaskSets.into())
-    );
+    session.stickers.masks.installed.begin_with(list);
+    let changed = session.request(change, None);
+    let pending = session.requests.pending.get(&changed.0).cloned();
+    session.finish_mask_mutation(pending.as_ref());
+    // The fetch forgot the request it waited for: the refetch may go out,
+    // and the late answer below finds nothing to land on.
+    assert!(session.stickers.masks.installed.is_idle());
     t.feed(
         json!({"@type":"stickerSets","@extra":list.as_extra(),"sets":[
         {"@type":"stickerSetInfo","id":"3","size":1,"is_installed":true}]}),
@@ -368,28 +369,50 @@ fn the_reply_bar_copy_shows_an_edit_and_the_oldest_copy_is_the_one_dropped() {
 }
 
 #[test]
-fn each_create_gets_its_own_generation_and_a_reset_never_reuses_one() {
+fn each_create_waits_for_its_own_request_and_a_reset_never_adopts_an_older_one() {
+    use crate::state::CreateStage;
     let mut t = Flaky::new();
-    let generation = |t: &Flaky| t.driver.session.bots.owned.create.generation;
-    let before = generation(&t);
-    t.driver
+    let asked = |t: &Flaky| match &t.driver.session.bots.owned.create.stage {
+        CreateStage::Creating { request, .. } => Some(*request),
+        _ => None,
+    };
+    assert_eq!(asked(&t), None);
+    let first = t
+        .driver
         .create_managed_bot(900, "A", "a_bot", false, None)
         .unwrap();
-    let first = generation(&t);
-    assert_eq!(first, before + 1);
+    assert_eq!(asked(&t), Some(first));
     // One create at a time: a second waits for the first's answer.
     assert!(
         t.driver
             .create_managed_bot(900, "B", "b_bot", false, None)
             .is_err()
     );
-    assert_eq!(generation(&t), first);
-    // The older create's answer finds a newer generation and drops.
+    assert_eq!(asked(&t), Some(first));
+    // The older create's answer finds another request in the stage, or none,
+    // and drops.
     t.driver.reset_create_bot();
-    assert_eq!(generation(&t), first + 1);
+    assert_eq!(asked(&t), None);
     assert!(!t.driver.session.bots.owned.create.creating());
-    t.driver
+    let older_answer = |extra: crate::ids::RequestId| {
+        json!({"@type":"user","@extra":extra.as_extra(),"id":901,"first_name":"A",
+            "type":{"@type":"userTypeBot","can_be_edited":true}})
+    };
+    // The older create's answer arrives after the reset: nothing adopts it.
+    t.feed(older_answer(first));
+    assert_eq!(asked(&t), None);
+    assert!(t.driver.take_created_bot().is_none());
+    let second = t
+        .driver
         .create_managed_bot(900, "B", "b_bot", false, None)
         .unwrap();
-    assert_eq!(generation(&t), first + 2);
+    assert_ne!(second, first);
+    assert_eq!(asked(&t), Some(second));
+    // ... nor does the newer create, which still waits for its own.
+    t.feed(older_answer(first));
+    assert_eq!(asked(&t), Some(second));
+    assert!(t.driver.take_created_bot().is_none());
+    t.feed(older_answer(second));
+    assert_eq!(asked(&t), None);
+    assert_eq!(t.driver.take_created_bot().map(|(_, id)| id), Some(901));
 }

@@ -78,7 +78,7 @@ impl QuillApp {
                     cover_files: Vec::new(),
                     is_viewed: true,
                 });
-            let mut view = StickerSetView::loading(78);
+            let mut view = StickerSetView::loading(78, quill::ids::RequestId(1));
             view.stage = StickerSetViewStage::Ready {
                 title: "My doodles".into(),
                 name: "my_doodles_by_quill".into(),
@@ -86,7 +86,6 @@ impl QuillApp {
                 is_emoji: false,
                 is_owned: true,
                 stickers,
-                files: quill::state::SetFiles::Asked,
             };
             session.stickers.sticker_set_view = Some(view);
         }
@@ -178,7 +177,9 @@ impl QuillApp {
             Ok("panel") => {
                 self.sticker_box.host = super::state::SetBoxHost::Closed;
                 self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
-                self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
+                self.pickers
+                    .media_panel
+                    .show(crate::ui::media_panel::PanelTab::Stickers, None);
             }
             _ => {}
         }

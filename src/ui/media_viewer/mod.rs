@@ -24,9 +24,9 @@ use quill::media_viewer::{
     SwipeInput, VIEWER_SHOW_MS, VIEWER_TRACKPAD_GESTURE_GAP, VIEWER_WAIT_HIDE_MS,
     VIEWER_WHEEL_NOTCH_PX, ViewerKeyAction, ViewerKeyMods, ViewerOrientation, ViewerSource,
     ViewerVideoStart, ViewerZoom, WheelAction, WheelInput, WheelSource, ZoomLevels,
-    collect_media_items, controls_fade_ms, controls_hide_wait_ms, controls_should_hide,
-    decide_viewer_video_start, orient_rgba, pinch_zoom_factor, save_media_to_downloads,
-    seek_target_secs, viewer_delete_gate, viewer_key_action, wheel_zoom_factor,
+    collect_media_items, controls_fade_ms, controls_should_hide, decide_viewer_video_start,
+    orient_rgba, pinch_zoom_factor, save_media_to_downloads, seek_target_secs, viewer_delete_gate,
+    viewer_key_action, wheel_zoom_factor,
 };
 use quill::settings::MediaPrefs;
 use quill::state::HistoryMessage;
@@ -92,6 +92,29 @@ pub(super) struct ViewerExtra {
     strip_asked: Vec<quill::ids::FileId>,
     /// The caption's collapsed / expanded state.
     pub(in crate::ui) caption: caption::ViewerCaption,
+    /// The Copy of the shown photo, while its encode runs.
+    pub(in crate::ui) copy: PhotoCopy,
+}
+
+/// Cmd+C on a photo: nothing under way, or the encode, whose task the item
+/// owns (a step or a close drops it, so a finished PNG never lands on the
+/// clipboard for an item that was left).
+#[derive(Default)]
+pub(in crate::ui) enum PhotoCopy {
+    #[default]
+    Idle,
+    Encoding {
+        task: Task<()>,
+    },
+}
+
+impl PhotoCopy {
+    /// The encode landed. This is its own task's turn: let it finish.
+    pub(in crate::ui) fn finish(&mut self) {
+        if let Self::Encoding { task } = std::mem::take(self) {
+            task.detach();
+        }
+    }
 }
 
 impl ViewerExtra {

@@ -21,7 +21,7 @@ use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
 use quill::send_rights::SendRights;
 use quill::telegram::envelope::AuthorizationState;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -215,13 +215,9 @@ impl QuillApp {
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::Q_MISC_FORWARD_TO)))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     }
                 }))
                 .footer(footer)

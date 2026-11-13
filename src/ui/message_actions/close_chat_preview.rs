@@ -236,13 +236,13 @@ impl QuillApp {
         let Some(chat) = chat else {
             return div().into_any_element();
         };
-        let pinned = if chat.in_archive {
-            chat.archive_is_pinned
+        let pinned = if chat.in_archive() {
+            chat.archive_is_pinned()
         } else {
-            chat.is_pinned
+            chat.is_pinned()
         };
         let unread = chat.is_marked_as_unread || chat.unread_count > 0;
-        let archived = chat.in_archive;
+        let archived = chat.in_archive();
         let can_clear = chat.can_be_deleted_only_for_self || chat.can_be_deleted_for_all_users;
         // tdesktop `addClearHistory` skips a channel's direct messages.
         let offers_clear = can_clear

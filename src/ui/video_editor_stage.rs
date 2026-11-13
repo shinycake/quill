@@ -1,10 +1,11 @@
 //! The video editor's stage: reading the file, ready to edit, or encoding
 //! the edited copy. One value, so a timeline never exists without the info
 //! it was cut from, the player never outlives an encode, and a late answer
-//! is matched by the serial of the stage that asked.
+//! cannot arrive: the stage holds the task that would deliver it, and
+//! leaving the stage drops that task.
 #![deny(clippy::indexing_slicing)]
 
-use super::video_editor::{VideoEditorDialog, next_editor_serial};
+use super::video_editor::VideoEditorDialog;
 use super::video_player::VideoPlayer;
 use gpui_kit::Task;
 use quill::lang::{keys, tr};
@@ -12,9 +13,9 @@ use quill::video_edit::{Crop, VideoEdits, VideoSource};
 use quill::video_timeline::Timeline;
 
 pub(super) enum EditorStage {
-    /// The probe with this serial is reading the file; its task is held
-    /// here, so closing the editor stops waiting for it.
-    Reading { serial: u64, probe: Task<()> },
+    /// The probe is reading the file; its task is held here, so closing
+    /// the editor or replacing the stage stops waiting for it.
+    Reading { probe: Task<()> },
     /// The probe found no video.
     Unreadable,
     /// Read: the picture edits, the strip's selection (the one place the
@@ -27,14 +28,13 @@ pub(super) enum EditorStage {
         looping: Looping,
         note: Option<String>,
     },
-    /// The edited copy is being encoded with these edits; the encode with
-    /// this serial may answer. Nothing edits meanwhile. A failure goes back
+    /// The edited copy is being encoded with these edits; only the task
+    /// held here may answer. Nothing edits meanwhile. A failure goes back
     /// to `Ready` with its line.
     Encoding {
         info: VideoSource,
         look: Look,
         timeline: Timeline,
-        serial: u64,
         /// The encode's task: leaving the stage (the editor closes, the
         /// screen is replaced) stops waiting for it.
         _job: Task<()>,
@@ -94,22 +94,12 @@ pub(super) enum Looping {
 }
 
 impl VideoEditorDialog {
-    /// The serial of the probe or encode in flight, 0 when none is.
-    #[cfg(test)]
-    #[cfg(feature = "demo-capture")]
-    pub(super) fn serial(&self) -> u64 {
-        match self.stage {
-            EditorStage::Reading { serial, .. } | EditorStage::Encoding { serial, .. } => serial,
-            EditorStage::Unreadable | EditorStage::Ready { .. } => 0,
-        }
+    pub(super) fn is_reading(&self) -> bool {
+        matches!(self.stage, EditorStage::Reading { .. })
     }
 
-    pub(super) fn is_reading(&self, serial: u64) -> bool {
-        matches!(self.stage, EditorStage::Reading { serial: now, .. } if now == serial)
-    }
-
-    pub(super) fn is_encoding(&self, serial: u64) -> bool {
-        matches!(self.stage, EditorStage::Encoding { serial: now, .. } if now == serial)
+    pub(super) fn is_encoding(&self) -> bool {
+        matches!(self.stage, EditorStage::Encoding { .. })
     }
 
     /// Probed size, length and sound, once read.
@@ -286,23 +276,25 @@ impl VideoEditorDialog {
         };
     }
 
-    /// The serial an encode started now would carry. `None` unless ready.
-    pub(super) fn encode_serial(&self) -> Option<u64> {
-        matches!(self.stage, EditorStage::Ready { .. }).then(next_editor_serial)
+    /// Whether an encode may start now: only a ready editor.
+    pub(super) fn can_encode(&self) -> bool {
+        matches!(self.stage, EditorStage::Ready { .. })
     }
 
-    /// Start encoding: drops the player; the stage holds `job` and the
-    /// serial its answer must carry (`encode_serial`). A job handed to an
-    /// editor that is not ready is dropped, which cancels it.
-    pub(super) fn start_encode(&mut self, serial: u64, info: VideoSource, job: Task<()>) {
+    /// Start encoding: drops the player; the stage holds `job`, the only
+    /// task that may answer. A job handed to an editor that is not ready
+    /// is dropped, which cancels it.
+    pub(super) fn start_encode(&mut self, info: VideoSource, job: Task<()>) {
         let EditorStage::Ready { look, timeline, .. } = self.stage else {
             return;
         };
+        // A pointer drag the encode outlives would hold the loop and the
+        // cover bubble for good.
+        self.motion.end_drag();
         self.stage = EditorStage::Encoding {
             info,
             look,
             timeline,
-            serial,
             _job: job,
         };
     }
@@ -327,12 +319,13 @@ impl VideoEditorDialog {
         }
     }
 
-    /// Tests: make the probe in flight stale, as a later one would.
+    /// Tests: stop the real probe, as a stage that was left would, so the
+    /// test can answer in its place.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
-    pub(super) fn make_probe_stale(&mut self) {
-        if let EditorStage::Reading { serial, .. } = &mut self.stage {
-            *serial = next_editor_serial();
+    pub(super) fn stop_probe(&mut self) {
+        if let EditorStage::Reading { probe } = &mut self.stage {
+            *probe = Task::ready(());
         }
     }
 }

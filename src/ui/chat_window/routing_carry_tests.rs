@@ -119,6 +119,7 @@ fn a_start_link_for_a_chat_with_its_own_window_prefills_that_window(cx: &mut Tes
                 story_id: None,
             },
             from_agent: false,
+            flow: None,
         };
         app.open_deep_link_chat(open, window, cx);
     });

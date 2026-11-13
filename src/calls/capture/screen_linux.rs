@@ -234,7 +234,7 @@ async fn cast(
         options,
         pacer: FramePacer::new(options.fps),
         format: None,
-        phase: StreamPhase::Connecting,
+        phase: StreamPhase::NoFrameYet,
     };
     let stream = match PwStream::connect(fd, node, Box::new(handler)) {
         Ok(stream) => stream,
@@ -251,7 +251,7 @@ async fn cast(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamPhase {
     /// No frame has flowed yet.
-    Connecting,
+    NoFrameYet,
     Streaming,
     /// The source stopped sending (the shared window is hidden).
     Paused,
@@ -346,7 +346,7 @@ mod tests {
             options,
             pacer: FramePacer::new(options.fps),
             format: None,
-            phase: StreamPhase::Connecting,
+            phase: StreamPhase::NoFrameYet,
         };
         (frames, sink)
     }
@@ -354,7 +354,7 @@ mod tests {
     #[test]
     fn a_stream_that_disconnects_before_it_streams_ends_the_share_once() {
         let (mut frames, sink) = frames();
-        frames.state_changed(StreamState::Connecting, None);
+        frames.state_changed(StreamState::Linking, None);
         frames.state_changed(StreamState::Paused, None);
         assert!(sink.take_events().is_empty(), "setup is not an event");
         frames.state_changed(StreamState::Unconnected, None);

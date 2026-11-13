@@ -89,11 +89,13 @@ impl QuillApp {
     }
 
     pub(super) fn close_checklist_dialog(&mut self, cx: &mut Context<Self>) {
-        let waiting = self
-            .chat_ui
-            .checklist_dialog
-            .take()
-            .and_then(|dialog| dialog.send.request());
+        let closed = self.chat_ui.checklist_dialog.take();
+        let waiting = closed.as_ref().and_then(|dialog| dialog.send.request());
+        // A new checklist already out still goes as the reply it was sent
+        // as; the bar has done its job.
+        if waiting.is_some() && closed.is_some_and(|dialog| dialog.add_to.is_none()) {
+            self.chat_ui.set_reply(None);
+        }
         self.forget_dialog_request(waiting);
         cx.notify();
     }
@@ -136,7 +138,13 @@ impl QuillApp {
             return;
         };
         match answer {
-            Answer::Done => {}
+            // The reply bar is spent when the send is acknowledged; a
+            // refusal keeps it, so the retried Create is still a reply.
+            Answer::Done => {
+                if !adding {
+                    self.chat_ui.set_reply(None);
+                }
+            }
             Answer::Failed(_) => {
                 self.chat_ui.checklist_dialog = Some(dialog);
                 self.set_note(StatusNote::error(tr(if adding {
@@ -223,7 +231,6 @@ impl QuillApp {
             match live.driver.send_checklist_draft(chat_id, &draft, reply_to) {
                 Ok(request) => {
                     self.checklist_dialog_sending(request);
-                    self.chat_ui.set_reply(None);
                     self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_CHECKLIST)));
                 }
                 Err(_) => self.set_note(StatusNote::error(tr(
@@ -583,6 +590,10 @@ impl QuillApp {
         }
         let (chat_id, message_id) = (panel.chat_id, panel.message_id);
         let text = super::composer_field::field_doc(panel.input.read(cx)).to_markup();
+        // An earlier refusal is about an earlier text: this Add judges anew.
+        if let Some(panel) = self.message_ui.poll_add_option.as_mut() {
+            panel.clear_refusal();
+        }
         let poll = self
             .session()
             .and_then(|session| session.histories.get(&chat_id.0))

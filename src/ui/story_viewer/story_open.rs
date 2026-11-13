@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::open::PendingStoryOpen;
+use quill::ids::RequestId;
 use quill::story_viewer::StoryViewer;
 use std::ops::{Deref, DerefMut};
 
@@ -17,8 +18,20 @@ pub(in crate::ui) enum StoryOpen {
     /// meanwhile. A repost's press (`if_gone`) holds the story still.
     Waiting {
         open: PendingStoryOpen,
+        ask: StoryAsk,
         shown: StoryViewer,
     },
+}
+
+/// What a waiting press waits on: the `getStory` it asked, so the wait
+/// ends when that request leaves flight, answered or not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum StoryAsk {
+    /// This request is out; the story's arrival or failure settles it.
+    Out(RequestId),
+    /// No request went out (the send was refused, or the story was already
+    /// cached): nothing can answer, so the next check settles it.
+    NoneOut,
 }
 
 impl StoryOpen {
@@ -34,6 +47,14 @@ impl StoryOpen {
         }
     }
 
+    /// What the waiting press waits on, if one waits.
+    pub(in crate::ui) fn ask(&self) -> Option<StoryAsk> {
+        match self {
+            Self::Shown(_) => None,
+            Self::Waiting { ask, .. } => Some(*ask),
+        }
+    }
+
     fn take_viewer(&mut self) -> StoryViewer {
         match std::mem::replace(self, Self::closed()) {
             Self::Shown(viewer) | Self::Waiting { shown: viewer, .. } => viewer,
@@ -41,9 +62,9 @@ impl StoryOpen {
     }
 
     /// `open` waits for its story; a press that waited before is replaced.
-    pub(in crate::ui) fn wait(&mut self, open: PendingStoryOpen) {
+    pub(in crate::ui) fn wait(&mut self, open: PendingStoryOpen, ask: StoryAsk) {
         let shown = self.take_viewer();
-        *self = Self::Waiting { open, shown };
+        *self = Self::Waiting { open, ask, shown };
     }
 
     /// Nothing waits any more (the story arrived or is gone, or the user
@@ -100,15 +121,15 @@ mod tests {
     #[test]
     fn a_newer_press_replaces_the_one_waiting() {
         let mut state = StoryOpen::closed();
-        state.wait(open(1));
-        state.wait(open(2));
+        state.wait(open(1), StoryAsk::NoneOut);
+        state.wait(open(2), StoryAsk::NoneOut);
         assert_eq!(state.waiting().map(|o| o.story_id), Some(2));
     }
 
     #[test]
     fn showing_a_story_ends_the_wait() {
         let mut state = StoryOpen::closed();
-        state.wait(open(1));
+        state.wait(open(1), StoryAsk::NoneOut);
         state.show(StoryViewer::closed());
         assert_eq!(state.waiting(), None);
     }
@@ -116,10 +137,10 @@ mod tests {
     #[test]
     fn closing_and_stopping_end_the_wait() {
         let mut state = StoryOpen::closed();
-        state.wait(open(1));
+        state.wait(open(1), StoryAsk::NoneOut);
         state.stop_waiting();
         assert_eq!(state.waiting(), None);
-        state.wait(open(3));
+        state.wait(open(3), StoryAsk::NoneOut);
         state.close();
         assert_eq!(state.waiting(), None);
         assert!(!state.is_open());

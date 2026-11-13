@@ -279,6 +279,95 @@ fn add_people_takes_the_call_into_a_new_conference_and_ends_it_with_the_link() {
     let _ = std::fs::remove_dir_all(&harness.0);
 }
 
+/// A 1:1 call upgraded to the conference 600, with its handover waiting on
+/// the `getGroupCall` the driver sent; returns that request's `@extra`.
+fn handover_waiting(harness: &mut Harness) -> Value {
+    feed(
+        harness,
+        &one_to_one(r#"{"@type":"callStatePending","is_created":true,"is_received":true}"#),
+    );
+    feed(harness, &one_to_one(READY_SUPPORTING_CONFERENCE));
+    let request = harness
+        .1
+        .upgrade_call_to_conference(vec![41, 42], false)
+        .expect("create sends");
+    let extra = serde_json::to_string(&request.as_extra()).unwrap();
+    let extra: Value = serde_json::from_str(&extra).unwrap();
+    feed(harness, &answer(&extra, 600));
+    let call = harness.1.session.calls.active_group_call.as_ref().unwrap();
+    assert!(call.conference.as_ref().unwrap().upgrade().is_some());
+    sent_request(&harness.2, "getGroupCall")["@extra"].clone()
+}
+
+fn assert_handover_left(harness: &Harness) {
+    let discard = sent_request(&harness.2, "discardCall");
+    assert_eq!(discard["call_id"], 5);
+    assert_eq!(discard["invite_link"], "");
+    assert_eq!(sent_count(&harness.2, "inviteGroupCallParticipant"), 0);
+    let call = harness.1.session.calls.active_group_call.as_ref().unwrap();
+    let conference = call.conference.as_ref().unwrap();
+    assert!(conference.upgrade().is_none() && conference.failed_upgrade().is_none());
+    let results = harness.1.session.calls.invite_results().unwrap();
+    assert_eq!(
+        results.failed,
+        vec![42],
+        "the other side of the call is not invited"
+    );
+}
+
+#[test]
+fn a_handover_leaves_when_its_own_group_call_fetch_is_refused() {
+    let mut harness = conference_driver();
+    let fetch = handover_waiting(&mut harness);
+    // Another request's refusal and a UI mark change nothing.
+    harness.1.session.calls.note_group_call_fetch_failed(600);
+    feed(
+        &mut harness,
+        r#"{"@type":"error","@extra":999,"code":400,"message":"NOPE"}"#,
+    );
+    assert!(
+        harness
+            .1
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .and_then(|call| call.conference.as_ref())
+            .is_some_and(|conference| conference.upgrade().is_some())
+    );
+    feed(
+        &mut harness,
+        &format!(
+            r#"{{"@type":"error","@extra":{fetch},"code":400,"message":"GROUPCALL_INVALID"}}"#
+        ),
+    );
+    assert_handover_left(&harness);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+#[test]
+fn a_handover_leaves_when_its_group_call_answers_with_no_link() {
+    let mut harness = conference_driver();
+    let fetch = handover_waiting(&mut harness);
+    let mut answered: Value = serde_json::from_str(&conference_update(600, "", false)).unwrap();
+    let mut group_call = answered["group_call"].take();
+    group_call["@extra"] = fetch;
+    feed(&mut harness, &group_call.to_string());
+    assert_handover_left(&harness);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+#[test]
+fn a_handover_waits_while_an_update_brings_no_link() {
+    let mut harness = conference_driver();
+    let _fetch = handover_waiting(&mut harness);
+    feed(&mut harness, &conference_update(600, "", false));
+    let call = harness.1.session.calls.active_group_call.as_ref().unwrap();
+    assert!(call.conference.as_ref().unwrap().upgrade().is_some());
+    assert_eq!(sent_count(&harness.2, "discardCall"), 0);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
 #[test]
 fn the_other_side_of_an_upgraded_call_joins_by_its_link() {
     let mut harness = conference_driver();
@@ -616,8 +705,8 @@ fn add_people_invitations_end_in_one_toast() {
         .1
         .session
         .calls
-        .invite_results
-        .clone()
+        .invite_results()
+        .cloned()
         .expect("results");
     assert!(!results.is_done());
     feed(
@@ -631,8 +720,8 @@ fn add_people_invitations_end_in_one_toast() {
         .1
         .session
         .calls
-        .invite_results
-        .clone()
+        .invite_results()
+        .cloned()
         .expect("results");
     assert!(results.is_done());
     assert_eq!(results.invited, [42]);
@@ -645,26 +734,32 @@ fn add_people_invitations_end_in_one_toast() {
 fn invited_into(harness: &mut Harness, group_call_id: i32) {
     let mut results = crate::state::ConferenceInviteResults::default();
     results.invited.push(42);
-    harness.1.session.calls.invite_results = Some(results.for_call(group_call_id));
+    let call = harness.1.session.calls.group_call_mut(group_call_id);
+    call.expect("the conference is tracked").invite_results = Some(results.for_call(group_call_id));
 }
 
-#[test]
-fn the_invite_toast_goes_with_its_conference_and_the_account() {
-    let mut harness = conference_driver();
+/// Join the conference call 600 by its link: the call is tracked.
+fn join_conference_600(harness: &mut Harness) {
     let request = harness
         .1
         .join_conference_link("https://t.me/call/xyz".into())
         .expect("join sends");
     let extra: Value = serde_json::to_value(request.as_extra()).unwrap();
-    feed(&mut harness, &answer(&extra, 600));
+    feed(harness, &answer(&extra, 600));
     feed(
-        &mut harness,
+        harness,
         &conference_update(600, "https://t.me/call/xyz", false),
     );
+}
+
+#[test]
+fn the_invite_toast_goes_with_its_conference_and_the_account() {
+    let mut harness = conference_driver();
+    join_conference_600(&mut harness);
     // Leaving drops it.
     invited_into(&mut harness, 600);
     harness.1.leave_group_call().expect("leave sends");
-    assert_eq!(harness.1.session.calls.invite_results, None);
+    assert_eq!(harness.1.session.calls.invite_results(), None);
     // The server ending the call drops it.
     invited_into(&mut harness, 600);
     // (TDLib has confirmed the leave by now.)
@@ -677,12 +772,14 @@ fn the_invite_toast_goes_with_its_conference_and_the_account() {
             .replace(r#""is_active":true"#, r#""is_active":false"#),
     );
     assert!(harness.1.session.calls.active_group_call.is_none());
-    assert_eq!(harness.1.session.calls.invite_results, None);
+    assert_eq!(harness.1.session.calls.invite_results(), None);
     // Dropping the call locally drops it.
+    join_conference_600(&mut harness);
     invited_into(&mut harness, 600);
     harness.1.drop_group_call_locally();
-    assert_eq!(harness.1.session.calls.invite_results, None);
+    assert_eq!(harness.1.session.calls.invite_results(), None);
     // Logging out drops it, and the box's search.
+    join_conference_600(&mut harness);
     invited_into(&mut harness, 600);
     harness
         .1
@@ -694,7 +791,7 @@ fn the_invite_toast_goes_with_its_conference_and_the_account() {
         &mut harness,
         r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateLoggingOut"}}"#,
     );
-    assert_eq!(harness.1.session.calls.invite_results, None);
+    assert_eq!(harness.1.session.calls.invite_results(), None);
     assert!(harness.1.session.calls.add_people_search.query().is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }

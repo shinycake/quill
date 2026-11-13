@@ -14,8 +14,7 @@ use gpui_kit::*;
 use quill::ids::FileId;
 use quill::lang::{keys, tr, tr_with, trn};
 use quill::local_path::sandboxed_display_path;
-use quill::state::StickersPurpose;
-use quill::state::{RequestPurpose, StickerTab};
+use quill::state::StickerTab;
 use quill::sticker_suggest::suggest_emoji_for;
 
 #[cfg(test)]
@@ -133,13 +132,7 @@ impl QuillApp {
     ) {
         self.set_media_pref(|prefs| prefs.sticker_suggest_mode = mode, cx);
         if let Some(live) = self.live.as_mut() {
-            drop(
-                live.driver
-                    .session
-                    .requests
-                    .take_purpose(RequestPurpose::SuggestStickers),
-            );
-            live.driver.session.clear_sticker_suggestions();
+            live.driver.session.cancel_sticker_suggestions();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.clear_sticker_suggestions();
         }
@@ -525,19 +518,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Button {
         let set_id = set.id;
-        let pending = self.session().is_some_and(|session| {
-            [(true, false), (false, true), (false, false)]
-                .into_iter()
-                .any(|(installed, archived)| {
-                    session.requests.has_purpose(RequestPurpose::Stickers(
-                        StickersPurpose::ManageStickerSet {
-                            set_id,
-                            installed,
-                            archived,
-                        },
-                    ))
-                })
-        });
+        let pending = self
+            .session()
+            .is_some_and(|session| session.sticker_set_change_pending(set_id));
         let button = Button::new(format!("sticker-{prefix}-action-{set_id}"))
             .disabled(pending)
             .ghost();
@@ -589,7 +572,7 @@ impl QuillApp {
         let mut seen = std::collections::HashSet::new();
         let visible_sets: Vec<_> = match panel.tab {
             StickerTab::Installed => panel.sets.iter().collect(),
-            StickerTab::Trending => panel.trending.iter().collect(),
+            StickerTab::Trending => panel.trending.sets.iter().collect(),
             StickerTab::Search => panel
                 .search
                 .sets
@@ -605,7 +588,7 @@ impl QuillApp {
         };
         for set in &visible_sets {
             let set_id = set.id;
-            let selected = panel.selection.set_id == Some(set_id);
+            let selected = panel.selection.set_id() == Some(set_id);
             let title = if set.title.is_empty() {
                 set.name.clone()
             } else {
@@ -623,7 +606,7 @@ impl QuillApp {
                     ),
             );
         }
-        if panel.tab == StickerTab::Trending && panel.trending_next_offset < panel.trending_total {
+        if panel.tab == StickerTab::Trending && panel.trending.has_more() {
             sets = sets.child(
                 Button::new("sticker-trending-more")
                     .label(tr(keys::Q_MEDIA_MORE_TRENDING_SETS))
@@ -677,7 +660,7 @@ impl QuillApp {
         }
         if panel.tab == StickerTab::Search
             && panel.search.has_more
-            && panel.selection.set_id.is_none()
+            && panel.selection.set_id().is_none()
         {
             grid = grid.child(
                 Button::new("sticker-search-more")
@@ -689,7 +672,7 @@ impl QuillApp {
         let mut preview = div().flex().items_center().justify_between().gap_2();
         if let Some(set) = visible_sets
             .iter()
-            .find(|set| Some(set.id) == panel.selection.set_id)
+            .find(|set| Some(set.id) == panel.selection.set_id())
         {
             preview = preview
                 .child(div().font_semibold().child(tr_with(
@@ -724,7 +707,7 @@ impl QuillApp {
                 StickerTab::Installed if panel.sets.is_empty() => {
                     Some(tr(keys::Q_MEDIA_NO_STICKER_SETS_YET).into())
                 }
-                StickerTab::Archived if panel.archived.is_empty() => {
+                StickerTab::Archived if panel.archived.sets.is_empty() => {
                     Some(tr(keys::Q_MEDIA_NO_ARCHIVED_STICKER_SETS).into())
                 }
                 StickerTab::Recent if panel.recent.is_empty() => {
@@ -733,7 +716,7 @@ impl QuillApp {
                 StickerTab::Favorites if panel.favorites.is_empty() => {
                     Some(tr(keys::Q_MEDIA_RIGHT_CLICK_A_STICKER_TO).into())
                 }
-                StickerTab::Trending if panel.trending.is_empty() => {
+                StickerTab::Trending if panel.trending.sets.is_empty() => {
                     Some(tr(keys::Q_MEDIA_NO_TRENDING_STICKER_SETS).into())
                 }
                 StickerTab::Search if panel.search.query.typed().is_empty() => {

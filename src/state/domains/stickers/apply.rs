@@ -45,14 +45,13 @@ impl Session {
                 ) {
                     // B11: "Attached Stickers" of a photo or video, for the
                     // request the box waits for.
-                    if self
-                        .stickers
-                        .stickers
-                        .attached
-                        .waits_for(pending.map(|p| p.id))
+                    if let Some(request) = pending.map(|p| p.id)
+                        && self.stickers.stickers.attached.waits_for(Some(request))
                     {
-                        self.stickers.stickers.attached =
-                            AttachedSets::Answered(sets.first().map(|set| set.id));
+                        self.stickers.stickers.attached = AttachedSets::Answered {
+                            request,
+                            first: sets.first().map(|set| set.id),
+                        };
                     }
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetInstalledStickerSets)
@@ -83,11 +82,6 @@ impl Session {
                 {
                     // Slice S10: emoji `stickerSets` land in the emoji panel (see emoji.rs).
                     self.accept_installed_emoji_sets(pending.map(|p| p.id), sets);
-                } else if let Some(RequestPurpose::Stickers(
-                    StickersPurpose::GetArchivedEmojiSets { first_page },
-                )) = pending.map(|p| p.purpose)
-                {
-                    self.accept_archived_emoji_sets(sets, first_page);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchEmojiSets) {
                     self.accept_found_emoji_sets(pending.map(|p| p.id), sets);
                 }
@@ -154,8 +148,12 @@ impl Session {
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingStickerSets) {
                     if current {
-                        self.stickers.stickers.trending_total = total_count.max(0) as usize;
-                        self.accept_trending_sticker_sets(sets, is_premium);
+                        self.accept_trending_sticker_sets(
+                            pending.map(|p| p.id),
+                            sets,
+                            is_premium,
+                            total_count.max(0) as usize,
+                        );
                     }
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTrendingEmojiSets) {
                     // Slice S10: emoji `trendingStickerSets` land in the emoji panel (see emoji.rs).
@@ -212,8 +210,11 @@ impl Session {
                     if let Some(pending) = pending {
                         self.stickers.emoji.custom_emoji_lookup_answered(pending.id);
                     }
+                    // A mini app's suggested-emoji lookup waits on this
+                    // answer: it finds it in the cache on its next pass.
+                    crate::wake::MINI_APPS.poke();
                 } else if purpose == Some(RequestPurpose::GetForumTopicDefaultIcons) {
-                    self.accept_topic_default_icons(stickers);
+                    self.accept_topic_default_icons(pending.map(|p| p.id), stickers);
                 } else if purpose == Some(RequestPurpose::GetBackgroundEmojiIcons) {
                     self.accept_background_emoji_icons(pending.map(|p| p.id), stickers);
                 } else if purpose == Some(RequestPurpose::GetProfilePhotoEmojiIcons) {
@@ -223,7 +224,7 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetStoryCustomEmojiStickers) {
                     // Phase 9.2+: story reaction picker visuals — keyed by
                     // sticker id (= custom emoji id).
-                    self.accept_story_custom_emoji_stickers(stickers);
+                    self.accept_story_custom_emoji_stickers(pending.map(|p| p.id), stickers);
                 } else if purpose
                     == Some(RequestPurpose::Stories(StoriesPurpose::Live(
                         LiveStoryPurpose::GetBursts,
@@ -286,12 +287,14 @@ impl Session {
                     self.chats_state.enter_deep_link_stage(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::StickerSet { set_id: id },
                     ));
-                } else if let Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet {
-                    set_id,
-                })) = pending.map(|p| p.purpose)
+                } else if let Some((
+                    request,
+                    RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id }),
+                )) = pending.map(|p| (p.id, p.purpose))
                 {
                     self.remember_files(&files);
                     self.accept_sticker_set_view(
+                        request,
                         set_id,
                         StickerSetViewStage::Ready {
                             title,
@@ -300,7 +303,6 @@ impl Session {
                             is_emoji: is_custom_emoji,
                             is_owned,
                             stickers,
-                            files: SetFiles::Unasked,
                         },
                     );
                 } else if let Some(PendingRequest {
@@ -346,7 +348,7 @@ impl Session {
             StickersPayload::Animations { animations, files } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
                     self.remember_files(&files);
-                    self.accept_saved_animations(animations);
+                    self.accept_saved_animations(pending.map(|p| p.id), animations);
                 }
             }
             StickersPayload::UpdateSavedAnimations { .. } => {

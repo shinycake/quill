@@ -3,6 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::settings::InstantViewMode;
 use crate::state::MessagesPurpose;
+use crate::state::fetch::Fetch;
 use crate::state::{RequestPurpose, UnreadJumpKind};
 use crate::telegram::requests::{
     add_message_reaction, get_link_preview, get_message_link, get_message_properties,
@@ -35,12 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // so only a story actually asked for counts as attempted.
         let now = std::time::Instant::now();
         for (chat_id, story_id) in self.session.reply_story_candidates(now) {
-            if self.get_story(chat_id, story_id)?.is_some() {
-                self.session
-                    .stories
-                    .story_fetch
-                    .asked((chat_id.0, story_id));
-            }
+            self.get_story(chat_id, story_id)?;
         }
         Ok(())
     }
@@ -288,7 +284,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// request per chat at a time.
     pub fn fetch_pinned_messages(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
         let purpose = RequestPurpose::GetPinnedMessages;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+        if self
+            .session
+            .messages
+            .pinned_messages
+            .get(&chat_id.0)
+            .is_some_and(Fetch::is_loading)
+        {
             return Ok(());
         }
         let extra = self.session.request(purpose, Some(chat_id));
@@ -308,8 +310,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .pinned_messages
             .entry(chat_id.0)
             .or_default();
-        fetch.begin();
-        fetch.sent(extra);
+        fetch.begin_with(extra);
         if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
             self.session
@@ -336,7 +337,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::Messages(MessagesPurpose::JumpToUnread { kind });
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+        // The window's own press is out already; the same chat in another
+        // window asks for itself.
+        let window = self.session.view_in_place();
+        if let Some(asked) = self.session.search.jump_lookups.asked_in(window)
+            && self.session.requests.get(asked).is_some_and(|pending| {
+                pending.purpose == purpose && pending.chat_id == Some(chat_id)
+            })
+        {
             return Ok(());
         }
         let extra = self.session.request(purpose, Some(chat_id));
@@ -354,6 +362,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.begin_jump_ask(extra);
         Ok(())
     }
 

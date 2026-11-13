@@ -27,12 +27,19 @@ impl Session {
             _ => {}
         }
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::GetTopChats) => {
+                self.search.search.top_chats.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
+            }
             Some(RequestPurpose::GetRecommendedChats) => {
-                self.search
-                    .search
-                    .tabs
-                    .recommended
-                    .fail(format!("error {}", err.code));
+                self.search.search.tabs.recommended.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
             }
             Some(RequestPurpose::SearchMessagesMore | RequestPurpose::SearchPublicPostsMore)
                 if self.search.search.awaits(pending) =>
@@ -67,17 +74,17 @@ impl Session {
                 _ => {}
             }
         }
-        if self.search.chat_search.matches_generation(pending)
+        if self.search.chat_search.waits_for_more(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
         {
             // The page stays askable: the Retry strip asks it again.
-            self.search.chat_search.fail_more();
+            self.search.chat_search.fail_more(pending.map(|p| p.id));
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetChatMessageByDate) => {
                 self.fail_date_jump(err.code == 404, pending)
             }
-            Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { .. })) => {
+            Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar)) => {
                 self.fail_message_calendar(pending)
             }
             Some(RequestPurpose::SearchFromMembers) => {
@@ -98,7 +105,7 @@ impl Session {
             }
             _ => {}
         }
-        if self.search.chat_search.matches_generation(pending)
+        if self.search.chat_search.waits_for_search(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessages)
         {
             self.search

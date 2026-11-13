@@ -284,29 +284,29 @@ fn an_older_program_page_does_not_land_on_the_list_a_sort_reset() {
 }
 
 #[test]
-fn a_commit_that_cannot_be_sent_keeps_the_stars_stuck_and_is_not_retried() {
+fn a_commit_that_cannot_be_sent_keeps_the_stars_stuck_and_is_sent_again_later() {
     use crate::ids::{ChatId, MessageId};
+    use crate::paid_reaction::ACCUMULATE_MS;
     let mut t = Flaky::new();
     t.driver
         .add_paid_reaction(ChatId(-100), MessageId(7), 3, None, 0)
         .unwrap();
     t.sender.refuse(&["commitPendingPaidMessageReactions"]);
-    assert!(
-        t.driver
-            .paid_reaction_tick(crate::paid_reaction::ACCUMULATE_MS)
-    );
+    assert!(t.driver.paid_reaction_tick(ACCUMULATE_MS));
     let paid = &t.driver.session.payments.paid;
     assert_eq!(paid.total_pending(), 3, "TDLib still holds the Stars");
     assert!(!paid.has_pending(), "no toast and no Undo for them");
     assert_eq!(t.driver.session.payments.notices.len(), 1);
-    // No later window sends it again, with the sender working or not.
+    // Not before the wait is over.
     t.sender.refuse(&[]);
-    assert!(
-        !t.driver
-            .paid_reaction_tick(10 * crate::paid_reaction::ACCUMULATE_MS)
-    );
+    assert!(!t.driver.paid_reaction_tick(ACCUMULATE_MS + 1_000));
     assert_eq!(t.sender.count("commitPendingPaidMessageReactions"), 0);
+    // Then it goes out once, the user is not told again, and its answer
+    // settles the Stars.
+    assert!(t.driver.paid_reaction_tick(ACCUMULATE_MS + 2_000));
+    assert_eq!(t.sender.count("commitPendingPaidMessageReactions"), 1);
     assert_eq!(t.driver.session.payments.notices.len(), 1);
+    assert!(t.driver.session.payments.paid.in_flight());
 }
 
 #[test]
@@ -811,7 +811,11 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
     t.answer("getStarSubscriptions", subs("more"));
     t.driver.fetch_more_star_subscriptions().unwrap();
     // An edit landed while the appended page is out.
-    t.driver.session.payments.star_subscriptions.edit_done();
+    {
+        let list = &mut t.driver.session.payments.star_subscriptions;
+        list.begin_edit(crate::ids::RequestId(900));
+        list.edit_done(crate::ids::RequestId(900));
+    }
     // The appended page is out: no first-page request beside it.
     assert!(
         t.driver
@@ -838,7 +842,11 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
     let list = &t.driver.session.payments.star_subscriptions;
     assert!(!list.is_stale() && !list.is_loading());
     // A refetch that is refused shows its error and is not asked every frame.
-    t.driver.session.payments.star_subscriptions.edit_done();
+    {
+        let list = &mut t.driver.session.payments.star_subscriptions;
+        list.begin_edit(crate::ids::RequestId(901));
+        list.edit_done(crate::ids::RequestId(901));
+    }
     t.sender.refuse(&["getStarSubscriptions"]);
     assert!(t.driver.refresh_star_subscriptions_if_stale().is_err());
     let payments = &t.driver.session.payments;
@@ -890,7 +898,7 @@ fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_asked_again_after_the_wait
     assert!(t.driver.refresh_proxies_if_stale_at(now).is_err());
     assert_eq!(
         t.driver.session.settings.proxy.ops.fetch(),
-        ProxyFetch::NotSentStale { at: now }
+        ProxyFetch::NotSentStale { at: now, tries: 0 }
     );
     assert!(
         t.driver.session.settings.proxy.busy(),

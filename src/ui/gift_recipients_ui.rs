@@ -17,7 +17,7 @@ use gpui_kit::component::input::Input;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::gift_recipients::{Heading, People, RowStatus, Section, sections};
+use quill::gift_recipients::{Heading, People, RowStatusIcon, Section, sections};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::Session;
 use quill::telegram::envelope::ChatKind;
@@ -172,7 +172,7 @@ fn recipient_sections(session: &Session, query: &str) -> Vec<Section> {
         session
             .search
             .search
-            .top_chats
+            .top_chat_ids()
             .iter()
             .filter_map(|chat| match session.chats.get(&chat.0)?.kind {
                 ChatKind::Private { user_id } => Some(user_id.0),
@@ -225,7 +225,7 @@ fn heading_label(heading: Heading, cx: &App) -> impl IntoElement {
 fn recipient_row(
     session: &Session,
     user_id: i64,
-    status: RowStatus,
+    status: RowStatusIcon,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let name = session
@@ -233,18 +233,18 @@ fn recipient_row(
         .map(|user| user.display_name())
         .unwrap_or_default();
     let status = match status {
-        RowStatus::Yourself => Some(tr(keys::GIFT_SELF_STATUS).to_string()),
-        RowStatus::BirthdayToday => Some(tr_with(
+        RowStatusIcon::Yourself => Some(tr(keys::GIFT_SELF_STATUS).to_string()),
+        RowStatusIcon::BirthdayToday => Some(tr_with(
             keys::GIFT_LIST_BIRTHDAY_STATUS_TODAY,
             &[("emoji", "\u{1F382}")],
         )),
-        RowStatus::BirthdayYesterday => {
+        RowStatusIcon::BirthdayYesterday => {
             Some(tr(keys::GIFT_LIST_BIRTHDAY_STATUS_YESTERDAY).to_string())
         }
-        RowStatus::BirthdayTomorrow => {
+        RowStatusIcon::BirthdayTomorrow => {
             Some(tr(keys::GIFT_LIST_BIRTHDAY_STATUS_TOMORROW).to_string())
         }
-        RowStatus::Plain => None,
+        RowStatusIcon::Plain => None,
     };
     let label = match status.as_deref() {
         Some(status) => format!("{name}, {status}"),

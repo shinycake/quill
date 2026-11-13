@@ -250,7 +250,9 @@ fn a_send_whose_request_was_lost_does_not_block_the_next_tap() {
         .session
         .requests
         .take_purpose(crate::state::RequestPurpose::SendMessageAlbum);
-    assert!(lost.is_some());
+    driver
+        .session
+        .settle_lost_request(lost.expect("the send was out"));
     driver.send_quick_reply(ChatId(31), 2).unwrap();
     let sent = recorder
         .snapshot()
@@ -263,8 +265,10 @@ fn a_send_whose_request_was_lost_does_not_block_the_next_tap() {
 #[test]
 fn a_double_click_on_add_creates_the_message_once() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
-    driver.add_quick_reply_text("hours", "Hi").unwrap();
-    driver.add_quick_reply_text("hours", "Hi").unwrap();
+    let first = driver.add_quick_reply_text("hours", "Hi").unwrap();
+    let second = driver.add_quick_reply_text("hours", "Hi").unwrap();
+    assert!(first.is_some());
+    assert_eq!(second, first, "the second press waits for the same request");
     let adds = |recorder: &Recorder| {
         recorder
             .snapshot()
@@ -276,6 +280,25 @@ fn a_double_click_on_add_creates_the_message_once() {
     // Another text is another change.
     driver.add_quick_reply_text("hours", "Bye").unwrap();
     assert_eq!(adds(&recorder), 2);
+}
+
+/// Sweep r4-10: a second Delete of a shortcut whose delete is on its way
+/// gets that request back, so its screen enters `Deleting` for it.
+#[test]
+fn a_second_delete_of_the_same_shortcut_returns_the_request_in_flight() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    let first = driver.delete_quick_reply_shortcut(9).unwrap();
+    let second = driver.delete_quick_reply_shortcut(9).unwrap();
+    assert!(first.is_some());
+    assert_eq!(second, first);
+    let deletes = recorder
+        .snapshot()
+        .iter()
+        .filter(|json| json.contains("deleteQuickReplyShortcut"))
+        .count();
+    assert_eq!(deletes, 1, "nothing is sent twice");
+    let other = driver.delete_quick_reply_shortcut(10).unwrap();
+    assert!(other.is_some() && other != first);
 }
 
 #[test]

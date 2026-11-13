@@ -200,6 +200,16 @@ fn shutdown_ends_every_helper_at_once() {
     assert_eq!(reports_until_threads_end(&mut host), Vec::new());
 }
 
+/// With no account folder configured, a host that was shut down still
+/// refuses to open: no helper starts after `shutdown()`.
+#[test]
+fn an_open_after_shutdown_starts_no_helper_without_an_account_folder() {
+    let (mut host, _) = host(Some(stand_in("stays-up.sh")));
+    host.shutdown();
+    assert_eq!(host.open(&request(5)), Err(CarrierError::Terminated));
+    assert!(host.carriers.is_empty(), "no helper was spawned");
+}
+
 #[test]
 fn a_shutdown_with_nothing_running_or_exiting_has_nothing_to_wait_for() {
     let (mut host, _) = host(Some(stand_in("stays-up.sh")));
@@ -304,4 +314,22 @@ fn without_a_folder_of_its_own_no_carrier_opens() {
     assert!(folder.starts_with(&root) && folder.is_dir());
     host.shutdown();
     assert!(!folder.exists());
+}
+
+/// A stopped host stays stopped: an open after the shutdown claims no new
+/// folder (the retry clock is for a failed claim, not for a host that
+/// gave its folder up).
+#[test]
+fn an_open_after_the_shutdown_claims_no_new_folder() {
+    let root = crate::scratch::process_dir("carrier-host")
+        .join("after-shutdown")
+        .join("webview-carrier");
+    let (mut host, _) = host_with(Some(stand_in("stays-up.sh")), Some(root.clone()));
+    let folder = host.data_folder().map(Path::to_path_buf).unwrap();
+    host.shutdown();
+    assert!(!folder.exists());
+    assert!(matches!(host.folder, Folder::Stopped));
+    assert_eq!(host.open(&request(5)), Err(CarrierError::Terminated));
+    assert_eq!(host.data_folder(), None);
+    assert!(!host.exiting());
 }

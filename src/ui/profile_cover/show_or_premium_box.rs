@@ -18,7 +18,7 @@ use quill::privacy::PrivacyRuleDetail;
 use quill::state::ReadDate;
 use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// What the box asks you to show (tdesktop `Ui::ShowOrPremium`).
@@ -95,10 +95,20 @@ impl QuillApp {
         user_id: i64,
         cx: &mut Context<Self>,
     ) {
+        // The change of this kind is already out: opening again shows the
+        // same wait, so its answer's toast is not lost.
+        let stage = match self.profile_cover.show_or_premium {
+            Some(ShowOrPremiumBox {
+                kind: open,
+                stage: saving @ ShowStage::Saving(_),
+                ..
+            }) if open == kind => saving,
+            _ => ShowStage::Choosing,
+        };
         self.profile_cover.show_or_premium = Some(ShowOrPremiumBox {
             kind,
             user_id,
-            stage: ShowStage::Choosing,
+            stage,
         });
         self.open_box(DialogKind::ShowOrPremium);
         cx.notify();
@@ -312,15 +322,12 @@ impl QuillApp {
                             })),
                     ),
             );
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

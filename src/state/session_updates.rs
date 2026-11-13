@@ -48,13 +48,13 @@ impl Session {
             self.chats_state.send_as_options.clear();
             self.messages.share_search = ShareSearch::default();
             self.calls.add_people_search = ShareSearch::default();
-            self.calls.invite_results = None;
+            self.calls.clear_invite_results();
             self.messages.forwards.clear();
         }
         if matches!(state, AuthorizationState::LoggingOut) {
             self.settle_account_requests();
             self.calls.add_people_search = ShareSearch::default();
-            self.calls.invite_results = None;
+            self.calls.clear_invite_results();
             self.search.search.close();
             self.search.chat_search.close();
             self.messages.forwards.forget_flights();
@@ -112,28 +112,22 @@ impl Session {
                         self.chat_list.promoted_chats.remove(&pos.chat_id.0);
                     }
                 }
-                let before = (chat.in_main_list, chat.order);
-                if pos.order == 0 {
-                    chat.in_main_list = false;
-                } else {
-                    chat.order = pos.order;
-                    chat.is_pinned = pos.is_pinned;
-                    chat.in_main_list = true;
-                }
-                if before != (chat.in_main_list, chat.order) {
+                let before = chat.main.map(|position| position.order);
+                chat.main = (pos.order != 0).then_some(ListPosition {
+                    order: pos.order,
+                    is_pinned: pos.is_pinned,
+                });
+                if before != chat.main.map(|position| position.order) {
                     self.chat_order_sync.moved.insert(pos.chat_id.0);
                 }
             }
             ChatList::Archive => {
-                let before = (chat.in_archive, chat.archive_order);
-                if pos.order == 0 {
-                    chat.in_archive = false;
-                } else {
-                    chat.archive_order = pos.order;
-                    chat.archive_is_pinned = pos.is_pinned;
-                    chat.in_archive = true;
-                }
-                if before != (chat.in_archive, chat.archive_order) {
+                let before = chat.archive.map(|position| position.order);
+                chat.archive = (pos.order != 0).then_some(ListPosition {
+                    order: pos.order,
+                    is_pinned: pos.is_pinned,
+                });
+                if before != chat.archive.map(|position| position.order) {
                     self.chat_order_sync.moved.insert(pos.chat_id.0);
                 }
             }
@@ -168,7 +162,7 @@ impl Session {
             None => {
                 self.chat_list.promoted_chats.remove(&chat_id.0);
                 if let Some(chat) = self.chats.get_mut(&chat_id.0)
-                    && std::mem::take(&mut chat.in_main_list)
+                    && chat.main.take().is_some()
                 {
                     self.chat_order_sync.moved.insert(chat_id.0);
                 }
@@ -182,7 +176,7 @@ impl Session {
             Some(pos) => self.apply_position_fields(pos),
             None => {
                 if let Some(chat) = self.chats.get_mut(&chat_id.0)
-                    && std::mem::take(&mut chat.in_archive)
+                    && chat.archive.take().is_some()
                 {
                     self.chat_order_sync.moved.insert(chat_id.0);
                 }

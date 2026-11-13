@@ -45,7 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let options = &mut self.session.payments.giveaway.options;
-        options.begin(boosted_chat_id);
+        options.retarget(boosted_chat_id);
         if !self.chats_path_active() {
             // Nothing is sent: the form shows the failure with Retry, not
             // "not available".
@@ -56,7 +56,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetPremiumGiveawayOptions,
             Some(crate::ids::ChatId(boosted_chat_id)),
         );
-        self.session.payments.giveaway.options.premium.sent(extra);
+        let premium_list = &mut self.session.payments.giveaway.options.premium;
+        premium_list.begin_with(extra);
         let premium = self.send_json_request(
             extra,
             &get_premium_giveaway_payment_options(extra, boosted_chat_id),
@@ -68,13 +69,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .options
                 .premium
                 .fail_dropping_data(send_failed_line("Could not load the prices"));
-        } else {
-            self.session.payments.giveaway.options.premium.sent(extra);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetStarGiveawayOptions, None);
-        self.session.payments.giveaway.options.stars.sent(extra);
+        let stars_list = &mut self.session.payments.giveaway.options.stars;
+        stars_list.begin_with(extra);
         let stars = self.send_json_request(extra, &get_star_giveaway_payment_options(extra));
         if stars.is_err() {
             self.session
@@ -83,8 +83,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .options
                 .stars
                 .fail_dropping_data(send_failed_line("Could not load the prices"));
-        } else {
-            self.session.payments.giveaway.options.stars.sent(extra);
         }
         premium.and(stars).map(|_| ())
     }

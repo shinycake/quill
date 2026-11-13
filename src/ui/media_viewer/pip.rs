@@ -224,7 +224,7 @@ impl QuillApp {
             .session()
             .filter(|session| &session.account == account)
             .or_else(|| {
-                let live = self.background.client(account)?.live.as_ref()?;
+                let live = self.background.client(account)?.live()?;
                 Some(&live.driver.session)
             });
         session
@@ -273,7 +273,7 @@ impl QuillApp {
         player.clear_watchers();
         self.viewer.clip.play(item.message_id, player);
         self.create_viewer_sliders(duration, cx);
-        self.spawn_viewer_session_tick(cx);
+        self.ensure_viewer_session_tick(cx);
         cx.notify();
     }
 
@@ -311,7 +311,6 @@ impl QuillApp {
             Some(index) => MediaViewer::open(items, index),
             None => MediaViewer::open(vec![item], 0),
         };
-        self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         let taken = self

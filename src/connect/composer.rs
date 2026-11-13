@@ -557,7 +557,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 stale: previous
                     .filter(|s| s.chat_id == chat_id)
                     .and_then(|mut s| s.members.take_data()),
-                request: Some(extra),
+                request: extra,
             },
         });
         if let Err(err) = self

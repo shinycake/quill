@@ -2,6 +2,124 @@
 use super::*;
 use crate::search_filters::SearchMediaKind;
 use crate::telegram::envelope::{CalendarDay, ParsedChatMember};
+use std::collections::HashMap;
+
+/// The jump lookup of each window (a date pick, a corner "@" / heart
+/// button), one per window (`None` is the main window's). A newer ask of a
+/// window replaces its earlier lookup, so the earlier answer, arriving
+/// after, changes nothing.
+#[derive(Debug, Default)]
+pub struct JumpLookups(HashMap<Option<ChatId>, JumpLookup>);
+
+impl JumpLookups {
+    fn begin(&mut self, window: Option<ChatId>, request: RequestId, chat: ChatId) {
+        self.0.insert(window, JumpLookup::Asking { request, chat });
+    }
+
+    /// `request` answered or failed: whether it is the ask of its window
+    /// (and so ends it).
+    fn settle(&mut self, pending: Option<&PendingRequest>) -> bool {
+        let Some(pending) = pending else {
+            return false;
+        };
+        let window = pending.asked_in.chat();
+        match self.0.get(&window) {
+            Some(JumpLookup::Asking { request, .. }) if *request == pending.id => {
+                self.0.remove(&window);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn set(&mut self, window: Option<ChatId>, lookup: JumpLookup) {
+        self.0.insert(window, lookup);
+    }
+
+    /// The main window left `chat` (`Some`), or every window's lookup goes
+    /// (`None`): what the main window asked, resolved or found nothing for
+    /// in that chat. A chat window's lookup is its own and stays.
+    fn forget_chat(&mut self, chat: Option<ChatId>) {
+        let Some(chat) = chat else {
+            self.0.clear();
+            return;
+        };
+        self.0.retain(|window, lookup| match lookup {
+            JumpLookup::NoMedia => window.is_some(),
+            JumpLookup::Failed => true,
+            JumpLookup::Asking { chat: asked, .. } => !(window.is_none() && *asked == chat),
+            JumpLookup::Resolved(jump) => !(window.is_none() && jump.chat_id == chat),
+        });
+    }
+
+    /// A chat window closed: its lookup goes with it.
+    pub(crate) fn forget_window(&mut self, window: ChatId) {
+        self.0.remove(&Some(window));
+    }
+
+    /// The request `window`'s lookup waits for, if it is out.
+    pub(crate) fn asked_in(&self, window: Option<ChatId>) -> Option<RequestId> {
+        match self.0.get(&window) {
+            Some(JumpLookup::Asking { request, .. }) => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// The jumps resolved and waiting for the driver to start them. Notes
+    /// and asks stay.
+    pub(crate) fn take_resolved(&mut self) -> Vec<ViewJump> {
+        let mut jumps = Vec::new();
+        self.0.retain(|_, lookup| match lookup {
+            JumpLookup::Resolved(jump) => {
+                jumps.push(*jump);
+                false
+            }
+            _ => true,
+        });
+        jumps
+    }
+
+    /// The windows whose date lookup failed since the last call, each once.
+    pub(crate) fn take_failed(&mut self) -> Vec<Option<ChatId>> {
+        let mut windows = Vec::new();
+        self.0.retain(|window, lookup| match lookup {
+            JumpLookup::Failed => {
+                windows.push(*window);
+                false
+            }
+            _ => true,
+        });
+        windows
+    }
+
+    /// Whether `window`'s calendar box says "no media".
+    fn no_media(&self, window: Option<ChatId>) -> bool {
+        matches!(self.0.get(&window), Some(JumpLookup::NoMedia))
+    }
+
+    /// `window`'s note goes; its ask or resolved jump and every other
+    /// window's lookup stay.
+    fn clear_note_in(&mut self, window: Option<ChatId>) {
+        if self.no_media(window) {
+            self.0.remove(&window);
+        }
+    }
+}
+
+impl SearchDomainState {
+    /// The line `window`'s calendar box draws for a shared-media day with
+    /// no media.
+    pub fn date_jump_note(&self, window: Option<ChatId>) -> Option<String> {
+        self.jump_lookups
+            .no_media(window)
+            .then(|| crate::lang::tr(crate::lang::keys::Q_MISC_NO_MEDIA_TO_JUMP_TO).to_string())
+    }
+
+    /// `window`'s "no media" note goes; its resolved jump stays.
+    pub(crate) fn clear_date_jump_note_for(&mut self, window: Option<ChatId>) {
+        self.jump_lookups.clear_note_in(window);
+    }
+}
 
 impl Session {
     /// Open the calendar box for the open chat. `None` when no chat is open.
@@ -12,17 +130,46 @@ impl Session {
         } else {
             SearchMediaKind::All
         };
-        let generation = self.next_calendar_generation();
-        self.search.clear_date_jump_note();
-        self.search.history_calendar = Some(HistoryCalendar::new(chat_id, media, now, generation));
+        let window = self.view_in_place();
+        self.search.clear_date_jump_note_for(window);
+        self.search.history_calendar = Some(HistoryCalendar::new(chat_id, media, now));
         self.search.history_calendar.as_ref()
     }
 
-    /// The generation for a calendar being opened: one more than the last
-    /// one opened, closed or not.
-    pub(crate) fn next_calendar_generation(&mut self) -> u64 {
-        self.search.calendar_generation = self.search.calendar_generation.saturating_add(1);
-        self.search.calendar_generation
+    /// `getChatMessageByDate` or the corner buttons' `searchChatMessages`
+    /// went out as `request`: it is the ask of the window that sent it.
+    pub fn begin_jump_ask(&mut self, request: RequestId) {
+        if let Some(pending) = self.requests.get(request)
+            && let Some(chat) = pending.chat_id
+        {
+            let window = pending.asked_in.chat();
+            self.search.jump_lookups.begin(window, request, chat);
+        }
+    }
+
+    /// The corner button's search answered: the oldest hit is the jump.
+    /// Only the ask of its window lands; an older ask answering after a
+    /// newer one began, or one of a chat the window left, changes nothing.
+    pub(crate) fn accept_unread_jump(
+        &mut self,
+        oldest: Option<MessageId>,
+        pending: Option<&PendingRequest>,
+    ) {
+        if !self.search.jump_lookups.settle(pending) {
+            return;
+        }
+        if let Some(jump) =
+            oldest.and_then(|id| ViewJump::for_request(pending, id, DateJumpMode::Exact))
+        {
+            self.search
+                .jump_lookups
+                .set(jump.window, JumpLookup::Resolved(jump));
+        }
+    }
+
+    /// The corner button's search failed: the window's ask ends.
+    pub(crate) fn fail_unread_jump(&mut self, pending: Option<&PendingRequest>) {
+        self.search.jump_lookups.settle(pending);
     }
 
     pub fn close_history_calendar(&mut self) {
@@ -34,6 +181,7 @@ impl Session {
     /// "nothing found" note. `chat` limits it to that chat's pieces
     /// (`None`: all of them).
     pub fn clear_date_jump_ui(&mut self, chat: Option<ChatId>) {
+        self.search.jump_lookups.forget_chat(chat);
         let is_chat = |id: ChatId| chat.is_none_or(|chat| chat == id);
         if self
             .search
@@ -42,12 +190,6 @@ impl Session {
             .is_some_and(|calendar| is_chat(calendar.chat_id))
         {
             self.search.history_calendar = None;
-        }
-        if matches!(
-            self.search.date_jump,
-            DateJumpAnswer::Resolved(jump) if jump.window.is_none() && is_chat(jump.chat_id)
-        ) {
-            self.search.date_jump = DateJumpAnswer::Idle;
         }
         // A date jump still loading becomes a plain one: it lands on the
         // message TDLib resolved, without retargeting.
@@ -64,7 +206,6 @@ impl Session {
                 then: JumpLanding::Message,
             };
         }
-        self.search.clear_date_jump_note();
     }
 
     pub(crate) fn apply_message_calendar(
@@ -72,35 +213,28 @@ impl Session {
         days: Vec<CalendarDay>,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation })) =
-            pending.map(|p| p.purpose)
-        else {
-            return;
-        };
-        let chat_id = pending.and_then(|p| p.chat_id);
-        if let Some(calendar) = self
-            .search
-            .history_calendar
-            .as_mut()
-            .filter(|c| c.generation == generation && Some(c.chat_id) == chat_id)
+        if let Some(calendar) = self.search.history_calendar.as_mut()
+            && pending.is_some_and(|p| {
+                matches!(
+                    p.purpose,
+                    RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar)
+                ) && p.chat_id == Some(calendar.chat_id)
+            })
         {
-            calendar.accept(days);
+            calendar.accept(pending.map(|p| p.id), days);
         }
     }
 
     pub(crate) fn fail_message_calendar(&mut self, pending: Option<&PendingRequest>) {
-        let Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { generation })) =
-            pending.map(|p| p.purpose)
-        else {
-            return;
-        };
-        if let Some(calendar) = self
-            .search
-            .history_calendar
-            .as_mut()
-            .filter(|c| c.generation == generation)
+        if let Some(calendar) = self.search.history_calendar.as_mut()
+            && pending.is_some_and(|p| {
+                matches!(
+                    p.purpose,
+                    RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar)
+                )
+            })
         {
-            calendar.fail();
+            calendar.fail(pending.map(|p| p.id));
         }
     }
 
@@ -110,20 +244,51 @@ impl Session {
         message_id: MessageId,
         pending: Option<&PendingRequest>,
     ) {
-        self.search.date_jump = ViewJump::for_request(pending, message_id, DateJumpMode::Next)
-            .map_or(DateJumpAnswer::Idle, DateJumpAnswer::Resolved);
+        if !self.search.jump_lookups.settle(pending) {
+            return;
+        }
+        if let Some(jump) = ViewJump::for_request(pending, message_id, DateJumpMode::Next) {
+            self.search
+                .jump_lookups
+                .set(jump.window, JumpLookup::Resolved(jump));
+        }
     }
 
     /// `getChatMessageByDate` failed: a 404 means nothing is that old, so
-    /// the jump goes to the start of the chat.
+    /// the jump goes to the start of the chat. Any other error is kept with
+    /// its window for the UI's status note there (the box closed when the
+    /// day was picked, so nothing in it could draw it).
     pub(crate) fn fail_date_jump(&mut self, not_found: bool, pending: Option<&PendingRequest>) {
-        if not_found {
-            self.search.date_jump =
-                ViewJump::for_request(pending, FIRST_MESSAGE_ID, DateJumpMode::Oldest)
-                    .map_or(DateJumpAnswer::Idle, DateJumpAnswer::Resolved);
-        } else {
-            self.search.date_jump = DateJumpAnswer::NotFound(DateJumpNote::Failed);
+        if !self.search.jump_lookups.settle(pending) {
+            return;
         }
+        let Some(pending) = pending else {
+            return;
+        };
+        if !not_found {
+            self.search
+                .jump_lookups
+                .set(pending.asked_in.chat(), JumpLookup::Failed);
+            return;
+        }
+        if let Some(jump) =
+            ViewJump::for_request(Some(pending), FIRST_MESSAGE_ID, DateJumpMode::Oldest)
+        {
+            self.search
+                .jump_lookups
+                .set(pending.asked_in.chat(), JumpLookup::Resolved(jump));
+        }
+    }
+
+    /// The windows whose date lookup failed, for the UI to say so in each
+    /// ([`JumpLookups::take_failed`]); `None` is the main window.
+    pub fn take_failed_date_jumps(&mut self) -> Vec<Option<ChatId>> {
+        self.search.jump_lookups.take_failed()
+    }
+
+    /// A chat window closed: its date lookup goes with it.
+    pub(crate) fn forget_window_jump_lookup(&mut self, window: ChatId) {
+        self.search.jump_lookups.forget_window(window);
     }
 
     /// Start a date jump: the same load-around pipeline as a search hit,
@@ -251,5 +416,144 @@ mod tests {
     #[test]
     fn first_message_id_is_server_id_one() {
         assert_eq!(super::FIRST_MESSAGE_ID.0, 1_048_576);
+    }
+
+    use crate::diagnostics::{DiagnosticSink, MemorySink};
+    use crate::ids::{AccountKey, ChatId, MessageId};
+    use crate::state::{JumpLookup, RequestPurpose, Session};
+    use std::sync::Arc;
+
+    fn session() -> Session {
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        Session::new(AccountKey::primary(), sink)
+    }
+
+    fn ask(session: &mut Session) -> crate::ids::RequestId {
+        ask_in(session, 11)
+    }
+
+    fn ask_in(session: &mut Session, chat: i64) -> crate::ids::RequestId {
+        let id = session.request(RequestPurpose::GetChatMessageByDate, Some(ChatId(chat)));
+        session.begin_jump_ask(id);
+        id
+    }
+
+    fn resolved(session: &Session, window: Option<ChatId>) -> Option<MessageId> {
+        match session.search.jump_lookups.0.get(&window) {
+            Some(JumpLookup::Resolved(jump)) => Some(jump.message_id),
+            _ => None,
+        }
+    }
+
+    /// 09-001: the newest pick of a window wins, whatever order the answers
+    /// arrive in.
+    #[test]
+    fn the_older_date_answer_never_wins_over_the_newer_pick() {
+        for newer_first in [true, false] {
+            let mut session = session();
+            let older = ask(&mut session);
+            let newer = ask(&mut session);
+            let (first, second) = if newer_first {
+                (newer, older)
+            } else {
+                (older, newer)
+            };
+            for (request, message) in [(first, 100), (second, 200)] {
+                let pending = session.requests.take(request);
+                session.accept_date_message(MessageId(message), pending.as_ref());
+            }
+            let expected = if newer_first { 100 } else { 200 };
+            assert_eq!(resolved(&session, None), Some(MessageId(expected)));
+        }
+    }
+
+    /// An answer nobody asked for, or one of a window that left, changes
+    /// nothing.
+    #[test]
+    fn an_unasked_date_answer_is_dropped() {
+        let mut session = session();
+        let stray = session.request(RequestPurpose::GetChatMessageByDate, Some(ChatId(11)));
+        let pending = session.requests.take(stray);
+        session.accept_date_message(MessageId(5), pending.as_ref());
+        assert_eq!(resolved(&session, None), None);
+        let asked = ask(&mut session);
+        session.clear_date_jump_ui(None);
+        let pending = session.requests.take(asked);
+        session.accept_date_message(MessageId(5), pending.as_ref());
+        assert_eq!(resolved(&session, None), None);
+    }
+
+    /// The main window leaving a chat forgets the main window's ask for it,
+    /// not the ask of that chat's own window; the late answer jumps nowhere.
+    #[test]
+    fn the_main_window_leaving_a_chat_forgets_its_own_ask_only() {
+        let mut session = session();
+        // The same chat open in its own window: ask in that window's view.
+        session.requests.view = crate::state::AskingView::Window {
+            chat: ChatId(11),
+            opening: 0,
+        };
+        let window_ask = ask_in(&mut session, 11);
+        session.requests.view = crate::state::AskingView::Main;
+        let main_ask = ask_in(&mut session, 11);
+        // The main window selects another chat.
+        session.clear_date_jump_ui(Some(ChatId(11)));
+        for request in [main_ask, window_ask] {
+            let pending = session.requests.take(request);
+            session.accept_date_message(MessageId(7), pending.as_ref());
+        }
+        assert_eq!(resolved(&session, None), None);
+        assert_eq!(resolved(&session, Some(ChatId(11))), Some(MessageId(7)));
+    }
+
+    /// The corner buttons' answers settle by request as well: the older ask
+    /// of a window answering after a newer one began does not win, and an
+    /// error ends its ask.
+    #[test]
+    fn the_older_unread_answer_never_wins_over_the_newer_ask() {
+        use crate::state::{MessagesPurpose, UnreadJumpKind};
+        let purpose = RequestPurpose::Messages(MessagesPurpose::JumpToUnread {
+            kind: UnreadJumpKind::Mention,
+        });
+        for newer_first in [true, false] {
+            let mut session = session();
+            let mut asks = Vec::new();
+            for _ in 0..2 {
+                let id = session.request(purpose, Some(ChatId(11)));
+                session.begin_jump_ask(id);
+                asks.push(id);
+            }
+            let order = if newer_first { [1, 0] } else { [0, 1] };
+            for at in order {
+                let pending = session.requests.take(asks[at]);
+                session.accept_unread_jump(Some(MessageId(100 + at as i64)), pending.as_ref());
+            }
+            assert_eq!(resolved(&session, None), Some(MessageId(101)));
+        }
+        let mut session = session();
+        let id = session.request(purpose, Some(ChatId(11)));
+        session.begin_jump_ask(id);
+        let pending = session.requests.take(id);
+        session.fail_unread_jump(pending.as_ref());
+        let late = session.request(purpose, Some(ChatId(11)));
+        let pending = session.requests.take(late);
+        session.accept_unread_jump(Some(MessageId(5)), pending.as_ref());
+        assert_eq!(resolved(&session, None), None, "an ask nobody holds");
+    }
+
+    /// A chat window closing takes its lookup with it.
+    #[test]
+    fn a_closed_window_forgets_its_date_ask() {
+        let mut session = session();
+        session.requests.view = crate::state::AskingView::Window {
+            chat: ChatId(11),
+            opening: 0,
+        };
+        let asked = ask_in(&mut session, 11);
+        session.requests.view = crate::state::AskingView::Main;
+        session.forget_window_jump_lookup(ChatId(11));
+        let pending = session.requests.take(asked);
+        session.accept_date_message(MessageId(7), pending.as_ref());
+        assert_eq!(resolved(&session, Some(ChatId(11))), None);
     }
 }

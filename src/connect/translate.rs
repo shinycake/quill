@@ -82,12 +82,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `toggleChatIsTranslatable`: tdesktop's bar-menu Hide (`false`) and
     /// the toast's Undo (`true`). TDLib answers with
     /// `updateChatIsTranslatable`, which drives the bar; the local flag is
-    /// set at once and put back when TDLib refuses.
+    /// set at once and put back when TDLib refuses. The request is
+    /// returned so a surface can settle on its own answer
+    /// (`RequestAcks`).
     pub fn toggle_chat_is_translatable(
         &mut self,
         chat_id: ChatId,
         is_translatable: bool,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -112,7 +114,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 shown: is_translatable,
             });
         }
-        Ok(())
+        Ok(extra)
     }
 
     /// `toggleSupergroupHasAutomaticTranslation` for a channel; needs

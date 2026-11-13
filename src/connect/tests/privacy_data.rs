@@ -379,6 +379,92 @@ fn a_failed_setting_keeps_its_line_when_another_control_succeeds() {
     cleanup(f);
 }
 
+/// 09-002: a reset while a fetch is out. The numbers of the fetch asked
+/// before the reset are dropped, the refetch behind it lands, and the
+/// reset's `ok` leaves the refetch alone.
+#[test]
+fn a_reset_leaves_only_the_fetch_asked_after_it() {
+    let usage = |extra: &str, received: u64| {
+        format!(
+            r#"{{"@type":"networkStatistics","since_date":1700000000,"entries":[{{"@type":"networkStatisticsEntryFile","file_type":{{"@type":"fileTypePhoto"}},"network_type":{{"@type":"networkTypeWiFi"}},"sent_bytes":0,"received_bytes":{received}}}],"@extra":"{extra}"}}"#
+        )
+    };
+    let mut f = fixture();
+    f.1.fetch_network_statistics().unwrap();
+    let before = extra_of(&last_request(&f));
+    f.1.reset_network_statistics().unwrap();
+    let snapshot = f.2.snapshot();
+    let reset: Value = serde_json::from_str(&snapshot[snapshot.len() - 2]).unwrap();
+    assert_eq!(reset["@type"], "resetNetworkStatistics");
+    let after = extra_of(&last_request(&f));
+    ingest(&mut f, &usage(&before, 900));
+    assert!(
+        f.1.session.settings.privacy_data.network.is_loading(),
+        "the answer of the fetch asked before the reset is dropped"
+    );
+    ingest(
+        &mut f,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra_of(&reset)),
+    );
+    assert!(f.1.session.settings.privacy_data.network.is_loading());
+    ingest(&mut f, &usage(&after, 7));
+    let shown =
+        f.1.session
+            .settings
+            .privacy_data
+            .network
+            .data()
+            .map(|usage| usage.grand_total().total());
+    assert_eq!(shown, Some(7));
+    cleanup(f);
+}
+
+/// A refused reset fails its own stage: the refetch asked behind it keeps
+/// its request, and its answer lands whichever comes first.
+#[test]
+fn a_refused_reset_leaves_the_refetch_asked_after_it() {
+    for error_first in [true, false] {
+        let mut f = fixture();
+        f.1.fetch_network_statistics().unwrap();
+        f.1.reset_network_statistics().unwrap();
+        let snapshot = f.2.snapshot();
+        let reset: Value = serde_json::from_str(&snapshot[snapshot.len() - 2]).unwrap();
+        let after = extra_of(&last_request(&f));
+        let refused = format!(
+            r#"{{"@type":"error","code":500,"message":"nope","@extra":"{}"}}"#,
+            extra_of(&reset)
+        );
+        let answer = format!(
+            r#"{{"@type":"networkStatistics","since_date":1700000000,"entries":[{{"@type":"networkStatisticsEntryFile","file_type":{{"@type":"fileTypePhoto"}},"network_type":{{"@type":"networkTypeWiFi"}},"sent_bytes":0,"received_bytes":7}}],"@extra":"{after}"}}"#
+        );
+        let order = if error_first {
+            [&refused, &answer]
+        } else {
+            [&answer, &refused]
+        };
+        for message in order {
+            ingest(&mut f, message);
+            if message == &refused {
+                assert!(
+                    f.1.session
+                        .settings
+                        .privacy_data
+                        .network_reset
+                        .error()
+                        .is_some()
+                );
+            }
+        }
+        let data = &f.1.session.settings.privacy_data;
+        assert!(data.network.error().is_none());
+        assert_eq!(
+            data.network.data().map(|usage| usage.grand_total().total()),
+            Some(7)
+        );
+        cleanup(f);
+    }
+}
+
 #[test]
 fn network_usage_fetch_and_reset() {
     let mut f = fixture();
@@ -595,10 +681,20 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
     assert!(!f.1.session.chat_list.suggestions.birthdays_hidden());
     f.1.hide_suggestion(&Suggestion::Birthdays(vec![9]))
         .unwrap();
-    // A fresh list from TDLib shows them again.
+    let hide = last_request(&f);
+    // A fresh list arriving before the hide is answered does not undo it:
+    // the hide's own refusal still finds its request and restores the card.
     ingest(
         &mut f,
         r#"{"@type":"updateContactCloseBirthdays","close_birthday_users":[]}"#,
+    );
+    assert!(f.1.session.chat_list.suggestions.birthdays_hidden());
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"NO"}}"#,
+            extra_of(&hide)
+        ),
     );
     assert!(!f.1.session.chat_list.suggestions.birthdays_hidden());
     cleanup(f);
@@ -766,5 +862,106 @@ fn an_older_new_chat_save_failing_does_not_roll_back_a_newer_one() {
         Some(s)
             if s.allow_from_unknown && s.incoming_paid_message_star_count == 0
     ));
+    cleanup(f);
+}
+
+fn blocked_page(f: &Fixture, total: i32, ids: &[i64]) -> String {
+    let request = last_request(f);
+    let senders: Vec<String> = ids
+        .iter()
+        .map(|id| format!(r#"{{"@type":"messageSenderUser","user_id":{id}}}"#))
+        .collect();
+    format!(
+        r#"{{"@type":"messageSenders","total_count":{total},"senders":[{}],"@extra":"{}"}}"#,
+        senders.join(","),
+        extra_of(&request)
+    )
+}
+
+/// Sweep r4-03 04-005: opening the privacy page asks for the first page
+/// again, whatever is loaded, and the page replaces the list when it comes.
+#[test]
+fn opening_privacy_refetches_the_first_blocked_page() {
+    let mut f = fixture();
+    f.1.fetch_blocked_senders().unwrap();
+    assert_eq!(last_request(&f)["offset"], 0);
+    let page = blocked_page(&f, 3, &[61, 62]);
+    ingest(&mut f, &page);
+    assert_eq!(f.1.session.settings.blocked_ids(), &[61, 62]);
+    // Scrolling asks for the next page from the loaded length.
+    f.1.fetch_more_blocked_senders().unwrap();
+    assert_eq!(last_request(&f)["offset"], 2);
+    let page = blocked_page(&f, 3, &[63]);
+    ingest(&mut f, &page);
+    assert_eq!(f.1.session.settings.blocked_ids(), &[61, 62, 63]);
+    // The next open asks for page 0 again and keeps the list meanwhile.
+    f.1.fetch_blocked_senders().unwrap();
+    assert_eq!(last_request(&f)["offset"], 0);
+    assert_eq!(f.1.session.settings.blocked_ids().len(), 3);
+    let page = blocked_page(&f, 2, &[61, 64]);
+    ingest(&mut f, &page);
+    assert_eq!(f.1.session.settings.blocked_ids(), &[61, 64]);
+    cleanup(f);
+}
+
+/// Sweep r4-03 round 2: opening again while a next page is out sends page 0
+/// (the page asked before no longer matches), and an unblock sent while the
+/// refresh is out is not undone by its answer: the unblock's `ok` asks for
+/// the first page again.
+#[test]
+fn a_refresh_replaces_a_page_in_flight_and_an_unblock_survives_it() {
+    let mut f = fixture();
+    f.1.fetch_blocked_senders().unwrap();
+    let page = blocked_page(&f, 3, &[61, 62]);
+    ingest(&mut f, &page);
+    f.1.fetch_more_blocked_senders().unwrap();
+    let next = blocked_page(&f, 3, &[63]);
+    f.1.fetch_blocked_senders().unwrap();
+    assert_eq!(last_request(&f)["offset"], 0, "the refresh is sent");
+    let refresh = blocked_page(&f, 2, &[61, 62]);
+    ingest(&mut f, &next);
+    assert_eq!(f.1.session.settings.blocked_ids(), &[61, 62]);
+    assert!(f.1.session.settings.blocked_senders.is_loading());
+
+    f.1.unblock_sender(61).unwrap();
+    let unblock = extra_of(&last_request(&f));
+    assert_eq!(f.1.session.settings.blocked_ids(), &[62]);
+    // The refresh was asked before the unblock: it is dropped.
+    ingest(&mut f, &refresh);
+    assert_eq!(f.1.session.settings.blocked_ids(), &[62]);
+    ingest(&mut f, &format!(r#"{{"@type":"ok","@extra":"{unblock}"}}"#));
+    assert_eq!(
+        last_request(&f)["offset"],
+        0,
+        "the first page is asked again"
+    );
+    let page = blocked_page(&f, 1, &[62]);
+    ingest(&mut f, &page);
+    assert_eq!(f.1.session.settings.blocked_ids(), &[62]);
+    assert_eq!(f.1.session.settings.blocked_total(), 1);
+    cleanup(f);
+}
+
+/// Sweep r4-03: the network usage fetch holds its own request, so an older
+/// request's answer never fills it.
+#[test]
+fn network_usage_takes_only_its_own_answer() {
+    let mut f = fixture();
+    f.1.fetch_network_statistics().unwrap();
+    let request = last_request(&f);
+    ingest(
+        &mut f,
+        r#"{"@type":"networkStatistics","since_date":1,"entries":[],"@extra":"999999"}"#,
+    );
+    assert!(f.1.session.settings.privacy_data.network.is_loading());
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"networkStatistics","since_date":1,"entries":[],"@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert!(!f.1.session.settings.privacy_data.network.is_loading());
+    assert!(f.1.session.settings.privacy_data.network.data().is_some());
     cleanup(f);
 }

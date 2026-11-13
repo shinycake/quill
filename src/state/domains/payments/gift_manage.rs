@@ -4,7 +4,7 @@
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
     ExportError, ExportSend, GiftEvent, GiftListFetch, GiftManagePayload, GiftManageState,
-    ProbeOutcome, SendStage, TransferStage,
+    ProbeOutcome, SendStage, SendStep, TransferStage,
 };
 use crate::lang::{keys, tr_with};
 use crate::state::*;
@@ -50,8 +50,9 @@ impl Session {
                     list.iter().flat_map(|c| c.files.iter().cloned()).collect();
                 self.remember_files(&files);
                 let manage = &mut self.payments.gifts_manage;
-                manage.collections_fetch.settle(pending.map(|p| p.id));
-                manage.collections = list;
+                manage
+                    .collections_fetch
+                    .answered(pending.map(|p| p.id), list);
                 if manage.active_collection != 0
                     && manage.collection(manage.active_collection).is_none()
                 {
@@ -88,8 +89,7 @@ impl Session {
                 if !send.asked_gifts(pending) {
                     return;
                 }
-                send.gifts_fetch = GiftListFetch::Answered;
-                send.gifts = gifts;
+                send.set_gifts_fetch(GiftListFetch::Answered(gifts));
             }
             (
                 GiftManagePayload::PremiumOptions(options),
@@ -99,8 +99,7 @@ impl Session {
                 if !send.asked_premium(pending) {
                     return;
                 }
-                send.premium_fetch = GiftListFetch::Answered;
-                send.premium_options = options;
+                send.set_premium_fetch(GiftListFetch::Answered(options));
             }
             (
                 GiftManagePayload::TemporaryPassword { has_password },
@@ -169,13 +168,13 @@ impl Session {
                 // Stars were spent whichever dialog asked.
                 hub.stars.page.invalidate();
                 let ours = manage.send.waits_for(pending);
-                let shown = ours && matches!(manage.send.stage, SendStage::Sending(_));
+                let shown = ours && matches!(manage.send.step(), Some(SendStep::Sending(_)));
                 if ours {
-                    manage.send.stage = if shown {
-                        SendStage::Idle
+                    if shown {
+                        manage.send.set_step(SendStep::Idle);
                     } else {
-                        SendStage::Closed
-                    };
+                        manage.send.stage = SendStage::Closed;
+                    }
                 }
                 // A box closed or rebuilt for another recipient while it was
                 // out has nobody to show it: Stars moved, so say so.
@@ -186,9 +185,10 @@ impl Session {
                     ));
                     return;
                 }
-                manage.send.selected = None;
-                manage.send.stage =
-                    SendStage::Sent(crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into());
+                manage.send.select(None);
+                manage.send.set_step(SendStep::Done(
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into(),
+                ));
             }
             _ => {}
         }
@@ -359,18 +359,20 @@ impl Session {
             PaymentsPurpose::GetGiftOption(_) => manage.limits_ask.fail(pending.map(|p| p.id)),
             PaymentsPurpose::GetGiftCollections { owner } => {
                 if self.payments.hub.received.owner == Some(owner) {
-                    manage.collections_fetch.settle(pending.map(|p| p.id));
+                    manage.collections_fetch.failed(pending.map(|p| p.id));
                 }
             }
             PaymentsPurpose::GetAvailableGifts if !manage.send.asked_gifts(pending) => {}
             PaymentsPurpose::GetPremiumGiftOptions if !manage.send.asked_premium(pending) => {}
             PaymentsPurpose::GetAvailableGifts => {
-                manage.send.gifts_fetch =
-                    GiftListFetch::Failed(format!("Couldn't load the gifts: {reason}"));
+                manage.send.set_gifts_fetch(GiftListFetch::Failed(format!(
+                    "Couldn't load the gifts: {reason}"
+                )));
             }
             PaymentsPurpose::GetPremiumGiftOptions => {
-                manage.send.premium_fetch =
-                    GiftListFetch::Failed(format!("Couldn't load the Premium options: {reason}"));
+                manage.send.set_premium_fetch(GiftListFetch::Failed(format!(
+                    "Couldn't load the Premium options: {reason}"
+                )));
             }
             PaymentsPurpose::TransferGift => {
                 if let (Some(picker), Some(request)) =
@@ -396,13 +398,13 @@ impl Session {
             }
             PaymentsPurpose::SendStarGift => {
                 let ours = manage.send.waits_for(pending);
-                let shown = ours && matches!(manage.send.stage, SendStage::Sending(_));
+                let shown = ours && matches!(manage.send.step(), Some(SendStep::Sending(_)));
                 if ours && !shown {
                     manage.send.stage = SendStage::Closed;
                 }
                 let text = format!("Couldn't send the gift: {reason}. The gift may be sold out.");
                 if shown {
-                    manage.send.stage = SendStage::Failed(text);
+                    manage.send.set_step(SendStep::Failed(text));
                 } else {
                     self.payments
                         .notices

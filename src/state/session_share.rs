@@ -279,8 +279,7 @@ impl Session {
             .send_as_options
             .entry(chat_id.0)
             .or_default();
-        slot.begin();
-        slot.sent(request);
+        slot.begin_with(request);
     }
 
     /// The list `request` asked for arrived: taken only by the fetch that

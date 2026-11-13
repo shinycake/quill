@@ -67,7 +67,7 @@ impl QuillApp {
         }
         self.background
             .client(&pick.account)
-            .and_then(|client| client.live.as_ref())
+            .and_then(|client| client.live())
             .and_then(|live| ringing_incoming_call(&live.driver.session))
             .is_some_and(|(call_id, ..)| call_id == pick.call_id)
     }
@@ -88,7 +88,7 @@ impl QuillApp {
             let still = self
                 .background
                 .client(&ring.account)
-                .and_then(|client| client.live.as_ref())
+                .and_then(|client| client.live())
                 .and_then(|live| ringing_incoming_call(&live.driver.session))
                 .is_some_and(|(call_id, _, _)| call_id == ring.call_id);
             if !still {
@@ -105,7 +105,7 @@ impl QuillApp {
             .map(|ring| (ring.account.clone(), ring.call_id));
         let mut new_ring = None;
         for client in self.background.clients_mut().iter_mut() {
-            let Some(live) = client.live.as_mut() else {
+            let Some(live) = client.stage.live_mut() else {
                 continue;
             };
             let Some((call_id, user_id, is_video)) = ringing_incoming_call(&live.driver.session)
@@ -249,7 +249,7 @@ impl QuillApp {
         if let Some(live) = self
             .background
             .client_mut(&account)
-            .and_then(|client| client.live.as_mut())
+            .and_then(|client| client.live_mut())
         {
             let _ = live.driver.discard_call();
         }

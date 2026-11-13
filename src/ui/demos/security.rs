@@ -55,6 +55,7 @@ impl QuillApp {
                 recipient: quill::telegram::envelope::MessageSender::User { user_id: 11 },
                 recipient_name: "Demo chat A".into(),
                 requested_name: quote.name.clone(),
+                asked: quill::ids::RequestId(1),
                 stage: quill::marketplace::GiftPurchaseStage::Quoted {
                     price: quote.stars,
                     quote,
@@ -71,6 +72,7 @@ impl QuillApp {
                 input.set_value("A little gift for you 🎁", window, cx)
             });
         self.payments.marketplace.open_for(ChatId(11), false);
+        self.payments.marketplace.asked(quill::ids::RequestId(1));
     }
 
     pub(crate) fn demo_ready_sessions(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -116,9 +118,11 @@ impl QuillApp {
             ThemeChoice::Light
         };
         let checking = std::env::var("QUILL_DEMO_LINK_HANDLER").as_deref() == Ok("checking");
-        quill::link_handler::demo_pin(
-            checking.then_some(quill::link_handler::LinkHandlerState::Checking),
-        );
+        quill::link_handler::demo_pin(if checking {
+            quill::link_handler::DemoPin::Unread
+        } else {
+            quill::link_handler::DemoPin::Off
+        });
         self.open_settings_on(quill::settings_catalog::Page::System, cx);
         self.set_note(StatusNote::silent("screenshot demo — default app row"));
     }

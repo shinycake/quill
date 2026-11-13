@@ -10,6 +10,6 @@ mod state;
 pub use purpose::*;
 
 pub use dialog_answers::*;
-pub use folder_specs::{FolderSpecs, SpecEntry};
+pub use folder_specs::FolderSpecs;
 pub use paging::ListPaging;
 pub use state::*;

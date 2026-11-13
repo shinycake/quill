@@ -95,12 +95,12 @@ fn the_status_follows_first_frame_stall_pause_and_end() {
     let t0 = Instant::now();
     let gaps = ArrivalGaps::default();
     let mut machine = TransportMachine::live(t0);
-    assert_eq!(machine.state(), PlayState::Opening);
+    assert_eq!(machine.state(), PlayState::NotOpen);
     assert!(machine.snapshot(t0).live);
     // No frame yet: still opening, nothing to check.
     let waiting = live_status(&snapshot(None, Some(LiveState::Active)), &gaps, t0);
     machine.observe_live(&waiting, t0);
-    assert_eq!(machine.state(), PlayState::Opening);
+    assert_eq!(machine.state(), PlayState::NotOpen);
     assert_eq!(stall_check_at(&waiting, None, &gaps, t0), None);
     // The first frame: playing, looked at again when it would stall.
     let playing = live_status(&snapshot(Some(t0), None), &gaps, t0);

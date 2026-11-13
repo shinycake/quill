@@ -45,6 +45,14 @@ fn sent(app: &mut QuillApp, purpose: RequestPurpose, folder: Option<i32>) -> Req
     }
 }
 
+/// The folder's spec fetch waits for `request`, as the driver records it.
+fn spec_waits_for(app: &mut QuillApp, folder_id: i32, request: RequestId) {
+    if let Some(session) = app.demo_session.as_mut() {
+        let fetch = session.chat_list.folder_specs.fetch_mut(folder_id);
+        fetch.begin_with(request);
+    }
+}
+
 /// What TDLib answers: `json` with the request's `@extra` filled in.
 fn answer(app: &mut QuillApp, request: RequestId, body: &str) {
     let sink: Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
@@ -200,6 +208,32 @@ fn the_add_contact_box_closes_on_the_answer_and_shows_a_refusal(cx: &mut TestApp
     });
 }
 
+/// A request lost with no answer kept (a reset, or more answers than the
+/// session keeps) ends the Add button's wait in the refusal.
+#[gpui_kit::test]
+fn a_lost_add_contact_request_ends_in_the_refusal(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let request = sent(app, RequestPurpose::AddContact, None);
+        let mut dialog = AddContactDialog::new(window, cx, 42, "+1555", "Ada", "");
+        dialog.stage = AddContactStage::Saving(request);
+        app.dialogs.add_contact_dialog = Some(dialog);
+        assert!(!app.settle_add_contact(cx), "still out: it waits");
+        // The session forgets the request with no answer.
+        if let Some(session) = app.session_mut() {
+            session.requests.take(request);
+        }
+        assert!(app.settle_add_contact(cx));
+        assert!(
+            matches!(
+                app.dialogs.add_contact_dialog.as_ref().map(|d| &d.stage),
+                Some(AddContactStage::Failed(_))
+            ),
+            "not a spinner for good"
+        );
+    });
+}
+
 #[gpui_kit::test]
 fn a_save_after_the_folder_changed_goes_onto_the_fresh_folder(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
@@ -215,6 +249,7 @@ fn a_save_after_the_folder_changed_goes_onto_the_fresh_folder(cx: &mut TestAppCo
         dialog.prefill_from_spec(&base, window, cx);
         dialog.editor.toggle_included(5);
         let request = sent(app, RequestPurpose::GetChatFolder, Some(5));
+        spec_waits_for(app, 5, request);
         dialog.load = FolderLoad::Merging(request);
         app.folders.editor = Some(dialog);
         app.maybe_prefill_folder_editor(window, cx);
@@ -361,8 +396,7 @@ fn shared_delete_box(app: &mut QuillApp) -> RequestId {
             .folder_chats_to_leave
             .entry(5)
             .or_default();
-        to_leave.begin();
-        to_leave.sent(request);
+        to_leave.begin_with(request);
     }
     request
 }
@@ -438,21 +472,10 @@ fn the_copied_check_mark_goes_back_to_the_copy_icon(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_reset_statistics_stage_ends_on_the_answer_or_the_session(cx: &mut TestAppContext) {
+fn the_reset_statistics_confirmation_ends_on_the_confirm(cx: &mut TestAppContext) {
     use crate::ui::dialogs::data_extra::NetworkReset;
     let (app, mut vcx) = open(cx);
-    app.update(&mut vcx, |app, cx| {
-        let request = sent(app, RequestPurpose::ResetNetworkStatistics, None);
-        app.privacy.extra.network_reset = NetworkReset::Resetting(request);
-        app.settle_network_reset(cx);
-        assert_eq!(
-            app.privacy.extra.network_reset,
-            NetworkReset::Resetting(request),
-            "still waiting for the answer"
-        );
-        answer(app, request, r#""@type":"ok""#);
-        app.settle_network_reset(cx);
-        assert_eq!(app.privacy.extra.network_reset, NetworkReset::Idle);
+    app.update(&mut vcx, |app, _| {
         // Without a live driver the confirmed reset is local and done.
         app.privacy.extra.network_reset = NetworkReset::Confirming;
         app.reset_network_usage();
@@ -557,14 +580,19 @@ fn another_link_does_not_replace_an_add_in_flight(cx: &mut TestAppContext) {
         });
         app.folders.invite = Some(FolderInviteDialog::new(
             "first".into(),
-            InviteStage::Adding { request, info },
+            InviteStage::Adding {
+                request,
+                info,
+                next: None,
+            },
         ));
         app.open_folder_invite("second".into(), cx);
         let dialog = app.folders.invite.as_ref().expect("the box stays");
         assert_eq!(dialog.link, "first", "the add in flight keeps its box");
         assert!(matches!(
-            dialog.stage,
-            InviteStage::Adding { request: kept, .. } if kept == request
+            &dialog.stage,
+            InviteStage::Adding { request: kept, next: Some(link), .. }
+                if *kept == request && link == "second"
         ));
     });
 }
@@ -590,7 +618,11 @@ fn closing_the_add_folder_box_keeps_the_adds_answer(cx: &mut TestAppContext) {
         });
         app.folders.invite = Some(FolderInviteDialog::new(
             "first".into(),
-            InviteStage::Adding { request, info },
+            InviteStage::Adding {
+                request,
+                info,
+                next: None,
+            },
         ));
         app.close_folder_invite(cx);
         assert!(app.folders.invite.is_none(), "the box is gone");
@@ -798,5 +830,175 @@ fn cancelling_the_form_keeps_the_save_it_sent(cx: &mut TestAppContext) {
         assert!(list.is_busy(), "edit and delete wait for the answer");
         form.set_op(LinkOp::Failed("no".into()));
         assert_eq!(form.cancelled_form().op(), &LinkOp::Idle);
+    });
+}
+
+/// Sweep r4-08 fix round (16-004): an `addlist` link that came while an add
+/// was out opens once the add settles, whichever way it ended, and an add
+/// refusal the next box replaces is told in a toast. The link being added
+/// queues nothing, and a close does not open it from inside the close.
+mod queued_invite {
+    use super::*;
+
+    const ADDED: &str = r#""@type":"ok""#;
+    const LIMIT: &str = r#""@type":"error","code":400,"message":"CHATLISTS_TOO_MUCH""#;
+
+    fn start_add(app: &mut QuillApp) -> RequestId {
+        let request = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        let info = Box::new(quill::telegram::envelope::ChatFolderInviteLinkInfo {
+            folder: quill::telegram::envelope::ChatFolderInfo {
+                id: 0,
+                name: "Work".into(),
+                icon_name: String::new(),
+                color_id: -1,
+                is_shareable: false,
+                has_my_invite_links: false,
+            },
+            missing_chat_ids: vec![],
+            added_chat_ids: vec![],
+        });
+        app.folders.invite = Some(FolderInviteDialog::new(
+            "first".into(),
+            InviteStage::Adding {
+                request,
+                info,
+                next: None,
+            },
+        ));
+        request
+    }
+
+    fn opened_link(app: &QuillApp) -> Option<&str> {
+        app.folders.invite.as_ref().map(|d| d.link.as_str())
+    }
+
+    fn notes_error(app: &QuillApp) -> bool {
+        !app.screen.connection.status_note().is_empty()
+    }
+
+    #[gpui_kit::test]
+    fn the_queued_link_opens_after_each_way_the_add_ends(cx: &mut TestAppContext) {
+        for body in [ADDED, REFUSED, LIMIT] {
+            let (app, mut vcx) = open(cx);
+            app.update_in(&mut vcx, |app, _, cx| {
+                let request = start_add(app);
+                app.open_folder_invite("second".into(), cx);
+                assert_eq!(opened_link(app), Some("first"));
+                answer(app, request, body);
+                assert!(app.drive_folder_invite(cx));
+                assert_eq!(opened_link(app), Some("second"), "{body}");
+                if body == REFUSED {
+                    assert!(notes_error(app), "the refusal is told before the swap");
+                }
+            });
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_link_being_added_queues_nothing(cx: &mut TestAppContext) {
+        let (app, mut vcx) = open(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            let request = start_add(app);
+            app.open_folder_invite("first".into(), cx);
+            answer(app, request, ADDED);
+            assert!(app.drive_folder_invite(cx));
+            assert!(
+                app.folders.invite.is_none(),
+                "no second box for the folder just added"
+            );
+        });
+    }
+
+    #[gpui_kit::test]
+    fn closing_keeps_the_queued_link_for_the_adds_answer(cx: &mut TestAppContext) {
+        let (app, mut vcx) = open(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            let request = start_add(app);
+            app.open_folder_invite("second".into(), cx);
+            // A caller that closes until the box is gone opens nothing.
+            app.close_folder_invite(cx);
+            app.close_folder_invite(cx);
+            assert!(app.folders.invite.is_none());
+            answer(app, request, ADDED);
+            assert!(app.settle_folder_share(cx));
+            assert_eq!(opened_link(app), Some("second"));
+        });
+    }
+}
+
+/// A dialog whose add is out, with `next` queued behind it.
+fn adding(link: &str, request: RequestId, next: Option<&str>) -> FolderInviteDialog {
+    let info = Box::new(quill::telegram::envelope::ChatFolderInviteLinkInfo {
+        folder: quill::telegram::envelope::ChatFolderInfo {
+            id: 0,
+            name: "Work".into(),
+            icon_name: String::new(),
+            color_id: -1,
+            is_shareable: false,
+            has_my_invite_links: false,
+        },
+        missing_chat_ids: vec![],
+        added_chat_ids: vec![],
+    });
+    FolderInviteDialog::new(
+        link.into(),
+        InviteStage::Adding {
+            request,
+            info,
+            next: next.map(String::from),
+        },
+    )
+}
+
+/// Sweep r4-08 review: a link queued behind a closed add gives way to a
+/// box the user opened since, and with two closed adds the newest link wins.
+#[gpui_kit::test]
+fn a_link_queued_behind_a_closed_add_does_not_replace_a_newer_box(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        app.folders.invite = Some(adding("one", request, Some("two")));
+        app.close_folder_invite(cx);
+        // Link three opens its own box meanwhile.
+        app.open_folder_invite("three".into(), cx);
+        answer(app, request, REFUSED);
+        assert!(app.settle_folder_share(cx));
+        let dialog = app.folders.invite.as_ref().expect("link three's box");
+        assert_eq!(dialog.link, "three", "the older queued link is dropped");
+    });
+}
+
+#[gpui_kit::test]
+fn the_newest_queued_link_opens_when_closed_adds_settle_together(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let first = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        app.folders.invite = Some(adding("a", first, Some("older")));
+        app.close_folder_invite(cx);
+        let second = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        app.folders.invite = Some(adding("b", second, Some("newer")));
+        app.close_folder_invite(cx);
+        answer(app, first, REFUSED);
+        answer(app, second, REFUSED);
+        assert!(app.settle_folder_share(cx));
+        let dialog = app.folders.invite.as_ref().expect("a box opens");
+        assert_eq!(dialog.link, "newer");
+    });
+}
+
+/// A closed add whose answer the ring evicted still opens its queued link.
+#[gpui_kit::test]
+fn an_evicted_closed_add_still_opens_its_queued_link(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        app.folders.invite = Some(adding("one", request, Some("two")));
+        app.close_folder_invite(cx);
+        answer(app, request, REFUSED);
+        let demo = app.demo_session.as_mut().expect("demo session");
+        assert!(demo.chat_list.dialog_answers.take(request).is_some());
+        app.settle_folder_share(cx);
+        let dialog = app.folders.invite.as_ref().expect("a box opens");
+        assert_eq!(dialog.link, "two");
     });
 }

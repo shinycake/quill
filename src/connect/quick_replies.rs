@@ -27,16 +27,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         // answer (or error) ends it.
         let is_change = purpose == RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies);
         let subject = if is_change { Some(build("")) } else { subject };
-        // The request registry is the one record of what is on its way: the
-        // request carries what it is for, so nothing here outlives it.
+        // The stage holds each request it sent: it leaves with its answer,
+        // its error or its loss. A second press gets the request already on
+        // its way back, so its screen waits for that one answer.
         if let Some(subject) = &subject
-            && self.session.requests.pending.values().any(|p| {
-                p.purpose == purpose
-                    && p.chat_id == chat_id
-                    && p.subject_id() == Some(subject.as_str())
-            })
+            && let Some((flying, _)) =
+                self.session
+                    .settings
+                    .quick_replies
+                    .sent
+                    .iter()
+                    .find(|(_, sent)| {
+                        sent.purpose == purpose
+                            && sent.chat_id == chat_id
+                            && sent.subject == *subject
+                    })
         {
-            return Ok(None);
+            return Ok(Some(flying));
         }
         let extra = match &subject {
             Some(subject) => self
@@ -45,7 +52,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             None => self.session.request(purpose, chat_id),
         };
         let json = build(&extra.as_extra());
-        self.send_json_request(extra, &json).map(Some)
+        let sent = self.send_json_request(extra, &json)?;
+        if let Some(subject) = subject {
+            self.session.settings.quick_replies.sent.begin(
+                sent,
+                crate::state::QuickReplySend {
+                    purpose,
+                    chat_id,
+                    subject,
+                },
+            );
+        }
+        Ok(Some(sent))
     }
 
     /// `loadQuickReplyShortcuts`, once per session unless a load failed.
@@ -60,8 +78,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             qr::load_shortcuts_request,
         );
         // A send that did not leave stays unasked: the next look asks again.
-        if sent.is_ok() {
-            self.session.settings.quick_replies.shortcuts_load.begin();
+        if let Ok(Some(request)) = sent {
+            let load = &mut self.session.settings.quick_replies.shortcuts_load;
+            load.begin_with(request);
         }
         sent.map(|_| ())
     }
@@ -89,8 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         if let Some(request) = sent {
             let mut load = Fetch::Idle;
-            load.begin();
-            load.sent(request);
+            load.begin_with(request);
             self.session
                 .settings
                 .quick_replies
@@ -101,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Add a text message; the shortcut `name` is created when new.
-    /// The request, or `None` when the same change is already on its way.
+    /// The request; the same change already on its way answers for this one.
     pub fn add_quick_reply_text(
         &mut self,
         name: &str,
@@ -171,7 +189,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         .map(|_| ())
     }
 
-    /// The request, or `None` when the same delete is already on its way.
+    /// The request; the same delete already on its way answers for this one.
     pub fn delete_quick_reply_shortcut(
         &mut self,
         shortcut_id: i32,

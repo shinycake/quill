@@ -182,7 +182,7 @@ fn a_session_box_closes_with_the_window_that_shows_it(cx: &mut TestAppContext) {
     draw_both(&h, chat_window, cx);
     close_from_inside(&h, chat_window, cx);
     h.app.read_with(cx, |app, _| {
-        assert!(app.notify.mute_box.is_none(), "its own close ran at once");
+        assert!(app.notify.mute_box().is_none(), "its own close ran at once");
     });
     draw(h.main, cx);
     assert_eq!(shown(&h.shell, cx), None);

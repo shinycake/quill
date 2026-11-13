@@ -81,11 +81,12 @@ impl NewChatCreation {
     }
 }
 
-/// A request of the type step's Save, from the send to its answer.
+/// A request of the type step's Save, from the send to its answer. The
+/// stage in flight names its request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeSave {
     /// Out: its answer has not come.
-    Sent,
+    Sent(RequestId),
     /// Answered without a refusal.
     Done,
     /// Refused or lost: the step stays, with TDLib's reason.
@@ -102,12 +103,44 @@ pub struct NewChatState {
 }
 
 impl NewChatState {
+    /// The type step's Save went out as `sent`; the previous Save's
+    /// requests are no longer waited for.
+    pub fn watch_type_save(&mut self, sent: &[RequestId]) {
+        self.type_saves = sent.iter().map(|id| (*id, TypeSave::Sent(*id))).collect();
+    }
+
+    /// The dialog no longer waits for these type Saves.
+    pub fn forget_type_save(&mut self, sent: &[RequestId]) {
+        for id in sent {
+            self.type_saves.remove(id);
+        }
+    }
+
+    /// `request` was answered. Only a watched Save records it.
+    pub fn type_save_done(&mut self, request: RequestId) {
+        if let Some(save) = self.type_saves.get_mut(&request) {
+            *save = TypeSave::Done;
+        }
+    }
+
     /// The reason one request of the type step's Save failed.
     pub fn type_save_failure(&self, sent: &[RequestId]) -> Option<&str> {
         sent.iter().find_map(|id| match self.type_saves.get(id) {
             Some(TypeSave::Failed(reason)) => Some(reason.as_str()),
             _ => None,
         })
+    }
+
+    /// How one Save ended, for a step whose requests all left flight.
+    fn type_save_refusal(&self, request: RequestId) -> Option<String> {
+        match self.type_saves.get(&request) {
+            Some(TypeSave::Done) => None,
+            Some(TypeSave::Failed(reason)) => Some(reason.clone()),
+            // Gone without an answer: the Save did not happen.
+            Some(TypeSave::Sent(_)) | None => {
+                Some(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string())
+            }
+        }
     }
 }
 
@@ -120,7 +153,11 @@ impl Session {
     /// step at once: the create request is not held past its answer.
     pub fn settled_new_chat(&self, kind: NewChatKind, stage: &NewChatStage) -> NewChatStage {
         match stage {
-            NewChatStage::Creating { request, back } => {
+            NewChatStage::Creating {
+                request,
+                back,
+                title,
+            } => {
                 let outcome = self
                     .groups
                     .new_chats
@@ -140,6 +177,7 @@ impl Session {
                             back: *back,
                             failure,
                             reason,
+                            title: title.clone(),
                         }
                     }
                     None if self.requests.get(*request).is_some() => stage.clone(),
@@ -153,15 +191,9 @@ impl Session {
                 if sent.iter().any(|id| self.requests.get(*id).is_some()) {
                     return stage.clone();
                 }
-                let saves = &self.groups.new_chats.type_saves;
-                let refusal = sent.iter().find_map(|id| match saves.get(id) {
-                    Some(TypeSave::Done) => None,
-                    Some(TypeSave::Failed(reason)) => Some(reason.clone()),
-                    // Gone without an answer: the Save did not happen.
-                    Some(TypeSave::Sent) | None => {
-                        Some(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string())
-                    }
-                });
+                let refusal = sent
+                    .iter()
+                    .find_map(|id| self.groups.new_chats.type_save_refusal(*id));
                 match refusal {
                     Some(reason) => NewChatStage::Type {
                         chat: *chat,

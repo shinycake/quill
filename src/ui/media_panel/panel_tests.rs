@@ -208,6 +208,25 @@ fn choosing_a_category_lists_its_stickers_and_back_returns(cx: &mut TestAppConte
     });
 }
 
+/// Opening the panel on the tab it last showed starts that tab over: no
+/// chosen category, the first section (`MediaPanel::show` is the one writer).
+#[gpui_kit::test]
+fn opening_the_panel_again_starts_the_tab_over(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| seed(app, true));
+    open_stickers(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx);
+        let tab = app.pickers.media_panel.tab();
+        app.close_media_panel(cx);
+        app.open_media_panel(tab, cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.pickers.media_panel.category, None);
+    });
+}
+
 /// Round 17 (area B, finding 5): the found stickers are one list per
 /// session. While they are another window's typed search, a category
 /// chosen here does not list them under its name.

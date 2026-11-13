@@ -36,7 +36,7 @@ use quill::ids::FileId;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{HistoryMessage, OutboxReceipt, Session, unix_ms_now};
+use quill::state::{HistoryMessage, OutboxReceiptView, Session, unix_ms_now};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{MessageContent, effective_content};
 use quill::text::TextEntity;
@@ -181,7 +181,7 @@ pub(super) fn album_history_row(
     // carry the chat.
     sender: Option<SenderLabel>,
     sender_status: Option<AnyElement>,
-    receipt: OutboxReceipt,
+    receipt: OutboxReceiptView,
     sender_avatar: Option<SenderAvatar>,
     // "via @bot", "Forwarded from" and the reply quote (`row_header`).
     header: Option<AnyElement>,

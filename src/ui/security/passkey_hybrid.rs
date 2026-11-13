@@ -14,7 +14,7 @@
 //! the bottom: Cancel, or Close on the error.
 #![deny(clippy::indexing_slicing)]
 
-use super::{CeremonyMode, CeremonySheet};
+use super::{CeremonyMode, CeremonySheet, CeremonyView};
 use crate::ui::app::QuillApp;
 use crate::ui::owned_image::OwnedImage;
 use crate::ui::shell::DialogKind;
@@ -153,12 +153,12 @@ impl QuillApp {
     pub(super) fn cable_sheet(
         &mut self,
         mode: CeremonyMode,
-        sheet: CeremonySheet,
+        view: CeremonyView,
         cx: &mut Context<Self>,
     ) -> Option<(Key, AnyElement)> {
         let body = div().flex().flex_col().gap_3();
-        match sheet {
-            CeremonySheet::Choose { bluetooth } => {
+        match view {
+            CeremonyView::Sheet(CeremonySheet::Choose { bluetooth }) => {
                 let qr = self
                     .privacy
                     .passkeys
@@ -207,8 +207,8 @@ impl QuillApp {
                     ));
                 Some((title, body.into_any_element()))
             }
-            CeremonySheet::Connecting | CeremonySheet::Continue => {
-                let (title, about) = if sheet == CeremonySheet::Continue {
+            CeremonyView::Connecting | CeremonyView::Sheet(CeremonySheet::Continue) => {
+                let (title, about) = if view == CeremonyView::Sheet(CeremonySheet::Continue) {
                     (
                         keys::PASSKEY_CABLE_CONTINUE,
                         Some(keys::PASSKEY_CABLE_FOLLOW),
@@ -239,12 +239,11 @@ impl QuillApp {
 
 /// The one bottom button of the phone and error sheets (tdesktop: a
 /// full-width light button, Close on the error, Cancel otherwise).
-pub(super) fn bottom_button(sheet: CeremonySheet, cx: &mut Context<QuillApp>) -> Option<Button> {
-    let (id, label) = match sheet {
-        CeremonySheet::Error(_) => ("passkey-ceremony-close", keys::CLOSE),
-        CeremonySheet::Choose { .. } | CeremonySheet::Connecting | CeremonySheet::Continue => {
-            ("passkey-ceremony-cancel", keys::CANCEL)
-        }
+pub(super) fn bottom_button(view: CeremonyView, cx: &mut Context<QuillApp>) -> Option<Button> {
+    let (id, label) = match view {
+        CeremonyView::Sheet(CeremonySheet::Error(_)) => ("passkey-ceremony-close", keys::CLOSE),
+        CeremonyView::Sheet(CeremonySheet::Choose { .. } | CeremonySheet::Continue)
+        | CeremonyView::Connecting => ("passkey-ceremony-cancel", keys::CANCEL),
         _ => return None,
     };
     Some(

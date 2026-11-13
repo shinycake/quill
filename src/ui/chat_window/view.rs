@@ -59,6 +59,16 @@ impl ChatWindowView {
                     window.window_handle().window_id(),
                     window.is_window_active(),
                 );
+                if !window.is_window_active() {
+                    // A pointer held on the video editor's strip loses its
+                    // mouse-up to another window.
+                    let chat_id = this.chat_id;
+                    let _ = this.owner.update(cx, |app, cx| {
+                        app.in_window_scope(Some(chat_id), cx, |app, cx| {
+                            app.release_lost_video_drag(cx)
+                        })
+                    });
+                }
                 this.placed(window, cx);
             }),
             cx.observe_window_bounds(window, Self::placed),

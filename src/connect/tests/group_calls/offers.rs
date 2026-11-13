@@ -133,6 +133,32 @@ fn a_failed_payload_sends_no_join_and_the_button_starts_over() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Push-to-talk joins muted: the join carries it, the tracked mark follows
+/// once it goes out, and a join whose offer failed leaves the call unmuted
+/// for the next Join (sweep 17-005).
+#[test]
+fn a_muted_join_marks_the_call_only_once_it_goes_out() {
+    let (dir, mut driver, recorder, handle, _sink, _seq) = ready_group_call_driver();
+    assert!(!tracked(&driver).is_muted_self);
+    handle.fail_group_offer();
+    driver
+        .join_video_chat_with(555, true)
+        .expect("the press is taken");
+    assert!(
+        !tracked(&driver).is_muted_self,
+        "a join that never left marked nothing"
+    );
+
+    handle.hold_group_offers();
+    driver.join_video_chat_with(555, true).expect("join again");
+    assert!(!tracked(&driver).is_muted_self, "not sent yet");
+    assert!(land(&mut driver, &handle));
+    let join = sent_request(&recorder, "joinVideoChat");
+    assert_eq!(join["join_parameters"]["is_muted"], true);
+    assert!(tracked(&driver).is_muted_self, "the join went out muted");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_rejoin_waits_without_touching_the_missing_instance() {
     let (dir, mut driver, recorder, handle, sink, seq) = ready_group_call_driver();

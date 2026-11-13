@@ -170,6 +170,17 @@ mod tests {
         assert!(asked.allow(20, false));
     }
 
+    /// Sweep r4-10: a list that starts over (a reopen, a reconnect) asks at
+    /// the length it had before, which the once-per-length memory refused.
+    #[test]
+    fn a_list_that_starts_over_asks_at_its_old_length_again() {
+        let asked = Asked::default();
+        assert!(asked.allow(10, false));
+        assert!(!asked.allow(10, false));
+        asked.reset();
+        assert!(asked.allow(10, false));
+    }
+
     #[test]
     fn one_request_at_a_time() {
         assert!(load_due(true, true, false));

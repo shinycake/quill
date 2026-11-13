@@ -18,7 +18,7 @@ pub enum Heading {
 
 /// The second line under a name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RowStatus {
+pub enum RowStatusIcon {
     /// The account itself: "buy yourself a gift".
     Yourself,
     BirthdayToday,
@@ -30,7 +30,7 @@ pub enum RowStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Row {
     pub user_id: i64,
-    pub status: RowStatus,
+    pub status: RowStatusIcon,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,7 +88,7 @@ pub fn sections(
             .filter(|id| name(*id).to_lowercase().contains(&query))
             .map(|user_id| Row {
                 user_id,
-                status: RowStatus::Plain,
+                status: RowStatusIcon::Plain,
             })
             .collect();
         return vec![Section {
@@ -103,7 +103,7 @@ pub fn sections(
             heading: None,
             rows: vec![Row {
                 user_id: me,
-                status: RowStatus::Yourself,
+                status: RowStatusIcon::Yourself,
             }],
         });
     }
@@ -121,7 +121,7 @@ pub fn sections(
     }
     let plain = |user_id| Row {
         user_id,
-        status: RowStatus::Plain,
+        status: RowStatusIcon::Plain,
     };
     if !frequent.is_empty() {
         out.push(Section {
@@ -142,16 +142,16 @@ fn is_today(b: &CloseBirthday, people: &People<'_>) -> bool {
     (b.month, b.day) == (people.month, people.day)
 }
 
-fn birthday_status(b: &CloseBirthday, people: &People<'_>) -> RowStatus {
+fn birthday_status(b: &CloseBirthday, people: &People<'_>) -> RowStatusIcon {
     let date = (b.month, b.day);
     if is_today(b, people) {
-        RowStatus::BirthdayToday
+        RowStatusIcon::BirthdayToday
     } else if date == day_before(people.month, people.day) {
-        RowStatus::BirthdayYesterday
+        RowStatusIcon::BirthdayYesterday
     } else if date == day_after(people.month, people.day) {
-        RowStatus::BirthdayTomorrow
+        RowStatusIcon::BirthdayTomorrow
     } else {
-        RowStatus::Plain
+        RowStatusIcon::Plain
     }
 }
 
@@ -217,7 +217,7 @@ mod tests {
             yourself.rows,
             [Row {
                 user_id: ME,
-                status: RowStatus::Yourself
+                status: RowStatusIcon::Yourself
             }]
         );
         let birthdays = out.get(1).expect("birthdays");
@@ -226,9 +226,9 @@ mod tests {
         assert_eq!(
             statuses,
             [
-                RowStatus::BirthdayToday,
-                RowStatus::BirthdayYesterday,
-                RowStatus::BirthdayTomorrow
+                RowStatusIcon::BirthdayToday,
+                RowStatusIcon::BirthdayYesterday,
+                RowStatusIcon::BirthdayTomorrow
             ]
         );
         assert_eq!(
@@ -272,6 +272,11 @@ mod tests {
         let found = out.first().expect("results");
         assert_eq!(found.heading, None);
         assert_eq!(ids(found), [5, 4, 3]);
-        assert!(found.rows.iter().all(|row| row.status == RowStatus::Plain));
+        assert!(
+            found
+                .rows
+                .iter()
+                .all(|row| row.status == RowStatusIcon::Plain)
+        );
     }
 }

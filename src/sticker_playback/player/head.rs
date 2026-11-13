@@ -97,7 +97,7 @@ pub struct Pick {
 pub enum PlayHead {
     /// Its first frame is not shown yet: the clock has not started.
     #[default]
-    Waiting,
+    Unstarted,
     /// Playing: how far it played, and when it last moved.
     Playing { pos: Duration, last: Instant },
 }
@@ -111,7 +111,7 @@ impl PlayHead {
     /// How far it played (while its view was drawn).
     pub fn pos(&self) -> Duration {
         match self {
-            Self::Waiting => Duration::ZERO,
+            Self::Unstarted => Duration::ZERO,
             Self::Playing { pos, .. } => *pos,
         }
     }

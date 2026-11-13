@@ -128,7 +128,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session
                     .users_state
                     .user_full_infos
-                    .fail(user_id, format!("{err:?}"));
+                    .fail_unsent(user_id, format!("{err:?}"));
             }
         }
     }

@@ -172,7 +172,7 @@ impl QuillApp {
             Page::Account => self
                 .settings
                 .set_box(crate::ui::settings_state::SettingsBox::LogOut, false),
-            Page::Privacy => self.close_privacy_layers(),
+            Page::Privacy => self.leave_privacy(),
             Page::Notifications => self.leave_notification_settings(),
             Page::Language => self.leave_language_settings(),
             Page::Devices => self.leave_devices(),
@@ -235,7 +235,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let narrow = f32::from(window.viewport_size().width) < NARROW;
-        self.settle_settings_search(window, cx);
         self.settle_arrival(window, cx);
         self.settings_search_input(window, cx);
         if !window.has_active_dialog(cx) && window.focused(cx).is_none() {
@@ -246,9 +245,6 @@ impl QuillApp {
         }
         if self.settings.page() == Some(Page::AgentAccess) && quill::agent::access::enabled() {
             self.ensure_agent_page(window, cx);
-        }
-        if self.settings.page() == Some(Page::DataStorage) {
-            self.ensure_storage_scroll(window, cx);
         }
         let searching = self.settings_searching(window, cx);
         // A narrow window shows the results in the list's place.
@@ -462,11 +458,11 @@ impl QuillApp {
             }
             ids.push(id);
         }
+        session.settings.blocked_total = 120;
         session.settings.blocked_senders = Fetch::Loading {
             stale: Some(ids),
-            request: None,
+            request: quill::ids::RequestId(1),
         };
-        session.settings.blocked_total = 120;
         self.demo_ui.seq.store(
             seq.load(std::sync::atomic::Ordering::SeqCst),
             std::sync::atomic::Ordering::SeqCst,

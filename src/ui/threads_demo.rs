@@ -77,6 +77,7 @@ pub(super) fn apply_ready_thread(session: &mut Session, seq: &AtomicU64, sink: &
             RequestPurpose::GetMessageThreadHistory { message_id: POST.0 },
             Some(CHANNEL),
         );
+        session.thread_older_asked(extra);
         apply(
             session,
             &format!(

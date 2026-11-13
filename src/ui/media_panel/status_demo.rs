@@ -8,6 +8,7 @@ use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::FileId;
 use quill::state::Session;
+use quill::state::fetch::Fetch;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{StickerFormat, StickerItem};
 use quill::telegram::{EmojiStatusItem, UpgradedGiftEmojiStatus};
@@ -82,33 +83,37 @@ pub(super) fn seed_status_session(sink: Arc<MemorySink>) -> Session {
             list.push(status_sticker(*id, face));
         }
     });
-    emoji.themed_status_ids = (5001..=5010).collect();
-    emoji.default_status_ids = (5011..=5026).collect();
-    emoji.recent_statuses = [5003, 5030, 5031]
-        .into_iter()
-        .map(|id| EmojiStatusItem {
-            custom_emoji_id: id,
-            expiration_date: 0,
-            gift: None,
-        })
-        .collect();
-    emoji.upgraded_gift_statuses = [5033, 5034]
-        .into_iter()
-        .map(|id| EmojiStatusItem {
-            custom_emoji_id: 0,
-            expiration_date: 0,
-            gift: Some(UpgradedGiftEmojiStatus {
-                upgraded_gift_id: id,
-                gift_title: "Plush Pepe".into(),
-                gift_name: "PlushPepe-1".into(),
-                model_custom_emoji_id: id,
-                symbol_custom_emoji_id: id,
-                backdrop_center_color: 0,
-                backdrop_edge_color: 0,
-                backdrop_symbol_color: 0,
-                backdrop_text_color: 0,
-            }),
-        })
-        .collect();
+    emoji.lists.themed_statuses = Fetch::Ready((5001..=5010).collect());
+    emoji.lists.default_statuses = Fetch::Ready((5011..=5026).collect());
+    emoji.lists.recent_statuses = Fetch::Ready(
+        [5003, 5030, 5031]
+            .into_iter()
+            .map(|id| EmojiStatusItem {
+                custom_emoji_id: id,
+                expiration_date: 0,
+                gift: None,
+            })
+            .collect(),
+    );
+    emoji.lists.upgraded_gift_statuses = Fetch::Ready(
+        [5033, 5034]
+            .into_iter()
+            .map(|id| EmojiStatusItem {
+                custom_emoji_id: 0,
+                expiration_date: 0,
+                gift: Some(UpgradedGiftEmojiStatus {
+                    upgraded_gift_id: id,
+                    gift_title: "Plush Pepe".into(),
+                    gift_name: "PlushPepe-1".into(),
+                    model_custom_emoji_id: id,
+                    symbol_custom_emoji_id: id,
+                    backdrop_center_color: 0,
+                    backdrop_edge_color: 0,
+                    backdrop_symbol_color: 0,
+                    backdrop_text_color: 0,
+                }),
+            })
+            .collect(),
+    );
     session
 }

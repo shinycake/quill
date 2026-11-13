@@ -6,7 +6,12 @@ use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
-    pub(super) fn spawn_mini_app_window(&mut self, launch: WebAppLaunch, cx: &mut Context<Self>) {
+    pub(super) fn spawn_mini_app_window(
+        &mut self,
+        launch: WebAppLaunch,
+        window: Option<quill::ids::ChatId>,
+        cx: &mut Context<Self>,
+    ) {
         // An app whose URL lands while Quill is locked (asked for just
         // before the lock) is refused: the helper window would show it,
         // usable, over the lock. TDLib closes the launch.
@@ -123,6 +128,7 @@ impl QuillApp {
             settings_button: false,
             popups: HashMap::new(),
             popup_seq: 0,
+            launch_window: window,
             write_access: launch_flow::WriteAccess::Idle,
             privacy_policy_url,
             in_attachment_menu,
@@ -202,7 +208,7 @@ impl QuillApp {
             return;
         };
         let apps = &mut live.driver.session.bots.web_apps;
-        let open_result = apps.open_result.take();
+        let open_result = apps.take_open_result();
         let write_access = std::mem::take(&mut apps.write_access);
         let custom_replies = std::mem::take(&mut apps.custom_replies);
         let attach_bots = std::mem::take(&mut apps.attachment_menu_bot);
@@ -216,6 +222,7 @@ impl QuillApp {
                     bot_user_id,
                     chat_id,
                     source,
+                    window,
                     launch_id,
                     url,
                 } => {
@@ -234,6 +241,7 @@ impl QuillApp {
                             launch_id,
                             url,
                         },
+                        window,
                         cx,
                     );
                 }
@@ -319,6 +327,22 @@ impl QuillApp {
                 self.as_asked_by(window, |this| this.found_web_app_answer(then, result, cx));
             }
         }
+        // A wait whose request left flight with no answer was dropped: the
+        // launch cannot happen, and the poll would wait for it for good.
+        let out = self.mini_apps.flow.awaited_request().map(|request| {
+            self.session()
+                .is_some_and(|session| session.requests.get(request).is_some())
+        });
+        if out == Some(false)
+            && let Some(Awaited { window, .. }) = self.mini_apps.flow.take_lost()
+        {
+            self.as_asked_by(window, |this| {
+                this.set_status_note(
+                    StatusNote::error(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT)),
+                    cx,
+                )
+            });
+        }
         for sent in data_sent {
             let sends = &mut self.mini_apps.data_sends;
             let Some(at) = sends.iter().position(|request| *request == sent.request) else {
@@ -331,6 +355,35 @@ impl QuillApp {
                 }
                 Err(message) => self.set_status_note(StatusNote::error(&message), cx),
             }
+        }
+    }
+
+    /// The `sendWebAppData` requests that left flight with no answer
+    /// (dropped by the stale sweep or a reconnect) never report: they end
+    /// here with an error, as the lost launch waits do. Runs every poll
+    /// pass, with or without a live account.
+    pub(super) fn end_lost_data_sends(&mut self, cx: &mut Context<Self>) {
+        let lost = {
+            let session = self.session();
+            let out = |request: &quill::ids::RequestId| {
+                session.is_some_and(|session| session.requests.get(*request).is_some())
+            };
+            let (_, lost): (Vec<_>, Vec<_>) = self
+                .mini_apps
+                .data_sends
+                .iter()
+                .copied()
+                .partition(|request| out(request));
+            lost
+        };
+        if !lost.is_empty() {
+            self.mini_apps
+                .data_sends
+                .retain(|request| !lost.contains(request));
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_SEND_THE_APPS_DATA)),
+                cx,
+            );
         }
     }
 
@@ -380,7 +433,7 @@ impl QuillApp {
         // Only the answer to the request this window is waiting on counts.
         let waiting = match window.write_access {
             launch_flow::WriteAccess::Checking(id) | launch_flow::WriteAccess::Allowing(id) => id,
-            launch_flow::WriteAccess::Idle | launch_flow::WriteAccess::Asking => return,
+            launch_flow::WriteAccess::Idle | launch_flow::WriteAccess::Asking { .. } => return,
         };
         if window.launch.bot_user_id != answer.bot_user_id || waiting != answer.request {
             return;
@@ -401,22 +454,25 @@ impl QuillApp {
                 window.emit(BridgeReply::write_access_requested(false));
             }
             WriteAccessResult::NeedsConsent => {
-                window.write_access = launch_flow::WriteAccess::Asking;
                 let name = window.launch.bot_name.clone();
-                window.show_popup(
-                    PopupPurpose::WriteAccess,
-                    popup(
-                        tr(keys::Q_MEDIA_ALLOW_MESSAGING),
-                        tr_with(
-                            keys::Q_MEDIA_ALLOW_TO_SEND_YOU_MESSAGES,
-                            &[("name", &name.to_string())],
-                        ),
-                        vec![
-                            ("cancel", tr(keys::CANCEL), "cancel"),
-                            ("allow", tr(keys::Q_MEDIA_ALLOW), "default"),
-                        ],
+                // The consent popup replaces the check that asked for it.
+                window.write_access = launch_flow::WriteAccess::Idle;
+                let consent = popup(
+                    tr(keys::Q_MEDIA_ALLOW_MESSAGING),
+                    tr_with(
+                        keys::Q_MEDIA_ALLOW_TO_SEND_YOU_MESSAGES,
+                        &[("name", &name.to_string())],
                     ),
+                    vec![
+                        ("cancel", tr(keys::CANCEL), "cancel"),
+                        ("allow", tr(keys::Q_MEDIA_ALLOW), "default"),
+                    ],
                 );
+                if let Some(popup) = self.show_mini_app_popup(None, consent, cx) {
+                    self.with_window(|window| {
+                        window.write_access = launch_flow::WriteAccess::Asking { popup }
+                    });
+                }
             }
         }
         cx.notify();
@@ -473,32 +529,32 @@ impl QuillApp {
                 self.set_status_note(note, cx);
             }
         }
-        self.answer_replaced_popups(cx);
     }
 
-    /// The helper shows one popup at a time, so a newer one (the close
-    /// confirm over a write-access prompt) replaced the others, which never
-    /// get `popup_closed`: each is answered as dismissed, or its request
-    /// would wait unanswered and later ones get "busy".
-    fn answer_replaced_popups(&mut self, cx: &mut Context<Self>) {
-        let replaced: Vec<String> = self
-            .mini_apps
-            .window
-            .as_ref()
-            .map(|window| {
-                let newest = format!("p{}", window.popup_seq);
-                window
-                    .popups
-                    .keys()
-                    .filter(|id| **id != newest)
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
-        for id in replaced {
-            let button = String::new();
-            self.handle_shell_event(ShellEvent::PopupClosed { id, button }, cx);
+    /// Shows `popup` to the helper (a plain one remembered by `purpose`, or
+    /// a stage's own, which the stage then holds the id of). The helper shows
+    /// one popup at a time, so the ones it replaced never get `popup_closed`:
+    /// each is answered as dismissed here, or its request would wait
+    /// unanswered and later ones get "busy". `None` with no window.
+    pub(super) fn show_mini_app_popup(
+        &mut self,
+        purpose: Option<PopupPurpose>,
+        popup: Popup,
+        cx: &mut Context<Self>,
+    ) -> Option<PopupId> {
+        let window = self.mini_apps.window.as_mut()?;
+        let shown = match purpose {
+            Some(purpose) => window.show_purpose_popup(purpose, popup),
+            None => window.show_popup(popup),
+        };
+        for replaced in shown.replaced {
+            let event = ShellEvent::PopupClosed {
+                id: replaced.wire(),
+                button: String::new(),
+            };
+            self.handle_shell_event(event, cx);
         }
+        Some(shown.id)
     }
 
     /// A URL the page tried to leave the frame for.
@@ -637,25 +693,23 @@ impl QuillApp {
                 cx.notify();
             }
             WebAppEvent::OpenInvoice { slug } => self.request_mini_app_invoice(slug, cx),
-            WebAppEvent::OpenPopup(spec) => self.with_window(|window| {
-                window.show_popup(
-                    PopupPurpose::App,
-                    Popup {
-                        id: String::new(),
-                        title: spec.title,
-                        message: spec.message,
-                        buttons: spec
-                            .buttons
-                            .into_iter()
-                            .map(|button| PopupButton {
-                                id: button.id,
-                                text: button.text,
-                                kind: button.kind,
-                            })
-                            .collect(),
-                    },
-                );
-            }),
+            WebAppEvent::OpenPopup(spec) => {
+                let app_popup = Popup {
+                    id: String::new(),
+                    title: spec.title,
+                    message: spec.message,
+                    buttons: spec
+                        .buttons
+                        .into_iter()
+                        .map(|button| PopupButton {
+                            id: button.id,
+                            text: button.text,
+                            kind: button.kind,
+                        })
+                        .collect(),
+                };
+                self.show_mini_app_popup(Some(PopupPurpose::App), app_popup, cx);
+            }
             WebAppEvent::RequestWriteAccess => {
                 if waiting_write_access {
                     self.with_window(|window| {
@@ -674,28 +728,26 @@ impl QuillApp {
                     _ => window.emit(BridgeReply::write_access_requested(false)),
                 });
             }
-            WebAppEvent::RequestPhone => self.request_mini_app_phone(),
+            WebAppEvent::RequestPhone => self.request_mini_app_phone(cx),
             WebAppEvent::RequestEmojiStatusAccess => self.request_emoji_status_access(cx),
             WebAppEvent::SetEmojiStatus {
                 custom_emoji_id,
                 duration_secs,
             } => self.request_set_emoji_status(custom_emoji_id, duration_secs, cx),
-            WebAppEvent::ReadTextFromClipboard { req_id } => self.with_window(|window| {
-                window.show_popup(
-                    PopupPurpose::Clipboard { req_id },
-                    popup(
-                        tr(keys::Q_MEDIA_PASTE_FROM_THE_CLIPBOARD),
-                        tr_with(
-                            keys::Q_MEDIA_ASKS_TO_READ_WHAT_YOU,
-                            &[("bot_name", &bot_name.to_string())],
-                        ),
-                        vec![
-                            ("cancel", tr(keys::CANCEL), "cancel"),
-                            ("allow", tr(keys::Q_MEDIA_PASTE), "default"),
-                        ],
+            WebAppEvent::ReadTextFromClipboard { req_id } => {
+                let paste = popup(
+                    tr(keys::Q_MEDIA_PASTE_FROM_THE_CLIPBOARD),
+                    tr_with(
+                        keys::Q_MEDIA_ASKS_TO_READ_WHAT_YOU,
+                        &[("bot_name", &bot_name.to_string())],
                     ),
+                    vec![
+                        ("cancel", tr(keys::CANCEL), "cancel"),
+                        ("allow", tr(keys::Q_MEDIA_PASTE), "default"),
+                    ],
                 );
-            }),
+                self.show_mini_app_popup(Some(PopupPurpose::Clipboard { req_id }), paste, cx);
+            }
             WebAppEvent::SetupClosingBehavior { need_confirmation } => {
                 self.with_window(|window| window.closing_confirmation = need_confirmation);
             }
@@ -759,19 +811,15 @@ impl QuillApp {
         match event {
             ShellEvent::Close { force } => {
                 if closing_confirmation && !force {
-                    self.with_window(|window| {
-                        window.show_popup(
-                            PopupPurpose::CloseConfirm,
-                            popup(
-                                tr(keys::Q_MEDIA_CLOSE_THE_MINI_APP),
-                                tr(keys::Q_MEDIA_CHANGES_YOU_MADE_MAY_NOT).into(),
-                                vec![
-                                    ("cancel", tr(keys::CANCEL), "cancel"),
-                                    ("close", tr(keys::Q_MEDIA_CLOSE_ANYWAY), "destructive"),
-                                ],
-                            ),
-                        );
-                    });
+                    let confirm = popup(
+                        tr(keys::Q_MEDIA_CLOSE_THE_MINI_APP),
+                        tr(keys::Q_MEDIA_CHANGES_YOU_MADE_MAY_NOT).into(),
+                        vec![
+                            ("cancel", tr(keys::CANCEL), "cancel"),
+                            ("close", tr(keys::Q_MEDIA_CLOSE_ANYWAY), "destructive"),
+                        ],
+                    );
+                    self.show_mini_app_popup(Some(PopupPurpose::CloseConfirm), confirm, cx);
                 } else {
                     self.close_mini_app_window(cx);
                 }
@@ -807,36 +855,22 @@ impl QuillApp {
                 _ => {}
             },
             ShellEvent::PopupClosed { id, button } => {
-                let Some(purpose) = self
+                let Some(popup) = PopupId::from_wire(&id) else {
+                    return;
+                };
+                let purpose = self
                     .mini_apps
                     .window
                     .as_mut()
-                    .and_then(|window| window.popups.remove(&id))
-                else {
+                    .and_then(|window| window.popups.remove(&popup));
+                let Some(purpose) = purpose else {
+                    self.answer_stage_popup(popup, &button, cx);
                     return;
                 };
                 match purpose {
                     PopupPurpose::App => self.with_window(|window| {
                         window.emit(BridgeReply::popup_closed(&button));
                     }),
-                    PopupPurpose::WriteAccess => {
-                        let sent = (button == "allow")
-                            .then(|| {
-                                self.live
-                                    .as_mut()
-                                    .map(|live| live.driver.allow_bot_to_send_messages(bot_id))
-                            })
-                            .flatten();
-                        self.with_window(|window| match sent {
-                            Some(Ok(request)) => {
-                                window.write_access = launch_flow::WriteAccess::Allowing(request)
-                            }
-                            _ => {
-                                window.write_access = launch_flow::WriteAccess::Idle;
-                                window.emit(BridgeReply::write_access_requested(false));
-                            }
-                        });
-                    }
                     PopupPurpose::Clipboard { req_id } => {
                         let text = (button == "allow")
                             .then(|| cx.read_from_clipboard().and_then(|item| item.text()))
@@ -853,13 +887,43 @@ impl QuillApp {
                             self.close_mini_app_window(cx);
                         }
                     }
-                    PopupPurpose::EmojiStatusAccess => {
-                        self.answer_emoji_status_access(&button, cx);
-                    }
-                    PopupPurpose::EmojiStatus => self.answer_set_emoji_status(&button, cx),
-                    PopupPurpose::Phone => self.answer_phone_prompt(&button, cx),
                 }
             }
+        }
+    }
+
+    /// A popup no plain purpose was kept for: the stage that holds its id,
+    /// if any, takes the answer. An id no stage holds is nobody's.
+    fn answer_stage_popup(&mut self, popup: PopupId, button: &str, cx: &mut Context<Self>) {
+        let Some((owner, bot_id)) = self.mini_apps.window.as_ref().and_then(|window| {
+            window
+                .popup_owner(popup)
+                .map(|owner| (owner, window.launch.bot_user_id))
+        }) else {
+            return;
+        };
+        match owner {
+            PopupOwner::WriteAccess => {
+                let sent = (button == "allow")
+                    .then(|| {
+                        self.live
+                            .as_mut()
+                            .map(|live| live.driver.allow_bot_to_send_messages(bot_id))
+                    })
+                    .flatten();
+                self.with_window(|window| match sent {
+                    Some(Ok(request)) => {
+                        window.write_access = launch_flow::WriteAccess::Allowing(request)
+                    }
+                    _ => {
+                        window.write_access = launch_flow::WriteAccess::Idle;
+                        window.emit(BridgeReply::write_access_requested(false));
+                    }
+                });
+            }
+            PopupOwner::EmojiAccess => self.answer_emoji_status_access(popup, button, cx),
+            PopupOwner::EmojiStatus => self.answer_set_emoji_status(popup, button, cx),
+            PopupOwner::Phone => self.answer_phone_prompt(popup, button, cx),
         }
     }
 

@@ -45,15 +45,16 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, Vec<i6
         let mut ids: Vec<i64> = session
             .chats
             .values()
-            .filter(|chat| chat.in_main_list)
+            .filter(|chat| chat.in_main_list())
             .map(|chat| chat.id.0)
             .collect();
         ids.sort_unstable();
         ids.truncate(2);
         for (order, id) in ids.iter().enumerate() {
             if let Some(chat) = session.chats.get_mut(id) {
-                chat.is_pinned = true;
-                chat.order = i64::MAX - order as i64;
+                let position = chat.main.get_or_insert_with(Default::default);
+                position.is_pinned = true;
+                position.order = i64::MAX - order as i64;
             }
         }
         session.pinned_chat_ids(false)
@@ -208,13 +209,15 @@ fn a_bulk_pin_over_the_limit_opens_the_limit_box_and_pins_nothing(cx: &mut TestA
             return;
         };
         for chat in session.chats.values_mut() {
-            chat.is_pinned = false;
+            if let Some(position) = chat.main.as_mut() {
+                position.is_pinned = false;
+            }
         }
         session.chat_list.pinned_chat_count_max = 0;
         let ids: Vec<i64> = session
             .chats
             .values()
-            .filter(|chat| chat.in_main_list)
+            .filter(|chat| chat.in_main_list())
             .map(|chat| chat.id.0)
             .collect();
         assert!(ids.len() >= 2, "two chats to pin");

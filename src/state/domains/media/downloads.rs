@@ -33,8 +33,10 @@ pub enum DownloadOrigin {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
-    /// The request is out; TDLib's file state tells how far it is.
-    Requested,
+    /// The file is wanted (the request goes out with the want, or waits
+    /// for TDLib); TDLib's file state tells how far it is. The intent, not
+    /// a request to match.
+    Wanted,
     /// The request is out and the user paused it (a listed user download).
     Paused,
     /// The request ended without completing (an error answer, or an active
@@ -55,13 +57,14 @@ struct Intent {
 impl Phase {
     /// A request is out and not cancelled (paused ones included).
     fn is_out(self) -> bool {
-        matches!(self, Self::Requested | Self::Paused)
+        matches!(self, Self::Wanted | Self::Paused)
     }
 }
 
-/// What a row shows for a file.
+/// What a row shows for a file, derived from its intent and TDLib's file
+/// state on every read; never stored.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DownloadStatus {
+pub enum DownloadStatusView {
     Idle,
     Downloading,
     Paused,
@@ -126,11 +129,7 @@ impl DownloadIntents {
             file_id,
             Some(Intent {
                 origin,
-                phase: if paused {
-                    Phase::Paused
-                } else {
-                    Phase::Requested
-                },
+                phase: if paused { Phase::Paused } else { Phase::Wanted },
             }),
         );
     }
@@ -157,10 +156,10 @@ impl DownloadIntents {
         }
         if let Some(new) = intent {
             match (new.phase, new.origin) {
-                (Phase::Requested | Phase::Paused, DownloadOrigin::User) => {
+                (Phase::Wanted | Phase::Paused, DownloadOrigin::User) => {
                     self.user.insert(file_id);
                 }
-                (Phase::Requested | Phase::Paused, DownloadOrigin::Preload) => {
+                (Phase::Wanted | Phase::Paused, DownloadOrigin::Preload) => {
                     self.preloads.insert(file_id);
                 }
                 (Phase::Ended, DownloadOrigin::User) => {
@@ -274,11 +273,7 @@ impl DownloadIntents {
             && intent.origin == DownloadOrigin::User
             && intent.phase.is_out()
         {
-            let phase = if paused {
-                Phase::Paused
-            } else {
-                Phase::Requested
-            };
+            let phase = if paused { Phase::Paused } else { Phase::Wanted };
             self.put(file_id, Some(Intent { phase, ..intent }));
         }
     }
@@ -464,7 +459,7 @@ impl DownloadIntents {
         self.failed
             .iter()
             .copied()
-            .filter(|id| self.status(*id, files) == DownloadStatus::Failed)
+            .filter(|id| self.status(*id, files) == DownloadStatusView::Failed)
     }
 
     /// Finished user downloads, oldest first, minus the ones TDLib now
@@ -480,32 +475,32 @@ impl DownloadIntents {
     /// The status a row shows. TDLib's file state wins: a finished file is
     /// Done whatever was asked, and a transfer TDLib reports active is
     /// Downloading unless the user cancelled it.
-    pub fn status(&self, file_id: i32, files: &FileMap) -> DownloadStatus {
+    pub fn status(&self, file_id: i32, files: &FileMap) -> DownloadStatusView {
         let local = files.get(&file_id).map(|f| &f.local);
         if local.is_some_and(|l| l.is_downloading_completed()) {
-            return DownloadStatus::Done;
+            return DownloadStatusView::Done;
         }
         let active = local.is_some_and(|l| l.is_downloading_active());
         match self.get(file_id) {
             Some(Intent {
                 phase: Phase::Paused,
                 ..
-            }) => DownloadStatus::Paused,
+            }) => DownloadStatusView::Paused,
             Some(Intent {
-                phase: Phase::Requested,
+                phase: Phase::Wanted,
                 ..
-            }) => DownloadStatus::Downloading,
+            }) => DownloadStatusView::Downloading,
             Some(Intent {
                 phase: Phase::Cancelled,
                 ..
-            }) => DownloadStatus::Idle,
+            }) => DownloadStatusView::Idle,
             Some(Intent {
                 phase: Phase::Ended,
                 origin: DownloadOrigin::User,
                 ..
-            }) if !active => DownloadStatus::Failed,
-            _ if active => DownloadStatus::Downloading,
-            _ => DownloadStatus::Idle,
+            }) if !active => DownloadStatusView::Failed,
+            _ if active => DownloadStatusView::Downloading,
+            _ => DownloadStatusView::Idle,
         }
     }
 
@@ -519,12 +514,26 @@ impl DownloadIntents {
         !running && self.get(file_id).is_some_and(|i| i.phase == Phase::Ended)
     }
 
+    /// The file has no transfer under way and none will start: its last
+    /// request ended without completing or was cancelled, or nothing asked
+    /// for it (the intent was cleared). A waiter that started a download
+    /// stops waiting on this.
+    pub fn gave_up(&self, file_id: i32, files: &FileMap) -> bool {
+        let local = files.get(&file_id).map(|f| &f.local);
+        let running =
+            local.is_some_and(|l| l.is_downloading_active() || l.is_downloading_completed());
+        !running
+            && self
+                .get(file_id)
+                .is_none_or(|i| matches!(i.phase, Phase::Ended | Phase::Cancelled))
+    }
+
     /// A transfer is under way (paused ones count: the row keeps its
     /// progress).
     pub fn is_downloading(&self, file_id: i32, files: &FileMap) -> bool {
         matches!(
             self.status(file_id, files),
-            DownloadStatus::Downloading | DownloadStatus::Paused
+            DownloadStatusView::Downloading | DownloadStatusView::Paused
         )
     }
 }

@@ -3,6 +3,7 @@
 
 use super::app::QuillApp;
 use super::privacy::PrivacyEditorTarget;
+use super::settings_state::SettingsBox;
 use super::settings_window::rows::{link_row, switch_row};
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::{status_note::StatusNote, user_error::user_error_for};
@@ -20,7 +21,7 @@ use quill::privacy::PrivacyKeyState;
 use quill::settings::CallPrefs;
 use quill::telegram::requests::{ArchiveChatListSettings, PrivacyWho};
 use quill::telegram::requests_privacy::PrivacySettingKey;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 /// Slice CL2: the three `archiveChatListSettings` fields (schema
 /// 1.8.67, line 3512) as (section title, toggle label, description),
@@ -75,17 +76,15 @@ impl QuillApp {
     /// `SettingsArchiveChatListController` fetches
     /// `getArchiveChatListSettings` on open).
     pub(super) fn open_archive_settings(&mut self, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.chat_list.archive_settings_open = true;
-            if let Err(err) = live.driver.fetch_archive_chat_list_settings() {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
-                    &err,
-                )));
-            }
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.chat_list.archive_settings_open = true;
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_archive_chat_list_settings()
+        {
+            self.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_ARCHIVE_SETTINGS,
+                &err,
+            )));
         }
+        self.settings.set_box(SettingsBox::ArchiveSettings, true);
         self.open_box(DialogKind::ArchiveSettings);
         cx.notify();
     }
@@ -233,12 +232,9 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -250,13 +246,7 @@ impl QuillApp {
     /// Slice CL2: show/hide the archive settings dialog on the active
     /// session.
     pub(super) fn set_archive_settings_open(&mut self, open: bool) {
-        if let Some(live) = self.live.as_mut() {
-            // box-host: only closes; every caller passes false
-            live.driver.session.chat_list.archive_settings_open = open;
-        } else if let Some(session) = self.demo_session.as_mut() {
-            // box-host: only closes; every caller passes false
-            session.chat_list.archive_settings_open = open;
-        }
+        self.settings.set_box(SettingsBox::ArchiveSettings, open);
     }
 
     /// Phase C2i: call settings — confirm-before-calling (real +
@@ -287,9 +277,15 @@ impl QuillApp {
                     None | Some(PrivacyKeyState::Loading { .. })
                 )
             });
-        let privacy_failed = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
-            .into_iter()
-            .any(|key| matches!(rule_state(key), Some(PrivacyKeyState::Failed { .. })));
+        let failed = |key: PrivacySettingKey| {
+            matches!(rule_state(key), Some(PrivacyKeyState::Failed { .. }))
+        };
+        let allow_failed = failed(PrivacySettingKey::AllowCalls).then(|| {
+            self.call_privacy_failed("call-privacy-allow", PrivacySettingKey::AllowCalls, cx)
+        });
+        let p2p_failed = failed(PrivacySettingKey::PeerToPeer).then(|| {
+            self.call_privacy_failed("call-privacy-p2p", PrivacySettingKey::PeerToPeer, cx)
+        });
         let ptt_section = self.push_to_talk_settings(&prefs.push_to_talk, cx);
         let mic_test_section = self.mic_test_section(cx);
         let device_prefs_section = self.call_device_prefs_section(cx);
@@ -481,13 +477,8 @@ impl QuillApp {
                     .pt_1()
                     .child(tr(keys::EDIT_PRIVACY_CALLS_HEADER)),
             )
-            .child(if privacy_failed {
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .px_2()
-                    .child(tr(keys::Q_PREFS_COULDN_T_LOAD_PRIVACY_SETTINGS))
-                    .into_any_element()
+            .child(if let Some(row) = allow_failed {
+                row
             } else if privacy_loading && allow_calls.is_none() {
                 div()
                     .text_xs()
@@ -511,13 +502,8 @@ impl QuillApp {
                     .pt_1()
                     .child(tr(keys::Q_PREFS_PEER_TO_PEER_CALLS)),
             )
-            .child(if privacy_failed {
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .px_2()
-                    .child(tr(keys::Q_PREFS_COULDN_T_LOAD_PRIVACY_SETTINGS))
-                    .into_any_element()
+            .child(if let Some(row) = p2p_failed {
+                row
             } else if privacy_loading && p2p.is_none() {
                 div()
                     .text_xs()
@@ -529,6 +515,41 @@ impl QuillApp {
                 privacy_group("call-privacy-p2p", p2p, PrivacySettingKey::PeerToPeer)
                     .into_any_element()
             })
+    }
+
+    /// One Calls privacy rule that did not load: its own line and a Retry
+    /// that asks for that rule again.
+    fn call_privacy_failed(
+        &self,
+        id: &'static str,
+        key: PrivacySettingKey,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_PREFS_COULDN_T_LOAD_PRIVACY_SETTINGS)),
+            )
+            .child(
+                div().debug_selector(|| format!("{id}-retry")).child(
+                    Button::new(format!("{id}-retry"))
+                        .label(tr(keys::Q_PREFS_RETRY))
+                        .ghost()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                let _ = live.driver.fetch_privacy_rules(key);
+                            }
+                            cx.notify();
+                        })),
+                ),
+            )
+            .into_any_element()
     }
 
     /// MED2: media settings section — the HQ round-video toggle (TGX
@@ -803,8 +824,13 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     ArchiveSettings => DialogSpec::new(
         500,
-        |app| app.session().is_some_and(|s| s.chat_list.archive_settings_open),
+        |app| app.settings.box_open(SettingsBox::ArchiveSettings),
         QuillApp::build_archive_settings_dialog,
     )
     .close(|app, _, _| app.set_archive_settings_open(false)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "calls_privacy_tests.rs"]
+mod calls_privacy_tests;

@@ -1,6 +1,6 @@
 use super::{MessageA11yContext, format_duration_text, message_accessibility_name};
 use crate::ids::{ChatId, FileId, MessageId};
-use crate::state::{HistoryMessage, OutboxReceipt};
+use crate::state::{HistoryMessage, OutboxReceiptView};
 use crate::telegram::envelope::ParsedFile;
 use crate::telegram::envelope::{
     DocumentContent, LocalFileState, MessageContent, MessageInteractionInfo, MessageReaction,
@@ -15,7 +15,7 @@ fn message(content: MessageContent, outgoing: bool) -> HistoryMessage {
         is_outgoing: outgoing,
         date: 0,
         content,
-        send: crate::state::SendState::Sent,
+        send: crate::state::SendState::Delivered,
         reply_to: None,
         forward_info: None,
         extras: Default::default(),
@@ -87,7 +87,7 @@ fn an_incoming_text_reads_sender_text_and_status() {
 fn an_outgoing_message_reads_seen_me_and_delivery() {
     let mut msg = message(MessageContent::Text(TextContent::plain("Hi")), true);
     let mut context = MessageA11yContext {
-        receipt: Some(OutboxReceipt::Read),
+        receipt: Some(OutboxReceiptView::Read),
         reply: Some((None, "Earlier".into())),
         ..Default::default()
     };
@@ -95,8 +95,8 @@ fn an_outgoing_message_reads_seen_me_and_delivery() {
         message_accessibility_name(&msg, &context, &no_files),
         "Seen\nMe\nIn reply to Me: Earlier\nHi\nSent"
     );
-    context.receipt = Some(OutboxReceipt::Sent);
-    msg.send = crate::state::SendState::Sending;
+    context.receipt = Some(OutboxReceiptView::Sent);
+    msg.send = crate::state::SendState::Unconfirmed;
     assert_eq!(
         message_accessibility_name(&msg, &context, &no_files),
         "Not seen\nMe\nIn reply to Me: Earlier\nHi\nSending"

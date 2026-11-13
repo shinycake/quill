@@ -104,7 +104,7 @@ pub fn price_label(price: Option<SuggestedPrice>) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SuggestedPostState {
     #[default]
-    Pending,
+    Proposed,
     Approved,
     Declined,
 }
@@ -136,7 +136,7 @@ impl SuggestedPostInfo {
         {
             Some("suggestedPostStateApproved") => SuggestedPostState::Approved,
             Some("suggestedPostStateDeclined") => SuggestedPostState::Declined,
-            _ => SuggestedPostState::Pending,
+            _ => SuggestedPostState::Proposed,
         };
         let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
         Some(Self {
@@ -329,7 +329,7 @@ impl SuggestionButtons {
     /// buttons. `AcceptAndDecline` shows [Decline | Accept] and [Suggest
     /// Changes]; `Decline` alone shows [Decline].
     pub fn for_info(info: &SuggestedPostInfo) -> Self {
-        if info.state != SuggestedPostState::Pending {
+        if info.state != SuggestedPostState::Proposed {
             return Self::default();
         }
         let accept = info.can_be_approved;
@@ -599,42 +599,6 @@ impl SuggestedPostLimits {
     }
 }
 
-/// "12.5" or "12,5" Grams as Gram cents; more than two decimals is not a
-/// valid price.
-pub fn parse_gram_cents(text: &str) -> Option<i64> {
-    let text = text.trim().replace(',', ".");
-    let (whole, fraction) = text.split_once('.').unwrap_or((text.as_str(), ""));
-    if fraction.len() > 2
-        || !whole.chars().all(|c| c.is_ascii_digit())
-        || !fraction.chars().all(|c| c.is_ascii_digit())
-        || (whole.is_empty() && fraction.is_empty())
-    {
-        return None;
-    }
-    let whole: i64 = if whole.is_empty() {
-        0
-    } else {
-        whole.parse().ok()?
-    };
-    let cents: i64 = match fraction.len() {
-        0 => 0,
-        1 => fraction.parse::<i64>().ok()?.saturating_mul(10),
-        _ => fraction.parse().ok()?,
-    };
-    whole.checked_mul(100)?.checked_add(cents)
-}
-
-/// The text a price field shows for `price` in its own currency.
-pub fn field_text(price: Option<SuggestedPrice>) -> String {
-    match price {
-        Some(SuggestedPrice::Stars(count)) => count.to_string(),
-        Some(price @ SuggestedPrice::TonCents(_)) => {
-            crate::ton_wallet::format_gram_amount(price.nanos()).replace(',', "")
-        }
-        None => String::new(),
-    }
-}
-
 /// The viewer's side in a channel's direct messages chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectMessagesRole {
@@ -768,6 +732,22 @@ pub struct SuggestedPostsState {
     /// so they come out in the order they failed. Capped at
     /// [`MAX_FAILURES`]: past it the oldest is dropped.
     pub failures: VecDeque<SuggestedPostFailure>,
+    /// The approvals and declines out, each with its request: the only
+    /// record of them, so the answer, the error or the loss of the request
+    /// frees the post.
+    pub deciding: Vec<PostDecision>,
+    /// The `addOffer` messages out, each with its request: a second submit
+    /// waits for the first one's answer, error or loss.
+    pub offering: Vec<PostDecision>,
+}
+
+/// An approve, decline or offer of the suggested post `(chat_id, message_id)`,
+/// out as `request`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PostDecision {
+    pub chat_id: i64,
+    pub message_id: i64,
+    pub request: crate::ids::RequestId,
 }
 
 /// Most unshown failures kept.

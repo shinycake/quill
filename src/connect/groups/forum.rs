@@ -48,7 +48,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .threads
                 .forum_topics
-                .fail(chat_id.0, "could not send the request");
+                .fail(chat_id.0, err.stage_line());
             return Err(err);
         }
         Ok(())
@@ -108,11 +108,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .threads
                 .forum_topics
-                .fail(chat_id.0, "could not send the request");
+                .fail(chat_id.0, err.stage_line());
             return Err(err);
         }
-        self.session.threads.forum_topics.begin(chat_id.0);
-        self.session.threads.forum_topics.sent(chat_id.0, extra);
+        self.session
+            .threads
+            .forum_topics
+            .begin_with(chat_id.0, extra);
         Ok(())
     }
 
@@ -185,7 +187,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
-            .topic_page_in_flight(chat_id, forum_topic_id, WindowEnd::Oldest)
+            .threads
+            .topic_histories
+            .get(&key)
+            .is_some_and(|h| h.asking_older())
         {
             return Ok(None);
         }
@@ -214,7 +219,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             TOPIC_HISTORY_PAGE_SIZE,
             None,
         )) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session
+                    .topic_older_asked(chat_id, forum_topic_id, extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -298,15 +307,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::CreateForumTopic)
+            .asked
+            .is_out(&self.session.requests, RequestPurpose::CreateForumTopic)
         {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::CreateForumTopic, Some(chat_id));
+        self.asked.sent(
+            &self.session.requests,
+            RequestPurpose::CreateForumTopic,
+            extra,
+        );
         if let Err(err) = self
             .sender
             .send_json(&create_forum_topic(extra, chat_id, name.trim()))

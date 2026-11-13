@@ -28,19 +28,20 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 /// What the box says about its last Apply. Editing a swatch leaves
-/// `Sent` and `Failed`; `Applying` ends only on the answers of the requests
+/// `Applied` and `Failed`; `Applying` ends only on the answers of the requests
 /// it holds (`Session::acks`), so another request's answer never lands here.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ApplyStage {
     Editing,
     /// The requests Apply sent that wait for their answer, and the first
-    /// refusal among those answered. Leaves for `Sent` when all were
+    /// refusal among those answered. Leaves for `Applied` when all were
     /// accepted, `Failed` when one was refused, `Editing` when none went out.
     Applying {
         waiting: Vec<RequestId>,
         refused: Option<String>,
     },
-    Sent,
+    /// Every request was accepted: a finished result, nothing is in flight.
+    Applied,
     Failed(String),
 }
 
@@ -79,7 +80,7 @@ impl ApplyStage {
         }
         *self = match refused.take() {
             Some(why) => Self::Failed(why),
-            None => Self::Sent,
+            None => Self::Applied,
         };
         true
     }
@@ -90,6 +91,32 @@ pub(crate) struct PeerColorDialog {
     pub(super) tab: PeerColorTab,
     pub(super) draft: PeerColorDraft,
     pub(super) stage: ApplyStage,
+    /// The picture files already asked for. A list that was replaced, or a
+    /// request that failed, asks for the files not in it
+    /// (`drain_peer_color`), whatever the list's length.
+    asked: std::collections::HashSet<quill::ids::FileId>,
+}
+
+#[cfg(test)]
+impl PeerColorDialog {
+    /// A box whose Apply waits on `waiting`.
+    pub(super) fn applying(waiting: Vec<RequestId>) -> Self {
+        Self {
+            tab: PeerColorTab::Name,
+            draft: PeerColorDraft {
+                name_color_id: 0,
+                name_emoji_id: 0,
+                gift_colors_id: 0,
+                profile_color_id: -1,
+                profile_emoji_id: 0,
+            },
+            stage: ApplyStage::Applying {
+                waiting,
+                refused: None,
+            },
+            asked: Default::default(),
+        }
+    }
 }
 
 impl QuillApp {
@@ -126,6 +153,18 @@ impl QuillApp {
     }
 
     pub(super) fn open_peer_color_dialog(&mut self, tab: PeerColorTab, cx: &mut Context<Self>) {
+        // An Apply is on its way: its answers land in the open box, so the
+        // box stays (on the tab asked for) instead of being written over.
+        if let Some(dialog) = self.dialogs.peer_color_dialog.as_mut()
+            && matches!(dialog.stage, ApplyStage::Applying { .. })
+        {
+            dialog.tab = tab;
+            self.open_box(DialogKind::PeerColor);
+            cx.notify();
+            return;
+        }
+        // Another box open meanwhile is let go whole, with what it waited for.
+        self.close_peer_color_dialog(cx);
         let Some(draft) = self.my_peer_colors() else {
             self.set_note(StatusNote::info(tr(keys::Q_MISC_COLORS_NEED_A_SIGNED_IN)));
             cx.notify();
@@ -147,6 +186,7 @@ impl QuillApp {
             tab,
             draft,
             stage: ApplyStage::Editing,
+            asked: Default::default(),
         });
         self.open_box(DialogKind::PeerColor);
         cx.notify();
@@ -160,7 +200,17 @@ impl QuillApp {
         let Some(dialog) = self.screen.dialogs.peer_color_dialog.as_mut() else {
             return false;
         };
-        if !dialog.stage.settle(&mut live.driver.session.acks) {
+        // The lists the box draws arrive after it opens: each picture is asked
+        // for once, from here, not by each build.
+        let icons = live
+            .driver
+            .download_background_emoji_icons_once(&mut dialog.asked);
+        let gifts = live
+            .driver
+            .download_wearable_gift_stickers(&mut dialog.asked);
+        let grown = icons || gifts;
+        let settled = dialog.stage.settle(&mut live.driver.session.acks);
+        if !settled && !grown {
             return false;
         }
         cx.notify();
@@ -174,9 +224,13 @@ impl QuillApp {
             .take()
             .map(|d| d.stage.in_flight().to_vec())
             .unwrap_or_default();
-        if let Some(live) = self.live.as_mut() {
+        let session = match self.live.as_mut() {
+            Some(live) => Some(&mut live.driver.session),
+            None => self.demo_session.as_deref_mut(),
+        };
+        if let Some(session) = session {
             for id in waiting {
-                live.driver.session.acks.forget(id);
+                session.acks.forget(id);
             }
         }
         cx.notify();
@@ -188,11 +242,14 @@ impl QuillApp {
         edit: impl FnOnce(&mut PeerColorDraft, PeerColorTab),
     ) {
         if let Some(dialog) = self.dialogs.peer_color_dialog.as_mut() {
+            // While Apply waits for its answers the draft is what was sent:
+            // an edit now would be reported as applied without ever going.
+            if matches!(dialog.stage, ApplyStage::Applying { .. }) {
+                return;
+            }
             let tab = dialog.tab;
             edit(&mut dialog.draft, tab);
-            if !matches!(dialog.stage, ApplyStage::Applying { .. }) {
-                dialog.stage = ApplyStage::Editing;
-            }
+            dialog.stage = ApplyStage::Editing;
         }
         cx.notify();
     }
@@ -283,10 +340,6 @@ impl QuillApp {
                 .title(crate::ui::shell::dialog_title(tr(
                     keys::SETTINGS_COLOR_TITLE,
                 )));
-            if let Some(live) = this.live.as_mut() {
-                live.driver.download_background_emoji_icons();
-                live.driver.download_wearable_gift_stickers();
-            }
             let Some(body) = this.peer_color_body(cx) else {
                 return dialog.on_close(on_close);
             };
@@ -681,7 +734,7 @@ impl QuillApp {
                 Some((tr(keys::Q_MISC_APPLYING_STYLE).to_string(), false))
             }
             ApplyStage::Failed(error) => Some((error, true)),
-            ApplyStage::Sent => Some((tr(keys::Q_MISC_STYLE_UPDATED).to_string(), false)),
+            ApplyStage::Applied => Some((tr(keys::Q_MISC_STYLE_UPDATED).to_string(), false)),
             ApplyStage::Editing => None,
         };
 

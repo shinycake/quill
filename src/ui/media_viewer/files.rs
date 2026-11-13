@@ -64,7 +64,6 @@ impl QuillApp {
             return false;
         };
         self.viewer.state = MediaViewer::open(items, index);
-        self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
         cx.notify();
@@ -118,7 +117,9 @@ fn picture_opens_in_app(path: &Path, doc: &DocumentContent) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum FileState {
+/// The file as the card shows it, read from the file map each time the card
+/// is built; nothing stores it.
+enum FileView {
     Remote,
     Downloading(Option<f32>),
     Local,
@@ -132,7 +133,7 @@ pub(super) struct FileCard {
     file_id: FileId,
     name: String,
     size: i64,
-    state: FileState,
+    state: FileView,
 }
 
 impl FileCard {
@@ -144,11 +145,11 @@ impl FileCard {
         let file_id = item.download_file_id;
         let file = files.get(&file_id.0);
         let state = if file.and_then(|f| f.usable_path()).is_some() {
-            FileState::Local
+            FileView::Local
         } else if file_is_downloading(file_id, files, downloading) {
-            FileState::Downloading(file.and_then(ParsedFile::download_progress))
+            FileView::Downloading(file.and_then(ParsedFile::download_progress))
         } else {
-            FileState::Remote
+            FileView::Remote
         };
         Self {
             row_id: item.message_id.0 as u64,
@@ -175,11 +176,11 @@ impl FileCard {
             state,
         } = self;
         let status = match state {
-            FileState::Downloading(Some(progress)) => tr_with(
+            FileView::Downloading(Some(progress)) => tr_with(
                 keys::Q_AV_DOWNLOADING_3,
                 &[("round", &((progress * 100.0).round() as i32).to_string())],
             ),
-            FileState::Downloading(None) => tr(keys::Q_AV_DOWNLOADING_4).to_string(),
+            FileView::Downloading(None) => tr(keys::Q_AV_DOWNLOADING_4).to_string(),
             _ => format_bytes(size),
         };
         let act = move |action: fn(&mut QuillApp, FileId, &mut Context<QuillApp>)| {
@@ -195,16 +196,16 @@ impl FileCard {
                 .text_color(gpui_kit::white())
         };
         let actions = match state {
-            FileState::Remote => div().child(
+            FileView::Remote => div().child(
                 button("viewer-file-download", tr(keys::MEDIA_DOWNLOAD)).on_click(act(
                     |this, id, cx| this.request_media_download(id, None, cx),
                 )),
             ),
-            FileState::Downloading(_) => div().child(
+            FileView::Downloading(_) => div().child(
                 button("viewer-file-cancel", tr(keys::MEDIA_CANCEL))
                     .on_click(act(|this, id, cx| this.cancel_media_download(id, cx))),
             ),
-            FileState::Local => div()
+            FileView::Local => div()
                 .flex()
                 .gap_1()
                 .child(

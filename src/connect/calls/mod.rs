@@ -16,6 +16,7 @@ use crate::telegram::requests::{
     send_call_debug_information, send_call_log, send_call_rating_detail, send_call_signaling_data,
 };
 use std::sync::Arc;
+use std::time::Instant;
 
 mod history;
 mod lifecycle;
@@ -408,7 +409,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// call's own signaling runs over its data channel, so Telegram may
     /// send nothing for a long time and these must not wait for an
     /// unrelated update. Returns whether anything was pending.
-    pub(crate) fn pump_call_engine_reports(&mut self) -> bool {
+    pub(crate) fn pump_call_engine_reports(&mut self, now: Instant) -> bool {
         let pending = !self.signaling_outbox.lock_or_recover().is_empty()
             || !self.transport_outbox.lock_or_recover().is_empty()
             || !self.video_state_outbox.lock_or_recover().is_empty()
@@ -419,7 +420,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let active = self.session.calls.active_call.as_ref().map(|call| call.id);
         // A send failure leaves the bytes queued for the next poll.
-        let _ = self.pump_call_engine(active, None);
+        let _ = self.pump_call_engine(active, None, now);
         self.drain_remote_audio_state();
         true
     }
@@ -430,6 +431,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         active_call_before: Option<i32>,
         bridge_signaling: Option<(i32, Vec<u8>)>,
+        now: Instant,
     ) -> Result<(), ConnectSendError> {
         let active_call_after = self.session.calls.active_call.as_ref().map(|call| {
             (
@@ -539,7 +541,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         reconnect_attempts: 0,
                     };
                     call.transport = match result {
-                        Ok(()) => CallTransport::Connecting(link),
+                        Ok(()) => CallTransport::Attempt(link),
                         Err(err) => CallTransport::Failed {
                             reason: err.to_string(),
                             link: Some(link),
@@ -564,7 +566,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 continue;
             }
             crate::advanced::debug_mode::call_log(&format!("[call] {call_id} transport {state:?}"));
-            self.apply_transport_report(state);
+            self.apply_transport_report(state, now);
         }
 
         // Phase C2e: peer camera state follows the same gate as
@@ -637,7 +639,22 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// other report moves the transport to that phase. A report for a
     /// transport Quill never connected has nothing to describe and is
     /// dropped.
-    fn apply_transport_report(&mut self, state: TransportState) {
+    /// A retry the engine never reported on counts as a failed report: the
+    /// next retry, or the end of the budget. Returns whether it moved.
+    pub(crate) fn expire_call_reconnect(&mut self, now: Instant) -> bool {
+        let overdue = self
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .is_some_and(|call| call.transport.reconnect_overdue(now));
+        if overdue {
+            self.apply_transport_report(TransportState::Failed, now);
+        }
+        overdue
+    }
+
+    fn apply_transport_report(&mut self, state: TransportState, now: Instant) {
         let Some(call) = self.session.calls.active_call.as_ref() else {
             return;
         };
@@ -667,8 +684,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     link.reconnect_attempts += 1;
                     match self.connect_call_transport(call_id, &link.params) {
                         // The retry is in flight: `Reconnecting` until the
-                        // engine's own reports move it on.
-                        Ok(()) => CallTransport::Reconnecting(link),
+                        // engine's own reports move it on, or its deadline
+                        // passes (`expire_call_reconnect`).
+                        Ok(()) => CallTransport::reconnecting(link, now),
                         Err(err) => CallTransport::Failed {
                             reason: err.to_string(),
                             link: Some(link),
@@ -677,7 +695,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
         } else {
-            match link.and_then(|link| CallTransport::reported(state, link)) {
+            match link.and_then(|link| CallTransport::reported(state, link, now)) {
                 Some(next) => next,
                 None => return,
             }

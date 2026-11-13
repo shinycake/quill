@@ -722,7 +722,6 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
             },
         );
         session.settings.business_extra.lookup = quill::state::BotLookup {
-            generation: 1,
             query: "shop_bot".into(),
             exact: quill::state::fetch::Fetch::Ready(Some(bot)),
             mine: quill::state::fetch::Fetch::Ready(Vec::new()),
@@ -1037,7 +1036,7 @@ fn a_chatbot_draft_waiting_for_the_server_is_filled_when_the_answer_lands(cx: &m
     // The draft waits: the connected bot has not been reported.
     app.update(vcx, |app, _| {
         if let Some(bot) = app.business_mut().and_then(|d| d.screen.chatbot_mut()) {
-            bot.bot = super::BotLink::Loading;
+            bot.bot = super::BotLink::Unreported;
         }
     });
     act(&app, vcx, |app, window, cx| {
@@ -1057,7 +1056,7 @@ fn a_chatbot_draft_waiting_for_the_server_is_filled_when_the_answer_lands(cx: &m
     // The answer lands after the draft went back to waiting (a late one).
     app.update(vcx, |app, _| {
         if let Some(bot) = app.business_mut().and_then(|d| d.screen.chatbot_mut()) {
-            bot.bot = super::BotLink::Loading;
+            bot.bot = super::BotLink::Unreported;
         }
         if let Some(session) = app.demo_session.as_mut() {
             session.settings.business_extra.connected_bot =
@@ -1072,6 +1071,49 @@ fn a_chatbot_draft_waiting_for_the_server_is_filled_when_the_answer_lands(cx: &m
         app.business_info_upkeep(window, cx)
     });
     assert_eq!(linked(&app, vcx), Some(super::BotLink::Connected(77)));
+}
+
+/// Leaving the Chatbots screen untouched writes nothing, even when the
+/// server's bot is another one by then (an earlier save of this same
+/// screen still answering, or another device): the draft is compared with
+/// the bot it was built from, never with the server's now.
+#[gpui_kit::test]
+fn an_untouched_chatbot_screen_writes_nothing_when_the_server_bot_changed(cx: &mut TestAppContext) {
+    use quill::business_bots::{BotRights, ConnectedBot};
+    use quill::business_settings::BusinessRecipients;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    let connected = |id: i64| {
+        quill::state::fetch::Fetch::Ready(Some(ConnectedBot {
+            bot_user_id: id,
+            recipients: BusinessRecipients::everyone(),
+            rights: BotRights::default(),
+        }))
+    };
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.business_extra.connected_bot = connected(77);
+        }
+    });
+    open(&app, vcx);
+    go(&app, vcx, View::Chatbots);
+    act(&app, vcx, |app, window, cx| {
+        app.business_info_upkeep(window, cx)
+    });
+    // The server's bot is another by the time the screen is left.
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.business_extra.connected_bot = connected(78);
+        }
+    });
+    back(&app, vcx);
+    assert_eq!(view(&app, vcx), View::Hub);
+    assert_eq!(
+        note(&app, vcx),
+        None,
+        "nothing was sent: the demo would have said it cannot"
+    );
 }
 
 #[gpui_kit::test]

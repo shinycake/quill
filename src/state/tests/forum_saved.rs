@@ -289,6 +289,8 @@ fn tag_updates_and_sublist_tag_names() {
     assert_eq!(session.threads.saved.tag_list()[0].label, "Love");
     session.open_saved_sublist(77);
     let extra = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 77 }, None);
+    let fetch = session.threads.saved.topic_tags.entry(77).or_default();
+    fetch.begin_with(extra);
     apply_json(
         &mut session,
         &seq,
@@ -303,6 +305,62 @@ fn tag_updates_and_sublist_tag_names() {
     assert_eq!(choices.len(), 1);
     assert_eq!(choices[0].label, "Love");
     assert_eq!(choices[0].count, 2);
+}
+
+/// A sublist's tags are taken from the ask that is out for it: an older ask
+/// answering after a newer one began, and one nobody asked, change nothing.
+#[test]
+fn a_sublist_takes_only_the_tags_it_asked_for() {
+    let (mut session, sink, seq) = saved_session();
+    let tags = |count: i32| {
+        format!(
+            r#""tags":[{{"tag":{{"@type":"reactionTypeEmoji","emoji":"❤"}},"label":"","count":{count}}}]"#
+        )
+    };
+    let ask = |session: &mut Session| {
+        let extra = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 77 }, None);
+        let fetch = session.threads.saved.topic_tags.entry(77).or_default();
+        fetch.begin_with(extra);
+        extra
+    };
+    let older = ask(&mut session);
+    let newer = ask(&mut session);
+    for (request, count) in [(older, 1), (newer, 2)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"savedMessagesTags","@extra":"{}",{}}}"#,
+                request.0,
+                tags(count)
+            ),
+        );
+        let held = session
+            .threads
+            .saved
+            .topic_tags
+            .get(&77)
+            .and_then(|f| f.data());
+        assert_eq!(held.map(|t| t[0].count), (count == 2).then_some(2));
+    }
+    // An update is the server's current list, whatever the fetch.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"updateSavedMessagesTags","saved_messages_topic_id":"77","tags":{{"@type":"savedMessagesTags",{}}}}}"#,
+            tags(5)
+        ),
+    );
+    let held = session
+        .threads
+        .saved
+        .topic_tags
+        .get(&77)
+        .and_then(|f| f.data());
+    assert_eq!(held.map(|t| t[0].count), Some(5));
 }
 
 #[test]
@@ -386,8 +444,7 @@ fn a_failed_first_page_is_asked_again_once_back_online() {
     assert!(!session.threads.saved.waiting_to_retry());
 
     let tags = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }, None);
-    session.threads.saved.tags.begin();
-    session.threads.saved.tags.sent(tags);
+    session.threads.saved.tags.begin_with(tags);
     apply_json(&mut session, &seq, &sink, &error(tags));
     assert!(session.threads.saved.waiting_to_retry());
     assert!(session.threads.saved.tags.error().is_some());
@@ -538,6 +595,7 @@ fn default_icons_keep_only_custom_emoji_stickers() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetForumTopicDefaultIcons, None);
+    session.threads.forum_topic_icons.begin_with(extra);
     let sticker = |id: i64, emoji_id: i64| {
         format!(
             r#"{{"@type":"sticker","id":"{id}","set_id":"1","width":100,"height":100,"emoji":"A","format":{{"@type":"stickerFormatWebp"}},"full_type":{{"@type":"stickerFullTypeCustomEmoji","custom_emoji_id":"{emoji_id}","needs_repainting":false}},"thumbnail":null,"sticker":{{"@type":"file","id":{id},"size":1,"expected_size":1,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":1}}}}}}"#
@@ -554,9 +612,9 @@ fn default_icons_keep_only_custom_emoji_stickers() {
             sticker(6, 0)
         ),
     );
-    assert_eq!(session.threads.forum_topic_icons.len(), 1);
+    assert_eq!(session.threads.forum_topic_icons.items().len(), 1);
     assert_eq!(
-        session.threads.forum_topic_icons[0].custom_emoji_id,
+        session.threads.forum_topic_icons.items()[0].custom_emoji_id,
         Some(5005)
     );
 }

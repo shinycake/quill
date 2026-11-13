@@ -12,6 +12,18 @@ pub(crate) fn session() -> (Session, Arc<MemorySink>) {
     (Session::new(AccountKey::primary(), dyn_sink), sink)
 }
 
+/// A member action (a status or tag change, an add) the way the driver
+/// registers it: the request, then the send that went out.
+pub(crate) fn member_request(
+    session: &mut Session,
+    purpose: RequestPurpose,
+    chat: ChatId,
+) -> RequestId {
+    let id = session.request(purpose, Some(chat));
+    session.groups.member_action_sent(chat.0, id);
+    id
+}
+
 pub(crate) fn apply_json(
     session: &mut Session,
     seq: &AtomicU64,
@@ -188,4 +200,15 @@ pub(crate) fn payment_sent_for_shown(session: &mut Session, request: RequestId) 
         .map(|shown| shown.invoice.clone())
         .expect("a checkout is open");
     session.payment_sent(request, &invoice);
+}
+
+/// A `getMessageThreadHistory` page of the open thread, asked as the driver
+/// asks it: the window waits for it.
+pub(super) fn asked_thread_page(session: &mut Session, message_id: i64, chat: i64) -> RequestId {
+    let page = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id },
+        Some(ChatId(chat)),
+    );
+    session.thread_older_asked(page);
+    page
 }

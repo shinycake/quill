@@ -8,7 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
-use quill::state::StoryCardState;
+use quill::state::StoryCardView;
 
 impl QuillApp {
     pub(in crate::ui) fn follow_story_tray(&mut self, cx: &mut Context<Self>) {
@@ -47,7 +47,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        fetch.retain(|(chat, id)| session.story_card_state(chat.0, *id) == StoryCardState::Loading);
+        fetch.retain(|(chat, id)| session.story_card_state(chat.0, *id) == StoryCardView::Loading);
         let pictures: Vec<FileId> = [-1, 1]
             .into_iter()
             .filter_map(|d| self.story_sibling_picture_to_download(d))

@@ -10,8 +10,8 @@ impl Session {
         _seq: u64,
     ) {
         self.settle_own_reaction(extra, false);
-        if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
-            *slot = TypeSave::Done;
+        if let Some(id) = extra {
+            self.groups.new_chats.type_save_done(id);
         }
         self.settle_direct_messages_ok(pending);
         if let Some(pending) = pending
@@ -26,11 +26,34 @@ impl Session {
         {
             self.threads.saved.page_answered(pending.id);
         }
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Groups(GroupsPurpose::AnswerSharingRequest { .. })
+            )
+        {
+            self.groups.private_sharing.answer_settled(pending.id);
+        }
+        if let Some(pending) = pending {
+            self.decision_settled(pending.id);
+            self.groups.member_action_confirmed(pending.id);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::RemoveSavedNotificationSound) {
             self.mark_saved_sounds_stale();
         }
         self.apply_profile_music_ok(pending);
         self.apply_proxy_ok(pending);
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList { .. })
+            )
+        {
+            // A block or unblock was answered: it is no longer out, and a
+            // page it replaced is asked again.
+            self.settings.block_note.settled(pending.id);
+            self.settings.block_change_landed(Some(pending.id));
+        }
         if let Some(request) = extra
             && matches!(
                 pending.map(|p| p.purpose),
@@ -166,6 +189,9 @@ impl Session {
         ) {
             self.settings.sessions_op.changed(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
+            if let Some(asked) = pending {
+                self.settings.sessions_note.settled(asked.id);
+            }
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
         // `toggleSessionCanAcceptCalls` succeeded — same stale
@@ -180,6 +206,9 @@ impl Session {
         ) {
             self.settings.sessions_op.changed(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
+            if let Some(asked) = pending {
+                self.settings.sessions_note.settled(asked.id);
+            }
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
@@ -199,46 +228,35 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.settings
-                .account_ttl
-                .answered(pending.map(|p| p.id), days);
+            // Only the write in flight is confirmed by its own `ok`.
+            if self.settings.account_write.request() == pending.map(|p| p.id) {
+                self.settings.account_ttl.pushed(days);
+            }
         }
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::DeleteAccount)
-        ) {
-            self.settings.account_delete = crate::state::fetch::Fetch::Idle;
-        }
-        // Slice A8: a `checkPhoneNumberCode` succeeded — the
-        // server completed the number change of the number the
-        // code was sent to, so the own user's `phone_number` is
-        // updated directly (not an optimistic guess — the `ok`
-        // confirms it; the authoritative `updateUser` that
-        // follows lands the same value idempotently). The
-        // code-entry step clears and any stale error goes with
-        // it.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::CheckPhoneNumberCode)
-        ) {
-            if let Some(target) = self.auth_state.change_number.phone().map(str::to_string)
-                && let Some(my_id) = self.my_user_id
+        self.settings.account_write.settle(pending.map(|p| p.id));
+        // Slice A8: a `checkPhoneNumberCode` succeeded: the server
+        // completed the number change of the number the code was sent to,
+        // so the own user's `phone_number` is updated directly (not an
+        // optimistic guess: the `ok` confirms it; the authoritative
+        // `updateUser` that follows lands the same value idempotently).
+        // Only the check the flow waits for ends it. The send or resend
+        // still out is dropped: a late answer must not resurrect the
+        // completed flow (re-write phone/timeout or park a phantom error
+        // after the number already changed).
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::CheckPhoneNumberCode
+            && let Some((target, out)) = self.auth_state.change_number.checked(pending.id)
+        {
+            if let Some(my_id) = self.my_user_id
                 && let Some(me) = self.users.get_mut(&my_id)
             {
                 me.phone_number = target;
             }
-            // The send/resend answers are dropped below, so nothing else
-            // would end a send in flight.
-            self.auth_state.change_number.finish();
-            // A8: drop any stale in-flight send/resend purposes —
-            // a late resend answer must not resurrect the
-            // completed flow (re-write phone/timeout or park a
-            // phantom error after the number already changed).
-            self.requests
-                .take_purpose(RequestPurpose::SendPhoneNumberCode);
-            self.requests
-                .take_purpose(RequestPurpose::ResendPhoneNumberCode);
+            for request in out {
+                self.requests.take(request);
+            }
         }
+        self.settle_participant_mute_toggle(pending);
         // Slice S4: a `setAutoDownloadSettings` succeeded — apply
         // the confirmed sent settings (the `ok` carries none, so
         // they ride the purpose); the error clears and the driver
@@ -250,7 +268,7 @@ impl Session {
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
             self.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
-            self.settings.data_storage_dirty = true;
+            self.settings.data_storage_disk = DataStorageDisk::Due;
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
@@ -289,16 +307,21 @@ impl Session {
         ) {
             self.settings.websites_op.changed(pending.map(|p| p.id));
             self.settings.connected_websites.clear_error();
+            if let Some(asked) = pending {
+                self.settings.websites_note.settled(asked.id);
+            }
         }
         // Slice `parity:bots-payment-recurring`: an
         // `editStarSubscription` / `reuseStarSubscription` succeeded —
         // same stale pattern: the old cache stays visible until the
         // server-confirmed refetch replaces it (never optimistic).
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
-        ) {
-            self.payments.star_subscriptions.edit_done();
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription
+            )
+        {
+            self.payments.star_subscriptions.edit_done(pending.id);
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from
         // the server (the connect driver does it on the same ingest) and,
@@ -327,12 +350,18 @@ impl Session {
             Some(RequestPurpose::AddFavoriteSticker | RequestPurpose::RemoveFavoriteSticker)
         ) {
             self.stickers.stickers.favorites.clear();
+            // A fetch out from before the change would carry the old list.
+            self.stickers.stickers.lists.favorites = crate::state::fetch::Fetch::Idle;
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::ClearRecentStickers)
         ) {
             self.stickers.stickers.recent.clear();
+            self.stickers.stickers.lists.recent = crate::state::fetch::Fetch::Idle;
+        }
+        if let Some(pending) = pending {
+            self.stickers.stickers.changes.settled(pending.id);
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -351,7 +380,7 @@ impl Session {
                 self.finish_set_change(request, set_id, true);
             }
             for sets in [
-                &mut self.stickers.stickers.trending,
+                &mut self.stickers.stickers.trending.sets,
                 &mut self.stickers.stickers.search.sets,
             ] {
                 for set in sets.iter_mut().filter(|set| set.id == set_id) {
@@ -359,15 +388,15 @@ impl Session {
                 }
             }
             self.stickers.stickers.sets.clear();
-            self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
-            self.stickers.stickers.archived.clear();
-            self.stickers.stickers.archived_has_more = false;
-            self.stickers.stickers.archived_next_offset = 0;
+            // A fetch out asked before the change: its answer predates it.
+            self.stickers.stickers.lists.installed.outdate();
+            self.stickers.stickers.lists.archived = crate::state::fetch::Fetch::Idle;
+            self.stickers.stickers.archived = Default::default();
             if self.stickers.stickers.tab == StickerTab::Archived {
                 self.stickers.stickers.selection = StickerSelection::default();
             }
         }
-        self.finish_mask_mutation(pending.map(|p| p.purpose));
+        self.finish_mask_mutation(pending);
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
         self.invalidate_emoji_caches(pending.map(|p| p.purpose), pending.map(|p| p.id));
         // Slice S9: a saved-GIF mutation (`addSavedAnimation` /
@@ -380,6 +409,7 @@ impl Session {
         ) {
             self.stickers.gifs.animations.clear();
             self.stickers.gifs.saved_forgotten();
+            self.stickers.gifs.save_settled(pending.map(|p| p.id));
         }
         // Phase C3a: a successful `leaveGroupCall` /
         // `endGroupCall` drops the tracked call (the `ok`
@@ -547,14 +577,14 @@ impl Session {
             && let Some(summary) = self.calls.summary.as_mut()
             && summary.log == CallUpload::Sending(pending.id)
         {
-            summary.log = CallUpload::Sent;
+            summary.log = CallUpload::Uploaded;
         }
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::SendCallDebugInformation
             && let Some(summary) = self.calls.summary.as_mut()
             && summary.debug_information == CallUpload::Sending(pending.id)
         {
-            summary.debug_information = CallUpload::Sent;
+            summary.debug_information = CallUpload::Uploaded;
         }
         // `sendCallRating` confirmed: the card says thanks.
         if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)
@@ -562,7 +592,7 @@ impl Session {
             && let Some(pending) = pending
             && summary.rating.sends(pending.id)
         {
-            summary.rating = CallRating::Sent;
+            summary.rating = CallRating::Rated;
         }
         // Slice S3: `setReadDatePrivacySettings` confirmed — clear
         // the optimistic spinner (the value itself was set at
@@ -583,11 +613,11 @@ impl Session {
         // A short OK is not exhaustion; 404 is. A page that went through
         // ends the wait after an earlier failure.
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
-            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
+            Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(extra),
+            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(extra),
             Some(RequestPurpose::LoadFolderChats) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id()) {
-                    self.chat_list.folder_page_ok(folder_id);
+                    self.chat_list.folder_page_ok(folder_id, extra);
                 }
             }
             _ => {}
@@ -682,7 +712,7 @@ impl Session {
                 .supergroup_members
                 .retain(|(id, _), _| *id != chat_id.0);
             self.groups.admin_lists.remove(&chat_id.0);
-            self.groups.add_members_failed.remove(&chat_id.0);
+            self.groups.member_actions.remove(&chat_id.0);
         }
         // Phase D3a: `processChatJoinRequest` confirmed — drop the
         // processed request from the cached list. The count is
@@ -883,12 +913,6 @@ impl Session {
             return;
         };
         let sent = *sent;
-        for later in self.requests.pending.values_mut().filter(|p| {
-            p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
-        }) {
-            if let Some(RequestRollback::ChatPermissions { previous, .. }) = &mut later.rollback {
-                *previous = Some(sent);
-            }
-        }
+        self.requests.rebase_permission_rollbacks(chat_id, sent);
     }
 }

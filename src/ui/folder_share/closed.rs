@@ -11,10 +11,16 @@ use quill::state::DialogAnswer;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClosedAsk {
     /// The add of a shared folder: the toast says it was added, with how
-    /// many chats were joined.
-    FolderAdded { folder: String, joined: usize },
+    /// many chats were joined. `next` is an `addlist` link that came while
+    /// the add was out: its box opens when the add is settled.
+    FolderAdded {
+        folder: String,
+        joined: usize,
+        next: Option<String>,
+    },
     /// A link save or delete of the Share Folder box: the list is the
-    /// session's, so only a failure has something to say.
+    /// session's, so only a failure has something to say; a success asks
+    /// the list of a box reopened since (`refetch_open_folder_links`).
     LinkChange,
 }
 
@@ -25,8 +31,11 @@ impl QuillApp {
         if self.folders.closed_asks.is_empty() {
             return false;
         }
-        let waiting: Vec<RequestId> = self.folders.closed_asks.keys().copied().collect();
+        let mut waiting: Vec<RequestId> = self.folders.closed_asks.keys().copied().collect();
+        // Request order: the newest queued link wins below.
+        waiting.sort_by_key(|request| request.0);
         let mut changed = false;
+        let mut queued: Option<String> = None;
         for request in waiting {
             let Some(session) = self.session_mut_any() else {
                 continue;
@@ -35,8 +44,12 @@ impl QuillApp {
                 // Out of the session's requests with no answer kept (the
                 // ring of answers dropped it): nothing will come, the
                 // entry ends without a toast.
-                if session.requests.get(request).is_none() {
-                    self.folders.closed_asks.remove(&request);
+                if session.requests.get(request).is_none()
+                    && let Some(ClosedAsk::FolderAdded { next, .. }) =
+                        self.folders.closed_asks.remove(&request)
+                {
+                    // The queued link still opens.
+                    queued = next.or(queued);
                 }
                 continue;
             };
@@ -44,15 +57,39 @@ impl QuillApp {
                 continue;
             };
             match (ask, answer) {
+                (ClosedAsk::FolderAdded { next, .. }, DialogAnswer::Failed(line)) => {
+                    self.set_note(StatusNote::error(line));
+                    queued = next.or(queued);
+                }
+                (ClosedAsk::FolderAdded { next, .. }, DialogAnswer::LimitHit) => {
+                    queued = next.or(queued);
+                }
                 (_, DialogAnswer::Failed(line)) => self.set_note(StatusNote::error(line)),
                 // The limit box says it; no toast on top.
                 (_, DialogAnswer::LimitHit) => {}
-                (ClosedAsk::FolderAdded { folder, joined }, _) => {
+                (
+                    ClosedAsk::FolderAdded {
+                        folder,
+                        joined,
+                        next,
+                    },
+                    _,
+                ) => {
                     self.set_note(folder_added_note(&folder, joined));
+                    queued = next.or(queued);
                 }
-                (ClosedAsk::LinkChange, _) => {}
+                // The delete or save landed: a box reopened meanwhile held its
+                // list back for it (`fetch_folder_share`) and asks it now.
+                (ClosedAsk::LinkChange, _) => self.refetch_open_folder_links(),
             }
             changed = true;
+        }
+        // A link queued behind a closed add gives way to anything newer: a
+        // box the user opened since stays as it is.
+        if let Some(link) = queued
+            && self.folders.invite.is_none()
+        {
+            self.open_folder_invite(link, cx);
         }
         if changed {
             cx.notify();

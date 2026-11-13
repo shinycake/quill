@@ -49,9 +49,11 @@ impl LinkProblem {
     }
 }
 
-/// What the line under the link field says (tdesktop `UsernameCheckInfo`).
+/// What the line under the link field says (tdesktop `UsernameCheckInfo`):
+/// worked out from the text and the server verdict each time, never stored,
+/// so `Pending` waits on the box's own check, not on a request held here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LinkStatus {
+pub enum LinkLine {
     /// Nothing typed: no line.
     Empty,
     /// The chat's own link, untouched: no line, and Save may keep it.
@@ -65,7 +67,7 @@ pub enum LinkStatus {
     Purchasable,
 }
 
-impl LinkStatus {
+impl LinkLine {
     /// tdesktop `goodUsername`: Save takes the link.
     pub fn is_good(self) -> bool {
         matches!(self, Self::Current | Self::Available)
@@ -74,19 +76,19 @@ impl LinkStatus {
 
 /// tdesktop `usernameChanged`: what the text says before the server is
 /// asked. `Pending` means it is worth a check.
-pub fn local_link_status(text: &str) -> LinkStatus {
+pub fn local_link_status(text: &str) -> LinkLine {
     if text.is_empty() {
-        return LinkStatus::Empty;
+        return LinkLine::Empty;
     }
     let bad = text
         .chars()
         .any(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'));
     if bad {
-        LinkStatus::Problem(LinkProblem::BadSymbols)
+        LinkLine::Problem(LinkProblem::BadSymbols)
     } else if text.chars().count() < USERNAME_MIN {
-        LinkStatus::Problem(LinkProblem::TooShort)
+        LinkLine::Problem(LinkProblem::TooShort)
     } else {
-        LinkStatus::Pending
+        LinkLine::Pending
     }
 }
 
@@ -94,7 +96,7 @@ pub fn local_link_status(text: &str) -> LinkStatus {
 /// `checkUsernameAvailability` done/fail).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CheckOutcome {
-    Status(LinkStatus),
+    Status(LinkLine),
     /// `CHANNELS_ADMIN_PUBLIC_TOO_MUCH`: the box goes back to private and
     /// shows the public links limit box.
     TooManyPublic,
@@ -107,17 +109,17 @@ pub enum CheckOutcome {
 /// occupied answer for it is the chat's own).
 pub fn check_outcome(result: UsernameCheckResult, checked: &str, editable: &str) -> CheckOutcome {
     match result {
-        UsernameCheckResult::Available => CheckOutcome::Status(LinkStatus::Available),
+        UsernameCheckResult::Available => CheckOutcome::Status(LinkLine::Available),
         UsernameCheckResult::Occupied if checked == editable => {
-            CheckOutcome::Status(LinkStatus::Available)
+            CheckOutcome::Status(LinkLine::Available)
         }
         UsernameCheckResult::Occupied => {
-            CheckOutcome::Status(LinkStatus::Problem(LinkProblem::Occupied))
+            CheckOutcome::Status(LinkLine::Problem(LinkProblem::Occupied))
         }
         UsernameCheckResult::Invalid => {
-            CheckOutcome::Status(LinkStatus::Problem(LinkProblem::Invalid))
+            CheckOutcome::Status(LinkLine::Problem(LinkProblem::Invalid))
         }
-        UsernameCheckResult::Purchasable => CheckOutcome::Status(LinkStatus::Purchasable),
+        UsernameCheckResult::Purchasable => CheckOutcome::Status(LinkLine::Purchasable),
         UsernameCheckResult::PublicChatsTooMany => CheckOutcome::TooManyPublic,
         UsernameCheckResult::PublicGroupsUnavailable => CheckOutcome::PublicUnavailable,
     }
@@ -125,15 +127,13 @@ pub fn check_outcome(result: UsernameCheckResult, checked: &str, editable: &str)
 
 /// The line under the field for `text`: the local rules first, then the
 /// server's answer for exactly this text (`None` while none came).
-pub fn link_status(text: &str, editable: &str, verdict: Option<CheckOutcome>) -> LinkStatus {
+pub fn link_status(text: &str, editable: &str, verdict: Option<CheckOutcome>) -> LinkLine {
     match local_link_status(text) {
-        LinkStatus::Pending => match verdict {
+        LinkLine::Pending => match verdict {
             Some(CheckOutcome::Status(status)) => status,
-            Some(CheckOutcome::TooManyPublic | CheckOutcome::PublicUnavailable) => {
-                LinkStatus::Empty
-            }
-            None if text == editable => LinkStatus::Current,
-            None => LinkStatus::Pending,
+            Some(CheckOutcome::TooManyPublic | CheckOutcome::PublicUnavailable) => LinkLine::Empty,
+            None if text == editable => LinkLine::Current,
+            None => LinkLine::Pending,
         },
         local => local,
     }
@@ -304,7 +304,7 @@ pub fn display_order(draft: &[String], active: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CheckOutcome, GroupTypeData, GroupTypeEdit, LinkProblem, LinkStatus, check_outcome,
+        CheckOutcome, GroupTypeData, GroupTypeEdit, LinkLine, LinkProblem, check_outcome,
         display_order, link_status, local_link_status, plan_group_type_save, reorder_active,
         username_save_problem,
     };
@@ -321,19 +321,19 @@ mod tests {
 
     #[test]
     fn local_rules_come_first() {
-        assert_eq!(local_link_status(""), LinkStatus::Empty);
+        assert_eq!(local_link_status(""), LinkLine::Empty);
         assert_eq!(
             local_link_status("bad-name"),
-            LinkStatus::Problem(LinkProblem::BadSymbols)
+            LinkLine::Problem(LinkProblem::BadSymbols)
         );
         assert_eq!(
             local_link_status("abcd"),
-            LinkStatus::Problem(LinkProblem::TooShort)
+            LinkLine::Problem(LinkProblem::TooShort)
         );
-        assert_eq!(local_link_status("abc_5"), LinkStatus::Pending);
+        assert_eq!(local_link_status("abc_5"), LinkLine::Pending);
         assert_eq!(
             local_link_status("ünicode"),
-            LinkStatus::Problem(LinkProblem::BadSymbols)
+            LinkLine::Problem(LinkProblem::BadSymbols)
         );
     }
 
@@ -342,19 +342,19 @@ mod tests {
         let cases = [
             (
                 UsernameCheckResult::Available,
-                CheckOutcome::Status(LinkStatus::Available),
+                CheckOutcome::Status(LinkLine::Available),
             ),
             (
                 UsernameCheckResult::Occupied,
-                CheckOutcome::Status(LinkStatus::Problem(LinkProblem::Occupied)),
+                CheckOutcome::Status(LinkLine::Problem(LinkProblem::Occupied)),
             ),
             (
                 UsernameCheckResult::Invalid,
-                CheckOutcome::Status(LinkStatus::Problem(LinkProblem::Invalid)),
+                CheckOutcome::Status(LinkLine::Problem(LinkProblem::Invalid)),
             ),
             (
                 UsernameCheckResult::Purchasable,
-                CheckOutcome::Status(LinkStatus::Purchasable),
+                CheckOutcome::Status(LinkLine::Purchasable),
             ),
             (
                 UsernameCheckResult::PublicChatsTooMany,
@@ -370,27 +370,27 @@ mod tests {
         }
         assert_eq!(
             check_outcome(UsernameCheckResult::Occupied, "mine", "mine"),
-            CheckOutcome::Status(LinkStatus::Available)
+            CheckOutcome::Status(LinkLine::Available)
         );
     }
 
     #[test]
     fn the_line_waits_for_the_answer_for_this_text() {
-        assert_eq!(link_status("quillchat", "", None), LinkStatus::Pending);
-        assert_eq!(link_status("mylink", "mylink", None), LinkStatus::Current);
-        let taken = Some(CheckOutcome::Status(LinkStatus::Problem(
+        assert_eq!(link_status("quillchat", "", None), LinkLine::Pending);
+        assert_eq!(link_status("mylink", "mylink", None), LinkLine::Current);
+        let taken = Some(CheckOutcome::Status(LinkLine::Problem(
             LinkProblem::Occupied,
         )));
         assert_eq!(
             link_status("quillchat", "", taken),
-            LinkStatus::Problem(LinkProblem::Occupied)
+            LinkLine::Problem(LinkProblem::Occupied)
         );
         assert_eq!(
             link_status("ab", "", taken),
-            LinkStatus::Problem(LinkProblem::TooShort)
+            LinkLine::Problem(LinkProblem::TooShort)
         );
-        assert!(LinkStatus::Current.is_good());
-        assert!(!LinkStatus::Pending.is_good());
+        assert!(LinkLine::Current.is_good());
+        assert!(!LinkLine::Pending.is_good());
     }
 
     #[test]

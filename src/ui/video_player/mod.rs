@@ -31,12 +31,15 @@ mod live_follow;
 mod live_picture;
 #[cfg(any(not(target_os = "macos"), test))]
 mod live_surface;
+mod open_wait;
 pub(super) mod pacing;
 mod picture;
 mod rotate;
 pub(crate) mod surface;
 mod transport;
 
+#[cfg(target_os = "macos")]
+mod avplayer_open;
 #[cfg(target_os = "macos")]
 mod backend_avplayer;
 
@@ -178,6 +181,13 @@ trait Backend {
     /// display's frame interval).
     fn next_due(&self, now: Instant, interval: Duration) -> Option<Instant>;
     fn error(&self) -> Option<PlayerError>;
+    /// Run `wake` (from any thread) once the clip is open or failed to
+    /// open. Returns whether the backend can say so; one that cannot is
+    /// polled by the frames it is drawn in while it opens.
+    fn on_open(&mut self, wake: Box<dyn FnOnce() + Send>) -> bool {
+        let _ = wake;
+        false
+    }
     /// A live feed's status, which the transport takes instead of
     /// [`Self::status`] (`None`: a file).
     fn live_status(&mut self, now: Instant) -> Option<LiveStatus> {
@@ -224,6 +234,9 @@ struct PlayerCell {
     live: Option<Rc<backend_live::LiveCore>>,
     /// The width last reported through `video_frame(..).on_width`.
     reported_width: Rc<Cell<f32>>,
+    /// The view the element last drew the picture in: redrawn with the
+    /// watchers when the clip opens, for an inline clip nothing watches.
+    drawn_in: Cell<Option<EntityId>>,
 }
 
 /// Shared with `frame_clock::request_video_frame`.
@@ -253,16 +266,14 @@ struct Inner {
     /// [`WATCH_INTERVAL`] apart while playing.
     watchers: Vec<EntityId>,
     watched: Option<(PlayState, Instant)>,
-    _poll: Option<Task<()>>,
+    /// Redraws the watchers once the open ends (`await_open`), or when a
+    /// live feed's frame lands (`backend_live`).
+    _waker: Option<Task<()>>,
 }
 
 /// How often watchers (time labels, the seek bar) are redrawn while the
 /// clip plays.
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
-/// While opening, the backend is polled this often (AVPlayer reports
-/// `readyToPlay` asynchronously; no KVO).
-const OPEN_POLL: Duration = Duration::from_millis(50);
-
 impl VideoPlayer {
     /// Open a local file; playback starts paused (call [`Self::play`]).
     /// Never blocks the UI thread, except in screenshot captures
@@ -278,14 +289,14 @@ impl VideoPlayer {
     ) -> Result<Self, PlayerError> {
         warm_decoder(cx);
         let player = Self::from_backend(open_backend(path, purpose)?, duration_hint);
-        let poll = player.spawn_open_poll(cx);
+        let waiting = player.await_open(cx);
         if let Ok(mut inner) = player.0.inner.try_borrow_mut() {
-            inner._poll = Some(poll);
+            inner._waker = waiting;
         }
         Ok(player)
     }
 
-    /// A player over an opened backend (no open poll: `pull` polls too).
+    /// A player over an opened backend (no open wake: its frames ask for the picture a short while).
     fn from_backend(backend: Box<dyn Backend>, duration_hint: Option<f64>) -> Self {
         let now = Instant::now();
         Self::assemble(
@@ -327,40 +338,15 @@ impl VideoPlayer {
                 life: life::Life::awake(awaiting),
                 watchers: Vec::new(),
                 watched: None,
-                _poll: None,
+                _waker: None,
             }),
             backend: Cell::new(Some(backend)),
             requested: Rc::new(Cell::new(None)),
             shown: Cell::new(0),
             live,
             reported_width: Rc::new(Cell::new(-1.0)),
+            drawn_in: Cell::new(None),
         }))
-    }
-
-    /// Poll the backend until it is open (or failed), then redraw the
-    /// watchers once. The task holds no strong handle: dropping the player
-    /// ends it.
-    fn spawn_open_poll(&self, cx: &mut App) -> Task<()> {
-        let weak = Rc::downgrade(&self.0);
-        cx.spawn(async move |cx| {
-            loop {
-                cx.background_executor().timer(OPEN_POLL).await;
-                let Some(cell) = weak.upgrade() else {
-                    return;
-                };
-                let player = VideoPlayer(cell);
-                player.update_status(Instant::now());
-                if player.state() != PlayState::Opening {
-                    let watchers = player.watchers();
-                    cx.update(|cx| {
-                        for id in watchers {
-                            cx.notify(id);
-                        }
-                    });
-                    return;
-                }
-            }
-        })
     }
 
     /// How many times the element painted this player's picture inside
@@ -424,7 +410,7 @@ impl VideoPlayer {
     /// picture, keeping the handle: the element paints nothing, asks for
     /// no frames, and still counts being painted in view, so an inline
     /// tile released off screen can be reopened once it is seen again
-    /// (`inline_players`). The open poll ends with the state.
+    /// (`inline_players`). The open wake ends with the state.
     pub(crate) fn hibernate(&self) {
         self.sleep(false);
     }
@@ -583,6 +569,23 @@ impl VideoPlayer {
         self.current_picture().map(|picture| picture.size())
     }
 
+    /// The element draws the picture in `view`.
+    pub(super) fn note_drawn_in(&self, view: EntityId) {
+        self.0.drawn_in.set(Some(view));
+    }
+
+    /// The views a change of the clip redraws: its watchers and the view
+    /// it was last drawn in.
+    fn views_to_redraw(&self) -> Vec<EntityId> {
+        let mut views = self.watchers();
+        if let Some(view) = self.0.drawn_in.get()
+            && !views.contains(&view)
+        {
+            views.push(view);
+        }
+        views
+    }
+
     fn watchers(&self) -> Vec<EntityId> {
         self.read_inner(|inner| inner.watchers.clone())
             .unwrap_or_default()
@@ -694,7 +697,7 @@ impl VideoPlayer {
         self.update_status(now);
         self.replace_refused(now);
         let state = self.state();
-        let pulled = if matches!(state, PlayState::Opening | PlayState::Failed) {
+        let pulled = if matches!(state, PlayState::NotOpen | PlayState::Failed) {
             Pulled::default()
         } else {
             self.with_backend(|backend| backend.take_picture(&present))
@@ -781,9 +784,7 @@ impl VideoPlayer {
         self.read_inner(|inner| {
             let transport = inner.machine.snapshot(now);
             let awaiting = inner.life.awaiting().is_some_and(|since| {
-                transport
-                    .state
-                    .awaits_picture(now.saturating_duration_since(since))
+                transport::awaits_picture(now.saturating_duration_since(since))
             });
             // A surface the renderer hasn't drawn yet, or refused: another
             // frame settles it (drawn, or replaced by an image), even while

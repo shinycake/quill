@@ -56,13 +56,15 @@ impl QuillApp {
         };
         let edits = editor.edits();
         let input = editor.source.to_string_lossy().into_owned();
-        let Some(serial) = editor.encode_serial() else {
+        if !editor.can_encode() {
             return false;
-        };
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
         // Removed unless the profile photo request takes it, also when the
         // window or screen is gone before the encode ends.
-        let output =
-            quill::scratch::OwnedFile::new(work_dir().join(format!("avatar-{serial}.mp4")));
+        let output = quill::scratch::OwnedFile::new(work_dir().join(format!("avatar-{stamp}.mp4")));
         let args = encode_args(&input, &output.path().to_string_lossy(), &edits, &info);
         let log = work_dir().join("encode.log");
         let worker = cx.background_spawn(async move { run_ffmpeg(&args, &log) });
@@ -74,7 +76,7 @@ impl QuillApp {
                     .send_box
                     .video_editor
                     .as_ref()
-                    .is_some_and(|editor| editor.is_encoding(serial));
+                    .is_some_and(|editor| editor.is_encoding());
                 if !current {
                     return;
                 }
@@ -109,7 +111,7 @@ impl QuillApp {
             });
         });
         if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-            editor.start_encode(serial, info, job);
+            editor.start_encode(info, job);
         }
         cx.notify();
         false

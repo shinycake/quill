@@ -1,9 +1,10 @@
 //! Connect driver: mask sticker sets (the manage dialog and the photo
 //! editor's Masks strip). Kept apart from the regular sticker panel, like
 //! tdesktop's separate `StickersType::Masks` lists.
+use super::settings::NoteSlot;
 use super::*;
 use crate::ids::RequestId;
-use crate::state::{MasksTab, RequestPurpose, StickersPurpose};
+use crate::state::{MaskChangeTarget, MasksTab, RequestPurpose, StickersPurpose};
 use crate::telegram::requests::{
     change_sticker_set, get_archived_mask_sets, get_installed_mask_sets, get_sticker_set,
     reorder_installed_mask_sets,
@@ -13,9 +14,11 @@ use crate::telegram::requests::{
 const STRIP_SETS: usize = 4;
 /// Mask stickers whose pictures the editor strip downloads.
 const STRIP_STICKERS: usize = 24;
+/// The line of a mask change that never left.
+const MASK_CHANGE_NOT_SENT: &str = "Could not change the mask sets";
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Send one mask request unless the same one is already in flight.
+    /// Send one mask request (the caller says whether one is already out).
     pub(super) fn mask_request(
         &mut self,
         purpose: RequestPurpose,
@@ -24,10 +27,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.has_purpose(purpose) {
+        if self.asked.is_out(&self.session.requests, purpose) {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
+        self.asked.sent(&self.session.requests, purpose, extra);
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
             return Err(err);
@@ -36,19 +40,23 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// A mask request that never left fails what it was asking for.
-    fn note_mask_send_failed(&mut self, purpose: StickersPurpose) {
+    fn note_mask_send_failed(&mut self, purpose: StickersPurpose, err: &ConnectSendError) {
+        let line = err.stage_line();
         let masks = &mut self.session.stickers.masks;
         match purpose {
-            StickersPurpose::GetInstalledMaskSets => masks.installed.fail("not sent"),
-            StickersPurpose::GetArchivedMaskSets { .. } => masks.archived.fail("not sent"),
-            _ => {
-                masks.installed.fail("not sent");
-                masks.archived.fail("not sent");
-            }
+            // The list's own fetch never left (callers checked it was not
+            // in flight): its stage ends in the error.
+            StickersPurpose::GetInstalledMaskSets => masks.installed.fail(line),
+            StickersPurpose::GetArchivedMaskSets { .. } => masks.archived.fail(line),
+            // Changes send through `send_noted`, which owns their line.
+            _ => {}
         }
     }
 
     fn request_installed_masks(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.stickers.masks.installed.is_loading() {
+            return Ok(None);
+        }
         let sent = self.mask_request(
             StickersPurpose::GetInstalledMaskSets.into(),
             get_installed_mask_sets,
@@ -56,10 +64,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         match &sent {
             Ok(Some(id)) => {
                 let installed = &mut self.session.stickers.masks.installed;
-                installed.begin();
-                installed.sent(*id);
+                installed.begin_with(*id);
             }
-            Err(_) => self.note_mask_send_failed(StickersPurpose::GetInstalledMaskSets),
+            Err(err) => self.note_mask_send_failed(StickersPurpose::GetInstalledMaskSets, err),
             Ok(None) => {}
         }
         sent
@@ -78,15 +85,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         } else {
             0
         };
+        if masks.archived.is_loading() {
+            return Ok(None);
+        }
         let purpose = StickersPurpose::GetArchivedMaskSets { first_page: !more };
         let sent = self.mask_request(purpose.into(), |id| get_archived_mask_sets(id, offset));
         match &sent {
             Ok(Some(id)) => {
                 let archived = &mut self.session.stickers.masks.archived;
-                archived.begin();
-                archived.sent(*id);
+                archived.begin_with(*id);
             }
-            Err(_) => self.note_mask_send_failed(purpose),
+            Err(err) => self.note_mask_send_failed(purpose, err),
             Ok(None) => {}
         }
         sent
@@ -130,7 +139,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id <= 0 || installed && archived {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.mask_set_change_pending(set_id) {
+        if self.session.stickers.masks.set_change_pending(set_id) {
             return Ok(None);
         }
         let purpose = StickersPurpose::ChangeMaskSet {
@@ -138,13 +147,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             installed,
             archived,
         };
-        let sent = self.mask_request(purpose.into(), |id| {
-            change_sticker_set(id, set_id, installed, archived)
-        });
-        if sent.is_err() {
-            self.note_mask_send_failed(purpose);
-        }
-        sent
+        let extra = self.session.request(purpose.into(), None);
+        self.send_noted(
+            NoteSlot::Masks(MaskChangeTarget::Set(set_id)),
+            extra,
+            MASK_CHANGE_NOT_SENT,
+            &change_sticker_set(extra, set_id, installed, archived),
+        )
+        .map(Some)
     }
 
     /// Move an installed mask set to the target's slot; the list commits
@@ -172,28 +182,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let busy = self.session.requests.pending.values().any(|pending| {
-            matches!(
-                pending.purpose,
-                RequestPurpose::Stickers(
-                    StickersPurpose::ChangeMaskSet { .. }
-                        | StickersPurpose::ReorderInstalledMaskSets
-                        | StickersPurpose::GetInstalledMaskSets
-                )
-            )
-        });
+        let masks = &self.session.stickers.masks;
+        let busy = masks.change_pending() || masks.installed.is_loading();
         if from == to || busy {
             return Ok(None);
         }
         ids.remove(from);
         ids.insert(to, source);
-        let sent = self.mask_request(StickersPurpose::ReorderInstalledMaskSets.into(), |id| {
-            reorder_installed_mask_sets(id, &ids)
-        });
-        if sent.is_err() {
-            self.note_mask_send_failed(StickersPurpose::ReorderInstalledMaskSets);
-        }
-        sent
+        let extra = self
+            .session
+            .request(StickersPurpose::ReorderInstalledMaskSets.into(), None);
+        self.send_noted(
+            NoteSlot::Masks(MaskChangeTarget::Reorder),
+            extra,
+            MASK_CHANGE_NOT_SENT,
+            &reorder_installed_mask_sets(extra, &ids),
+        )
+        .map(Some)
     }
 
     /// The editor's Masks strip came on screen: load the installed mask
@@ -227,7 +232,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !open && !strip {
             return Ok(());
         }
-        if self.session.mask_change_pending() {
+        if self.session.stickers.masks.change_pending() {
             return Ok(());
         }
         let masks = &self.session.stickers.masks;
@@ -250,7 +255,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .take(STRIP_SETS)
             .map(|set| set.id)
-            .filter(|id| !self.session.stickers.masks.sets.contains_key(id))
+            .filter(|id| self.session.stickers.masks.set_wanted(*id))
             .collect();
         for set_id in wanted {
             match self.mask_request(StickersPurpose::GetMaskSet { set_id }.into(), |id| {
@@ -258,8 +263,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }) {
                 Ok(Some(id)) => {
                     let set = self.session.stickers.masks.sets.entry(set_id).or_default();
-                    set.begin();
-                    set.sent(id);
+                    set.begin_with(id);
                 }
                 Ok(None) => {}
                 // Never left: asked again on the next strip refresh.

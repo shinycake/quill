@@ -19,6 +19,7 @@
 
 mod app;
 mod display;
+mod opening;
 mod spec;
 mod view;
 
@@ -27,6 +28,8 @@ pub(super) use app::sidebar_emoji_head;
 pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors, panel_sticker_head};
 pub(super) use display::note_display;
 use display::{display_of, forget_display};
+pub(in crate::ui) use opening::Leaving;
+use opening::{Opening, open_gave_up};
 pub(super) use spec::{ClipSpec, HeadId, Part};
 pub(super) use view::StickerView;
 
@@ -35,7 +38,7 @@ use futures_channel::oneshot;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::sticker_playback::player::{
-    AHEAD, ClipKey, ClipState, Engine, PlayHead, PlayMode, Timeline, edge_for,
+    AHEAD, ClipKey, ClipView, Engine, PlayHead, PlayMode, Timeline, edge_for,
 };
 use smallvec::SmallVec;
 #[cfg(test)]
@@ -103,17 +106,6 @@ impl Upkeep {
     }
 }
 
-/// Whether a clip opened.
-#[derive(Clone, Copy, Default)]
-enum Opening {
-    /// Not answered yet.
-    #[default]
-    Pending,
-    Ready(Timeline),
-    Failed,
-}
-
-#[derive(Default)]
 struct UiClip {
     opening: Opening,
     /// Frames drawn and not shown yet, by grid index.
@@ -134,14 +126,33 @@ struct UiClip {
 }
 
 impl UiClip {
-    fn failed(&self) -> bool {
-        matches!(self.opening, Opening::Failed)
+    /// A clip whose open was just asked of the engine.
+    fn opening_at(now: Instant) -> Self {
+        Self {
+            opening: Opening::Pending { since: now },
+            ready: BTreeMap::new(),
+            shown: None,
+            used: None,
+            drawn: SmallVec::new(),
+            seen: None,
+            wants: Vec::new(),
+            ready_at: None,
+            places: Places::default(),
+        }
+    }
+
+    /// When the open was asked, while it is unanswered.
+    fn pending_since(&self) -> Option<Instant> {
+        match self.opening {
+            Opening::Pending { since } => Some(since),
+            Opening::Ready(_) | Opening::Failed => None,
+        }
     }
 
     fn timeline(&self) -> Option<Timeline> {
         match self.opening {
             Opening::Ready(timeline) => Some(timeline),
-            Opening::Pending | Opening::Failed => None,
+            Opening::Pending { .. } | Opening::Failed => None,
         }
     }
 }
@@ -192,23 +203,6 @@ type Places = SmallVec<[Place; 2]>;
 fn note_place(places: &mut Places, place: Place) {
     if !places.contains(&place) {
         places.push(place);
-    }
-}
-
-/// What a window lets go of ([`Player::leave`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Leaving {
-    /// Its chat: another chat opens there, or the chat moves to a window
-    /// of its own. The rest of the window stays as it is.
-    Chat,
-    /// All of it: the window closes.
-    Window,
-}
-
-impl Leaving {
-    /// Whether `window` letting go of this loses what views at `place` use.
-    fn loses(self, window: Option<ChatId>, place: Place) -> bool {
-        place.window == window && (self == Leaving::Window || place.part == Part::Chat)
     }
 }
 
@@ -428,7 +422,7 @@ impl Player {
     /// Whether `key` failed to open.
     #[cfg(feature = "demo-capture")]
     pub(super) fn failed_key(&self, key: &ClipKey) -> bool {
-        matches!(self.engine.state(key), Some(ClipState::Failed(_)))
+        matches!(self.engine.state(key), Some(ClipView::Failed(_)))
     }
 
     /// Take the frames the workers drew. True when one of them is a clip's
@@ -461,6 +455,24 @@ impl Player {
         first
     }
 
+    /// Moves every clip whose open the engine has answered out of
+    /// `Opening::Pending`; true when one moved. The engine wakes the UI for
+    /// an open (ready or failed), and a view that gave up ticking for it
+    /// only redraws if the wake says so.
+    fn settle_opens(&self) -> bool {
+        let Ok(mut inner) = self.inner.try_borrow_mut() else {
+            return false;
+        };
+        let mut moved = false;
+        for (key, clip) in inner.clips.iter_mut() {
+            if matches!(clip.opening, Opening::Pending { .. }) {
+                clip.opening = clip.opening.settled(self.engine.state(key));
+                moved |= !matches!(clip.opening, Opening::Pending { .. });
+            }
+        }
+        moved
+    }
+
     /// Opens `spec` at `edge` for a view at `place` unless it is open; true
     /// once a frame of it (at any size) can show.
     pub(super) fn prepare(&self, spec: &ClipSpec, edge: u32, place: Place) -> bool {
@@ -472,7 +484,7 @@ impl Player {
         let now = self.now();
         let clip = inner.clips.entry(key).or_insert_with(|| {
             self.engine.open(key, self.origin(spec, edge));
-            UiClip::default()
+            UiClip::opening_at(now)
         });
         clip.used = Some(now);
         note_place(&mut clip.places, place);
@@ -512,18 +524,12 @@ impl Player {
             let drawn = super::image_budget::paint_stamp_in(window);
             let clip = inner.clips.entry(key).or_insert_with(|| {
                 self.engine.open(key, self.origin(spec, edge));
-                UiClip::default()
+                UiClip::opening_at(now)
             });
             clip.used = Some(now);
             note_drawn(&mut clip.drawn, drawn);
             note_place(&mut clip.places, place);
-            if matches!(clip.opening, Opening::Pending) {
-                match self.engine.state(&key) {
-                    Some(ClipState::Ready(info)) => clip.opening = Opening::Ready(info.timeline),
-                    Some(ClipState::Failed(_)) | None => clip.opening = Opening::Failed,
-                    Some(ClipState::Opening) => {}
-                }
-            }
+            clip.opening = clip.opening.settled(self.engine.state(&key));
             match clip.timeline() {
                 Some(timeline) => {
                     let entry = inner.heads.entry((head, key.file)).or_insert_with(|| Head {

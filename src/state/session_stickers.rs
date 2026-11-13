@@ -40,6 +40,20 @@ impl Session {
         self.stickers.stickers.batch.finish_item(request, success);
     }
 
+    /// A change of the set is in flight: its request has not come back.
+    pub fn sticker_set_change_pending(&self, set_id: i64) -> bool {
+        self.stickers.stickers.changes.set_busy(set_id)
+    }
+
+    /// The composer's suggestions are dropped, and the search that was out
+    /// for them with the stage that waited for it.
+    pub fn cancel_sticker_suggestions(&mut self) {
+        if let SuggestFor::Asked { request, .. } = &self.stickers.stickers.suggest_for {
+            drop(self.requests.take(*request));
+        }
+        self.clear_sticker_suggestions();
+    }
+
     /// The box's change of the viewed set went out as `request`.
     pub fn begin_set_change(&mut self, set_id: i64, change: SetChange, request: RequestId) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
@@ -77,24 +91,7 @@ impl Session {
     }
 
     pub fn accept_archived_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        let next = sets.last().map(|set| set.id).unwrap_or(0);
-        self.stickers.stickers.archived_has_more =
-            sets.len() == 100 && next > 0 && next != self.stickers.stickers.archived_offset;
-        self.stickers.stickers.archived_next_offset = next;
-        if self.stickers.stickers.archived_offset == 0 {
-            self.stickers.stickers.archived.clear();
-        }
-        let mut ids: HashSet<_> = self
-            .stickers
-            .stickers
-            .archived
-            .iter()
-            .map(|set| set.id)
-            .collect();
-        self.stickers
-            .stickers
-            .archived
-            .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
+        self.stickers.stickers.archived.accept(sets);
     }
 
     /// The installed sets the load that waits for them answered (the
@@ -108,39 +105,34 @@ impl Session {
             .stickers
             .stickers
             .selection
-            .set_id
+            .set_id()
             .is_some_and(|id| self.stickers.stickers.sets.iter().any(|set| set.id == id));
         if !still_selected {
-            self.stickers.stickers.selection = StickerSelection {
-                set_id: self.stickers.stickers.sets.first().map(|set| set.id),
-                ..StickerSelection::default()
-            };
+            self.stickers.stickers.selection = self
+                .stickers
+                .stickers
+                .sets
+                .first()
+                .map_or_else(StickerSelection::default, |set| {
+                    StickerSelection::of(set.id)
+                });
         }
     }
 
-    /// Replace the first trending page; append later pages without duplicate sets.
-    pub fn accept_trending_sticker_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
-        self.stickers.stickers.trending_next_offset =
-            self.stickers.stickers.trending_offset + sets.len();
-        if sets.is_empty() {
-            self.stickers.stickers.trending_total = self.stickers.stickers.trending_next_offset;
-        }
-        if self.stickers.stickers.trending_offset == 0 {
-            self.stickers.stickers.trending = sets;
-        } else {
-            let mut ids: HashSet<_> = self
-                .stickers
-                .stickers
-                .trending
-                .iter()
-                .map(|set| set.id)
-                .collect();
-            self.stickers
-                .stickers
-                .trending
-                .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
-        }
-        self.stickers.stickers.trending_is_premium = is_premium;
+    /// A trending page answered as `request`: the first replaces the list,
+    /// a later one adds the sets it does not have; only the page asked last
+    /// lands.
+    pub fn accept_trending_sticker_sets(
+        &mut self,
+        request: Option<RequestId>,
+        sets: Vec<StickerSetInfo>,
+        is_premium: bool,
+        total: usize,
+    ) {
+        self.stickers
+            .stickers
+            .trending
+            .accept(request, sets, is_premium, total);
     }
 
     /// Slice S8: store a `getFavoriteStickers` answer.
@@ -236,7 +228,10 @@ impl Session {
         } else {
             // Custom emoji (mask updates are routed away before this call)
             // route to the emoji panel's installed sets.
-            &mut self.stickers.emoji.installed_sets
+            match self.stickers.emoji.lists.installed.data_mut() {
+                Some(sets) => sets,
+                None => return,
+            }
         };
         if sets.is_empty() || ids.is_empty() {
             return;
@@ -246,7 +241,7 @@ impl Session {
     }
 
     pub fn select_sticker_set(&mut self, set_id: i64) {
-        if self.stickers.stickers.selection.set_id == Some(set_id) {
+        if self.stickers.stickers.selection.set_id() == Some(set_id) {
             return;
         }
         self.stickers.stickers.selection = StickerSelection::of(set_id);
@@ -257,8 +252,12 @@ impl Session {
         self.stickers.stickers.selection.stage = StickerSetStage::Loading { set_id, request };
     }
 
-    pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.saved_answered(animations);
+    pub fn accept_saved_animations(
+        &mut self,
+        request: Option<RequestId>,
+        animations: Vec<AnimationItem>,
+    ) {
+        self.stickers.gifs.saved_answered(request, animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -280,7 +279,7 @@ impl Session {
         }
         self.stickers
             .gifs
-            .search_page_answered(animations, next_offset, first_page);
+            .search_page_answered(request, animations, next_offset, first_page);
         let gifs = &mut self.stickers.gifs;
         let query = gifs.search_query().to_string();
         let found = gifs.search_results().to_vec();
