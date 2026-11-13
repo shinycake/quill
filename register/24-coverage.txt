@@ -67,3 +67,9 @@ src/video_edit.rs 902 read
 src/video_encoder.rs 309 read
 src/video_timeline.rs 537 read
 src/viewer_extras.rs 370 read
+src/voice.rs 1150 read
+src/voice_input.rs 214 read
+src/wake.rs 356 read
+src/voice_opus.rs 481 read
+src/wallpaper_raster/mod.rs 590 read
+src/wallpaper_raster/soft_light.rs 105 read
