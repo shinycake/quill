@@ -455,7 +455,11 @@ pub fn revoke(id: u64) {
     if agent == UNNAMED_AGENT
         && let Some(process) = process
     {
-        if !roster.refused.iter().any(|r| r.holds_back("", Some(process))) {
+        if !roster
+            .refused
+            .iter()
+            .any(|r| r.holds_back("", Some(process)))
+        {
             roster.refused.push(Refused::Unnamed { process });
         }
     } else {

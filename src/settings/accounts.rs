@@ -1209,10 +1209,16 @@ mod account_registry_tests {
         );
         set_desktop_notifications(&root, false).unwrap();
         let untouched = load_preferences(&AccountPaths::for_root(&root, &key));
-        assert!(untouched.desktop_notifications, "its own file still says on");
+        assert!(
+            untouched.desktop_notifications,
+            "its own file still says on"
+        );
         assert!(!desktop_notifications(&root, &untouched));
         set_active_account(&root, &key).unwrap();
-        assert!(!desktop_notifications(&root, &untouched), "other edits keep it");
+        assert!(
+            !desktop_notifications(&root, &untouched),
+            "other edits keep it"
+        );
         set_desktop_notifications(&root, true).unwrap();
         assert!(desktop_notifications(&root, &earlier));
         let _ = std::fs::remove_dir_all(&root);

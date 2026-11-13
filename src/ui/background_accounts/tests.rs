@@ -570,5 +570,9 @@ fn another_accounts_message_asks_for_attention_without_a_render(cx: &mut TestApp
         let quiet = quill::notify_accounts::NotifyDrain::default();
         app.deliver_background(&other_account(), quiet, cx);
     });
-    assert_eq!(attention_asks::take(), 0, "a drain with no new message asks nothing");
+    assert_eq!(
+        attention_asks::take(),
+        0,
+        "a drain with no new message asks nothing"
+    );
 }
