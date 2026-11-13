@@ -586,7 +586,16 @@ fn the_in_call_demo_shows_the_story_beside_the_call(cx: &mut TestAppContext) {
 fn the_toast_goes_once_the_stars_are_due(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_live(cx, "ready-live-story-stars");
     let vcx = &mut vcx;
+    // The demo's Stars wait 5.5 s of real time, which a busy machine can
+    // spend before the first look: they wait until no clock gets there,
+    // and below they are due at any time.
+    set_commit_at(&app, vcx, u64::MAX / 2);
     assert!(find(vcx, "live-story-toast").is_some());
+    set_commit_at(&app, vcx, 1);
+    assert!(find(vcx, "live-story-toast").is_none());
+}
+
+fn set_commit_at(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, commit_at_ms: u64) {
     app.update(vcx, |app, cx| {
         if let Some(pending) = app
             .demo_session
@@ -594,12 +603,11 @@ fn the_toast_goes_once_the_stars_are_due(cx: &mut TestAppContext) {
             .and_then(|s| s.stories.live.as_mut())
             .and_then(|live| live.pending_reaction.as_mut())
         {
-            pending.commit_at_ms = 1;
+            pending.commit_at_ms = commit_at_ms;
         }
         cx.notify();
     });
     frames(vcx);
-    assert!(find(vcx, "live-story-toast").is_none());
 }
 
 #[gpui_kit::test]
