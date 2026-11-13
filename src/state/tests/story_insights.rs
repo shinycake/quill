@@ -45,8 +45,19 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
     session.begin_story_insights(11, 6);
     let late = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
     apply_json(&mut session, &seq, &sink, &page(late.0, "z"));
-    assert!(session.stories.insights.get(11, 6).unwrap().forwards.is_empty());
-    assert_eq!(session.stories.insights.get(11, 5).unwrap().forwards.len(), 2);
+    assert!(
+        session
+            .stories
+            .insights
+            .get(11, 6)
+            .unwrap()
+            .forwards
+            .is_empty()
+    );
+    assert_eq!(
+        session.stories.insights.get(11, 5).unwrap().forwards.len(),
+        2
+    );
 }
 
 /// A first page answered twice replaces the rows instead of extending
@@ -69,7 +80,14 @@ fn a_first_forwards_page_replaces_and_a_stray_page_is_dropped() {
     session.story_forwards_loading(11, 5, again, "");
     // The first request's late duplicate answer is not the one awaited.
     apply_json(&mut session, &seq, &sink, &page(first.0));
-    assert!(session.stories.insights.get(11, 5).unwrap().forwards_loading());
+    assert!(
+        session
+            .stories
+            .insights
+            .get(11, 5)
+            .unwrap()
+            .forwards_loading()
+    );
     apply_json(&mut session, &seq, &sink, &page(again.0));
     let state = session.stories.insights.get(11, 5).unwrap();
     assert_eq!(state.forwards.len(), 1);
