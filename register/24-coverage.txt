@@ -29,3 +29,10 @@ src/ui/widget_runtime/fonts.rs 446 read
 src/ui/widget_runtime/geometry.rs 378 read
 src/ui/widget_runtime/paint.rs 695 read
 src/ui/widget_runtime/backend.rs 23 read
+src/ui/widgets_state.rs 491 read
+src/ui/widgets_ui.rs 989 read
+src/ui/window_actions.rs 466 read
+src/ui/window_control.rs 685 read
+src/ui/window_chrome.rs 84 read
+src/ui/window_frame.rs 334 read
+src/ui/window_keys.rs 147 read
