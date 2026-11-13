@@ -306,10 +306,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             let sent = self.send_purpose(purpose, None, |extra| {
                 get_saved_messages_tags(extra, topic_id)
             });
-            if let Some(tags) = self.session.threads.saved.topic_tags.get_mut(&topic_id) {
-                if let Ok(Some(extra)) = &sent {
-                    tags.begin_with(*extra);
-                }
+            if let Ok(Some(extra)) = &sent
+                && let Some(tags) = self.session.threads.saved.topic_tags.get_mut(&topic_id)
+            {
+                tags.begin_with(*extra);
             }
             return sent;
         }
