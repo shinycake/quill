@@ -872,7 +872,9 @@ impl QuillApp {
                 .retain(|(_, p)| !(p.hiding() && p.opacity.done(now)));
             self.notify_show_next(cx);
         }
-        if animating {
+        // A close restacks, which starts fades and slides `animating` did
+        // not see: step again a frame later and let them play out.
+        if animating || closed {
             return Some(FRAME);
         }
         self.delivery.windows.next_step(now)
