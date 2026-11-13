@@ -10823,6 +10823,7 @@ superseded by this.
 | 12-003, `apply_ton_wallet_ok` | An `updateTonWalletState` pushed while `own` is `Loading { request: Some(r) }` answers that load (`own.answered(Some(r), state)`); otherwise `Fetch::replace_data` keeps the stage. The `ok` of `loadTonWalletState` only fails a load still waiting, so a state an earlier load left no longer settles it and the fetch is asked again. Tests `the_update_then_the_ok_settles_the_load` and `an_ok_with_no_update_for_this_load_fails_it_despite_an_earlier_state`. |
 | g-073 row, round-3 paragraph | Written as the code is: no `PaneView` / `StartupOutcome`, the `StartupStep::Waiting` allow line stays, `WorkerTicket` and `Opening` are gone, and a failed date lookup is `JumpLookup::Failed` in the asking window. |
 | `Hotspot-change` trailer of 4fbce02bf | History is not rewritten; the integrator squashes r4-06 with a message that has no such trailer. |
+
 ### Sweep fixes (r4-12)
 
 | Ids | What changed |
@@ -10933,6 +10934,7 @@ launch_flow}`, `widgets_lock_tests`, `wallpaper_preview_tests`, `voice`,
 | FFmpeg reopen tests | The refused-reopen test asserts with `try_recv`: the wake runs on the test thread inside `set_volume`, so a missing re-registration fails the assertion instead of hanging. A second test covers the other order: the reopen is refused while the old player still opens, then the open settles, and the wake fires exactly once (one `Ok`, then `Empty`). A probe registered after both forwarders marks the settle without a wait. Checked by reverting: without the re-registration only the first test fails; without the put-back both fail. |
 | decisions | The round 4 "recheck timer" row is marked superseded by round 5. |
 | open_wake doc | The field comment describes the current design: the wake waits in the slot, a reopen moves it to a fresh slot, a refused reopen puts it back and registers again. |
+
 ### Sweep fixes (r4-09)
 
 | Ids | What changed |

@@ -19,4 +19,3 @@ unkeyed:RowDownload::Running 1
 unkeyed:RowState::Downloading 1
 unkeyed:StoryFetch::Asked 1
 unkeyed:Writer::Running 1
-bare:CallWindow::Opening 1
