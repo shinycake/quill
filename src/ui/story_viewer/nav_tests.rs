@@ -8,8 +8,9 @@ use crate::ui::media_panel::PanelTab;
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
 use quill::ids::{ChatId, FileId};
 use quill::story_sibling_layout::sibling_layout;
-use quill::story_viewer::{StoryOpenScope, StoryViewerItem, StoryViewerKind};
+use quill::story_viewer::{STORY_PHOTO_DURATION, StoryOpenScope, StoryViewerItem, StoryViewerKind};
 use quill::telegram::envelope::StoryListView;
+use std::time::Duration;
 
 const LEO: i64 = 105;
 const NEWS: i64 = 54;
@@ -28,6 +29,27 @@ fn shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<(i64, i3
 fn step(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, delta: i32) {
     app.update(vcx, |app, cx| app.step_story_viewer(delta, cx));
     frames(vcx);
+}
+
+/// A photo story moves on once its time on the viewer's clock is over, and
+/// not before.
+#[gpui_kit::test]
+fn a_photo_story_moves_on_when_its_time_is_over(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    let skip = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, by| {
+        app.update(vcx, |app, cx| {
+            app.stories.clock.skip(by);
+            cx.notify();
+        });
+        frames(vcx);
+    };
+    assert_eq!(shown(&app, vcx), Some((LEO, 3)));
+    let almost = STORY_PHOTO_DURATION.saturating_sub(Duration::from_millis(100));
+    skip(&app, vcx, almost);
+    assert_eq!(shown(&app, vcx), Some((LEO, 3)), "not yet");
+    skip(&app, vcx, Duration::from_millis(100));
+    assert_eq!(shown(&app, vcx), Some((NEWS, 1)), "the next poster");
 }
 
 #[gpui_kit::test]
@@ -288,11 +310,10 @@ fn a_poster_waiting_out_a_failed_fetch_is_passed_over(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     assert_eq!(shown(&app, vcx), Some((LEO, 3)));
     app.update(vcx, |app, cx| {
+        let now = app.stories.clock.now();
         if let Some(session) = app.demo_session.as_mut() {
             session.stories.stories.remove(&(NEWS, 1));
-            session
-                .stories
-                .story_fetch_failed((NEWS, 1), None, std::time::Instant::now());
+            session.stories.story_fetch_failed((NEWS, 1), None, now);
         }
         cx.notify();
     });

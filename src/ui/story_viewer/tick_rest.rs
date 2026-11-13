@@ -26,7 +26,7 @@ impl QuillApp {
             self.stories.emoji_warm = None;
             return;
         }
-        let now = Instant::now();
+        let now = self.stories.clock.now();
         // B14: the native player drives video stories;
         // the duration clock stays frozen meanwhile.
         self.sync_story_video(cx);
@@ -48,11 +48,13 @@ impl QuillApp {
         // per change of what they need.
         self.warm_story_custom_emoji();
         // A stealth toast is cleared when its time is over, which redraws.
+        // It is stamped with the time, not the viewer's clock.
+        let wall = Instant::now();
         if let Some(open) = self.stories.viewer_ui_mut()
             && open
                 .stealth_toast
                 .as_ref()
-                .is_some_and(|shown| shown.until <= now)
+                .is_some_and(|shown| shown.until <= wall)
         {
             open.stealth_toast = None;
             changed = true;

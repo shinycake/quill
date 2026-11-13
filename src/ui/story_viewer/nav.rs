@@ -18,7 +18,7 @@ impl QuillApp {
     pub(in crate::ui) fn story_sibling_key(&self, delta: i32) -> Option<(ChatId, i32)> {
         let walk = self.stories.viewer.tray_walk()?;
         let session = self.session()?;
-        let now = Instant::now();
+        let now = self.stories.clock.now();
         walk.neighbours(delta)
             .into_iter()
             .filter_map(|(chat_id, shown)| {
@@ -120,7 +120,8 @@ impl QuillApp {
         self.stories.viewer.stop_waiting();
         self.replace_story_item(prev, next, cx);
         self.stories.video.retry();
-        self.stories.playback.start(Instant::now());
+        let now = self.stories.clock.now();
+        self.stories.playback.start(now);
         self.sync_story_video(cx);
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);
