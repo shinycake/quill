@@ -334,8 +334,9 @@ pub struct StoriesState {
     /// accumulates them). `None` when the panel is closed or the viewer
     /// moved to a different story.
     pub viewers: Option<StoryViewersState>,
-    /// Statistics and public forwards of the story open in the viewer.
-    pub insights: Option<StoryInsightsState>,
+    /// Statistics and public forwards of each story whose statistics are
+    /// open (the viewer's panel, a channel's statistics page).
+    pub insights: StoryInsightsSet,
     /// The public story search (hashtag, location or venue) and its pages.
     pub search: Option<StorySearchState>,
     /// Phase 9.5: the in-progress `reportStory` flow for the story open in
@@ -429,7 +430,7 @@ impl StoriesState {
             tray_refresh: HashSet::new(),
             post: StoryPostState::default(),
             viewers: None,
-            insights: None,
+            insights: StoryInsightsSet::default(),
             search: None,
             report: None,
             stealth: StoryStealthMode::default(),

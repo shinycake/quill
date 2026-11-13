@@ -71,6 +71,51 @@ pub struct StoryInsightsState {
     pub forwards_page: ForwardsPage,
 }
 
+/// How many stories keep their insights: the viewer's panel and a
+/// channel's statistics page each show one, with room to go back and forth.
+const KEPT_INSIGHTS: usize = 4;
+
+/// The insights of the stories whose statistics were opened, oldest first.
+/// The channel statistics page and the story viewer's panel can show two
+/// stories at once, so each story has its own entry: opening one never
+/// takes the other's (sweep 22-001). Past [`KEPT_INSIGHTS`] the oldest goes.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StoryInsightsSet {
+    stories: Vec<StoryInsightsState>,
+}
+
+impl StoryInsightsSet {
+    /// The story's insights, if they are kept.
+    pub fn get(&self, chat_id: i64, story_id: i32) -> Option<&StoryInsightsState> {
+        self.stories
+            .iter()
+            .find(|state| state.chat_id == chat_id && state.story_id == story_id)
+    }
+
+    fn get_mut(&mut self, chat_id: i64, story_id: i32) -> Option<&mut StoryInsightsState> {
+        self.stories
+            .iter_mut()
+            .find(|state| state.chat_id == chat_id && state.story_id == story_id)
+    }
+
+    fn take(&mut self, chat_id: i64, story_id: i32) -> Option<StoryInsightsState> {
+        let at = self
+            .stories
+            .iter()
+            .position(|state| state.chat_id == chat_id && state.story_id == story_id)?;
+        Some(self.stories.remove(at))
+    }
+
+    /// `state` in place of its story's, as the newest; the oldest past the
+    /// cap go.
+    fn put(&mut self, state: StoryInsightsState) {
+        self.take(state.chat_id, state.story_id);
+        self.stories.push(state);
+        let over = self.stories.len().saturating_sub(KEPT_INSIGHTS);
+        self.stories.drain(..over);
+    }
+}
+
 /// The public-forwards request of one insights panel. A page is applied
 /// only when the answer carries the id it is `Loading` for, and a first
 /// page replaces the rows instead of extending them, so a page asked for
@@ -162,25 +207,23 @@ impl Session {
     /// Start tracking insights for a story. The same story keeps what it
     /// has; another story starts clean.
     pub fn begin_story_insights(&mut self, chat_id: i64, story_id: i32) {
-        let same = self
+        let state = self
             .stories
             .insights
-            .as_ref()
-            .is_some_and(|state| state.chat_id == chat_id && state.story_id == story_id);
-        if !same {
-            self.stories.insights = Some(StoryInsightsState {
+            .take(chat_id, story_id)
+            .unwrap_or(StoryInsightsState {
                 chat_id,
                 story_id,
                 ..Default::default()
             });
-        }
+        self.stories.insights.put(state);
     }
 
     /// The statistics request could not be sent: the story's insights stand
     /// at `Failed`, so its panel draws the error with Retry (never a
     /// "Loading" nothing will answer).
     pub fn story_statistics_not_sent(&mut self, chat_id: i64, story_id: i32, message: String) {
-        self.stories.insights = Some(StoryInsightsState {
+        self.stories.insights.put(StoryInsightsState {
             chat_id,
             story_id,
             statistics: StoryStatsFetch::Failed(message),
@@ -188,16 +231,14 @@ impl Session {
         });
     }
 
-    pub fn clear_story_insights(&mut self) {
-        self.stories.insights = None;
+    /// Drop the story's insights; another story's stay.
+    pub fn clear_story_insights(&mut self, chat_id: i64, story_id: i32) {
+        self.stories.insights.take(chat_id, story_id);
     }
 
     /// The statistics request went out under `request`.
     pub fn story_statistics_requested(&mut self, chat_id: i64, story_id: i32, request: RequestId) {
-        if let Some(state) = self.stories.insights.as_mut()
-            && state.chat_id == chat_id
-            && state.story_id == story_id
-        {
+        if let Some(state) = self.stories.insights.get_mut(chat_id, story_id) {
             state.statistics = StoryStatsFetch::Loading { request };
         }
     }
@@ -211,10 +252,7 @@ impl Session {
         request: RequestId,
         offset: &str,
     ) {
-        if let Some(state) = self.stories.insights.as_mut()
-            && state.chat_id == chat_id
-            && state.story_id == story_id
-        {
+        if let Some(state) = self.stories.insights.get_mut(chat_id, story_id) {
             state.forwards_page = ForwardsPage::Loading {
                 request,
                 offset: offset.to_string(),
@@ -227,20 +265,14 @@ impl Session {
     /// again (the stage would otherwise stay `NotAsked`, which draws "No
     /// public shares yet").
     pub fn story_forwards_unsent(&mut self, chat_id: i64, story_id: i32, message: String) {
-        if let Some(state) = self.stories.insights.as_mut()
-            && state.chat_id == chat_id
-            && state.story_id == story_id
-        {
+        if let Some(state) = self.stories.insights.get_mut(chat_id, story_id) {
             state.forwards_page = ForwardsPage::Failed(message);
         }
     }
 
     fn insights_for(&mut self, pending: &PendingRequest) -> Option<&mut StoryInsightsState> {
         let (chat_id, story_id) = (pending.chat_id?, pending.story_id()?);
-        self.stories
-            .insights
-            .as_mut()
-            .filter(|state| state.chat_id == chat_id.0 && state.story_id == story_id)
+        self.stories.insights.get_mut(chat_id.0, story_id)
     }
 
     pub(crate) fn accept_story_statistics(

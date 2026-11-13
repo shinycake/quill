@@ -272,8 +272,7 @@ fn story_statistics_reopened_while_pending_take_the_late_answer() {
             .is_none(),
         "A's request is still in flight"
     );
-    let insights = driver.session.stories.insights.as_ref().expect("insights");
-    assert_eq!((insights.chat_id, insights.story_id), (7, 5));
+    let insights = driver.session.stories.insights.get(7, 5).expect("insights");
     assert!(
         insights.forwards_loading(),
         "A's forwards are on the way too"
@@ -293,7 +292,7 @@ fn story_statistics_reopened_while_pending_take_the_late_answer() {
             .unwrap(),
         )
         .unwrap();
-    let insights = driver.session.stories.insights.as_ref().expect("insights");
+    let insights = driver.session.stories.insights.get(7, 5).expect("insights");
     assert!(
         matches!(
             insights.statistics,
@@ -305,10 +304,11 @@ fn story_statistics_reopened_while_pending_take_the_late_answer() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// A's forwards answer before A's statistics, B opens, then A again: A's
-/// forwards are asked for again instead of showing an empty list.
+/// A's forwards answer before A's statistics, B opens, then A again: B
+/// does not take A's insights (sweep r5, 22-001), so A's answered page is
+/// kept, not asked for again.
 #[test]
-fn story_forwards_answered_before_a_reopen_are_asked_again() {
+fn story_forwards_answered_before_a_reopen_are_kept() {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let sink = Arc::new(MemorySink::new());
@@ -353,10 +353,10 @@ fn story_forwards_answered_before_a_reopen_are_asked_again() {
         .into_iter()
         .filter(|v| v["@type"] == "getStoryPublicForwards" && v["story_id"] == 5)
         .count();
-    assert_eq!(asked, 2);
-    let insights = driver.session.stories.insights.as_ref().expect("insights");
-    assert_eq!((insights.chat_id, insights.story_id), (7, 5));
-    assert!(insights.forwards_loading());
+    assert_eq!(asked, 1);
+    let insights = driver.session.stories.insights.get(7, 5).expect("insights");
+    assert_eq!(insights.forwards_page, crate::state::ForwardsPage::Ready);
+    assert!(driver.session.stories.insights.get(7, 6).is_some());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -399,7 +399,7 @@ fn the_first_forwards_page_is_not_asked_twice_on_a_reopen() {
         session
             .stories
             .insights
-            .as_ref()
+            .get(7, 5)
             .map_or(0, |state| state.forwards.len())
     };
     assert_eq!(rows(&driver.session), 1);
@@ -440,7 +440,7 @@ fn a_first_forwards_page_that_cannot_be_sent_fails_the_stage() {
         .fetch_story_insights(ChatId(7), 6, true)
         .unwrap()
         .expect("statistics sends");
-    let insights = driver.session.stories.insights.as_ref().expect("insights");
+    let insights = driver.session.stories.insights.get(7, 6).expect("insights");
     assert!(insights.forwards_error().is_some());
     assert!(!insights.forwards_loading());
     drop(dir);
