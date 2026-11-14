@@ -430,7 +430,11 @@ impl QuillApp {
             .and_then(|row| rows.iter().position(|(_, candidate)| *candidate == row));
         let page = rows_per_page(
             self.chat_list.scroll.bounds().size.height,
-            chat_row_height(&[], self.appearance.preview_lines),
+            chat_row_height(
+                false,
+                self.appearance.preview_lines,
+                self.appearance.compact_mode,
+            ),
         );
         let Some(&(item, row)) =
             step(key, current, rows.len(), page, false).and_then(|next| rows.get(next))
@@ -538,7 +542,13 @@ impl QuillApp {
         let row_height = order
             .first()
             .and_then(|row| keys.search_bounds_of(row).map(|b| b.size.height))
-            .unwrap_or_else(|| chat_row_height(&[], self.appearance.preview_lines));
+            .unwrap_or_else(|| {
+                chat_row_height(
+                    false,
+                    self.appearance.preview_lines,
+                    self.appearance.compact_mode,
+                )
+            });
         let page = rows_per_page(
             self.search_ui.results_scroll.bounds().size.height,
             row_height,

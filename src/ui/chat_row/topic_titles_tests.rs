@@ -84,6 +84,26 @@ fn a_forum_row_is_three_lines_and_a_plain_row_keeps_its_height(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn compact_rows_keep_forum_controls_within_the_virtual_list_height(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.appearance.compact_mode = true;
+        cx.refresh_windows();
+    });
+    frames(&mut vcx);
+
+    let forum = shown(&mut vcx, ("chat-row", 71));
+    let badge = shown(&mut vcx, ("unread-pill", 71));
+    let message = shown(&mut vcx, ("forum-jump-message", 71));
+    let next = shown(&mut vcx, ("chat-row", 72));
+    let plain = shown(&mut vcx, ("chat-row", 11));
+    assert_eq!(forum.size.height, px(60.));
+    assert_eq!(plain.size.height, px(40.));
+    assert!(badge.top() >= forum.top() && badge.bottom() <= forum.bottom());
+    assert!(message.top() >= badge.bottom() && message.bottom() <= next.top());
+}
+
+#[gpui_kit::test]
 fn the_badge_counts_unread_topics_not_messages(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let (unread_topics, messages) = app.update(&mut vcx, |app, _| {

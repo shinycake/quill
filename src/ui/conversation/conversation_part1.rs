@@ -196,6 +196,7 @@ impl QuillApp {
                             )
                         })
                         .p_3()
+                        .when(self.appearance.compact_mode, |composer| composer.py_1())
                         .border_t_1()
                         .border_color(cx.theme().border)
                         .flex()
@@ -304,7 +305,7 @@ impl QuillApp {
                         )
                         // kit Phase 5: the composer input row — attach and
                         // emoji/sticker pickers, the borderless growing
-                        // kit Textarea (auto_grow(2, 6) on the state sizes
+                        // kit Textarea (auto_grow on the state sizes
                         // it; no fixed height, no custom focus ring or
                         // placeholder machinery), the voice/video record
                         // button, and the round send button.
@@ -315,6 +316,7 @@ impl QuillApp {
                                 .flex()
                                 .items_end()
                                 .gap_2()
+                                .when(self.appearance.compact_mode, |row| row.gap_1())
                                 .when(show_attach, |row| {
                                     row.when_some(self.bot_menu_button(cx), |row, button| {
                                         row.child(button)
@@ -330,6 +332,9 @@ impl QuillApp {
                                         Button::new("composer-emoji")
                                             .icon(IconName::FaceSlightlySmiling)
                                             .ghost()
+                                            .when(self.appearance.compact_mode, |button| {
+                                                button.small().h_8()
+                                            })
                                             .tooltip(if self.sticker_panel_open() {
                                                 tr(keys::Q_CHAT_CLOSE_STICKERS)
                                             } else {
@@ -399,6 +404,7 @@ impl QuillApp {
                     div()
                         .id("composer-note")
                         .p_3()
+                        .when(self.appearance.compact_mode, |note| note.py_1())
                         .border_t_1()
                         .border_color(cx.theme().border)
                         .text_sm()

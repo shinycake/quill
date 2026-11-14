@@ -324,8 +324,10 @@ impl QuillApp {
         }
         let status = chat.member_status();
         let muted = chat.is_muted();
+        let compact = self.appearance.compact_mode;
         let footer = div()
             .p_3()
+            .when(compact, |footer| footer.py_1())
             .border_t_1()
             .border_color(cx.theme().border)
             .flex()
@@ -350,6 +352,7 @@ impl QuillApp {
             let side = || div().w(px(CHANNEL_BAR_SIDE)).h_full().flex().items_center();
             div()
                 .h(px(CHANNEL_BAR_HEIGHT))
+                .when(compact, |bar| bar.h_9())
                 .border_t_1()
                 .border_color(cx.theme().border)
                 .flex()

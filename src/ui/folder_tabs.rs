@@ -420,6 +420,7 @@ impl QuillApp {
             .children(tabs)
             .selected_index(selected)
             .underline()
+            .when(self.appearance.compact_mode, |tabs| tabs.small())
             .max_width(px(140.))
             .track_scroll(scroll)
             .w_full()

@@ -258,6 +258,7 @@ impl Render for ChatWindowView {
         let view = cx.weak_entity();
         super::super::window_frame::sync(window, cx, app.read(cx).appearance.native_window_frame);
         let title_bar = super::super::window_frame::FrameTitleBar::new()
+            .compact(app.read(cx).appearance.compact_mode)
             .on_close_window({
                 let view = view.clone();
                 move |_, window, cx| {
@@ -375,6 +376,7 @@ impl ChatWindowView {
         });
         let view = cx.weak_entity();
         let title_bar = super::super::window_frame::FrameTitleBar::new()
+            .compact(app.read(cx).appearance.compact_mode)
             .on_close_window({
                 let view = view.clone();
                 move |_, window, cx| {

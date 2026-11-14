@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::ui::chat_list_keys::ListRow;
-use crate::ui::chat_row::{CHAT_ROW_AVATAR, chat_row_height};
+use crate::ui::chat_row::chat_row_avatar_size;
 use crate::ui::pressable::PressableDiv;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -376,18 +376,21 @@ impl QuillApp {
     pub(in crate::ui) fn community_row_element(
         &mut self,
         community_id: i64,
+        height: Pixels,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(summary) = self.community_row_summary(community_id) else {
             return div().into_any_element();
         };
-        let height = chat_row_height(&[], self.appearance.preview_lines);
+        let compact = self.appearance.compact_mode;
+        let avatar_size = chat_row_avatar_size(compact);
         let badge = summary.badge();
         let mentioned = summary.mentioned;
         div()
             .id(("community-row", community_id as u64))
             .w_full()
             .px_2()
+            .when(compact, |row| row.px_1())
             .h(height)
             .flex()
             .flex_col()
@@ -414,12 +417,13 @@ impl QuillApp {
                     .flex()
                     .items_center()
                     .gap_3()
+                    .when(compact, |row| row.gap_2())
                     .child(
                         div()
-                            .ml(px(-CHAT_ROW_AVATAR * PEEK))
+                            .ml(px(-avatar_size * PEEK))
                             .child(self.community_userpic_on(
                                 community_id,
-                                CHAT_ROW_AVATAR,
+                                avatar_size,
                                 cx.theme().sidebar,
                                 cx,
                             )),
@@ -429,6 +433,7 @@ impl QuillApp {
                             .flex()
                             .flex_col()
                             .gap_0p5()
+                            .when(compact, |lines| lines.gap_0().line_height(rems(1.125)))
                             .min_w_0()
                             .flex_1()
                             .child(

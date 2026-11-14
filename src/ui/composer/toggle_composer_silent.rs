@@ -3,6 +3,7 @@
 use super::*;
 use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
+use gpui_kit::prelude::FluentBuilder;
 use quill::lang::{keys, tr};
 
 /// See [`QuillApp::send_options_state`].
@@ -151,6 +152,7 @@ impl QuillApp {
         Button::new("composer-format-menu")
             .icon(IconName::ALargeSmall)
             .ghost()
+            .when(self.appearance.compact_mode, |button| button.small().h_8())
             .tooltip(tr(keys::Q_CHAT_FORMATTING))
             .accessibility_label(tr(keys::Q_CHAT_FORMATTING))
             .on_click(|event, window, cx| {

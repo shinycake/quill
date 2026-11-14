@@ -173,7 +173,11 @@ fn page_keys_move_by_a_page(cx: &mut TestAppContext) {
     let page = app.update(vcx, |app, _| {
         crate::ui::chat_list_keys::rows_per_page(
             app.chat_list.scroll.bounds().size.height,
-            crate::ui::chat_row::chat_row_height(&[], app.appearance.preview_lines),
+            crate::ui::chat_row::chat_row_height(
+                false,
+                app.appearance.preview_lines,
+                app.appearance.compact_mode,
+            ),
         )
     });
     assert!(page >= 2, "page of {page} rows");
@@ -343,4 +347,26 @@ fn arrows_in_the_search_field_walk_the_results_and_enter_opens_one(cx: &mut Test
     press(vcx, "enter");
     assert_eq!(open_chat(&app, vcx), Some(target));
     assert!(!app.update(vcx, |app, _| app.search_is_open()));
+}
+
+#[gpui_kit::test]
+fn selecting_a_search_result_in_compact_mode_keeps_the_bottom_clear(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, "ready-chats", 800.);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.appearance.compact_mode = true;
+        app.open_search_ui(window, cx);
+    });
+    frames(&mut vcx);
+    vcx.simulate_input("Demo chat A");
+    frames(&mut vcx);
+    press(&mut vcx, "enter");
+
+    assert_eq!(open_chat(&app, &mut vcx), Some(ChatId(11)));
+    assert!(!app.update(&mut vcx, |app, _| app.search_is_open()));
+    let selected = quill::lang::tr(quill::lang::keys::Q_CHAT_CHAT_SELECTED);
+    assert_eq!(
+        app.update(&mut vcx, |app, _| app.connection.status_note().to_string()),
+        selected
+    );
+    assert!(vcx.debug_bounds("status-line").is_none());
 }

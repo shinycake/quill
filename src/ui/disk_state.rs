@@ -4,9 +4,9 @@ use super::app::{PaneMode, QuillApp};
 use super::connect_ui::ConnectStage;
 use super::message_media::format_bytes;
 use super::status_note::StatusNote;
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{ActiveTheme as _, TITLE_BAR_HEIGHT};
 use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -444,7 +444,9 @@ impl QuillApp {
                 .id("disk-full-cover")
                 .debug_selector(|| "disk-full-cover".to_string())
                 .absolute()
-                .top(TITLE_BAR_HEIGHT)
+                .top(super::window_frame::title_bar_height(
+                    self.appearance.compact_mode,
+                ))
                 .left_0()
                 .right_0()
                 .bottom_0()

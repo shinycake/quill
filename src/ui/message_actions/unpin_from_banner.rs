@@ -13,11 +13,12 @@ const PINNED_BAR_GUESS: Pixels = px(48.);
 const PINNED_SWAP_SHIFT: f32 = 10.;
 
 /// The bar's title over its one-line preview.
-fn pinned_bar_lines_block(title: String, preview: String) -> Div {
+fn pinned_bar_lines_block(title: String, preview: String, compact: bool) -> Div {
     div()
         .flex()
         .flex_col()
         .min_w_0()
+        .when(compact, |lines| lines.line_height(rems(1.)))
         .child(
             div()
                 .text_xs()
@@ -88,12 +89,13 @@ impl QuillApp {
             self.request_animation_tick(60, cx);
         }
         let drawn = drawn?;
+        let compact = self.appearance.compact_mode;
         let content = self.pinned_message_banner_body(chat_id, &drawn, cx)?;
         Some(surface_reveal::slide_open(
             content,
             drawn.shown,
             self.frame.surfaces.pinned_bar_size.height.clone(),
-            PINNED_BAR_GUESS,
+            if compact { px(37.) } else { PINNED_BAR_GUESS },
             px(0.),
             surface_reveal::Attached::Top,
         ))
@@ -228,8 +230,11 @@ impl QuillApp {
                 let lines = (previous.title.clone(), previous.preview.clone());
                 (lines, previous.index < index)
             });
+        let compact = self.appearance.compact_mode;
+        let lines_height = px(if compact { 32. } else { 34. });
+        let lines = |title, preview| pinned_bar_lines_block(title, preview, compact);
         let text = match previous {
-            None => pinned_bar_lines_block(title, preview).into_any_element(),
+            None => lines(title, preview).into_any_element(),
             Some(((old_title, old_preview), up)) => {
                 let swap = drawn.swap;
                 let sign = if up { -1. } else { 1. };
@@ -237,9 +242,9 @@ impl QuillApp {
                     .relative()
                     .flex_1()
                     .min_w_0()
-                    .h(px(34.))
+                    .h(lines_height)
                     .child(
-                        pinned_bar_lines_block(old_title, old_preview)
+                        lines(old_title, old_preview)
                             .absolute()
                             .left_0()
                             .right_0()
@@ -247,7 +252,7 @@ impl QuillApp {
                             .opacity(1. - swap),
                     )
                     .child(
-                        pinned_bar_lines_block(title, preview)
+                        lines(title, preview)
                             .absolute()
                             .left_0()
                             .right_0()
@@ -265,6 +270,7 @@ impl QuillApp {
                 .gap_2()
                 .px_3()
                 .py_1p5()
+                .when(compact, |bar| bar.py_0p5())
                 .border_b_1()
                 .border_color(cx.theme().border)
                 .bg(bg_canvas())
@@ -294,7 +300,7 @@ impl QuillApp {
                                 .flex()
                                 .flex_col()
                                 .gap(px(2.))
-                                .h(px(34.))
+                                .h(lines_height)
                                 .children(segments),
                         )
                         .child(text),

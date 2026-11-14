@@ -71,12 +71,17 @@ pub(super) const ENTRIES: &[Entry] = &[
         keys::Q_PREFS_INTERFACE_SCALE,
     )
     .keywords(&["zoom", "dpi", "size"]),
+    Entry::new("appearance.compact_mode", P, keys::Q_PREFS_COMPACT_MODE).keywords(&[
+        "density",
+        "spacing",
+        "padding",
+        "smaller rows",
+    ]),
     Entry::new("appearance.chat_style", P, keys::Q_PREFS_CHAT_STYLE)
         .keywords(&["bubbles", "plain", "layout"]),
     Entry::new("appearance.chat_list_rows", P, keys::Q_PREFS_CHAT_LIST_ROWS).keywords(&[
         "two lines",
         "three lines",
-        "density",
         "preview",
     ]),
     Entry::new("appearance.media_icons", P, keys::Q_PREFS_MEDIA_ICONS)

@@ -227,7 +227,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
         f: impl FnOnce(&mut AppearancePrefs),
     ) {
+        let previous_preview_lines = self.appearance.preview_lines;
         f(&mut self.appearance);
+        if previous_preview_lines != self.appearance.preview_lines {
+            self.chat_list.pin.end_drag();
+        }
         quill::tray::set_tray_enabled(self.appearance.work_mode.has_tray());
         quill::tray::monochrome::set_monochrome(self.appearance.tray_icon_monochrome);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
@@ -653,6 +657,7 @@ impl QuillApp {
 mod night_clock;
 pub(super) use night_clock::NightClock;
 mod appearance_keybindings_section;
+mod compact_mode;
 mod new_accent_picker;
 pub(in crate::ui) use new_accent_picker::{AccentSelect, LinkHandlerRecheck};
 mod send_to_menu_section;

@@ -90,10 +90,22 @@ pub(super) enum ChatListItem {
     StoryStrip,
 }
 
+impl ChatListItem {
+    pub(super) fn height(&self) -> Pixels {
+        match self {
+            Self::Chat { height, .. }
+            | Self::ArchiveRow { height }
+            | Self::Community { height, .. } => *height,
+            Self::ArchiveBar => px(quill::chatlist_archive::COLLAPSED_BAR_HEIGHT),
+            Self::StoryStrip => px(quill::stories_strip::FULL_HEIGHT),
+        }
+    }
+}
+
 /// kit Phase 9: a loading placeholder row for the chat list — a kit
 /// `Skeleton` avatar circle plus two skeleton text lines, matching the
 /// shape of a chat row.
-pub(super) fn chat_list_skeleton_row(index: usize) -> impl IntoElement {
+pub(super) fn chat_list_skeleton_row(index: usize, compact: bool) -> impl IntoElement {
     div()
         .id(("chat-list-skeleton", index))
         .flex()
@@ -101,7 +113,16 @@ pub(super) fn chat_list_skeleton_row(index: usize) -> impl IntoElement {
         .gap_3()
         .px_3()
         .py_2()
-        .child(Skeleton::new().w(px(40.)).h(px(40.)).rounded_full())
+        .when(compact, |row| row.px_1().py_1().gap_2())
+        .child(
+            Skeleton::new()
+                .size(px(if compact {
+                    chat_row_avatar_size(compact)
+                } else {
+                    40.
+                }))
+                .rounded_full(),
+        )
         .child(
             div()
                 .flex()
@@ -269,23 +290,27 @@ pub(super) fn chat_row_has_tags(
     )
 }
 
-/// [`chat_row_height`] from whether the row has tag chips.
-pub(super) fn chat_row_height_tagged(has_tags: bool, preview_lines: u8) -> Pixels {
-    px(quill::chatlist_style::chat_row_height_px(
-        has_tags,
-        preview_lines,
-    ))
+/// Row extent shared by the renderer, virtual list and pin reordering.
+pub(super) fn chat_row_height(has_tags: bool, preview_lines: u8, compact: bool) -> Pixels {
+    if !compact {
+        return px(quill::chatlist_style::chat_row_height_px(
+            has_tags,
+            preview_lines,
+        ));
+    }
+    // The third line can contain both forum topic chips and an unread badge.
+    let content = if preview_lines >= quill::chatlist_style::PREVIEW_LINES_MAX {
+        60.
+    } else {
+        40.
+    };
+    let tags = if has_tags { 24. } else { 0. };
+    px(content + tags)
 }
 
-/// kit Phase 3: chat rows render at a fixed height so the kit
-/// `VirtualList` can position them from declared sizes — 56px base
-/// (avatar 40 + the old py_2), 80px when the folder-tag strip is present.
-/// `session_chat_row` enforces the same height on the element.
-pub(super) fn chat_row_height(tags: &[FolderTag], preview_lines: u8) -> Pixels {
-    chat_row_height_tagged(!tags.is_empty(), preview_lines)
+pub(super) fn chat_row_avatar_size(compact: bool) -> f32 {
+    if compact { 28. } else { CHAT_ROW_AVATAR }
 }
-
-impl QuillApp {}
 
 /// The open chat's row under the pointer (or the keyboard selection).
 pub(super) fn open_row_hover_fill(theme: &Theme) -> Hsla {
@@ -328,6 +353,8 @@ pub(super) fn session_chat_row(
     // Slice chatlist-list-style: preview line count, media icons, and
     // formatted preview (Settings → Appearance → Chat list rows).
     row_style: ChatListRowStyle,
+    compact: bool,
+    height: Pixels,
     // The chat with yourself: "Saved Messages" with a bookmark avatar.
     saved: bool,
     // Group previews lead with the sender ("Dad: …", "You: …").
@@ -470,21 +497,17 @@ pub(super) fn session_chat_row(
     } else {
         format!("{title} — {preview}")
     };
-    // kit Phase 3: tag chips via the shared helper — the row height
-    // (declared to the `VirtualList`) is derived from the same list.
     let tags = chat_row_tags(chat, folders, show_tags, viewing_folder);
+    let avatar_size = chat_row_avatar_size(compact);
     div()
         .id(("chat-row", id.0 as u64))
         .a11y_tag(quill::agent::ui_driver::redact::chat_tag(id.0))
         .w_full()
         .px_2()
+        .when(compact, |row| row.px_1())
         .role(Role::Button)
         .aria_label(row_label)
-        // kit Phase 3: fixed height (see `chat_row_height`) — the
-        // `VirtualList` positions rows from declared sizes, so the row
-        // enforces the same height and centers its content. Title and
-        // preview truncate to one line so content can never overflow it.
-        .h(chat_row_height(&tags, row_style.preview_lines))
+        .h(height)
         .flex()
         .flex_col()
         .justify_center()
@@ -570,6 +593,7 @@ pub(super) fn session_chat_row(
                 .flex()
                 .items_center()
                 .gap_3()
+                .when(compact, |row| row.gap_2())
                 // Parity slice: circular chat photo or colored initials for
                 // every chat-list row / chat type.
                 // Slice CL3: the select-mode check circle precedes the
@@ -591,14 +615,14 @@ pub(super) fn session_chat_row(
                                 }
                             },
                             ring,
-                            CHAT_ROW_AVATAR,
+                            avatar_size,
                             muted_fg,
                         ),
-                        None if saved => saved_messages_avatar(CHAT_ROW_AVATAR),
+                        None if saved => saved_messages_avatar(avatar_size),
                         None => UserpicFrame::over(
                             video.as_ref(),
-                            chat_avatar(&title, photo_path, CHAT_ROW_AVATAR).into_any_element(),
-                            CHAT_ROW_AVATAR,
+                            chat_avatar(&title, photo_path, avatar_size).into_any_element(),
+                            avatar_size,
                         ),
                     },
                     quill::peer_badge::shows_call_badge(chat.video_chat.as_ref()),
@@ -613,6 +637,7 @@ pub(super) fn session_chat_row(
                         .flex()
                         .flex_col()
                         .gap_0p5()
+                        .when(compact, |lines| lines.gap_0().line_height(rems(1.125)))
                         .min_w_0()
                         .flex_1()
                         .child(

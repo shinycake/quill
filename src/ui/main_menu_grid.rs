@@ -213,6 +213,7 @@ impl QuillApp {
                 Button::new("main-menu")
                     .icon(IconName::Menu)
                     .ghost()
+                    .when(self.appearance.compact_mode, |button| button.small())
                     .tooltip(tr(keys::MAIN_MENU))
                     .accessibility_label(tr(keys::MAIN_MENU)),
             )
