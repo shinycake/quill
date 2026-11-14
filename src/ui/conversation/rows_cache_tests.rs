@@ -56,6 +56,41 @@ fn apply(app: &Entity<QuillApp>, cx: &mut VisualTestContext, updates: &[&str]) {
 
 const GROUP: i64 = 31;
 
+#[gpui_kit::test]
+fn compact_spacing_remeasures_the_open_history_without_replacing_rows(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    open_group(&app, &mut vcx);
+    let heights = |vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, cx| {
+            app.history.scroller.read(cx).estimated_row_heights(0..3)
+        })
+        .expect("three measured rows")
+    };
+    let initial = heights(&mut vcx);
+    let rebuilds = counts(&app, &mut vcx).0;
+    for compact in [true, false] {
+        app.update(&mut vcx, |app, cx| {
+            app.appearance.compact_mode = compact;
+            app.refresh_compact_layout(cx);
+        });
+        frames(&mut vcx);
+        let expected = if compact {
+            vec![
+                initial[0] - px(4.),
+                initial[1] - px(12.),
+                initial[2] - px(12.),
+            ]
+        } else {
+            initial.clone()
+        };
+        assert_eq!(heights(&mut vcx), expected);
+        assert_eq!(counts(&app, &mut vcx).0, rebuilds);
+        assert!(app.read_with(&vcx, |app, cx| {
+            app.history.scroller.read(cx).is_following_tail()
+        }));
+    }
+}
+
 fn open_group(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     apply(
         app,

@@ -76,6 +76,9 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .min_w_0()
+                    .when(self.appearance.compact_mode, |identity| {
+                        identity.line_height(rems(1.125))
+                    })
                     .child(title_row)
                     .when_some(status_line, |this, line| {
                         this.child(conversation_status_line(

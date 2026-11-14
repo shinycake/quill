@@ -15,6 +15,7 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputContentType, InputEvent, InputState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::AccountKey;
 use quill::lang::{keys, tr, tr_with};
@@ -784,6 +785,7 @@ impl QuillApp {
         Button::new("lock-app")
             .icon(gpui_kit::assets::IconName::Lock)
             .ghost()
+            .when(self.appearance.compact_mode, |button| button.small())
             .tooltip(tr(keys::Q_PREFS_LOCK_QUILL))
             .accessibility_label(tr(keys::Q_PREFS_LOCK_QUILL))
             .on_click(cx.listener(|this, _, _, cx| this.lock_by_passcode(cx)))

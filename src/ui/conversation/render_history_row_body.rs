@@ -252,13 +252,14 @@ impl QuillApp {
                     .flatten();
                 let highlighted = inputs.highlighted;
                 let failed = message.failed();
-                let run_start = inputs.run_start;
                 let element = div()
                     .relative()
                     .child(super::vanish::row_tracker(quill::ids::ChatMessage::new(
                         row_chat, row_msg,
                     )))
-                    .when(run_start, |this| this.pt_2())
+                    .when(inputs.run_start && !self.appearance.compact_mode, |this| {
+                        this.pt_2()
+                    })
                     // Jump target, forward selection and failed sends tint
                     // the whole row instead of outlining it: no border or
                     // padding, so the row never shifts as the state flips.

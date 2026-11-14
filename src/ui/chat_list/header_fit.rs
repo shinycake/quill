@@ -13,8 +13,11 @@ use gpui_kit::component::tooltip::Tooltip;
 
 /// Sidebar padding (`p_3`) on both sides.
 const SIDEBAR_PADDING: f32 = 24.;
+/// Compact sidebar padding (`px_1`) on both sides.
+const COMPACT_SIDEBAR_PADDING: f32 = 8.;
 /// Width of one ghost icon button in the header.
 const SIDE_BUTTON_WIDTH: f32 = 32.;
+const COMPACT_SIDE_BUTTON_WIDTH: f32 = 24.;
 /// Gap between header children (`gap_1`).
 const HEADER_GAP: f32 = 4.;
 /// Estimated width of one label character in the tab strip (`text_sm`).
@@ -33,9 +36,19 @@ pub(super) fn labelled_tabs_width(labels: &[&str]) -> f32 {
 }
 
 /// Whether the tab strip must show icons instead of labels.
-pub(super) fn tabs_icon_only(sidebar_width: f32, side_buttons: usize, labelled_width: f32) -> bool {
-    let side = side_buttons as f32 * (SIDE_BUTTON_WIDTH + HEADER_GAP);
-    sidebar_width - SIDEBAR_PADDING - side < labelled_width
+fn tabs_icon_only(
+    sidebar_width: f32,
+    side_buttons: usize,
+    labelled_width: f32,
+    compact: bool,
+) -> bool {
+    let (padding, button_width) = if compact {
+        (COMPACT_SIDEBAR_PADDING, COMPACT_SIDE_BUTTON_WIDTH)
+    } else {
+        (SIDEBAR_PADDING, SIDE_BUTTON_WIDTH)
+    };
+    let side = side_buttons as f32 * (button_width + HEADER_GAP);
+    sidebar_width - padding - side < labelled_width
 }
 
 impl QuillApp {
@@ -50,7 +63,12 @@ impl QuillApp {
             tr(keys::MENU_CONTACTS),
             tr(keys::MENU_CALLS),
         ]);
-        let icon_only = tabs_icon_only(f32::from(self.list_width()), side_buttons, labelled_width);
+        let icon_only = tabs_icon_only(
+            f32::from(self.list_width()),
+            side_buttons,
+            labelled_width,
+            self.appearance.compact_mode,
+        );
         div()
             .flex()
             .items_center()
@@ -107,6 +125,7 @@ impl QuillApp {
         TabBar::new("list-tabs")
             .w_full()
             .segmented()
+            .when(self.appearance.compact_mode, |tabs| tabs.small())
             .selected_index(selected)
             .child(tab(IconName::MessageCircle, tr(keys::RECENT_CHATS)))
             .child(tab(IconName::Users, tr(keys::MENU_CONTACTS)))
@@ -126,8 +145,12 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{labelled_tabs_width, tabs_icon_only};
+    use super::labelled_tabs_width;
     use quill::settings::{MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH};
+
+    fn tabs_icon_only(width: f32, buttons: usize, labels: f32) -> bool {
+        super::tabs_icon_only(width, buttons, labels, false)
+    }
 
     /// "Chats", "Contacts", "Calls".
     fn english() -> f32 {
@@ -156,6 +179,12 @@ mod tests {
         assert!(tabs_icon_only(240., 1, english()));
         assert!(tabs_icon_only(287., 1, english()));
         assert!(!tabs_icon_only(288., 1, english()));
+    }
+
+    #[test]
+    fn compact_header_reserves_less_space_for_the_menu_and_insets() {
+        assert!(super::tabs_icon_only(263., 1, english(), true));
+        assert!(!super::tabs_icon_only(264., 1, english(), true));
     }
 
     #[test]

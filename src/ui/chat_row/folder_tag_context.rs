@@ -36,12 +36,13 @@ impl QuillApp {
     ) -> AnyElement {
         let item = self.chat_list.items.get(ix).cloned();
         match item {
-            Some(ChatListItem::ArchiveRow { .. }) => self.archive_row_element(cx),
+            Some(ChatListItem::ArchiveRow { height }) => self.archive_row_element(height, cx),
             Some(ChatListItem::ArchiveBar) => self.archive_bar_element(cx),
             Some(ChatListItem::StoryStrip) => self.story_strip_element(cx),
-            Some(ChatListItem::Community { community_id, .. }) => {
-                self.community_row_element(community_id, cx)
-            }
+            Some(ChatListItem::Community {
+                community_id,
+                height,
+            }) => self.community_row_element(community_id, height, cx),
             Some(ChatListItem::Chat {
                 id,
                 archived,
@@ -152,7 +153,7 @@ impl QuillApp {
                     &chat.kind,
                     selected,
                     saved,
-                    CHAT_ROW_AVATAR,
+                    chat_row_avatar_size(self.appearance.compact_mode),
                     cx,
                 );
                 // Swipe action for this row (none while selecting).
@@ -188,6 +189,8 @@ impl QuillApp {
                         self.appearance.chat_list_media_icons,
                         self.appearance.chat_list_rich_preview,
                     ),
+                    self.appearance.compact_mode,
+                    height,
                     saved,
                     self.session().and_then(|s| s.chat_preview_sender(chat)),
                     self.preview_emoji_images(chat, cx),

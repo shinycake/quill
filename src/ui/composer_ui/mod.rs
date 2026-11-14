@@ -388,6 +388,7 @@ impl QuillApp {
         Button::new("composer-attach")
             .icon(IconName::Paperclip)
             .ghost()
+            .when(self.appearance.compact_mode, |button| button.small().h_8())
             .tooltip(tr(keys::Q_CHAT_ATTACH))
             .accessibility_label(tr(keys::Q_CHAT_ATTACH))
             .on_click(|event, window, cx| {

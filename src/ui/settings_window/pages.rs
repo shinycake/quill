@@ -111,6 +111,7 @@ impl QuillApp {
                     ]))
                     .children(cards([
                         self.appearance_scale_section(cx),
+                        self.appearance_compact_mode_section(cx),
                         self.appearance_font_section(cx),
                         self.appearance_font_family_section(cx),
                     ]))

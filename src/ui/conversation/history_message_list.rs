@@ -513,11 +513,13 @@ impl QuillApp {
                     weak.update(cx, |this, cx| this.render_history_row(ix, window, cx))
                         .unwrap_or_else(|_| div().into_any_element())
                 })
-                // The kit's default row wrapper pads every non-last row with
-                // pb_8 (32px); override to pb_1 to restore the old gap_1
-                // density. The kit also supplies row px and list py, so the
-                // outer div needs neither.
-                .with_row_style(StyleRefinement::default().pb_1())
+                // Bubbles bring their own vertical inset. Compact mode
+                // uses that alone for the gap, keeping list-edge padding.
+                .with_row_style(if self.appearance.compact_mode {
+                    StyleRefinement::default().pb_0()
+                } else {
+                    StyleRefinement::default().pb_1()
+                })
                 // Jump to latest: shows the unread count, and replaces a
                 // window that stops short of the latest message instead of
                 // only scrolling to its end.
