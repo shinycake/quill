@@ -243,3 +243,24 @@ fn a_language_listed_twice_leaves_the_skip_list_with_one_toggle() {
     assert!(prefs.toggle_skip("en", "en"));
     assert_eq!(prefs.skip("ru"), ["ru"]);
 }
+
+#[test]
+fn translations_follow_the_interface_pack_language() {
+    use super::{TranslatePrefs, interface_language};
+    // A Vietnamese beta pack (vi-raw) with the saved tag still English.
+    let ui = interface_language(Some("vi"), "en");
+    assert_eq!(ui, "vi");
+    let prefs = TranslatePrefs::default();
+    assert_eq!(prefs.to_language(&ui), "vi");
+    assert_eq!(prefs.skip(&ui), ["vi"]);
+    // English (no pack) and packs whose language Quill doesn't know keep
+    // the saved tag.
+    assert_eq!(interface_language(None, "de"), "de");
+    assert_eq!(interface_language(Some("x-klingon"), "de"), "de");
+    // A target picked by hand wins.
+    let picked = TranslatePrefs {
+        translate_to: "ja".into(),
+        ..TranslatePrefs::default()
+    };
+    assert_eq!(picked.to_language(&ui), "ja");
+}

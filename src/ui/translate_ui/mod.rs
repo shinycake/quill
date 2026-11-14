@@ -19,7 +19,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId, RequestId};
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::{HistoryMessage, Session, Translation};
 use quill::telegram::envelope::ChatKind;
 use quill::text::TextEntity;
@@ -179,9 +179,12 @@ impl QuillApp {
     /// The app language tag ("Translate to" and "Do Not Translate" default
     /// to it).
     pub(in crate::ui) fn translate_ui_language(&self) -> String {
-        self.session()
+        let saved = self
+            .session()
             .map(|s| s.settings.language_prefs.system_language_code.clone())
-            .unwrap_or_else(|| quill::settings::DEFAULT_LANGUAGE_CODE.to_string())
+            .unwrap_or_else(|| quill::settings::DEFAULT_LANGUAGE_CODE.to_string());
+        let pack = quill::lang::current();
+        quill::translate::interface_language(pack.as_deref().map(|p| p.plural_code()), &saved)
     }
 
     fn set_translate_prefs(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut TranslatePrefs)) {
@@ -389,6 +392,29 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The name of the language the open box translates to.
+    fn translate_to_label(&self) -> String {
+        self.translate
+            .dialog
+            .as_ref()
+            .map(|dialog| quill::translate::language_native_name(dialog.to))
+            .unwrap_or_default()
+    }
+
+    /// Settings → Translate To.
+    pub(super) fn open_translate_to_setting(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let to = self
+            .preferences
+            .translate
+            .prefs
+            .to_language(&self.translate_ui_language());
+        self.open_translate_chooser(to, window, cx);
+    }
+
     /// Settings → Do Not Translate.
     pub(super) fn open_translate_skip_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let to = self
@@ -584,7 +610,10 @@ impl QuillApp {
             .justify_between()
             .child(
                 Button::new("translate-language")
-                    .label(tr(keys::Q_MISC_LANGUAGE))
+                    .label(tr_with(
+                        keys::Q_REST_TRANSLATE_TO,
+                        &[("language_name", &self.translate_to_label())],
+                    ))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(dialog) = this.translate.dialog.as_mut() {

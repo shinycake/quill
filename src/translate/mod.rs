@@ -157,6 +157,17 @@ pub fn normalize_code(tag: &str) -> Option<&'static str> {
         .map(|(code, _, _)| *code)
 }
 
+/// The language translations go to by default, as tdesktop's
+/// `DefaultSkipLanguages` reads it: the interface pack's language when
+/// Quill knows it, else the saved language tag. Beta packs such as
+/// `vi-raw` name their language only through the pack.
+pub fn interface_language(pack_language: Option<&str>, saved_tag: &str) -> String {
+    pack_language
+        .filter(|code| normalize_code(code).is_some())
+        .unwrap_or(saved_tag)
+        .to_string()
+}
+
 /// English name of a language code ("Russian"); the code itself when it is
 /// not in the table.
 pub fn language_name(code: &str) -> String {
