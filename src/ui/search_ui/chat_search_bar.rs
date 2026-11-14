@@ -17,6 +17,7 @@ impl QuillApp {
             .map(|s| s.search.chat_search.position_label())
             .unwrap_or_default();
         let jump_note = session.map(chat_search_jump_note).unwrap_or_default();
+        let list_shown = session.is_some_and(|s| s.search.chat_search.list_shown());
         let can_pick = session.is_some_and(|s| s.chat_search_can_pick_sender());
         let sender_label = session.and_then(|s| {
             s.search
@@ -160,12 +161,24 @@ impl QuillApp {
                         ),
                     )
                     .when(!position.is_empty() && !picker_open, |this| {
+                        // tdesktop's counter is the list toggle
+                        // (`BottomBar::_showList`).
+                        let toggle = if list_shown {
+                            tr(keys::Q_CHAT_HIDE_SEARCH_RESULTS)
+                        } else {
+                            tr(keys::Q_CHAT_SHOW_SEARCH_RESULTS)
+                        };
                         this.child(
-                            div()
-                                .px_1()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(position),
+                            Button::new("chat-search-position")
+                                .label(position)
+                                .ghost()
+                                .xsmall()
+                                .selected(list_shown)
+                                .tooltip(toggle)
+                                .accessibility_label(toggle)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_chat_search_list(cx);
+                                })),
                         )
                     })
                     .child(
@@ -251,7 +264,7 @@ impl QuillApp {
             .when_some(picker, |this, picker| {
                 this.child(self.chat_search_picker(&picker, cx))
             })
-            .when(!hits.is_empty() && !picker_open, |this| {
+            .when(list_shown && !picker_open, |this| {
                 let mut list = div().id("chat-search-hits").flex().flex_col().gap_1();
                 for (message_id, preview, date, selected) in hits {
                     list = list.child(chat_search_hit_row(
@@ -260,7 +273,7 @@ impl QuillApp {
                 }
                 this.child(list)
             })
-            .when(more_failed && !picker_open, |this| {
+            .when(more_failed && list_shown && !picker_open, |this| {
                 this.child(
                     div()
                         .id("chat-search-more-failed")

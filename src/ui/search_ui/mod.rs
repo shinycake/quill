@@ -687,6 +687,7 @@ impl QuillApp {
     }
 
     pub(super) fn jump_selected_chat_search_hit(&mut self, cx: &mut Context<Self>) {
+        self.fold_list_for_jump();
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -716,6 +717,7 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
+        self.fold_list_for_jump();
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -733,7 +735,33 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The "N of M" counter: fold or unfold the hits list.
+    pub(super) fn toggle_chat_search_list(&mut self, cx: &mut Context<Self>) {
+        if let Some(session) = self.session_mut() {
+            session.search.chat_search.toggle_list();
+        }
+        cx.notify();
+    }
+
+    /// The user jumps to a hit (a click, Go to message, Enter, the
+    /// arrows): the hits list folds so the chat is in view, as tdesktop's
+    /// `ComposeSearch` hides its list on every activation. The first hit
+    /// a new search lands on is not the user's pick and keeps the list.
+    fn fold_list_for_jump(&mut self) {
+        if let Some(session) = self.session_mut() {
+            session.search.chat_search.fold_list();
+        }
+    }
+
+    /// Escape over a shown list folds it before closing the search
+    /// (tdesktop `TopBar::cancelRequests`).
+    pub(super) fn fold_chat_search_list(&mut self, cx: &mut Context<Self>) {
+        self.fold_list_for_jump();
+        cx.notify();
+    }
+
     pub(super) fn chat_search_newer(&mut self, cx: &mut Context<Self>) {
+        self.fold_list_for_jump();
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -764,6 +792,7 @@ impl QuillApp {
     }
 
     pub(super) fn chat_search_older(&mut self, cx: &mut Context<Self>) {
+        self.fold_list_for_jump();
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -922,6 +951,11 @@ mod top_people_demo;
 #[cfg(feature = "demo-capture")]
 #[path = "member_field_tests.rs"]
 mod member_field_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "chat_search_list_tests.rs"]
+mod chat_search_list_tests;
 
 #[cfg(test)]
 mod match_tests {

@@ -282,6 +282,14 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         }
     ),
     layer!(
+        "chat-search-list",
+        |app| app.chat_search_is_open()
+            && app
+                .session()
+                .is_some_and(|session| session.search.chat_search.list_shown()),
+        |app, _, cx| app.fold_chat_search_list(cx)
+    ),
+    layer!(
         "chat-search",
         |app| app.chat_search_is_open(),
         |app, window, cx| app.close_chat_search_ui(window, cx)
