@@ -61,8 +61,9 @@ const POSTS: [(&str, &str); 8] = [
 ];
 
 impl QuillApp {
-    fn demo_chat_translate(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let hidden = std::env::var("QUILL_DEMO_TRANSLATE").is_ok_and(|mode| mode == "hidden");
+    fn demo_chat_translate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mode = std::env::var("QUILL_DEMO_TRANSLATE").unwrap_or_default();
+        let hidden = mode == "hidden";
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -105,6 +106,10 @@ impl QuillApp {
                 CHANNEL,
                 true,
             );
+        }
+        // `box`: the translate box of the first post, as from its menu.
+        if mode == "box" {
+            self.open_translate_message(ChatId(CHANNEL), quill::ids::MessageId(201), window, cx);
         }
         cx.notify();
     }

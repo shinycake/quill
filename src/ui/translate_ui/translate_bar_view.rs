@@ -606,7 +606,17 @@ impl QuillApp {
             cx.listener(|this, _, window, cx| this.open_translate_skip_list(window, cx)),
             cx,
         );
+        let to_row = link_row(
+            "translate-to-language",
+            tr(keys::TRANSLATE_MENU_TO),
+            Some(quill::translate::language_native_name(prefs.to_language(&ui)).into()),
+            cx.listener(|this, _, window, cx| this.open_translate_to_setting(window, cx)),
+            cx,
+        );
         let mut rows = vec![show, chats];
+        if prefs.show_button {
+            rows.push(to_row);
+        }
         if skip_shown {
             rows.push(self.setting_spot(&["language.do_not_translate"], skip_row, cx));
         }
