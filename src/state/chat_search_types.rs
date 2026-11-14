@@ -76,6 +76,19 @@ pub struct OpenChatSearch {
     pub media: crate::search_filters::SearchMediaKind,
     /// The member picker replacing the results while choosing a sender.
     pub from_picker: Option<FromPicker>,
+    /// Whether the hits list shows under the bar.
+    pub list: ChatSearchList,
+}
+
+/// The hits list under the in-chat search bar. A jump folds it so the chat
+/// is in view, while the bar and its "N of M" stay to step through matches;
+/// the counter unfolds it again (tdesktop `ComposeSearch::Inner::hideList`
+/// and `showListRequests`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatSearchList {
+    #[default]
+    Shown,
+    Folded,
 }
 
 impl OpenChatSearch {
@@ -91,10 +104,13 @@ impl OpenChatSearch {
             sender: None,
             media: crate::search_filters::SearchMediaKind::All,
             from_picker: None,
+            list: ChatSearchList::Shown,
         }
     }
 
     fn clear_results(&mut self) {
+        // New results list again: only a jump folds the list.
+        self.list = ChatSearchList::Shown;
         self.hits.clear();
         self.total_count = 0;
         self.paging = ChatSearchPaging::End;
@@ -179,6 +195,30 @@ impl ChatSearchState {
         match &mut self.surface {
             ChatSearchSurface::Open(open) => Some(open),
             ChatSearchSurface::Closed => None,
+        }
+    }
+
+    /// The hits list shows: the bar is open, the list unfolded and
+    /// something found.
+    pub fn list_shown(&self) -> bool {
+        self.open()
+            .is_some_and(|open| open.list == ChatSearchList::Shown && !open.hits.is_empty())
+    }
+
+    /// The counter's click: fold a shown list, unfold a folded one.
+    pub fn toggle_list(&mut self) {
+        if let Some(open) = self.open_mut() {
+            open.list = match open.list {
+                ChatSearchList::Shown => ChatSearchList::Folded,
+                ChatSearchList::Folded => ChatSearchList::Shown,
+            };
+        }
+    }
+
+    /// Fold the hits list (a jump, or Escape over the list).
+    pub fn fold_list(&mut self) {
+        if let Some(open) = self.open_mut() {
+            open.list = ChatSearchList::Folded;
         }
     }
 

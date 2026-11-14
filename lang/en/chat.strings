@@ -615,3 +615,5 @@
 "qll_chat_send_or_remove_the_attachments_before" = "Send or remove the attachments before editing a message.";
 "qll_chat_the_draft_changed_the_ai_answer" = "The draft changed, so the AI answer was not applied.";
 "qll_chat_emoji_word_lookup_failed" = "Couldn't look up emoji for that word.";
+"qll_chat_hide_search_results" = "Hide results";
+"qll_chat_show_search_results" = "Show results";

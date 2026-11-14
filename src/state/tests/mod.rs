@@ -12,6 +12,7 @@ mod chat_appearance;
 mod chat_list;
 mod chat_list_more;
 mod chat_row;
+mod chat_search_list;
 mod common;
 mod communities;
 mod composer_placeholder;
