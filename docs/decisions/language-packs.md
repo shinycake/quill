@@ -465,6 +465,27 @@ stays English is listed in the baseline: page ids in `navigation.rs` that
 look like text, and a few strings in files where the text is data rather
 than interface copy.
 
+## Beta packs in the list (issue #1461)
+
+Telegram's `localizationTargetInfo` for `tdesktop` holds only the official
+packs (33 on 2026-11-14). Community packs that Telegram marks as beta, such
+as Vietnamese, Japanese, Swedish and Hungarian, are reachable only through
+`t.me/setlanguage/<code>-beta` links, which resolve to `<code>-raw` ids.
+Telegram Desktop shows none of them in its box; Telegram X lists them in a
+section of their own. Quill does the same: `BETA_LANGUAGE_PACKS` names the
+link ids, the Language page asks `getLanguagePackInfo` for each (one
+`Fetch` per pack, once per session; Retry asks the failed ones again), and
+the packs at least half translated show under a Beta heading with their
+progress and a note that untranslated text stays in English.
+
+The lookup also matters for installing: `addCustomServerLanguagePack` of a
+`-raw` id fails with "Language pack not found" unless that TDLib instance
+looked the pack up first. The list and the link box both look it up before
+a switch.
+
+The table holds every beta pack at least 20% translated on 2026-11-14;
+a pack that grows past half shows on its own. New beta packs need an entry.
+
 ## How verified (PR 1)
 
 - `cargo test --lib`: lang store, plural rules (ru, ar, ja, fr, pt-br),

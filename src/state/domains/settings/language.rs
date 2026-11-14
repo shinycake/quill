@@ -33,6 +33,9 @@ pub enum LanguagePurpose {
     /// `synchronizeLanguagePack` / `addCustomServerLanguagePack` of a
     /// switch. Response is `ok`.
     Synchronize,
+    /// `getLanguagePackInfo` of a beta pack ([`BetaPack`]); the pack waits
+    /// for the request itself. Response is `languagePackInfo`.
+    BetaInfo,
 }
 
 type Strings = Vec<(String, PackValue)>;
@@ -173,6 +176,9 @@ pub struct LanguageState {
     /// The pack the interface uses (the one TDLib's `language_pack_id`
     /// names); empty for the built-in English.
     pub current: Option<LanguagePackInfoData>,
+    /// The beta packs the official list leaves out, each with its own
+    /// lookup; empty until the Language page first asks.
+    pub betas: Vec<BetaPack>,
     pub stage: LanguageStage,
     /// Queue for the UI: strings to install, changed strings, a reload
     /// request, a failure.
@@ -403,6 +409,9 @@ impl Session {
                 if let Some(request) = request {
                     self.chat_list.psa_labels.fail_request(request);
                 }
+            }
+            LanguagePurpose::BetaInfo => {
+                self.apply_beta_language_error(request, error_reason(err));
             }
             LanguagePurpose::SetOption => {}
         }

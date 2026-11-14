@@ -65,6 +65,13 @@ impl Session {
         info: LanguagePackInfoData,
         pending: Option<&PendingRequest>,
     ) {
+        if let Some(p) = pending
+            && p.purpose
+                == RequestPurpose::Settings(SettingsPurpose::Language(LanguagePurpose::BetaInfo))
+        {
+            self.apply_beta_language_info(info, Some(p.id));
+            return;
+        }
         if let Some(lookup) = self.settings.language_link.as_mut()
             && lookup.is_ours(pending)
         {

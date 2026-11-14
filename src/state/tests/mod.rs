@@ -41,6 +41,7 @@ mod history_window_cap;
 mod history_window_cap_live;
 mod inline_members;
 mod join_requests;
+mod language_beta;
 mod lost_requests;
 mod main_profile_tab;
 mod marketplace_notice;
