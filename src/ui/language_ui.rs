@@ -17,7 +17,8 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::prefs::{self, LanguageChoice};
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
+use quill::state::translated_percent;
 use quill::state::{LanguageEvent, LanguageReady};
 use quill::telegram::envelope::LanguagePackInfoData;
 
@@ -29,14 +30,25 @@ pub(super) struct LanguageRow {
     pub(super) recent: bool,
 }
 
+/// The sections of the box.
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct LanguageLists {
+    pub(super) recent: Vec<LanguageRow>,
+    pub(super) official: Vec<LanguageRow>,
+    /// Community packs Telegram marks as beta, minus any already listed.
+    pub(super) beta: Vec<LanguageRow>,
+}
+
 /// The rows of the box: recent packs that are not official first, then
-/// the official list, both filtered by `query` (tdesktop `PrepareLists`).
+/// the official list (tdesktop `PrepareLists`), then the beta packs, all
+/// filtered by `query`.
 pub(super) fn language_rows(
     official: &[LanguagePackInfoData],
+    beta: &[LanguagePackInfoData],
     recent: &[LanguageChoice],
     current: &str,
     query: &str,
-) -> (Vec<LanguageRow>, Vec<LanguageRow>) {
+) -> LanguageLists {
     let mut recent: Vec<LanguageRow> = recent
         .iter()
         .filter(|choice| !official.iter().any(|o| o.id == choice.pack_id))
@@ -47,20 +59,39 @@ pub(super) fn language_rows(
         .collect();
     // The current pack goes first.
     recent.sort_by_key(|row| row.info.id != current);
-    let official = official
+    let official: Vec<LanguageRow> = official
         .iter()
         .filter(|info| info.is_official)
         .map(|info| LanguageRow {
             info: info.clone(),
             recent: false,
-        });
+        })
+        .collect();
+    let listed = |id: &str| recent.iter().chain(&official).any(|row| row.info.id == id);
+    let beta: Vec<LanguageRow> = beta
+        .iter()
+        .filter(|info| !listed(&info.id))
+        .map(|info| LanguageRow {
+            info: info.clone(),
+            recent: false,
+        })
+        .collect();
     let keep = |row: &LanguageRow| {
         quill::lang::search::matches(query, &[&row.info.name, &row.info.native_name])
     };
-    (
-        recent.into_iter().filter(keep).collect(),
-        official.filter(keep).collect(),
-    )
+    LanguageLists {
+        recent: recent.into_iter().filter(keep).collect(),
+        official: official.into_iter().filter(keep).collect(),
+        beta: beta.into_iter().filter(keep).collect(),
+    }
+}
+
+/// A pack's name without the " (beta)" or " (raw)" Telegram adds to beta
+/// packs; the Beta section says it once.
+fn shown_name(name: &str) -> &str {
+    name.strip_suffix(" (beta)")
+        .or_else(|| name.strip_suffix(" (raw)"))
+        .unwrap_or(name)
 }
 
 fn quill_info_of(choice: &LanguageChoice) -> LanguagePackInfoData {
@@ -178,6 +209,9 @@ impl QuillApp {
         {
             let _ = live.driver.request_language_packs();
         }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.request_beta_language_packs(false);
+        }
     }
 
     /// The Retry of a list that failed to load.
@@ -188,6 +222,9 @@ impl QuillApp {
             && live.driver.session.settings.language.packs.can_ask()
         {
             let _ = live.driver.request_language_packs();
+        }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.request_beta_language_packs(true);
         }
         cx.notify();
     }
@@ -228,6 +265,15 @@ impl QuillApp {
                 .cloned()
                 .unwrap_or_default(),
             None => super::language_demo::demo_packs(),
+        }
+    }
+
+    /// The beta packs translated far enough to list: TDLib's answers, or
+    /// the demo fixture.
+    fn beta_language_packs(&self) -> Vec<LanguagePackInfoData> {
+        match self.live.as_ref() {
+            Some(live) => live.driver.session.settings.language.listed_betas(),
+            None => super::language_demo::demo_beta_packs(),
         }
     }
 
@@ -448,8 +494,24 @@ impl QuillApp {
         let name = if row.info.name.is_empty() {
             row.info.id.clone()
         } else {
-            row.info.name.clone()
+            shown_name(&row.info.name).to_string()
         };
+        let native = shown_name(&row.info.native_name).to_string();
+        // Beta rows say how far the community got.
+        let detail = (row.info.is_beta && !row.recent)
+            .then(|| translated_percent(&row.info))
+            .filter(|percent| *percent < 100)
+            .map_or(native.clone(), |percent| {
+                let progress = tr_with(
+                    keys::Q_LANGUAGE_TRANSLATED_PERCENT,
+                    &[("percent", &percent.to_string())],
+                );
+                if native.is_empty() {
+                    progress
+                } else {
+                    format!("{native} · {progress}")
+                }
+            });
         let pick = row.info.clone();
         let mut line = div()
             .id(SharedString::from(format!("language-row-{id}")))
@@ -475,13 +537,8 @@ impl QuillApp {
                     .flex_1()
                     .min_w_0()
                     .child(div().text_sm().child(name))
-                    .when(!row.info.native_name.is_empty(), |col| {
-                        col.child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .child(row.info.native_name.clone()),
-                        )
+                    .when(!detail.is_empty(), |col| {
+                        col.child(div().text_xs().text_color(muted).child(detail))
                     }),
             );
         // TDLib's local packs (ids starting with `X`) have no link.
@@ -550,7 +607,12 @@ impl QuillApp {
         let current = current_id();
         let official = self.official_language_packs();
         let shown_recent = self.shown_recent_languages();
-        let (recent, official) = language_rows(&official, &shown_recent, &current, &query);
+        let betas = self.beta_language_packs();
+        let LanguageLists {
+            recent,
+            official,
+            beta,
+        } = language_rows(&official, &betas, &shown_recent, &current, &query);
         let packs = self
             .live
             .as_ref()
@@ -569,6 +631,30 @@ impl QuillApp {
             .into_iter()
             .map(|row| self.language_row(row, &current, cx))
             .collect();
+        let beta_rows: Vec<AnyElement> = beta
+            .into_iter()
+            .map(|row| self.language_row(row, &current, cx))
+            .collect();
+        let beta_section = (!beta_rows.is_empty()).then(|| {
+            crate::ui::settings_window::rows::group(
+                Some(tr(keys::Q_LANGUAGE_BETA_TITLE)),
+                [div()
+                    .id("language-beta-rows")
+                    .flex()
+                    .flex_col()
+                    .children(beta_rows)
+                    .child(
+                        div()
+                            .px_3()
+                            .pt_1()
+                            .pb_2()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(tr(keys::Q_LANGUAGE_BETA_ABOUT)),
+                    )
+                    .into_any_element()],
+            )
+        });
         div()
             .flex()
             .flex_col()
@@ -634,6 +720,7 @@ impl QuillApp {
                     cx,
                 )],
             ))
+            .children(beta_section)
             .into_any_element()
     }
 }

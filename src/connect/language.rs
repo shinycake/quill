@@ -9,8 +9,8 @@ use crate::state::{
 };
 use crate::telegram::envelope::LanguagePackInfoData;
 use crate::telegram::requests::{
-    add_custom_server_language_pack, get_language_pack_strings, get_localization_target_info,
-    set_option_string, synchronize_language_pack,
+    add_custom_server_language_pack, get_language_pack_info, get_language_pack_strings,
+    get_localization_target_info, set_option_string, synchronize_language_pack,
 };
 
 fn purpose(purpose: LanguagePurpose) -> RequestPurpose {
@@ -69,6 +69,46 @@ impl<S: JsonSender> ConnectDriver<S> {
             ));
         }
         result
+    }
+
+    /// `getLanguagePackInfo` of each beta pack not asked about yet, or
+    /// whose last lookup failed when `retry`. A send that fails is a failed
+    /// lookup, so the next render does not ask again.
+    pub fn request_beta_language_packs(&mut self, retry: bool) {
+        let count = self.session.settings.language.betas_mut().len();
+        for index in 0..count {
+            let Some((link_id, ask)) =
+                self.session.settings.language.betas.get(index).map(|beta| {
+                    (
+                        beta.link_id,
+                        if retry {
+                            beta.info.can_ask()
+                        } else {
+                            beta.info.is_idle()
+                        },
+                    )
+                })
+            else {
+                continue;
+            };
+            if !ask {
+                continue;
+            }
+            let extra = self
+                .session
+                .request(purpose(LanguagePurpose::BetaInfo), None);
+            if let Some(beta) = self.session.settings.language.betas.get_mut(index) {
+                beta.info.begin_with(extra);
+            }
+            let sent = self.send_json_request(extra, &get_language_pack_info(extra, link_id));
+            if sent.is_err()
+                && let Some(beta) = self.session.settings.language.betas.get_mut(index)
+            {
+                beta.info.fail(crate::lang::tr(
+                    crate::lang::keys::Q_NOTES_SOMETHING_WENT_WRONG,
+                ));
+            }
+        }
     }
 
     /// Switch the interface to `info`: select it in TDLib, fetch its strings

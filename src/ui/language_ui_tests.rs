@@ -1,4 +1,4 @@
-use super::language_rows;
+use super::{LanguageLists, language_rows};
 use quill::lang::prefs::LanguageChoice;
 use quill::telegram::envelope::LanguagePackInfoData;
 
@@ -38,19 +38,66 @@ fn recent_unofficial_packs_come_first_and_search_folds_diacritics() {
         custom("x-pirate", "Pirate"),
         custom("pt-br", "dup"),
     ];
-    let (top, rest) = language_rows(&list, &recent, "x-pirate", "");
+    let LanguageLists {
+        recent: top,
+        official: rest,
+        ..
+    } = language_rows(&list, &[], &recent, "x-pirate", "");
     // Official ids never repeat in the recent section; the current is first.
     let ids: Vec<&str> = top.iter().map(|r| r.info.id.as_str()).collect();
     assert_eq!(ids, ["x-pirate", "x-old"]);
     assert_eq!(rest.len(), 2);
 
-    let (top, rest) = language_rows(&list, &recent, "en", "portugues");
+    let LanguageLists {
+        recent: top,
+        official: rest,
+        ..
+    } = language_rows(&list, &[], &recent, "en", "portugues");
     assert!(top.is_empty());
     assert_eq!(rest.len(), 1);
     assert_eq!(rest[0].info.id, "pt-br");
 
-    let (top, rest) = language_rows(&list, &recent, "en", "klingon");
+    let LanguageLists {
+        recent: top,
+        official: rest,
+        ..
+    } = language_rows(&list, &[], &recent, "en", "klingon");
     assert!(top.is_empty() && rest.is_empty());
+}
+
+#[test]
+fn beta_packs_list_after_the_official_ones_unless_already_shown() {
+    let list = [official("en", "English", "English")];
+    let beta = |id: &str, name: &str, native: &str| LanguagePackInfoData {
+        is_official: false,
+        is_beta: true,
+        ..official(id, name, native)
+    };
+    let betas = [
+        beta("vi-raw", "Vietnamese", "Tiếng Việt (beta)"),
+        beta("ja-raw", "Japanese", "日本語 (beta)"),
+    ];
+    // A beta pack used before shows once, in the recent section.
+    let recent = [custom("ja-raw", "Japanese")];
+    let lists = language_rows(&list, &betas, &recent, "en", "");
+    let ids = |rows: &[super::LanguageRow]| -> Vec<String> {
+        rows.iter().map(|r| r.info.id.clone()).collect()
+    };
+    assert_eq!(ids(&lists.recent), ["ja-raw"]);
+    assert_eq!(ids(&lists.official), ["en"]);
+    assert_eq!(ids(&lists.beta), ["vi-raw"]);
+
+    // Search finds a beta pack by its native name, diacritics folded.
+    let lists = language_rows(&list, &betas, &[], "en", "tieng viet");
+    assert!(lists.official.is_empty());
+    assert_eq!(ids(&lists.beta), ["vi-raw"]);
+}
+
+#[test]
+fn beta_names_drop_the_suffix_telegram_adds() {
+    assert_eq!(super::shown_name("Tiếng Việt (beta)"), "Tiếng Việt");
+    assert_eq!(super::shown_name("Русский (raw)"), "Русский");
+    assert_eq!(super::shown_name("Deutsch"), "Deutsch");
 }
 
 #[test]

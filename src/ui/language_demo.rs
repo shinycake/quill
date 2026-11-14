@@ -50,9 +50,27 @@ pub(super) fn demo_packs() -> Vec<LanguagePackInfoData> {
         pack("es", "Spanish", "Español", "es", false),
         pack("fr", "French", "Français", "fr", false),
         pack("it", "Italian", "Italiano", "it", false),
-        pack("he", "Hebrew", "עברית", "he", true),
-        pack("ja", "Japanese", "日本語", "ja", false),
     ]
+}
+
+/// The beta packs the demos list, with Telegram's names and counts.
+pub(super) fn demo_beta_packs() -> Vec<LanguagePackInfoData> {
+    [
+        ("ja-raw", "Japanese", "日本語 (beta)", "ja", 8871),
+        ("sv-raw", "Swedish", "Svenska (beta)", "sv", 7500),
+        ("vi-raw", "Vietnamese", "Tiếng Việt (beta)", "vi", 7794),
+    ]
+    .into_iter()
+    .map(
+        |(id, name, native, plural, translated)| LanguagePackInfoData {
+            is_official: false,
+            is_beta: true,
+            total_string_count: 8892,
+            translated_string_count: translated,
+            ..pack(id, name, native, plural, false)
+        },
+    )
+    .collect()
 }
 
 const PT_BR: &[(&str, &str)] = &[
