@@ -12,7 +12,6 @@ use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
 use quill::lang::{keys, tr, tr_with};
 use quill::platform::OsOpen;
-use std::path::PathBuf;
 
 /// Which list a downloads-manager row is in: one value, so a row is never
 /// both running and failed.
@@ -81,11 +80,7 @@ impl QuillApp {
     /// MED3: open a fully-downloaded file with the system viewer
     /// (`platform::open_local_file` — `xdg-open` / `open`).
     pub(super) fn open_downloaded_file(&mut self, file_id: FileId, cx: &mut Context<Self>) {
-        let path: Option<PathBuf> = self
-            .session()
-            .and_then(|s| s.media.files.get(&file_id.0))
-            .and_then(|f| f.usable_path())
-            .map(PathBuf::from);
+        let path = self.document_local_path(file_id);
         match path {
             // B13: tdesktop asks before running executables, unknown types
             // and files that may reveal the IP address.
@@ -100,11 +95,7 @@ impl QuillApp {
     /// MED3: reveal a downloaded file in the file manager
     /// (`platform::reveal_in_file_manager`).
     pub(super) fn reveal_downloaded_file(&mut self, file_id: FileId, cx: &mut Context<Self>) {
-        let path: Option<PathBuf> = self
-            .session()
-            .and_then(|s| s.media.files.get(&file_id.0))
-            .and_then(|f| f.usable_path())
-            .map(PathBuf::from);
+        let path = self.document_local_path(file_id);
         let failure = tr(keys::Q_OPS_COULD_NOT_REVEAL_THE_FILE);
         match path {
             Some(path) => self.reveal_in_folder_or(&path, failure, cx),
@@ -117,6 +108,9 @@ impl QuillApp {
     /// `cancelDownloadFile` (TGX's cancel button on downloading media).
     pub(super) fn cancel_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         self.drop_play_intent_for(file_id);
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.media.folder_saves.cancel(file_id.0);
+        }
         if let Some(live) = self.live.as_mut() {
             let note = match live.driver.cancel_download(file_id) {
                 Ok(true) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_CANCELED)),

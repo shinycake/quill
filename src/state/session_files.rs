@@ -25,6 +25,7 @@ impl Session {
         let idle_incomplete = file.local.is_idle_incomplete();
         if file.local.is_downloading_completed() {
             self.record_completed_user_download(id);
+            self.media.folder_saves.on_completed(id, file.usable_path());
             self.media.downloads.forget(id);
         }
         if from_file_update && !file.local.is_downloading_active() {

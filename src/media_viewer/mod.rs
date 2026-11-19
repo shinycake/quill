@@ -64,8 +64,8 @@ pub use placement::{
 pub use profile::{PhotoHeaderOwner, profile_photo_header};
 pub use quality::{VideoQualityOption, build_quality_options, current_quality, pick_quality};
 pub use save::{
-    downloads_dir, os_downloads_dir, save_media_to_downloads, save_media_to_downloads_in_dir,
-    saved_note,
+    downloads_dir, os_downloads_dir, save_file_in_dir_as, save_media_to_downloads,
+    save_media_to_downloads_in_dir, saved_note,
 };
 pub use swipe::{
     SwipeAction, SwipeDir, SwipeIndicator, SwipeInput, SwipeNav, VIEWER_SWIPE_THRESHOLD_PX,

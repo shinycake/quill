@@ -22,13 +22,9 @@ impl QuillApp {
         file_id: FileId,
         cx: &mut Context<Self>,
     ) {
-        let path: Option<PathBuf> = self
-            .session()
-            .and_then(|s| s.media.files.get(&file_id.0))
-            .and_then(|f| f.usable_path())
-            .map(PathBuf::from);
-        let Some(path) = path else {
-            self.request_media_download(file_id, None, cx);
+        let Some(path) = self.document_local_path(file_id) else {
+            let origin = crate::ui::message_media::DocOrigin::Message(chat_id, message_id);
+            self.request_document_download(file_id, origin, cx);
             return;
         };
         let picture = self

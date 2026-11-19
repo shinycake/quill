@@ -28,6 +28,8 @@ impl QuillApp {
         }) {
             self.hand_out_notifications(drain, window, cx);
         }
+        // Documents that finished go to the download folder.
+        self.save_finished_documents(cx);
         // The call windows follow the call from here too, not from the
         // main window's frame alone, which a hidden main window never draws.
         self.sync_call_windows(cx);

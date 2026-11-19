@@ -5,6 +5,7 @@ mod download_extras;
 mod downloads;
 mod error;
 mod file_map;
+mod folder_saves;
 mod purpose;
 mod state;
 
@@ -14,4 +15,5 @@ pub use disk_pauses::{DiskPauses, PauseKey};
 pub(crate) use download_extras::DownloadExtras;
 pub use downloads::*;
 pub use file_map::*;
+pub use folder_saves::{FolderSaveDue, FolderSaves};
 pub use state::*;

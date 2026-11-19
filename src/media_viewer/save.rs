@@ -61,9 +61,35 @@ pub fn save_media_to_downloads_in_dir(
     src: &std::path::Path,
     dir: &std::path::Path,
 ) -> std::io::Result<std::path::PathBuf> {
+    let name = src.file_name().and_then(|s| s.to_str()).unwrap_or("media");
+    copy_into_dir(src, dir, std::path::Path::new(name))
+}
+
+/// Copy `src` into `dir` named after `name`, a file name the sender chose
+/// (`document.file_name`): it is cut to one safe component first
+/// (`export::names::safe_file_name`), so it cannot leave `dir` or use a
+/// name Windows refuses. An empty `name` keeps `src`'s own. De-duplicated
+/// like [`save_media_to_downloads_in_dir`].
+pub fn save_file_in_dir_as(
+    src: &std::path::Path,
+    dir: &std::path::Path,
+    name: &str,
+) -> std::io::Result<std::path::PathBuf> {
+    if name.is_empty() {
+        return save_media_to_downloads_in_dir(src, dir);
+    }
+    let safe = crate::export::names::safe_file_name(name);
+    copy_into_dir(src, dir, std::path::Path::new(&safe))
+}
+
+fn copy_into_dir(
+    src: &std::path::Path,
+    dir: &std::path::Path,
+    name: &std::path::Path,
+) -> std::io::Result<std::path::PathBuf> {
     std::fs::create_dir_all(dir)?;
-    let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("media");
-    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let stem = name.file_stem().and_then(|s| s.to_str()).unwrap_or("media");
+    let ext = name.extension().and_then(|e| e.to_str()).unwrap_or("");
     let mut input = std::fs::File::open(src)?;
     let mut n = 1u32;
     loop {
@@ -100,6 +126,29 @@ pub fn save_media_to_downloads_in_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sender_name_is_kept_inside_the_folder_and_deduplicated() {
+        let root = std::env::temp_dir().join(format!("quill-save-as-{}", std::process::id()));
+        let dir = root.join("dl");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let src = root.join("cache_name_1.bin");
+        std::fs::write(&src, b"pdf").unwrap();
+        let first = save_file_in_dir_as(&src, &dir, "Report: Q3.pdf").unwrap();
+        let second = save_file_in_dir_as(&src, &dir, "Report: Q3.pdf").unwrap();
+        let escape = save_file_in_dir_as(&src, &dir, "../../evil.pdf").unwrap();
+        let unnamed = save_file_in_dir_as(&src, &dir, "").unwrap();
+        for path in [&first, &second, &escape, &unnamed] {
+            assert_eq!(path.parent(), Some(dir.as_path()));
+            assert_eq!(std::fs::read(path).unwrap(), b"pdf");
+        }
+        assert_ne!(first, second);
+        assert!(second.to_string_lossy().ends_with(" (2).pdf"));
+        assert_eq!(escape.file_name().unwrap(), "evil.pdf");
+        assert_eq!(unnamed.file_name().unwrap(), "cache_name_1.bin");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn saved_note_names_the_downloads_folder() {

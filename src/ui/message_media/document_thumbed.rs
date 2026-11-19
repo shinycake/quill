@@ -30,7 +30,6 @@ pub(in crate::ui) fn thumbed_document_chip(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = doc.file_id;
-    let sponsored = origin.sponsored();
     let file = files.get(&file_id.0);
     let ready = file.and_then(|f| f.usable_path()).is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
@@ -67,7 +66,7 @@ pub(in crate::ui) fn thumbed_document_chip(
         } else if ready {
             origin.open(file_id, this, cx);
         } else {
-            this.request_media_download(file_id, sponsored, cx);
+            this.request_document_download(file_id, origin, cx);
         }
     };
     let link_action = move |this: &mut QuillApp, cx: &mut Context<QuillApp>| {
@@ -76,7 +75,7 @@ pub(in crate::ui) fn thumbed_document_chip(
         } else if ready {
             this.open_downloaded_file(file_id, cx);
         } else {
-            this.request_media_download(file_id, sponsored, cx);
+            this.request_document_download(file_id, origin, cx);
         }
     };
     let thumb = doc.thumbnail.as_ref();
