@@ -45,7 +45,7 @@ fn download_added_elsewhere_enters_the_list_and_removal_leaves_it() {
         session
             .media
             .downloads
-            .recent(&session.media.files)
+            .recent(&session.media.files, &session.media.folder_saves)
             .any(|id| id == 42)
     );
 
@@ -63,7 +63,7 @@ fn download_added_elsewhere_enters_the_list_and_removal_leaves_it() {
         !session
             .media
             .downloads
-            .recent(&session.media.files)
+            .recent(&session.media.files, &session.media.folder_saves)
             .any(|id| id == 42)
     );
 }

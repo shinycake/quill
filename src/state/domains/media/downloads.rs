@@ -464,11 +464,18 @@ impl DownloadIntents {
 
     /// Finished user downloads, oldest first, minus the ones TDLib now
     /// reports as no longer on disk (cache cleared).
-    pub fn recent<'a>(&'a self, files: &'a FileMap) -> impl Iterator<Item = i32> + 'a {
+    /// A document copied to the download folder stays listed after its
+    /// cache copy is deleted (`FolderSaves::has_copy`).
+    pub fn recent<'a>(
+        &'a self,
+        files: &'a FileMap,
+        saves: &'a super::FolderSaves,
+    ) -> impl Iterator<Item = i32> + 'a {
         self.finished.iter().copied().filter(|id| {
-            files
-                .get(id)
-                .is_none_or(|f| f.local.is_downloading_completed())
+            saves.has_copy(*id)
+                || files
+                    .get(id)
+                    .is_none_or(|f| f.local.is_downloading_completed())
         })
     }
 

@@ -146,13 +146,17 @@ fn recent_list_drops_a_file_removed_from_the_cache() {
         session
             .media
             .downloads
-            .recent(&session.media.files)
+            .recent(&session.media.files, &session.media.folder_saves)
             .collect::<Vec<_>>(),
         vec![64]
     );
     apply_json(&mut session, &seq, &sink, &update_file(64, false, false, 0));
     assert_eq!(
-        session.media.downloads.recent(&session.media.files).count(),
+        session
+            .media
+            .downloads
+            .recent(&session.media.files, &session.media.folder_saves)
+            .count(),
         0
     );
     assert_eq!(status(&session, 64), DownloadStatusView::Idle);
@@ -177,7 +181,11 @@ fn closing_the_session_forgets_every_download() {
     assert_eq!(session.media.downloads.requested_count(), 0);
     assert!(!session.media.downloads.is_failed(67));
     assert_eq!(
-        session.media.downloads.recent(&session.media.files).count(),
+        session
+            .media
+            .downloads
+            .recent(&session.media.files, &session.media.folder_saves)
+            .count(),
         0
     );
 }

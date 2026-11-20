@@ -140,6 +140,17 @@ pub fn remove_file_from_downloads(
     .to_string()
 }
 
+/// `deleteFile` (TDLib 1.8.67): "Deletes a file from the TDLib file
+/// cache". Answer: `Ok`.
+pub fn delete_file(extra: RequestId, file_id: FileId) -> String {
+    json!({
+        "@type": "deleteFile",
+        "@extra": extra.as_extra(),
+        "file_id": file_id.0,
+    })
+    .to_string()
+}
+
 /// `inputMessagePhoto` body (TDLib 1.8.67). Shared by `sendMessage` and `sendMessageAlbum`.
 pub fn input_message_photo(
     path: &str,

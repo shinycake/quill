@@ -210,7 +210,11 @@ impl QuillApp {
         let session = self.session()?;
         let (active, recent) = (
             session.media.downloads.user_count(),
-            session.media.downloads.recent(&session.media.files).count(),
+            session
+                .media
+                .downloads
+                .recent(&session.media.files, &session.media.folder_saves)
+                .count(),
         );
         // Its width is the shell's (`shell_layout`).
         let mut panel = div()
@@ -276,7 +280,11 @@ impl QuillApp {
     pub(super) fn has_downloads(&self) -> bool {
         self.session().is_some_and(|s| {
             s.media.downloads.user_count() > 0
-                || s.media.downloads.recent(&s.media.files).next().is_some()
+                || s.media
+                    .downloads
+                    .recent(&s.media.files, &s.media.folder_saves)
+                    .next()
+                    .is_some()
                 || s.media
                     .downloads
                     .failed_ids(&s.media.files)
@@ -312,7 +320,7 @@ impl QuillApp {
         let mut recent: Vec<i32> = session
             .media
             .downloads
-            .recent(&session.media.files)
+            .recent(&session.media.files, &session.media.folder_saves)
             .collect();
         recent.retain(keep);
         let muted = cx.theme().muted_foreground;

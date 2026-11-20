@@ -75,6 +75,7 @@ pub(super) fn sponsored_message_row(
     message: &SponsoredMessage,
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
+    saves: &quill::state::FolderSaves,
     media_roots: &[PathBuf],
     revealed: &crate::ui::message_text::revealed::Revealed,
     // Settings → Appearance: font size + bubble/plain style.
@@ -237,6 +238,7 @@ pub(super) fn sponsored_message_row(
             false,
             files,
             downloading,
+            Some(saves),
             media_roots,
             // Sponsored rows don't expose the list-API pause toggle (the
             // manager panel does); `None` hides it.
@@ -421,6 +423,7 @@ impl QuillApp {
                 &ad,
                 files,
                 downloading,
+                &session.media.folder_saves,
                 &media_roots,
                 &self.message_ui.revealed,
                 look,

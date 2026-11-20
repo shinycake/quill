@@ -6,8 +6,8 @@ use crate::state::{DownloadOrigin, RequestPurpose};
 use crate::story_preload::PreloadRequest;
 use crate::telegram::requests::{
     add_file_to_downloads as add_file_to_downloads_request,
-    cancel_download_file as cancel_download_file_request, download_file as download_file_request,
-    download_file_range as download_file_range_request,
+    cancel_download_file as cancel_download_file_request, delete_file as delete_file_request,
+    download_file as download_file_request, download_file_range as download_file_range_request,
     remove_file_from_downloads as remove_file_from_downloads_request,
     toggle_download_is_paused as toggle_download_is_paused_request,
 };
@@ -528,6 +528,33 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    /// Delete TDLib's copy of a document once it was copied to the download
+    /// folder (`ui::folder_saves`), so the file lives only there. A listed
+    /// download leaves the download list with its cache file; `deleteFile`
+    /// covers one that was never listed. A failure leaves the cache copy.
+    pub fn delete_cached_copy(&mut self, file_id: FileId) -> Result<(), ConnectSendError> {
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if file_id.0 == 0 {
+            return Ok(());
+        }
+        let unlist = self.session.request(RequestPurpose::DeleteCachedCopy, None);
+        if let Err(err) = self
+            .sender
+            .send_json(&remove_file_from_downloads_request(unlist, file_id, true))
+        {
+            self.session.requests.take(unlist);
+            return Err(err);
+        }
+        let delete = self.session.request(RequestPurpose::DeleteCachedCopy, None);
+        if let Err(err) = self.sender.send_json(&delete_file_request(delete, file_id)) {
+            self.session.requests.take(delete);
+            return Err(err);
+        }
+        Ok(())
     }
 
     /// Cancel an in-flight download. Listed (user-initiated) downloads are

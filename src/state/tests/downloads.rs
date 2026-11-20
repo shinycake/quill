@@ -391,7 +391,7 @@ fn completed_user_downloads_land_in_recent_list() {
         session
             .media
             .downloads
-            .recent(&session.media.files)
+            .recent(&session.media.files, &session.media.folder_saves)
             .collect::<Vec<_>>(),
         vec![7]
     );
@@ -466,7 +466,7 @@ fn update_file_download_tracks_pause_and_completion() {
         session
             .media
             .downloads
-            .recent(&session.media.files)
+            .recent(&session.media.files, &session.media.folder_saves)
             .any(|id| id == 31)
     );
     assert!(!session.media.downloads.is_user(31));
@@ -495,7 +495,7 @@ fn update_file_download_ignores_non_user_downloads() {
         !session
             .media
             .downloads
-            .recent(&session.media.files)
+            .recent(&session.media.files, &session.media.folder_saves)
             .any(|id| id == 32)
     );
 }

@@ -17,9 +17,13 @@ use std::path::{Path, PathBuf};
 enum FolderSave {
     /// The user asked for the download; it has not finished. Left by
     /// the finish (`Due`), a cancel, or the session going away.
-    Wanted { name: String },
+    Wanted { name: String, keep_cache: bool },
     /// Finished in TDLib's cache; the UI takes it on its next drain.
-    Due { source: PathBuf, name: String },
+    Due {
+        source: PathBuf,
+        name: String,
+        keep_cache: bool,
+    },
     /// The copy was written here: Open and Show in folder use it.
     Saved { dest: PathBuf },
 }
@@ -33,6 +37,10 @@ pub struct FolderSaveDue {
     /// The document's own name (`document.file_name`), empty when it has
     /// none: the copy is named after it, not after TDLib's cache name.
     pub name: String,
+    /// TDLib's copy stays after the copy is made: Quill's viewer shows
+    /// this document as a picture from the cache. Every other copied
+    /// document leaves the cache (`delete_cached_copy`).
+    pub keep_cache: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -41,13 +49,15 @@ pub struct FolderSaves {
 }
 
 impl FolderSaves {
-    /// The user asked to download `file_id`, a document named `name`.
-    pub fn want(&mut self, file_id: i32, name: &str) {
+    /// The user asked to download `file_id`, a document named `name`;
+    /// `keep_cache` when the viewer shows it from TDLib's copy.
+    pub fn want(&mut self, file_id: i32, name: &str, keep_cache: bool) {
         if file_id != 0 {
             self.files.insert(
                 file_id,
                 FolderSave::Wanted {
                     name: name.to_string(),
+                    keep_cache,
                 },
             );
         }
@@ -70,12 +80,13 @@ impl FolderSaves {
         let Some(path) = path.filter(|p| !p.is_empty()) else {
             return;
         };
-        let Some(FolderSave::Wanted { name }) = self.files.get(&file_id) else {
+        let Some(FolderSave::Wanted { name, keep_cache }) = self.files.get(&file_id) else {
             return;
         };
         let due = FolderSave::Due {
             source: PathBuf::from(path),
             name: name.clone(),
+            keep_cache: *keep_cache,
         };
         self.files.insert(file_id, due);
     }
@@ -91,10 +102,15 @@ impl FolderSaves {
         ids.sort_unstable();
         ids.into_iter()
             .filter_map(|file_id| match self.files.remove(&file_id) {
-                Some(FolderSave::Due { source, name }) => Some(FolderSaveDue {
+                Some(FolderSave::Due {
+                    source,
+                    name,
+                    keep_cache,
+                }) => Some(FolderSaveDue {
                     file_id,
                     source,
                     name,
+                    keep_cache,
                 }),
                 _ => None,
             })
@@ -110,6 +126,14 @@ impl FolderSaves {
         {
             self.files.insert(file_id, FolderSave::Saved { dest });
         }
+    }
+
+    /// A copy of `file_id` was saved this session. TDLib's cache copy is
+    /// deleted after it, so rows and the Downloads list count the file as
+    /// downloaded from this, not from TDLib's file state. Not checked
+    /// against the disk: opening a copy that is gone downloads it again.
+    pub fn has_copy(&self, file_id: i32) -> bool {
+        self.copy_of(file_id).is_some()
     }
 
     /// Where the copy of `file_id` was saved, if one was. The caller
@@ -129,7 +153,7 @@ mod tests {
     #[test]
     fn a_wanted_document_is_due_once_when_it_completes_with_a_path() {
         let mut saves = FolderSaves::default();
-        saves.want(7, "report.pdf");
+        saves.want(7, "report.pdf", false);
         saves.on_completed(7, None);
         assert!(saves.take_due().is_empty());
         saves.on_completed(7, Some("/td/documents/report.pdf"));
@@ -140,6 +164,7 @@ mod tests {
                 file_id: 7,
                 source: PathBuf::from("/td/documents/report.pdf"),
                 name: "report.pdf".to_string(),
+                keep_cache: false,
             }]
         );
         // Copying: a repeated completion copies nothing more.
@@ -152,10 +177,10 @@ mod tests {
     fn a_file_nobody_asked_for_or_a_cancelled_one_is_not_copied() {
         let mut saves = FolderSaves::default();
         saves.on_completed(1, Some("/td/a"));
-        saves.want(2, "b.pdf");
+        saves.want(2, "b.pdf", false);
         saves.cancel(2);
         saves.on_completed(2, Some("/td/b"));
-        saves.want(0, "zero");
+        saves.want(0, "zero", false);
         assert!(!saves.is_wanted(0));
         assert!(saves.take_due().is_empty());
     }
@@ -163,14 +188,14 @@ mod tests {
     #[test]
     fn the_copy_is_remembered_and_a_new_request_copies_again() {
         let mut saves = FolderSaves::default();
-        saves.want(3, "c.pdf");
+        saves.want(3, "c.pdf", false);
         saves.on_completed(3, Some("/td/c"));
         assert_eq!(saves.take_due().len(), 1);
         saves.note_copy(3, Some(PathBuf::from("/dl/c.pdf")));
         assert_eq!(saves.copy_of(3), Some(Path::new("/dl/c.pdf")));
         saves.cancel(3);
         assert_eq!(saves.copy_of(3), Some(Path::new("/dl/c.pdf")));
-        saves.want(3, "c.pdf");
+        saves.want(3, "c.pdf", false);
         assert_eq!(saves.copy_of(3), None);
         saves.on_completed(3, Some("/td/c"));
         assert_eq!(saves.take_due().len(), 1);
@@ -179,12 +204,30 @@ mod tests {
     }
 
     #[test]
+    fn a_picture_keeps_its_cache_copy_and_a_saved_copy_counts_as_downloaded() {
+        let mut saves = FolderSaves::default();
+        saves.want(5, "photo.jpg", true);
+        assert!(!saves.has_copy(5));
+        saves.on_completed(5, Some("/td/photo.jpg"));
+        let due = saves.take_due();
+        assert_eq!(due.len(), 1);
+        assert!(due.iter().all(|save| save.keep_cache));
+        saves.note_copy(5, Some(PathBuf::from("/dl/photo.jpg")));
+        assert!(saves.has_copy(5));
+        saves.want(6, "doc.pdf", false);
+        saves.on_completed(6, Some("/td/doc.pdf"));
+        assert!(saves.take_due().iter().all(|save| !save.keep_cache));
+        saves.note_copy(6, None);
+        assert!(!saves.has_copy(6));
+    }
+
+    #[test]
     fn a_request_made_while_copying_is_not_overwritten_by_the_copy() {
         let mut saves = FolderSaves::default();
-        saves.want(4, "d.pdf");
+        saves.want(4, "d.pdf", false);
         saves.on_completed(4, Some("/td/d"));
         assert_eq!(saves.take_due().len(), 1);
-        saves.want(4, "d.pdf");
+        saves.want(4, "d.pdf", false);
         saves.note_copy(4, Some(PathBuf::from("/dl/d.pdf")));
         assert!(saves.is_wanted(4));
     }

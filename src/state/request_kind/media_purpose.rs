@@ -15,6 +15,7 @@ impl MediaPurpose {
             | Self::IsProfileAudio { .. }
             | Self::GetMapThumbnailFile => RequestKind::Lookup,
             Self::CancelDownloadFile
+            | Self::DeleteCachedCopy
             | Self::ToggleDownloadIsPaused
             | Self::AddProfileAudio { .. }
             | Self::RemoveProfileAudio { .. }
