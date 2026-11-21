@@ -60,7 +60,6 @@ pub(in crate::ui) fn file_album_history_row(
                 message.is_outgoing,
                 files,
                 downloading,
-                session.map(|s| &s.media.folder_saves),
                 media_roots,
                 session
                     .filter(|s| s.media.downloads.is_user(doc.file_id.0))

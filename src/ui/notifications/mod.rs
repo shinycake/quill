@@ -565,6 +565,11 @@ impl QuillApp {
         // lock too, as tdesktop's player plays on while locked; the lock
         // dropped the parked clips.
         self.resume_play_intent(cx);
+        // Documents that finished go where the user saves files; locked,
+        // they wait for the unlock (the copy shows a note).
+        if !self.lock_waits() {
+            self.save_finished_documents(cx);
+        }
         if logged_out {
             self.restart_live_connection(cx);
         }

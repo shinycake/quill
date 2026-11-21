@@ -29,6 +29,18 @@ impl QuillApp {
         sponsored: Option<(ChatId, i64)>,
         cx: &mut Context<Self>,
     ) {
+        self.request_media_download_to(file_id, sponsored, None, cx);
+    }
+
+    /// [`Self::request_media_download`], copying the file to `target` once
+    /// it finishes (`ui::folder_saves`).
+    pub(super) fn request_media_download_to(
+        &mut self,
+        file_id: FileId,
+        sponsored: Option<(ChatId, i64)>,
+        target: Option<quill::state::SaveTarget>,
+        cx: &mut Context<Self>,
+    ) {
         if file_id.0 == 0 {
             return;
         }
@@ -36,7 +48,12 @@ impl QuillApp {
             self.click_sponsored_message(chat_id, message_id, true, cx);
         }
         if let Some(live) = self.live.as_mut() {
-            let result = live.driver.download_user_file(file_id, sponsored);
+            let result = match target {
+                Some(target) => live
+                    .driver
+                    .download_user_file_to(file_id, sponsored, target),
+                None => live.driver.download_user_file(file_id, sponsored),
+            };
             let note = match result {
                 Ok(Some(_)) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOADING)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_OPS_ALREADY_LOCAL_OR_IN_PROGRESS)),
@@ -108,9 +125,6 @@ impl QuillApp {
     /// `cancelDownloadFile` (TGX's cancel button on downloading media).
     pub(super) fn cancel_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         self.drop_play_intent_for(file_id);
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.media.folder_saves.cancel(file_id.0);
-        }
         if let Some(live) = self.live.as_mut() {
             let note = match live.driver.cancel_download(file_id) {
                 Ok(true) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_CANCELED)),
@@ -210,11 +224,7 @@ impl QuillApp {
         let session = self.session()?;
         let (active, recent) = (
             session.media.downloads.user_count(),
-            session
-                .media
-                .downloads
-                .recent(&session.media.files, &session.media.folder_saves)
-                .count(),
+            session.media.downloads.recent(&session.media.files).count(),
         );
         // Its width is the shell's (`shell_layout`).
         let mut panel = div()
@@ -280,11 +290,7 @@ impl QuillApp {
     pub(super) fn has_downloads(&self) -> bool {
         self.session().is_some_and(|s| {
             s.media.downloads.user_count() > 0
-                || s.media
-                    .downloads
-                    .recent(&s.media.files, &s.media.folder_saves)
-                    .next()
-                    .is_some()
+                || s.media.downloads.recent(&s.media.files).next().is_some()
                 || s.media
                     .downloads
                     .failed_ids(&s.media.files)
@@ -320,7 +326,7 @@ impl QuillApp {
         let mut recent: Vec<i32> = session
             .media
             .downloads
-            .recent(&session.media.files, &session.media.folder_saves)
+            .recent(&session.media.files)
             .collect();
         recent.retain(keep);
         let muted = cx.theme().muted_foreground;

@@ -27,73 +27,58 @@ is on, it opens a save dialog instead. Quill now does the same.
 
 ## What changed
 
-- **When a copy is made.** It is made only for a download the user started
-  from a document row (`request_document_download`), and only when a
-  download folder is set or "Ask where to save each file" is on. With
-  neither, the file stays in the cache and nothing changes. The setting is
-  read again when the download finishes, so a change made while it ran
-  takes effect.
-- **The stages** live in `state/domains/media/folder_saves.rs`, with one
-  enum per file id: `Wanted` (requested) → `Due` (TDLib reported it
-  complete with a usable path) → `Saved { dest }`.
-  - A cancel removes `Wanted`, so a cancelled file is never copied.
-  - `take_due` removes a file while it is being copied, so a second
-    completion update for the same file finds nothing to do.
-  - A request that arrives during the copy is kept, not overwritten by the
-    copy's result.
-- **The copy** is in `ui/folder_saves.rs`. It goes to the folder, or
-  through a save dialog when "ask" is on, using
-  `media_viewer::save_file_in_dir_as`. The copy takes the document's own
-  name (`document.file_name`), not TDLib's cache name.
-  - The name is made safe on every OS: path separators and characters
-    Windows rejects are replaced, and `..` cannot leave the folder.
-  - A name already in the folder becomes `Name (2).pdf`, the same `(n)`
-    de-duplication the viewer uses.
-  - When the copy succeeds, the "Saved to …" note appears.
-- **The cache copy is deleted** once the copy is written, so the document
-  lives only in the folder.
-  - Quill sends `removeFileFromDownloads(delete_from_cache: true)` for a
-    download in TDLib's list, then `deleteFile` for one that is not
-    (`ConnectDriver::delete_cached_copy`, purpose `DeleteCachedCopy`).
-    Answers are not waited on, and a failure leaves the cache file.
-  - Documents Quill opens as pictures keep their cache copy (`keep_cache`,
-    from `opens_as_picture`), because the viewer reads them from TDLib's
-    files directory.
-  - Saving the same document again downloads it again and writes a new
-    copy, de-duplicated with ` (n)` even when the files are identical.
-- **Document rows and the Downloads list** count a document with a saved
-  copy as downloaded (`FolderSaves::has_copy`), since TDLib no longer
-  reports it complete. Rows show Open, and the Recent section keeps it.
-- **Open and Show in folder** use the copy while it is on disk, and the
-  cache file otherwise. If the copy has been deleted from the folder,
-  Open downloads the document again.
+- **When a copy is made.** Only for a download the user starts from a
+  document row (`request_document_download`), and only when a download
+  folder is set or "Ask where to save each file" is on. With neither, the
+  file stays in the cache and nothing changes.
+- **Where it goes is decided at the click**, as in Telegram Desktop:
+  `SaveTarget::Folder { dir, name }` for a set folder, or
+  `SaveTarget::Exact(path)` from the save dialog, which opens at the click
+  when "ask" is on. A closed dialog downloads nothing. The click does no
+  filesystem work: the folder is checked when the copy runs, off the UI
+  thread, and one that cannot be reached counts as unset.
+- **The target travels with the download intent**
+  (`DownloadIntents::save_to`, set by `ConnectDriver::download_user_file_to`
+  only when a request went out). `put`, the intents' single writer, drops
+  it with any change that is not a running user download, so a cancel, a
+  failure, a removal from the list (here or on another device) or the
+  session closing leaves nothing to copy later.
+- **A finished target** is queued in `media.folder_saves` and drained
+  from the poll (`poll_live`). The UI owns the two stages that run there,
+  `FolderCopy::Asking` and `FolderCopy::Copying`, each holding its task
+  (`ui/folder_saves.rs`, an `OnScreen` field): a newer copy of the same
+  file or the account leaving the screen drops the older task.
+- **The copy** takes the document's own name (`document.file_name`), made
+  safe on every OS: path separators, characters Windows rejects and bidi
+  controls (U+202E and friends, which can show `…exe.pdf` for an `.exe`)
+  are replaced, and `..` cannot leave the folder. A name already there
+  becomes `Name (2).pdf`. When the copy succeeds, the "Saved to …" note
+  appears; a failure shows an error and is logged.
+- **Protected content is not copied out**: a chat with protected content,
+  or a self-destructing or one-time message, downloads to the cache only,
+  the same rule Save As and the viewer's Save follow.
+- **TDLib's cache copy stays.** An earlier version of this branch deleted
+  it, but every surface that reads the file map (the message menu, the
+  viewer, shared media, the Downloads panel) then treated the document as
+  never downloaded. Open and Show in folder use the saved copy while it is
+  on disk, and the cache file otherwise.
 
 ## Left out
 
-- Where a copy went is kept only in memory. With the cache copy deleted,
-  the row shows Download again after a restart. Downloading it writes a
-  new copy (`Name (2).pdf`) next to the first. This was chosen over
-  keeping a per-account record of copies.
-- If the folder cannot be reached, for example a cloud drive that is not
-  mounted yet, it counts as unset and the file stays in the cache. No
-  error is shown.
+- Where a copy went is kept only in memory, so after a restart Open and
+  Show in folder use the cache file.
 - Downloads started by auto-download, voice notes, videos and photos are
   not copied. Only a document the user clicked is, which is the case
   `DocumentSaveClickHandler` covers.
+- A finished download of an account that is not on screen is copied when
+  that account is back on screen.
 
 ## Testing
 
-- Unit tests:
-  - `state::domains::media::folder_saves` has five tests: a wanted document
-    is due once; a cancelled or unrequested file is not copied; a request
-    made during a copy survives; the saved copy is remembered and a new
-    request copies again; a picture keeps its cache copy, and a saved copy
-    counts as downloaded.
-  - `media_viewer::save` has one test: names are sanitised, kept inside the
-    folder and de-duplicated.
-- By hand, by the contributor, on Windows: the portable build of this
-  branch (built from tag `v2026.1119.6880` on the fork) with the download
-  folder set to a folder on a Google Drive mount (`G:`). Documents
-  downloaded from a chat landed in that folder. That build came before
-  the cache copy was deleted, and that step has not been tested by hand
-  yet.
+- Unit tests: `state::domains::media::folder_saves` (the queue and saved
+  copies), `state::tests::downloads` (a target is due once on finish; a
+  cancel, failure or removal copies nothing later; only a running user
+  download takes a target), `media_viewer::save` (names kept inside the
+  folder and de-duplicated) and `export::names` (bidi controls).
+- By hand, by the contributor, on Windows with the download folder on a
+  Google Drive mount (`G:`): documents downloaded from a chat landed there.

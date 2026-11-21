@@ -25,7 +25,14 @@ impl Session {
         let idle_incomplete = file.local.is_idle_incomplete();
         if file.local.is_downloading_completed() {
             self.record_completed_user_download(id);
-            self.media.folder_saves.on_completed(id, file.usable_path());
+            // A copy the user asked for at the click (`ui::folder_saves`).
+            if let Some(source) = file.usable_path()
+                && let Some(target) = self.media.downloads.take_target(id)
+            {
+                self.media
+                    .folder_saves
+                    .push_due(id, std::path::PathBuf::from(source), target);
+            }
             self.media.downloads.forget(id);
         }
         if from_file_update && !file.local.is_downloading_active() {

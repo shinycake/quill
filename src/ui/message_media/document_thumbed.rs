@@ -24,7 +24,6 @@ pub(in crate::ui) fn thumbed_document_chip(
     outgoing: bool,
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
-    saves: Option<&quill::state::FolderSaves>,
     media_roots: &[PathBuf],
     origin: DocOrigin,
     room: crate::ui::history::bubble_width::BubbleRoom,
@@ -32,8 +31,7 @@ pub(in crate::ui) fn thumbed_document_chip(
 ) -> AnyElement {
     let file_id = doc.file_id;
     let file = files.get(&file_id.0);
-    let ready = file.and_then(|f| f.usable_path()).is_some()
-        || saves.is_some_and(|saves| saves.has_copy(file_id.0));
+    let ready = file.and_then(|f| f.usable_path()).is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
     let failed_now = !ready && !downloading_now && downloading.is_failed(file_id.0);
     let progress = file.and_then(|f| f.download_progress());

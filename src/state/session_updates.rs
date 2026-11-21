@@ -41,6 +41,7 @@ impl Session {
             self.account_generation.bump();
             self.media.files.clear();
             self.media.downloads.clear();
+            self.media.folder_saves.clear();
             self.media.download_extras.clear();
             self.search.search.close();
             self.search.chat_search.close();

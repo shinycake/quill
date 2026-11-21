@@ -9,10 +9,6 @@ pub enum MediaPurpose {
     DownloadFile,
     /// MED3: `cancelDownloadFile`. Response is `Ok`.
     CancelDownloadFile,
-    /// A document copied to the download folder leaves TDLib's cache:
-    /// `removeFileFromDownloads(delete_from_cache)` and `deleteFile`.
-    /// Response is `Ok`, or an error that leaves the cache copy in place.
-    DeleteCachedCopy,
     /// Slice media-downloads-pause: `toggleDownloadIsPaused`. Response is
     /// `Ok`; the pause state itself arrives on `updateFileDownload`.
     ToggleDownloadIsPaused,
@@ -64,7 +60,6 @@ pub enum MediaPurpose {
 flat_purposes!(Media(MediaPurpose) {
     DownloadFile,
     CancelDownloadFile,
-    DeleteCachedCopy,
     ToggleDownloadIsPaused,
     SearchDiskPausedDownloads,
     CancelUpload,

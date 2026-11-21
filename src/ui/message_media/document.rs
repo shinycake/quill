@@ -125,9 +125,6 @@ pub(in crate::ui) fn document_chip(
     outgoing: bool,
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
-    // Documents copied to the download folder: their cache copy is gone,
-    // so they count as downloaded from this (`FolderSaves::has_copy`).
-    saves: Option<&quill::state::FolderSaves>,
     media_roots: &[PathBuf],
     // Slice media-downloads-pause: `None` when the file isn't a pausable
     // (user-initiated, listed) download; `Some(paused)` otherwise.
@@ -146,7 +143,6 @@ pub(in crate::ui) fn document_chip(
             outgoing,
             files,
             downloading,
-            saves,
             media_roots,
             origin,
             room,
@@ -155,8 +151,7 @@ pub(in crate::ui) fn document_chip(
     }
     let file_id = doc.file_id;
     let file = files.get(&file_id.0);
-    let ready = file.and_then(|f| f.usable_path()).is_some()
-        || saves.is_some_and(|saves| saves.has_copy(file_id.0));
+    let ready = file.and_then(|f| f.usable_path()).is_some();
     let downloading_now = file_is_downloading(file_id, files, downloading);
     let paused_now = downloading_now && paused == Some(true);
     let failed_now = !ready && !downloading_now && downloading.is_failed(file_id.0);

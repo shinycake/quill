@@ -278,7 +278,6 @@ pub(in crate::ui) fn session_history_row(
             message.is_outgoing,
             files,
             downloading,
-            session.map(|s| &s.media.folder_saves),
             media_roots,
             // The pause toggle is for user-initiated (listed) downloads.
             session
