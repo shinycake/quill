@@ -48,7 +48,7 @@ impl QuillApp {
     }
 
     /// The status the account has now (`0`: none).
-    fn current_status_id(&self) -> i64 {
+    pub(super) fn current_status_id(&self) -> i64 {
         self.session()
             .and_then(|s| s.my_user_id.and_then(|id| s.user(id)))
             .map_or(0, |user| user.emoji_status_id)
@@ -172,8 +172,12 @@ impl QuillApp {
             StatusPick::PremiumPreview => {
                 self.open_premium_at(quill::premium_hub::PremiumFeature::EmojiStatus, cx)
             }
-            StatusPick::Remove => self.change_emoji_status_for(None, 0, cx),
-            StatusPick::Set { id, secs } => self.change_emoji_status_for(Some(id), secs, cx),
+            StatusPick::Remove => {
+                self.change_emoji_status_for(None, 0, cx);
+            }
+            StatusPick::Set { id, secs } => {
+                self.change_emoji_status_for(Some(id), secs, cx);
+            }
         }
     }
 

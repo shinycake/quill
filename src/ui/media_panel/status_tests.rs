@@ -12,7 +12,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::{TestQueryExt, TestWindowExt};
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
-use quill::emoji_status_selector::time_picker_values;
+use quill::emoji_status_selector::{MenuStatusAction, time_picker_values};
 
 fn new_app(cx: &mut TestAppContext, premium: bool) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -218,7 +218,7 @@ fn the_star_removes_the_status(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, true);
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
-        app.change_emoji_status_for(Some(5003), 0, cx)
+        app.change_emoji_status_for(Some(5003), 0, cx);
     });
     assert_eq!(my_status(&app, vcx), 5003);
     open_selector(&app, vcx);
@@ -367,4 +367,64 @@ fn cancel_closes_the_box_without_a_change(cx: &mut TestAppContext) {
         assert!(app.pickers.media_panel.until.is_none())
     });
     assert_eq!(my_status(&app, vcx), 0);
+}
+
+/// The note the toast shows now.
+fn note(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
+    app.read_with(vcx, |app, _| {
+        app.connection.toasts.note().text().to_string()
+    })
+}
+
+/// The custom emoji `id`'s menu item, chosen as its click does.
+fn menu_pick(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64, item: &str) {
+    let action = app.read_with(vcx, |app, _| app.menu_status_action(Some(id)));
+    let action = action.expect("a status item");
+    let label = match action {
+        MenuStatusAction::Set(_) => "Set Status",
+        MenuStatusAction::Remove => "Remove Status",
+    };
+    assert_eq!(label, item);
+    app.update(vcx, |app, cx| app.apply_menu_status_action(action, cx));
+    frames(vcx);
+}
+
+/// tdesktop `EmojiStatusMenu::AddSetAsStatusAction`: a custom emoji's
+/// menu sets it as the status, or removes the status it is, and the toast's
+/// Undo puts the old status back.
+#[gpui_kit::test]
+fn a_custom_emoji_menu_sets_and_removes_the_status_with_undo(cx: &mut TestAppContext) {
+    crate::ui::app_render::pin_toasts_for_tests();
+    let (app, mut vcx) = new_app(cx, true);
+    let vcx = &mut vcx;
+    let first = 5001;
+    menu_pick(&app, vcx, first, "Set Status");
+    assert_eq!(my_status(&app, vcx), first);
+    assert_eq!(note(&app, vcx), "Emoji status set. Undo");
+    // A click on the toast is its Undo: no status, as before.
+    vcx.update(|window, cx| window.click("status-toast", cx));
+    frames(vcx);
+    assert_eq!(my_status(&app, vcx), 0);
+
+    app.update(vcx, |app, cx| {
+        app.change_emoji_status_for(Some(first), 0, cx);
+    });
+    menu_pick(&app, vcx, first, "Remove Status");
+    assert_eq!(
+        my_status(&app, vcx),
+        0,
+        "the emoji that is the status removes it"
+    );
+    assert_eq!(note(&app, vcx), "Emoji status removed. Undo");
+    vcx.update(|window, cx| window.click("status-toast", cx));
+    frames(vcx);
+    assert_eq!(my_status(&app, vcx), first, "Undo puts the status back");
+}
+
+#[gpui_kit::test]
+fn without_premium_a_custom_emoji_has_no_status_item(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, false);
+    let vcx = &mut vcx;
+    let action = app.read_with(vcx, |app, _| app.menu_status_action(Some(5001)));
+    assert_eq!(action, None);
 }

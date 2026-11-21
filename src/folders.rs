@@ -433,6 +433,7 @@ mod tests {
             is_premium: false,
             verification: Default::default(),
             emoji_status_id: 0,
+            emoji_status_until: None,
         }
     }
 

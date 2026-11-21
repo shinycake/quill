@@ -28,6 +28,20 @@ register_demos![
         "screenshot demo — Set Status for... box (injected statuses, no live Telegram)"
     )
     .setup(|app, window, cx| app.open_status_time_box(5003, window, cx)),
+    // The emoji panel with recently used custom emoji: their right-click
+    // menu sets or removes the status.
+    DemoSpec::ready(
+        "ready-emoji-status-menu",
+        seed_status_session,
+        "screenshot demo — Set Status on a custom emoji in the emoji panel (injected, no live Telegram)"
+    )
+    .setup(|app, _, cx| {
+        app.set_media_pref(
+            |prefs| prefs.recent_custom_emoji_ids = (5001..=5008).collect(),
+            cx,
+        );
+        app.open_media_panel(super::PanelTab::Emoji, cx);
+    }),
     // The account alone, with the selector closed (the base of the UI tests).
     DemoSpec::ready(
         "ready-emoji-status-account",

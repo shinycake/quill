@@ -59,7 +59,8 @@ impl QuillApp {
         let still = self.panel_still(&item);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         let fallback: SharedString = item.emoji.clone().into();
-        let status_id = self.pickers.media_panel.status().and(item.custom_emoji_id);
+        let custom_emoji_id = item.custom_emoji_id;
+        let status_id = self.pickers.media_panel.status().and(custom_emoji_id);
         let cell = div()
             .id(("panel-custom-emoji", id))
             .size(px(EMOJI_CELL))
@@ -92,8 +93,26 @@ impl QuillApp {
                     None => div().text_size(px(22.)).child(fallback).into_any_element(),
                 }
             }));
-        match status_id {
-            Some(status_id) => self.with_status_duration_menu(cell, status_id, cx),
+        if let Some(status_id) = status_id {
+            return self.with_status_duration_menu(cell, status_id, cx);
+        }
+        // The emoji panel's own menu (tdesktop `fillRecentMenu`): Set
+        // Status, or Remove Status on the emoji that is the status now.
+        let action = self
+            .pickers
+            .media_panel
+            .reaction()
+            .is_none()
+            .then(|| self.menu_status_action(custom_emoji_id))
+            .flatten();
+        match action {
+            Some(action) => {
+                let owner = cx.entity().downgrade();
+                cell.context_menu(move |menu, _, _| {
+                    super::with_status_item(menu, Some(action), owner.clone())
+                })
+                .into_any_element()
+            }
             None => cell.into_any_element(),
         }
     }

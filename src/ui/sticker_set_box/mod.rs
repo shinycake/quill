@@ -320,10 +320,16 @@ impl QuillApp {
                 .filter(|(id, _)| *id != set_id)
                 .collect()
         };
+        // An emoji pack's cell can be set as the status, or remove it
+        // (tdesktop `AddSetAsStatusAction`).
+        let status_action = (kind == SetKind::Emoji)
+            .then(|| self.menu_status_action(item.custom_emoji_id))
+            .flatten();
         let item = item.clone();
         let owner = cx.entity().downgrade();
         cell.context_menu(move |menu, window, cx| {
-            let mut menu = menu;
+            let mut menu =
+                crate::ui::media_panel::with_status_item(menu, status_action, owner.clone());
             if kind == SetKind::Stickers {
                 let favorite_owner = owner.clone();
                 menu = menu.item(

@@ -4,7 +4,7 @@
 //! state (`ui/toast_queue.rs`); this file only wires them to the frame.
 
 use super::*;
-use crate::ui::status_note::{NoteKind, StatusNote};
+use crate::ui::status_note::{NoteClick, NoteKind, StatusNote};
 use crate::ui::surface_reveal;
 use gpui_kit::TestSupportExt;
 use quill::ids::ChatId;
@@ -253,19 +253,22 @@ impl QuillApp {
     }
 
     /// A click on the toast sends it away and brings the next one; a
-    /// "saved" toast first shows its file in the file manager.
+    /// "saved" toast first shows its file in the file manager, an emoji
+    /// status toast first undoes its change.
     fn dismiss_status_toast(&mut self, cx: &mut Context<Self>) {
-        let reveal = self
+        let click = self
             .connection
             .toasts
             .visible()
-            .and_then(|note| note.reveal().map(std::path::Path::to_path_buf));
-        if let Some(path) = reveal {
-            self.reveal_in_folder(&path, cx);
-        }
+            .map(|note| note.click().clone());
         self.connection
             .toasts
             .dismiss_by_click(std::time::Instant::now());
+        match click {
+            Some(NoteClick::Reveal(path)) => self.reveal_in_folder(&path, cx),
+            Some(NoteClick::UndoEmojiStatus(undo)) => self.undo_emoji_status(undo, cx),
+            Some(NoteClick::Dismiss) | None => {}
+        }
         cx.notify();
     }
 

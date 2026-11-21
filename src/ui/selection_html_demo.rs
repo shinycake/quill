@@ -250,12 +250,15 @@ mod tests {
             app.toast_rich_html(&RichHtmlOutcome::Saved(html.clone()));
             let note = app.connection.note();
             assert_eq!(note.text(), "Message was saved to your Archive folder");
-            assert_eq!(note.reveal(), Some(html.as_path()));
+            assert_eq!(
+                note.click(),
+                &crate::ui::status_note::NoteClick::Reveal(html.clone())
+            );
 
             app.toast_rich_html(&RichHtmlOutcome::Failed);
             let note = app.connection.note();
             assert_eq!(note.text(), "Could not save the message as HTML.");
-            assert_eq!(note.reveal(), None);
+            assert_eq!(note.click(), &crate::ui::status_note::NoteClick::Dismiss);
 
             // Logout or quit ends it silently.
             app.toast_rich_html(&RichHtmlOutcome::Cancelled);
