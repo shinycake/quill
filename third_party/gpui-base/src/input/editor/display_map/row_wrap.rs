@@ -113,7 +113,11 @@ impl<'a> Resume<'a> {
             .ok()?;
         let delta = self.delta;
         let closed = self.rows.get(row..self.rows.len().saturating_sub(1))?;
-        Some(closed.iter().map(move |row| row.end.saturating_add_signed(delta)))
+        Some(
+            closed
+                .iter()
+                .map(move |row| row.end.saturating_add_signed(delta)),
+        )
     }
 }
 
@@ -447,14 +451,24 @@ impl LineWidths for LineMetrics<'_> {
 
     fn overflow(&mut self, start: usize, available: Pixels) -> usize {
         let first = self.tokens.partition_point(|(r, _)| r.end <= start);
-        let mut tokens = self.tokens.get(first..).unwrap_or_default().iter().peekable();
+        let mut tokens = self
+            .tokens
+            .get(first..)
+            .unwrap_or_default()
+            .iter()
+            .peekable();
         let tab_stop = self.text.tab_stop;
         let mut x = px(0.);
         let mut at = start;
         let mut past_token = start;
         while at < self.line.len() {
             let limit = ceil_char_boundary(self.line, at.saturating_add(RUN_CHUNK));
-            let runs = styled_runs(&self.text.font, self.line_start, at..limit, &self.text.fonts);
+            let runs = styled_runs(
+                &self.text.font,
+                self.line_start,
+                at..limit,
+                &self.text.fonts,
+            );
             for run in runs {
                 let Some(wrapper) = self.text.wrapper(&run.font) else {
                     return at;
@@ -577,7 +591,15 @@ pub(crate) mod tests {
     }
 
     fn fresh(text: &str, width: f32, indent: WrappingIndent) -> Vec<Boundary> {
-        wrap_rows(text, px(width), indent, &[], None, &mut Counted::new(text), false)
+        wrap_rows(
+            text,
+            px(width),
+            indent,
+            &[],
+            None,
+            &mut Counted::new(text),
+            false,
+        )
     }
 
     /// A small deterministic generator, so a failure names a seed.
@@ -585,7 +607,10 @@ pub(crate) mod tests {
 
     impl Lcg {
         fn next(&mut self, below: usize) -> usize {
-            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             ((self.0 >> 33) as usize) % below.max(1)
         }
 
@@ -595,8 +620,20 @@ pub(crate) mod tests {
     }
 
     const WORDS: [&str; 14] = [
-        "the ", "Telegram ", "illicit ", "wrapping, ", "a ", "(see) ", "مرحبا ", "بالعالم ", "日本語",
-        "نص ", "e\u{301}e\u{301} ", "👩\u{200d}💻 ", "https://x.y/a/b?c=1 ", "0123456789abcdef",
+        "the ",
+        "Telegram ",
+        "illicit ",
+        "wrapping, ",
+        "a ",
+        "(see) ",
+        "مرحبا ",
+        "بالعالم ",
+        "日本語",
+        "نص ",
+        "e\u{301}e\u{301} ",
+        "👩\u{200d}💻 ",
+        "https://x.y/a/b?c=1 ",
+        "0123456789abcdef",
     ];
 
     fn sentence(rng: &mut Lcg, len: usize) -> String {
@@ -619,7 +656,10 @@ pub(crate) mod tests {
         let mut text = format!("{indent}{}", sentence(rng, len));
         let mut rows = rows_of(&fresh(&text, width, mode), text.len());
         for edit in 0..200 {
-            let start = char_boundary(&text, indent.len() + 1 + rng.next(text.len() - indent.len()));
+            let start = char_boundary(
+                &text,
+                indent.len() + 1 + rng.next(text.len() - indent.len()),
+            );
             let removed = match rng.next(3) {
                 0 => 0,
                 1 => rng.next(12),
@@ -642,6 +682,7 @@ pub(crate) mod tests {
                 &[],
                 resume.as_ref(),
                 &mut Counted::new(&next),
+                false,
             );
             let expected = fresh(&next, width, mode);
             assert_eq!(
@@ -680,7 +721,15 @@ pub(crate) mod tests {
         next.replace_range(start..start, "x");
         let resume = Resume::of(&rows, 0, start..start, 1, next.len());
         let mut widths = Counted::new(&next);
-        wrap_rows(&next, px(width), mode, &[], resume.as_ref(), &mut widths, false);
+        wrap_rows(
+            &next,
+            px(width),
+            mode,
+            &[],
+            resume.as_ref(),
+            &mut widths,
+            false,
+        );
         (widths.measured, widths.walked)
     }
 
@@ -689,7 +738,10 @@ pub(crate) mod tests {
         let words = |len: usize| "wrapping a line ".repeat(len / 16);
         let (short_measured, short_walked) = keystroke(&words(8 * 1024), 800.);
         let (near_measured, near_walked) = keystroke(&words(LONG_LINE - 16), 800.);
-        assert!(near_measured < 2 * short_measured.max(1024), "{near_measured}");
+        assert!(
+            near_measured < 2 * short_measured.max(1024),
+            "{near_measured}"
+        );
         assert!(near_walked < 2 * short_walked.max(1024), "{near_walked}");
 
         let (measured, walked) = keystroke(&words(LONG_LINE), 800.);
@@ -710,7 +762,15 @@ pub(crate) mod tests {
     fn a_row_of_a_long_line_ends_at_the_summed_width() {
         let text = "wrapping a line ".repeat(LONG_LINE / 16);
         let mut widths = Counted::new(&text);
-        let boundaries = wrap_rows(&text, px(200.), WrappingIndent::None, &[], None, &mut widths, false);
+        let boundaries = wrap_rows(
+            &text,
+            px(200.),
+            WrappingIndent::None,
+            &[],
+            None,
+            &mut widths,
+            false,
+        );
         assert_eq!(widths.measured, 0);
         for row in rows_of(&boundaries, text.len()) {
             let sum: f32 = text[row.clone()].chars().map(char_width).sum();
@@ -722,7 +782,9 @@ pub(crate) mod tests {
     #[test]
     fn an_atom_stays_whole_in_a_long_line() {
         let text = "abcdefghij".repeat(2 * LONG_LINE / 10);
-        let atoms: Vec<_> = (0..text.len() / 40).map(|i| i * 40 + 3..i * 40 + 37).collect();
+        let atoms: Vec<_> = (0..text.len() / 40)
+            .map(|i| i * 40 + 3..i * 40 + 37)
+            .collect();
         let boundaries = wrap_rows(
             &text,
             px(150.),
@@ -730,10 +792,15 @@ pub(crate) mod tests {
             &atoms,
             None,
             &mut Counted::new(&text),
+            false,
         );
         assert!(!boundaries.is_empty());
         for boundary in boundaries {
-            assert!(!atoms.iter().any(|a| a.start < boundary.ix && boundary.ix < a.end));
+            assert!(
+                !atoms
+                    .iter()
+                    .any(|a| a.start < boundary.ix && boundary.ix < a.end)
+            );
         }
     }
 
@@ -750,7 +817,15 @@ pub(crate) mod tests {
     fn a_short_line_of_a_long_text_never_shapes() {
         let text = "a word and another word and yet another word";
         let mut widths = Counted::new(text);
-        wrap_rows(text, px(100.), WrappingIndent::None, &[], None, &mut widths, true);
+        wrap_rows(
+            text,
+            px(100.),
+            WrappingIndent::None,
+            &[],
+            None,
+            &mut widths,
+            true,
+        );
         assert_eq!(widths.measured, 0);
     }
 
@@ -766,6 +841,11 @@ pub(crate) mod tests {
         let text = "日".repeat(LONG_LINE);
         let boundaries = fresh(&text, 5., WrappingIndent::None);
         assert_eq!(boundaries.len(), LONG_LINE - 1);
-        assert!(boundaries.iter().enumerate().all(|(i, b)| b.ix == (i + 1) * 3));
+        assert!(
+            boundaries
+                .iter()
+                .enumerate()
+                .all(|(i, b)| b.ix == (i + 1) * 3)
+        );
     }
 }

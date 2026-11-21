@@ -2495,7 +2495,10 @@ impl<M: InputModeKind> TextElement<M> {
                 let buffer_line_start = state.text.line_start_offset(row);
                 let line_item = state.display_map.line(row);
                 let part = line_item.filter(|_| !state.is_single_line()).map(|item| {
-                    item.window(state.display_map.buffer_line_to_display_row(row), wanted_rows)
+                    item.window(
+                        state.display_map.buffer_line_to_display_row(row),
+                        wanted_rows,
+                    )
                 });
                 let part = part.filter(|part| !part.is_whole());
                 let skipped = part.as_ref().map_or(0, |part| part.bytes.start);
@@ -2506,7 +2509,9 @@ impl<M: InputModeKind> TextElement<M> {
                     smallvec::smallvec![0..text.len()]
                 } else {
                     let item = line_item.expect("prepared line");
-                    let rows = part.as_ref().map_or(0..item.lines_len(), |p| p.rows.clone());
+                    let rows = part
+                        .as_ref()
+                        .map_or(0..item.lines_len(), |p| p.rows.clone());
                     item.wrapped_lines
                         .get(rows)
                         .unwrap_or_default()
@@ -2728,7 +2733,7 @@ impl<M: InputModeKind> TextElement<M> {
                 if let Some(width) = token_width {
                     let width_f = width.as_f32();
                     fragments.push(Fragment::new(
-                        local.clone(),
+                        local,
                         run.rtl,
                         x.as_f32(),
                         width_f,
@@ -2943,7 +2948,9 @@ impl<M: InputModeKind> TextElement<M> {
             );
             let part = (!part.is_whole()).then_some(part);
             let skipped = part.as_ref().map_or(0, |part| part.bytes.start);
-            let rows = part.as_ref().map_or(0..line_item.lines_len(), |p| p.rows.clone());
+            let rows = part
+                .as_ref()
+                .map_or(0..line_item.lines_len(), |p| p.rows.clone());
             let line_text = laid_out_text(display_text, buffer_line, part.as_ref());
             // Offsets below are relative to the laid-out part of the line.
             let part_run_offset = run_offset + skipped;
@@ -2953,7 +2960,8 @@ impl<M: InputModeKind> TextElement<M> {
             let mut line_has_background = false;
             // Right-to-left content: the paragraph is analysed once and each wrapped row is
             // shaped run by run in visual order (see `display_map::bidi`).
-            let paragraph = laid_out_paragraph(&line_text, display_text, buffer_line, part.as_ref());
+            let paragraph =
+                laid_out_paragraph(&line_text, display_text, buffer_line, part.as_ref());
             let paragraph_rtl = paragraph.as_ref().is_some_and(|p| p.is_rtl());
 
             for range in line_item.wrapped_lines.get(rows).unwrap_or_default() {
@@ -2962,7 +2970,7 @@ impl<M: InputModeKind> TextElement<M> {
                     let (row, has_bg) = Self::layout_bidi_row(
                         paragraph,
                         &line_text,
-                        range.clone(),
+                        range,
                         part_run_offset,
                         runs,
                         bg_segments,
@@ -2978,10 +2986,14 @@ impl<M: InputModeKind> TextElement<M> {
                 let line_runs = if bg_segments.is_empty() {
                     line_runs
                 } else {
-                    split_runs_by_bg_segments(part_byte_offset + range.start, &line_runs, bg_segments)
+                    split_runs_by_bg_segments(
+                        part_byte_offset + range.start,
+                        &line_runs,
+                        bg_segments,
+                    )
                 };
 
-                let sub_line: SharedString = line_text[range.clone()].to_string().into();
+                let sub_line: SharedString = line_text[range].to_string().into();
                 let line_runs =
                     align_runs_to_char_boundaries(&sub_line, &line_runs).unwrap_or(line_runs);
                 let mut shaped_line = window
@@ -3317,7 +3329,10 @@ fn wrapped_indent(
     if indent == 0 || !continues {
         return px(0.);
     }
-    if let Some(first) = rows.first().filter(|_| part.is_none_or(|p| p.rows.start == 0)) {
+    if let Some(first) = rows
+        .first()
+        .filter(|_| part.is_none_or(|p| p.rows.start == 0))
+    {
         return first.x_for_index(indent);
     }
     let run = TextRun {

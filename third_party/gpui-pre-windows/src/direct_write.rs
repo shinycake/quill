@@ -416,64 +416,10 @@ impl DirectWriteState {
         font_size: Pixels,
         font_runs: &[FontRun],
     ) -> Result<LineLayout> {
-        if !text.contains(is_line_separator) {
-            return self.layout_line_without_separators(components, text, font_size, font_runs);
-        }
-
-        // DirectWrite honors mandatory breaks even without wrapping. Keep each
-        // separator at a segment's end so no subsequent text moves to a new baseline.
-        let mut layout = LineLayout {
-            font_size,
-            len: text.len(),
-            ..Default::default()
-        };
-        let mut remaining_runs = font_runs;
-        let mut run_offset = 0;
-        let mut text_offset = 0;
-        let mut segment_runs = SmallVec::<[FontRun; 4]>::new();
-        for segment in text.split_inclusive(is_line_separator) {
-            segment_runs.clear();
-            let mut remaining_bytes = segment.len();
-            while remaining_bytes > 0 {
-                let Some(run) = remaining_runs.first() else {
-                    break;
-                };
-                let len = remaining_bytes.min(run.len - run_offset);
-                if len > 0 {
-                    segment_runs.push(FontRun {
-                        len,
-                        font_id: run.font_id,
-                    });
-                }
-                remaining_bytes -= len;
-                run_offset += len;
-                if run_offset == run.len {
-                    remaining_runs = &remaining_runs[1..];
-                    run_offset = 0;
-                }
-            }
-
-            let segment_layout =
-                self.layout_line_without_separators(components, segment, font_size, &segment_runs)?;
-            for mut run in segment_layout.runs {
-                for glyph in &mut run.glyphs {
-                    glyph.index += text_offset;
-                    glyph.position.x += layout.width;
-                }
-                if let Some(last) = layout.runs.last_mut()
-                    && last.font_id == run.font_id
-                {
-                    last.glyphs.append(&mut run.glyphs);
-                } else {
-                    layout.runs.push(run);
-                }
-            }
-            layout.width += segment_layout.width;
-            layout.ascent = layout.ascent.max(segment_layout.ascent);
-            layout.descent = layout.descent.max(segment_layout.descent);
-            text_offset += segment.len();
-        }
-        Ok(layout)
+        // QUILL: U+2028 and U+2029 go to DirectWrite as spaces (see
+        // `layout_line_without_separators`), so the line is one bidi paragraph with one
+        // base direction, as on CoreText and cosmic-text.
+        self.layout_line_without_separators(components, text, font_size, font_runs)
     }
 
     fn layout_line_without_separators(
@@ -491,7 +437,14 @@ impl DirectWriteState {
         }
         unsafe {
             self.layout_line_scratch.clear();
-            self.layout_line_scratch.extend(text.encode_utf16());
+            // QUILL: DirectWrite breaks the line at U+2028 and U+2029 even without
+            // wrapping. Both are one UTF-16 unit, like the space that stands in for them,
+            // so glyph indices still map back to the text.
+            self.layout_line_scratch
+                .extend(text.encode_utf16().map(|unit| match unit {
+                    0x2028 | 0x2029 => 0x20,
+                    unit => unit,
+                }));
             let text_wide = &*self.layout_line_scratch;
 
             // DirectWrite lays a paragraph out left to right unless told otherwise.
@@ -1436,6 +1389,24 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                 });
                 run_advance += metrics.width;
             }
+            // QUILL: in a right-to-left run (odd bidi level) the first tab typed is the
+            // rightmost; mirror the positions and hand them over left to right like the
+            // glyph path below.
+            if glyphrun.bidiLevel % 2 == 1 {
+                let mut widths: Vec<f32> = glyphs
+                    .windows(2)
+                    .map(|pair| f32::from(pair[1].position.x - pair[0].position.x))
+                    .collect();
+                if let Some(last) = glyphs.last() {
+                    widths.push(run_advance - f32::from(last.position.x));
+                }
+                let mut pen = run_advance;
+                for (glyph, width) in glyphs.iter_mut().zip(widths) {
+                    pen -= width;
+                    glyph.position.x = px(pen);
+                }
+                glyphs.reverse();
+            }
             if !glyphs.is_empty() {
                 context.placed.push(PlacedRun::new(
                     baselineoriginx,
@@ -1631,10 +1602,18 @@ impl<'a> StringIndexConverter<'a> {
 
     fn advance_to_utf16_ix(&mut self, utf16_target: usize) {
         // DirectWrite draws a line's runs in visual order, which is not typing order
-        // once right-to-left text is involved: start over for a run that lies earlier.
-        if utf16_target < self.utf16_ix {
-            self.utf8_ix = 0;
-            self.utf16_ix = 0;
+        // once right-to-left text is involved. QUILL: step back to a run that lies
+        // earlier instead of starting over, so a long mixed line costs its length once.
+        while self.utf16_ix > utf16_target {
+            let Some(c) = self
+                .text
+                .get(..self.utf8_ix)
+                .and_then(|before| before.chars().next_back())
+            else {
+                break;
+            };
+            self.utf8_ix -= c.len_utf8();
+            self.utf16_ix -= c.len_utf16();
         }
         for (ix, c) in self.text[self.utf8_ix..].char_indices() {
             if self.utf16_ix >= utf16_target {
@@ -1877,9 +1856,6 @@ fn is_color_glyph(
 
 const DEFAULT_LOCALE_NAME: PCWSTR = windows::core::w!("en-US");
 
-fn is_line_separator(character: char) -> bool {
-    matches!(character, '\u{2028}' | '\u{2029}')
-}
 
 #[cfg(test)]
 mod tests {

@@ -230,3 +230,10 @@ frame sooner (`docs/decisions/launch-time-macos-appkit.md`):
 - `src/platform.rs`: `create_menu_bar` passes the menu whose `role` is
   `MenuRole::Window` to `setWindowsMenu`, instead of the menu named "Window",
   so AppKit keeps the window list in a translated Window menu.
+
+## Declared notification feature
+
+Changed by the Quill project in 2026: `Cargo.toml` asks `objc2-user-notifications`
+for `UNNotificationAttachment`, which `src/system_notifications.rs` uses. It
+compiled before only because Quill's own manifest turned that feature on, so the
+crate could not be built or tested on its own.

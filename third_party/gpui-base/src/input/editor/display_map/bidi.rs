@@ -12,10 +12,12 @@
 //! * runs of the other direction (digits, Latin words) are laid out inside the
 //!   paragraph in visual order, per rules L1/L2.
 //!
-//! GPUI's platform text systems disagree on the base direction of a line
-//! (CoreText and cosmic-text pick it from the first strong character,
-//! DirectWrite always lays out left-to-right) and none of them can say where a
-//! *logical* offset sits when a run is right-to-left. This module therefore
+//! GPUI's platform text systems used to disagree on how they lay out a mixed
+//! line (DirectWrite took no base direction and drew right-to-left runs in
+//! typing order; cosmic-text listed right-to-left lines from their right end).
+//! They now share one contract, checked on every OS by `crates/text-conformance`,
+//! but a shaped line still cannot say which edge of a character is its leading
+//! one at a direction change, so the caret needs more than it gives. This module therefore
 //! splits a visual line into runs of one embedding level, which the engine
 //! shapes one by one (a single-direction run shapes identically on every
 //! platform), places them in visual order itself, and maps caret offsets, hit

@@ -57,11 +57,30 @@ pub struct ShapedGlyph {
     pub is_emoji: bool,
 }
 
+/// QUILL: one character cluster of a line, for hit testing right-to-left text.
+struct GlyphCluster {
+    /// Byte index of the character that starts the cluster.
+    index: usize,
+    /// Byte index of the next character in the text, or the line's length.
+    end: usize,
+    left: Pixels,
+    right: Pixels,
+    rtl: bool,
+}
+
 impl LineLayout {
     /// The index for the character at the given x coordinate
     pub fn index_for_x(&self, x: Pixels) -> Option<usize> {
         if x >= self.width {
             None
+        } else if let Some(clusters) = self.unordered_clusters() {
+            // QUILL: right-to-left glyphs (see `unordered_clusters`).
+            clusters
+                .iter()
+                .rev()
+                .find(|cluster| cluster.left <= x)
+                .or(clusters.first())
+                .map(|cluster| cluster.index)
         } else {
             for run in self.runs.iter().rev() {
                 for glyph in run.glyphs.iter().rev() {
@@ -77,6 +96,25 @@ impl LineLayout {
     /// closest_index_for_x returns the character boundary closest to the given x coordinate
     /// (e.g. to handle aligning up/down arrow keys)
     pub fn closest_index_for_x(&self, x: Pixels) -> usize {
+        if let Some(clusters) = self.unordered_clusters() {
+            // QUILL: the caret stop nearest to x, each cluster's leading edge being its
+            // start and its trailing edge the start of the character after it.
+            let mut best = (Pixels::MAX, self.len);
+            for cluster in &clusters {
+                let (leading, trailing) = if cluster.rtl {
+                    (cluster.right, cluster.left)
+                } else {
+                    (cluster.left, cluster.right)
+                };
+                for (edge, index) in [(leading, cluster.index), (trailing, cluster.end)] {
+                    let distance = (edge - x).abs();
+                    if distance < best.0 {
+                        best = (distance, index);
+                    }
+                }
+            }
+            return best.1;
+        }
         let mut prev_index = 0;
         let mut prev_x = px(0.);
 
@@ -107,6 +145,31 @@ impl LineLayout {
 
     /// The x position of the character at the given index
     pub fn x_for_index(&self, index: usize) -> Pixels {
+        if let Some(clusters) = self.unordered_clusters() {
+            // QUILL: the leading edge of the character at `index`, which is the right edge
+            // in right-to-left text; past the end, the trailing edge of the last character.
+            let containing = clusters
+                .iter()
+                .filter(|cluster| cluster.index <= index)
+                .max_by_key(|cluster| cluster.index);
+            return match containing {
+                Some(cluster) if index < cluster.end => {
+                    if cluster.rtl {
+                        cluster.right
+                    } else {
+                        cluster.left
+                    }
+                }
+                Some(cluster) => {
+                    if cluster.rtl {
+                        cluster.left
+                    } else {
+                        cluster.right
+                    }
+                }
+                None => self.width,
+            };
+        }
         for run in &self.runs {
             for glyph in &run.glyphs {
                 if glyph.index >= index {
@@ -115,6 +178,51 @@ impl LineLayout {
             }
         }
         self.width
+    }
+
+    /// QUILL: the line's character clusters left to right, when its glyphs are not in byte
+    /// order (right-to-left text), so the hit tests above can tell a character's leading
+    /// edge from its trailing one; `None` for byte-ordered lines, which keep the upstream
+    /// walks. A cluster reads right to left when the cluster after it on screen starts
+    /// earlier in the text (or, last on the line, the one before it starts later).
+    fn unordered_clusters(&self) -> Option<Vec<GlyphCluster>> {
+        if super::glyphs_in_byte_order(self) {
+            return None;
+        }
+        let mut starts: Vec<(Pixels, usize)> = self
+            .runs
+            .iter()
+            .flat_map(|run| &run.glyphs)
+            .map(|glyph| (glyph.position.x, glyph.index))
+            .collect();
+        starts.sort_by(|a, b| a.1.cmp(&b.1).then(f32::from(a.0).total_cmp(&f32::from(b.0))));
+        // One entry per character start, at its leftmost glyph.
+        starts.dedup_by_key(|(_, index)| *index);
+        let mut by_index: Vec<usize> = starts.iter().map(|(_, index)| *index).collect();
+        by_index.sort_unstable();
+        starts.sort_by(|a, b| f32::from(a.0).total_cmp(&f32::from(b.0)));
+        let mut clusters: Vec<GlyphCluster> = Vec::with_capacity(starts.len());
+        for (ix, &(left, index)) in starts.iter().enumerate() {
+            let right = starts
+                .get(ix + 1)
+                .map_or(self.width, |(next, _)| *next)
+                .max(left);
+            let next_start = by_index.partition_point(|&start| start <= index);
+            let end = by_index.get(next_start).copied().unwrap_or(self.len);
+            let rtl = match (starts.get(ix + 1), ix.checked_sub(1).and_then(|p| starts.get(p))) {
+                (Some((_, next)), _) => *next < index,
+                (None, Some((_, previous))) => *previous > index,
+                (None, None) => false,
+            };
+            clusters.push(GlyphCluster {
+                index,
+                end,
+                left,
+                right,
+                rtl,
+            });
+        }
+        Some(clusters)
     }
 
     /// The corresponding Font at the given index

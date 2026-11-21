@@ -460,7 +460,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             && !self.masked
             && !self.token_is_secret()
             && (!self.text_spans.is_empty() || !self.token_spans().is_empty())
-            && self.text.slice(range.clone()).to_string() == text;
+            && self.text.slice(range.clone()) == text;
         if !rich {
             return ClipboardItem::new_string(text);
         }

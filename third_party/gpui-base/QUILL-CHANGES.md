@@ -234,3 +234,17 @@ Quill's `row_wrap.rs`. Upstream's width-range cache for live resize
 (`text_wrapper/measurements.rs`, `wrap_width.rs`) solves the same problem on the
 algorithm Quill replaced, so those files are removed. `BlinkCursor::is_blinking`
 reads upstream's `last_activity` where it read `epoch`.
+
+## Tests that run (RTL sweep)
+
+Changed by the Quill project in 2026 (`docs/decisions/rtl-sweep.md`): the crate
+is a member of Quill's workspace so `cargo test -p gpui-base --features
+test-support --lib` runs, in CI on every OS. `Cargo.toml` drops the
+dev-dependencies only the benches used (`criterion`, `gpui-fast`,
+`gpui-fast-platform`, `gpui-pre-reqwest-client`) and the two `[[bench]]`
+targets, whose files are removed. `row_wrap.rs` tests pass `wrap_rows` its
+`long_text` argument. `src/input/base/movement.rs`: before a line is laid out,
+the arrow keys step by the paragraph's own direction (read from its text), so
+Right in a Hebrew paragraph moves toward its start as it does once drawn;
+`test_rtl_arrow_keys_move_visually` checks it with no layout. The Quill-modified
+files are formatted with `cargo fmt`.

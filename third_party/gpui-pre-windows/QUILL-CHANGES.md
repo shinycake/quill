@@ -538,7 +538,8 @@ every Hebrew or Arabic word came out mirrored (the bidi engine in gpui-base
 shapes each right-to-left run on its own and reads glyph x positions back).
 `src/direct_write.rs`: `DrawGlyphRun` places such a run's glyphs from its
 right edge (a positive advance offset moves a glyph leftward too) and emits
-them in visual order, left to right, as cosmic-text and CoreText do; the run
+them in visual order, left to right, as every backend now must
+(`crates/text-conformance`); the run
 still adds its total advance to the line width. The test
 `right_to_left_runs_are_placed_in_visual_order` checks Hebrew alone and mixed
 with Latin; the Hebrew cases left `tabs_preserve_native_advances_and_cursor`,
@@ -546,12 +547,23 @@ which assumed logical x offsets.
 
 It also takes a line's direction from its first strong character (UAX #9
 P2/P3, `unicode_bidi::get_base_direction`, a new dependency in `Cargo.toml`),
-as cosmic-text and CoreText do: a right-to-left line gets
+as the other backends do: a right-to-left line gets
 `DWRITE_READING_DIRECTION_RIGHT_TO_LEFT` with no wrapping and a zero-width
 layout box (an infinite one would put every run at x = inf), so the space
 after a Hebrew word sits at its left end instead of its right.
 `DrawGlyphRun` records each run with the left edge DirectWrite gave it
 (`PlacedRun`), and the line lays the runs side by side in that order rather
-than the order they were drawn in; `StringIndexConverter` starts over when a
+than the order they were drawn in; `StringIndexConverter` steps back when a
 run lies earlier in the text than the last one. Test:
 `right_to_left_lines_keep_trailing_spaces_at_the_left`.
+
+The RTL sweep (`docs/decisions/rtl-sweep.md`) changed it again in 2026:
+`layout_line` no longer splits a line at U+2028 or U+2029. They reach
+DirectWrite as spaces (one UTF-16 unit each, so indices still map back), and
+the line keeps one base direction, as on CoreText and cosmic-text; each piece
+used to take its own. The tab path of `DrawGlyphRun` mirrors the tabs of a
+right-to-left run like the glyph path does. `StringIndexConverter` steps back
+to an earlier run instead of restarting at the line start, so a long mixed
+line converts in linear time. `shaping_text_system()` (in `gpui_windows.rs`)
+hands out the DirectWrite text system without a window for
+`crates/text-conformance`. CI now runs `direct_write::tests` too.
