@@ -395,8 +395,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// [`Self::download_user_file`], and once it finishes copy the file to
-    /// `target` (`ui::folder_saves`). The target joins the download intent
-    /// only when a request went out, so it leaves with that intent.
+    /// `target` (`ui::folder_saves`). The target joins the file's user
+    /// download, the new one or one already running, and leaves with it.
     pub fn download_user_file_to(
         &mut self,
         file_id: FileId,
@@ -404,9 +404,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         target: crate::state::SaveTarget,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let sent = self.download_user_file(file_id, origin)?;
-        if sent.is_some() {
-            self.session.media.downloads.save_to(file_id.0, target);
-        }
+        self.session.media.downloads.save_to(file_id.0, target);
         Ok(sent)
     }
 

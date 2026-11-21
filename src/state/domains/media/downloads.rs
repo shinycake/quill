@@ -95,10 +95,11 @@ pub struct DownloadIntents {
     /// the chat. Kept while the file has an intent or a place in
     /// `finished`.
     chats: HashMap<i32, (ChatId, i64)>,
-    /// Where the user wants a requested user download copied when it
-    /// finishes (`save_to`; `ui::folder_saves`). Kept only while that
-    /// download is out: `put` drops it with any other change, so a
-    /// cancel, an end, a removal or `clear` leaves nothing to copy.
+    /// Where the user wants a user download copied when it finishes
+    /// (`save_to`; `ui::folder_saves`). Kept while the file has a user
+    /// intent that is not cancelled (an end keeps it: TDLib's idle update
+    /// can come before a pause, and Retry resumes the same download);
+    /// `put` drops it on a cancel, a removal, another origin or `clear`.
     targets: HashMap<i32, SaveTarget>,
 }
 
@@ -151,8 +152,8 @@ impl DownloadIntents {
                 self.entries.remove(&file_id)
             }
         };
-        let keeps_target =
-            intent.is_some_and(|new| new.origin == DownloadOrigin::User && new.phase.is_out());
+        let keeps_target = intent
+            .is_some_and(|new| new.origin == DownloadOrigin::User && new.phase != Phase::Cancelled);
         if !keeps_target {
             self.targets.remove(&file_id);
         }

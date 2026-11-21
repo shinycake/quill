@@ -48,17 +48,25 @@ impl FolderCopies {
     /// The stage of `file_id` answered: its task is the one running this
     /// answer, so it is let finish instead of dropped mid-poll.
     fn finish(&mut self, file_id: i32) {
-        match self.by_file.remove(&file_id) {
-            Some(FolderCopy::Asking { _task: task } | FolderCopy::Copying { _task: task }) => {
-                task.detach();
-            }
-            None => {}
+        if let Some(FolderCopy::Asking { _task: task } | FolderCopy::Copying { _task: task }) =
+            self.by_file.remove(&file_id)
+        {
+            task.detach();
         }
     }
 }
 
 /// The copies end with the screen: nothing to say through the client.
 impl crate::ui::on_screen::Farewell for FolderCopies {}
+
+/// How the save dialog answered.
+enum SaveAnswer {
+    Path(PathBuf),
+    /// The user closed it: nothing downloads, as in Telegram Desktop.
+    Closed,
+    /// It could not open.
+    NoDialog,
+}
 
 /// How a copy ended, worked out off the UI thread.
 enum CopyOutcome {
@@ -123,8 +131,8 @@ impl QuillApp {
 
     /// The name to save the document under (empty: TDLib's cache name), or
     /// `None` when it may not be copied out: a chat with protected
-    /// content, a self-destructing or one-time message (the checks Save
-    /// As and the viewer's Save make), or a message no longer loaded.
+    /// content, a message TDLib says cannot be saved, a self-destructing or
+    /// one-time message, or a message no longer loaded.
     fn savable_document_name(&self, origin: DocOrigin) -> Option<String> {
         let DocOrigin::Message(chat_id, message_id) = origin else {
             return Some(String::new());
@@ -138,7 +146,14 @@ impl QuillApp {
             .get(&chat_id.0)?
             .messages
             .get(&message_id.0)?;
-        if message.self_destruct.is_some() || message.ephemeral.is_some() {
+        // Per-message protection (a bot's `protect_content`), when the
+        // message's properties are known, as Save As reads them.
+        let unsavable = session
+            .messages
+            .menu_actions
+            .get(chat_id, message_id)
+            .is_some_and(|actions| !actions.can_be_saved);
+        if unsavable || message.self_destruct.is_some() || message.ephemeral.is_some() {
             return None;
         }
         match &message.content {
@@ -174,9 +189,15 @@ impl QuillApp {
         // screen-scope: the dialog belongs to the account on screen, and
         // its answer to no chat window.
         let task = self.spawn_screen(cx, async move |this, cx| {
-            let dest = picker.await.ok().and_then(Result::ok).flatten();
+            // No dialog at all (a Linux desktop without a file chooser
+            // portal): download to the cache, so the click is not lost.
+            let answer = match picker.await {
+                Ok(Ok(Some(dest))) => SaveAnswer::Path(dest),
+                Ok(Ok(None)) => SaveAnswer::Closed,
+                Ok(Err(_)) | Err(_) => SaveAnswer::NoDialog,
+            };
             let _ = this.update(cx, |this, cx| {
-                this.answer_save_dialog(file_id, origin, dest, cx)
+                this.answer_save_dialog(file_id, origin, answer, cx)
             });
         });
         self.folder_copies
@@ -188,12 +209,17 @@ impl QuillApp {
         &mut self,
         file_id: FileId,
         origin: DocOrigin,
-        dest: Option<PathBuf>,
+        answer: SaveAnswer,
         cx: &mut Context<Self>,
     ) {
         self.folder_copies.finish(file_id.0);
-        let Some(dest) = dest else {
-            return;
+        let dest = match answer {
+            SaveAnswer::Path(dest) => dest,
+            SaveAnswer::Closed => return,
+            SaveAnswer::NoDialog => {
+                self.request_media_download(file_id, origin.sponsored(), cx);
+                return;
+            }
         };
         // Finished while the dialog was open (another surface asked for
         // it): copy it now.

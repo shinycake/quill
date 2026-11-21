@@ -39,10 +39,14 @@ is on, it opens a save dialog instead. Quill now does the same.
   thread, and one that cannot be reached counts as unset.
 - **The target travels with the download intent**
   (`DownloadIntents::save_to`, set by `ConnectDriver::download_user_file_to`
-  only when a request went out). `put`, the intents' single writer, drops
-  it with any change that is not a running user download, so a cancel, a
-  failure, a removal from the list (here or on another device) or the
-  session closing leaves nothing to copy later.
+  on the file's user download, a new one or one already running). `put`,
+  the intents' single writer, keeps it while the file has a user intent
+  that is not cancelled: an end keeps it, because TDLib's idle update can
+  come before a pause and Retry resumes the same download. A cancel, a
+  removal from the list (here or on another device), another origin or
+  the session closing drops it. Every completion path (`updateFile`,
+  `updateFileDownload`, `updateFileAddedToDownloads`) queues the copy
+  before the intent goes (`Session::queue_folder_save`).
 - **A finished target** is queued in `media.folder_saves` and drained
   from the poll (`poll_live`). The UI owns the two stages that run there,
   `FolderCopy::Asking` and `FolderCopy::Copying`, each holding its task
@@ -55,8 +59,11 @@ is on, it opens a save dialog instead. Quill now does the same.
   becomes `Name (2).pdf`. When the copy succeeds, the "Saved to …" note
   appears; a failure shows an error and is logged.
 - **Protected content is not copied out**: a chat with protected content,
-  or a self-destructing or one-time message, downloads to the cache only,
-  the same rule Save As and the viewer's Save follow.
+  a message TDLib says cannot be saved (`can_be_saved`, when its
+  properties are known), or a self-destructing or one-time message
+  downloads to the cache only.
+- **No save dialog** (a Linux desktop without a file chooser portal): the
+  click downloads to the cache, so it is not lost.
 - **TDLib's cache copy stays.** An earlier version of this branch deleted
   it, but every surface that reads the file map (the message menu, the
   viewer, shared media, the Downloads panel) then treated the document as
@@ -65,8 +72,10 @@ is on, it opens a save dialog instead. Quill now does the same.
 
 ## Left out
 
-- Where a copy went is kept only in memory, so after a restart Open and
-  Show in folder use the cache file.
+- Where a copy went, and where a running download should go, is kept
+  only in memory. After a restart Open and Show in folder use the cache
+  file, and a download TDLib resumes from its list finishes without a
+  copy.
 - Downloads started by auto-download, voice notes, videos and photos are
   not copied. Only a document the user clicked is, which is the case
   `DocumentSaveClickHandler` covers.

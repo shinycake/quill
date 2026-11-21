@@ -25,14 +25,7 @@ impl Session {
         let idle_incomplete = file.local.is_idle_incomplete();
         if file.local.is_downloading_completed() {
             self.record_completed_user_download(id);
-            // A copy the user asked for at the click (`ui::folder_saves`).
-            if let Some(source) = file.usable_path()
-                && let Some(target) = self.media.downloads.take_target(id)
-            {
-                self.media
-                    .folder_saves
-                    .push_due(id, std::path::PathBuf::from(source), target);
-            }
+            self.queue_folder_save(id, file.usable_path());
             self.media.downloads.forget(id);
         }
         if from_file_update && !file.local.is_downloading_active() {
@@ -123,6 +116,31 @@ impl Session {
         self.note_avatar_file_changed(file_id);
         self.media.downloads.settle(file_id);
         self.media.download_extras.remove_file(file_id);
+    }
+
+    /// `file_id` finished at `path`: queue the copy the user asked for at
+    /// the click (`ui::folder_saves`). Every completion path calls this
+    /// before the intent goes, so the target is taken whichever comes
+    /// first; a path not known yet leaves it for the update that has one.
+    pub(crate) fn queue_folder_save(&mut self, file_id: i32, path: Option<&str>) {
+        if let Some(source) = path
+            && let Some(target) = self.media.downloads.take_target(file_id)
+        {
+            self.media
+                .folder_saves
+                .push_due(file_id, std::path::PathBuf::from(source), target);
+        }
+    }
+
+    /// The finished file's path in TDLib's cache, when the file map has it.
+    pub(crate) fn queue_folder_save_from_map(&mut self, file_id: i32) {
+        let path = self
+            .media
+            .files
+            .get(&file_id)
+            .and_then(|file| file.usable_path())
+            .map(str::to_string);
+        self.queue_folder_save(file_id, path.as_deref());
     }
 
     /// Record a finished user-initiated download in the downloads manager's

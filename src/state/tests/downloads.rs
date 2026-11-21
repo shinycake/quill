@@ -671,21 +671,48 @@ fn a_download_saved_to_the_folder_is_due_once_when_it_finishes() {
 }
 
 #[test]
-fn a_cancelled_failed_or_removed_download_copies_nothing_later() {
+fn a_cancelled_or_removed_download_copies_nothing_later() {
     let (mut session, _sink) = session();
-    for id in [62, 63, 64] {
+    for id in [62, 64] {
         session.begin_user_download(FileId(id));
         session.media.downloads.save_to(id, to_folder());
     }
     session.abort_download(FileId(62));
-    session.media.downloads.end(63);
     session.apply_download_removed(64);
-    for id in [62, 63, 64] {
+    for id in [62, 64] {
         // The same file finishing later through another path.
         session.begin_user_download(FileId(id));
         session.upsert_file(doc_file(id, false, true), true);
     }
     assert!(!session.media.folder_saves.has_due());
+}
+
+#[test]
+fn a_download_that_stopped_and_resumed_is_still_copied() {
+    let (mut session, _sink) = session();
+    session.begin_user_download(FileId(63));
+    session.media.downloads.save_to(63, to_folder());
+    // TDLib's idle update before the list's pause event, then the resume.
+    session.upsert_file(doc_file(63, true, false), true);
+    session.upsert_file(doc_file(63, false, false), true);
+    assert!(session.media.downloads.is_failed(63));
+    session.media.downloads.adopt(63, false);
+    session.upsert_file(doc_file(63, false, true), true);
+    assert_eq!(session.media.folder_saves.take_due().len(), 1);
+}
+
+#[test]
+fn a_completion_from_the_download_list_queues_the_copy_too() {
+    let (mut session, _sink) = session();
+    session.upsert_file(doc_file(67, true, false), true);
+    session.begin_user_download(FileId(67));
+    session.media.downloads.save_to(67, to_folder());
+    // The file map already has the finished file when the list says so.
+    session.media.files.insert(doc_file(67, false, true));
+    session.queue_folder_save_from_map(67);
+    session.media.downloads.settle(67);
+    session.upsert_file(doc_file(67, false, true), true);
+    assert_eq!(session.media.folder_saves.take_due().len(), 1);
 }
 
 #[test]
