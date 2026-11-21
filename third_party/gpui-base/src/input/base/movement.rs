@@ -212,11 +212,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         let mut stop = (offset - line_start, trailing);
         let mut word: Option<Kind> = None;
         let mut moved = false;
-        loop {
-            let next = match line.horizontal_step(stop.0, stop.1, left) {
-                HorizontalStep::Stop(column, trailing) => (column, trailing),
-                HorizontalStep::Logical { .. } | HorizontalStep::Stay => break,
-            };
+        while let HorizontalStep::Stop(column, trailing) =
+            line.horizontal_step(stop.0, stop.1, left)
+        {
+            let next = (column, trailing);
             if line.crosses_rows(stop, next) {
                 // A soft wrap falls between words: a word already entered ends at the
                 // row's edge, else the step carries on from the next row.
