@@ -82,12 +82,14 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// direction change an offset has two places on screen, and the step starts from, and may
     /// land on, either of them.
     ///
-    /// Like Qt's visual cursor navigation (Telegram Desktop's input field), a caret in a
-    /// paragraph that holds right-to-left text follows the glyphs: it moves to the caret
-    /// stop next to it on screen, whatever the logical order there. At the visual edge of a
-    /// row it stays put, except at the logical end of the paragraph where it crosses into the
-    /// neighbouring paragraph the way the text flows. Plain left-to-right paragraphs step
-    /// logically, as always.
+    /// A caret in a paragraph that holds right-to-left text follows the glyphs, as AppKit
+    /// and browsers move it: to the caret stop next to it on screen, whatever the logical
+    /// order there. (Telegram Desktop keeps Qt's default logical movement, where Left is
+    /// forward in a right-to-left paragraph whatever run the caret is in; Quill moves
+    /// visually on purpose, see docs/decisions/rtl-sweep.md.) At the visual edge of a row
+    /// it enters the facing edge of the next or previous row; at the logical end of the
+    /// paragraph it crosses into the neighbouring paragraph the way the text flows. Plain
+    /// left-to-right paragraphs step logically, as always.
     pub(super) fn step_horizontally(
         &self,
         offset: usize,

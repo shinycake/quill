@@ -189,11 +189,13 @@ fn paint_inline_hint(
     let room = clip.right() - left;
     let mut line = shape(hint);
     if line.width > room {
-        // Elide at the field edge, as lib_ui does for a placeholder.
-        let mut kept: Vec<char> = hint.chars().collect();
+        // Elide at the field edge, as lib_ui does for a placeholder, a whole grapheme at a
+        // time so an emoji or a letter with its points is never cut.
+        let mut kept: Vec<&str> =
+            unicode_segmentation::UnicodeSegmentation::graphemes(hint, true).collect();
         while !kept.is_empty() {
             kept.pop();
-            let mut cut: String = kept.iter().collect();
+            let mut cut: String = kept.concat();
             cut.push('…');
             line = shape(&cut);
             if line.width <= room {

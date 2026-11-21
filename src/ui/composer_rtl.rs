@@ -2,8 +2,9 @@
 //! Telegram Desktop's `InputField` (Qt `QTextEdit` with
 //! `Qt::LayoutDirectionAuto`): each paragraph takes the direction of its first
 //! strong character, a Hebrew or Arabic paragraph is right-aligned, its caret
-//! starts at the right edge and advances leftwards, and left/right arrows
-//! follow the glyphs.
+//! starts at the right edge and advances leftwards. Left/right arrows follow
+//! the glyphs, as on AppKit; Qt's default is logical movement (see
+//! docs/decisions/rtl-sweep.md).
 //!
 //! The layout lives in the bidi-aware input engine (`third_party/gpui-base`,
 //! see `docs/decisions/codex-rtl-composer.md`); these tests drive the real
@@ -659,6 +660,89 @@ pub(super) mod tests {
                 .unwrap();
             });
         }
+    }
+
+    struct OneLine {
+        input: Entity<gpui_kit::component::input::InputState>,
+    }
+
+    impl Render for OneLine {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().p_4().child(
+                div()
+                    .id("field")
+                    .test_support()
+                    .w(px(300.))
+                    .child(gpui_kit::component::input::Input::new(&self.input)),
+            )
+        }
+    }
+
+    #[test]
+    fn a_one_line_field_lays_hebrew_out_right_to_left() {
+        let dispatcher = gpui_kit::TestDispatcher::new(0);
+        let mut cx = TestAppContext::build_with_text_system(
+            dispatcher,
+            None,
+            Arc::new(BidiTextSystem { base_rtl: None }),
+        );
+        cx.update(gpui_kit::init);
+        let slot = Rc::new(RefCell::new(None));
+        let handle = cx.open_window(size(px(640.), px(240.)), {
+            let slot = slot.clone();
+            move |window, cx| {
+                let input = cx.new(|cx| gpui_kit::component::input::InputState::new(window, cx));
+                *slot.borrow_mut() = Some(input.clone());
+                let view = cx.new(|_| OneLine { input });
+                Root::new(view, window, cx)
+            }
+        });
+        let input = slot.borrow().clone().expect("the field opened");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("field", cx);
+            for ch in "אבג".chars() {
+                type_char(window, ch, cx);
+            }
+            let caret_x = |cx: &gpui_kit::App| input.read(cx).caret_bounds().unwrap().left();
+            // The caret follows the newest letter, at the left end of the word.
+            let end = caret_x(cx);
+            window.press("right", cx);
+            window.render_frame(cx);
+            let middle = caret_x(cx);
+            assert!(middle > end, "Right goes back towards the word's start");
+            window.press("right", cx);
+            window.render_frame(cx);
+            window.press("right", cx);
+            window.render_frame(cx);
+            assert_eq!(input.read(cx).cursor(), 0);
+            let start = caret_x(cx);
+            assert!(start > middle);
+            // A right-to-left value is right-aligned: its start is at the field's right.
+            let field = window.find("field").bounds();
+            assert!(start > field.right() - px(40.), "{start:?} in {field:?}");
+            // Shift+Left selects one letter, drawn over that letter only.
+            window.press("shift-left", cx);
+            window.render_frame(cx);
+            assert_eq!(input.read(cx).selected_range(), 0..2);
+
+            // A value longer than the field scrolls so the caret stays in view, at either end.
+            input.update(cx, |state, cx| {
+                state.set_value("שלום ".repeat(20), window, cx)
+            });
+            window.render_frame(cx);
+            for key in ["end", "home", "end"] {
+                window.press(key, cx);
+                window.render_frame(cx);
+                let x = caret_x(cx);
+                assert!(
+                    x >= field.left() - px(1.) && x <= field.right() + px(1.),
+                    "{key}: caret at {x:?}, field {field:?}"
+                );
+            }
+        })
+        .unwrap();
+        cx.quit();
     }
 
     #[test]

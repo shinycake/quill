@@ -2886,6 +2886,32 @@ impl<M: InputModeKind> TextElement<M> {
         );
 
         if is_single_line {
+            // QUILL: a one-line field holding right-to-left text takes the same bidi layout
+            // as a paragraph of the multi-line input, so its caret, selection and arrows
+            // follow the glyphs and a right-to-left value is right-aligned (Telegram
+            // Desktop's single-line `InputField` is a `QTextEdit` and does the same).
+            if state.text.len() > 0 {
+                let line_text = display_text.to_string();
+                if let Some(paragraph) = Paragraph::analyze(&line_text) {
+                    let (row, has_bg) = Self::layout_bidi_row(
+                        &paragraph,
+                        &line_text,
+                        0..line_text.len(),
+                        0,
+                        runs,
+                        bg_segments,
+                        0,
+                        font_size,
+                        window,
+                    );
+                    let line_layout = LineLayout::new()
+                        .inline_lines(smallvec::smallvec![row])
+                        .rtl(paragraph.is_rtl())
+                        .with_background(has_bg)
+                        .with_whitespaces(whitespace_indicators);
+                    return vec![line_layout];
+                }
+            }
             let text: SharedString = display_text.to_string().into();
             let aligned_runs = align_runs_to_char_boundaries(&text, runs);
             let line_runs = aligned_runs.as_deref().unwrap_or(runs);
