@@ -31,8 +31,10 @@ pub(super) mod tests {
     /// back in *visual* order, runs of a right-to-left level reversed, every
     /// character `0.6 em` wide. gpui's own test text system lays characters
     /// out in typing order and so cannot show bidi at all. `base_rtl` forces
-    /// the paragraph direction (DirectWrite always lays out left to right:
-    /// `Some(false)`); `None` takes it from the first strong character.
+    /// the paragraph direction, as a platform that ignores the text does
+    /// (upstream DirectWrite always lays out left to right: `Some(false)`);
+    /// `None` takes it from the first strong character, as CoreText,
+    /// cosmic-text and Quill's DirectWrite backend do.
     pub(in crate::ui) struct BidiTextSystem {
         pub(in crate::ui) base_rtl: Option<bool>,
     }
@@ -329,9 +331,10 @@ pub(super) mod tests {
 
     #[test]
     fn layout_does_not_depend_on_the_platform_base_direction() {
-        // DirectWrite lays every line out left to right whatever it holds; the
-        // engine shapes single-direction runs, so the result must match the
-        // platforms that pick the direction from the text.
+        // A platform may lay every line out left to right whatever it holds
+        // (upstream DirectWrite does); the engine shapes single-direction runs,
+        // so the result must match the platforms that pick the direction from
+        // the text.
         let text = "שלום hello 123 עולם";
         let measure = |base: Option<bool>| {
             let out: Rc<RefCell<Vec<Pixels>>> = Rc::new(RefCell::new(Vec::new()));

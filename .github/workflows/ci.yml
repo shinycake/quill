@@ -339,10 +339,10 @@ jobs:
         run: >-
           cargo test --no-default-features --locked --lib --
           export::copy::tests::windows_ settings::tests::windows_ platform::tests::windows_
-      - name: tests (vendored GPUI timer and file picker)
+      - name: tests (vendored GPUI timer, file picker and DirectWrite text)
         run: >-
           cargo test -p gpui-pre-windows -p quill --lib --features quill/demo-capture --locked --
-          timer_thread::tests file_picker_tests
+          timer_thread::tests file_picker_tests direct_write::tests
 
   # The message-widget runtime on Windows (docs/decisions/message-widgets.md):
   # MSVC builds of QuickJS, litehtml and the sandbox, and Intl on the system

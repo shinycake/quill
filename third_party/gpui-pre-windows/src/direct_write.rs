@@ -416,8 +416,15 @@ impl DirectWriteState {
         font_size: Pixels,
         font_runs: &[FontRun],
     ) -> Result<LineLayout> {
+        // DirectWrite lays a paragraph out left to right unless told otherwise.
+        // cosmic-text and CoreText take the direction from the first strong
+        // character (UAX #9 P2/P3); do the same, or the space typed after a Hebrew
+        // word lands on its right and pushes the word leftward. The whole line
+        // takes one direction, separator segments included.
+        let rtl = unicode_bidi::get_base_direction(text) == unicode_bidi::Direction::Rtl;
         if !text.contains(is_line_separator) {
-            return self.layout_line_without_separators(components, text, font_size, font_runs);
+            return self
+                .layout_line_without_separators(components, text, font_size, font_runs, rtl);
         }
 
         // DirectWrite honors mandatory breaks even without wrapping. Keep each
@@ -431,6 +438,7 @@ impl DirectWriteState {
         let mut run_offset = 0;
         let mut text_offset = 0;
         let mut segment_runs = SmallVec::<[FontRun; 4]>::new();
+        let mut segments = SmallVec::<[(usize, LineLayout); 4]>::new();
         for segment in text.split_inclusive(is_line_separator) {
             segment_runs.clear();
             let mut remaining_bytes = segment.len();
@@ -453,8 +461,25 @@ impl DirectWriteState {
                 }
             }
 
-            let segment_layout =
-                self.layout_line_without_separators(components, segment, font_size, &segment_runs)?;
+            let segment_layout = self.layout_line_without_separators(
+                components,
+                segment,
+                font_size,
+                &segment_runs,
+                rtl,
+            )?;
+            layout.ascent = layout.ascent.max(segment_layout.ascent);
+            layout.descent = layout.descent.max(segment_layout.descent);
+            segments.push((text_offset, segment_layout));
+            text_offset += segment.len();
+        }
+
+        // A right-to-left line reads from its right edge: its first segment sits
+        // rightmost, so lay the segments side by side from the last one.
+        if rtl {
+            segments.reverse();
+        }
+        for (text_offset, segment_layout) in segments {
             for mut run in segment_layout.runs {
                 for glyph in &mut run.glyphs {
                     glyph.index += text_offset;
@@ -469,19 +494,19 @@ impl DirectWriteState {
                 }
             }
             layout.width += segment_layout.width;
-            layout.ascent = layout.ascent.max(segment_layout.ascent);
-            layout.descent = layout.descent.max(segment_layout.descent);
-            text_offset += segment.len();
         }
         Ok(layout)
     }
 
+    /// Lays out `text`, which holds no line or paragraph separator, as one line
+    /// reading right to left when `rtl` is set.
     fn layout_line_without_separators(
         &mut self,
         components: &DirectWriteComponents,
         text: &str,
         font_size: Pixels,
         font_runs: &[FontRun],
+        rtl: bool,
     ) -> Result<LineLayout> {
         if font_runs.is_empty() {
             return Ok(LineLayout {
@@ -494,11 +519,6 @@ impl DirectWriteState {
             self.layout_line_scratch.extend(text.encode_utf16());
             let text_wide = &*self.layout_line_scratch;
 
-            // DirectWrite lays a paragraph out left to right unless told otherwise.
-            // cosmic-text and CoreText take the direction from the first strong
-            // character (UAX #9 P2/P3); do the same, or the space typed after a Hebrew
-            // word lands on its right and pushes the word leftward.
-            let rtl = unicode_bidi::get_base_direction(text) == unicode_bidi::Direction::Rtl;
             let mut utf8_offset = 0usize;
             let mut utf16_offset = 0u32;
             let text_layout = {
@@ -522,19 +542,17 @@ impl DirectWriteState {
                 }
                 if rtl {
                     format.SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT)?;
-                    format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
                 }
 
-                // A right-to-left line starts at the right edge of its layout box, so an
-                // infinite box would put every run at x = inf. Without wrapping the box
-                // only anchors the line; runs are laid side by side from their order.
-                let max_width = if rtl { 0.0 } else { f32::INFINITY };
-                let layout = components.factory.CreateTextLayout(
-                    text_wide,
-                    &format,
-                    max_width,
-                    f32::INFINITY,
-                )?;
+                // The line never wraps, so the layout box only anchors it: a
+                // right-to-left line starts at the box's right edge, and an infinite
+                // box would put every run at x = inf. A zero-width box anchors both
+                // directions at x = 0; the runs are laid side by side after `Draw`.
+                format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+                let layout =
+                    components
+                        .factory
+                        .CreateTextLayout(text_wide, &format, 0.0, f32::INFINITY)?;
                 let current_text = &text[utf8_offset..(utf8_offset + first_run.len)];
                 utf8_offset += first_run.len;
                 let current_text_utf16_length = current_text.encode_utf16().count() as u32;
@@ -585,11 +603,12 @@ impl DirectWriteState {
                 break_ligatures = !break_ligatures;
             }
 
+            let utf8_offsets = utf8_offsets_by_utf16(text);
             let mut placed = Vec::new();
             let mut renderer_context = RendererContext {
                 text_system: self,
                 components,
-                index_converter: StringIndexConverter::new(text),
+                utf8_offsets: &utf8_offsets,
                 placed: &mut placed,
                 layout: &text_layout,
             };
@@ -601,7 +620,10 @@ impl DirectWriteState {
             )?;
 
             // Lay the runs side by side in the order DirectWrite placed them on the
-            // line, left to right, whatever order it drew them in.
+            // line, left to right, whatever order it drew them in. Its origins only
+            // give that order: the x positions come from the summed advances, so the
+            // runs abut exactly and the line starts at 0 and is as wide as they are,
+            // in either direction, as on cosmic-text and CoreText.
             placed.sort_by(|a: &PlacedRun, b: &PlacedRun| a.left.total_cmp(&b.left));
             let mut runs = Vec::with_capacity(placed.len());
             let mut x = 0.0f32;
@@ -1218,9 +1240,33 @@ impl TextRenderer {
 struct RendererContext<'t, 'a, 'b> {
     text_system: &'t mut DirectWriteState,
     components: &'a DirectWriteComponents,
-    index_converter: StringIndexConverter<'a>,
+    /// The byte offset in the line's text of every UTF-16 position, and of its end.
+    utf8_offsets: &'b [usize],
     placed: &'b mut Vec<PlacedRun>,
     layout: &'b IDWriteTextLayout,
+}
+
+impl RendererContext<'_, '_, '_> {
+    /// The byte offset in the line's text of UTF-16 position `utf16_ix`.
+    fn utf8_ix(&self, utf16_ix: usize) -> usize {
+        self.utf8_offsets
+            .get(utf16_ix)
+            .or(self.utf8_offsets.last())
+            .copied()
+            .unwrap_or(0)
+    }
+}
+
+/// For each UTF-16 position of `text`, the byte offset of the character it belongs
+/// to, then `text.len()` for the end. Built once per line, so runs can be looked up
+/// in whatever order DirectWrite draws them.
+fn utf8_offsets_by_utf16(text: &str) -> Vec<usize> {
+    let mut offsets = Vec::with_capacity(text.len() + 1);
+    for (index, character) in text.char_indices() {
+        offsets.extend(std::iter::repeat_n(index, character.len_utf16()));
+    }
+    offsets.push(text.len());
+    offsets
 }
 
 /// One run as `DrawGlyphRun` saw it: glyph x positions from the run's own left edge,
@@ -1404,8 +1450,7 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
         if let Some(text) = text {
             // Tabs have layout advances but no glyph advances. Keep invisible
             // glyphs so LineLayout can map their byte indices to caret positions.
-            let mut glyphs = Vec::new();
-            let mut run_advance = 0.0f32;
+            let mut tabs = Vec::new();
             for (offset, &character) in text.iter().enumerate() {
                 if character != u16::from(b'\t') {
                     continue;
@@ -1414,7 +1459,6 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                 let mut x = 0.0;
                 let mut y = 0.0;
                 let mut metrics = DWRITE_HIT_TEST_METRICS::default();
-                let mut space = 0;
                 unsafe {
                     context.layout.HitTestTextPosition(
                         position,
@@ -1423,18 +1467,39 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                         &mut y,
                         &mut metrics,
                     )?;
-                    font_face.GetGlyphIndices(&u32::from(b' '), 1, &mut space)?;
                 }
-                context
-                    .index_converter
-                    .advance_to_utf16_ix(position as usize);
+                tabs.push((position as usize, metrics.width));
+            }
+            let mut space = 0;
+            if !tabs.is_empty() {
+                unsafe { font_face.GetGlyphIndices(&u32::from(b' '), 1, &mut space)? };
+            }
+
+            // Tabs in a right-to-left line take its level (UAX #9 L1) and, like
+            // glyphs, advance leftward from the run's right edge: the first tab
+            // typed sits rightmost.
+            let rtl = glyphrun.bidiLevel % 2 == 1;
+            let run_advance: f32 = tabs.iter().map(|&(_, width)| width).sum();
+            let mut pen = if rtl { run_advance } else { 0.0 };
+            let mut glyphs = Vec::with_capacity(tabs.len());
+            for (position, width) in tabs {
+                let x = if rtl {
+                    pen -= width;
+                    pen
+                } else {
+                    let x = pen;
+                    pen += width;
+                    x
+                };
                 glyphs.push(ShapedGlyph {
                     id: GlyphId(u32::from(space)),
-                    position: point(px(run_advance), px(0.0)),
-                    index: context.index_converter.utf8_ix,
+                    position: point(px(x), px(0.0)),
+                    index: context.utf8_ix(position),
                     is_emoji: false,
                 });
-                run_advance += metrics.width;
+            }
+            if rtl {
+                glyphs.reverse();
             }
             if !glyphs.is_empty() {
                 context.placed.push(PlacedRun::new(
@@ -1490,14 +1555,18 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
             let mut glyph_idx = 0;
             let mut glyphs = Vec::with_capacity(glyph_count);
             for (cluster_utf16_len, cluster_glyph_count) in cluster_analyzer {
-                context.index_converter.advance_to_utf16_ix(utf16_idx);
+                let utf8_ix = context.utf8_ix(utf16_idx);
                 utf16_idx += cluster_utf16_len;
                 let cluster = glyph_idx..(glyph_idx + cluster_glyph_count);
                 let (Some(ids), Some(advances), Some(offsets)) = (
                     glyph_ids.get(cluster.clone()),
                     glyph_advances.get(cluster.clone()),
-                    glyph_offsets.get(cluster),
+                    glyph_offsets.get(cluster.clone()),
                 ) else {
+                    log::warn!(
+                        "DirectWrite cluster {cluster:?} lies past the run's {glyph_count} \
+                         glyphs; dropping the rest of the run"
+                    );
                     break;
                 };
                 for ((glyph_id, &advance), offset) in ids.iter().zip(advances).zip(offsets) {
@@ -1515,7 +1584,7 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                     glyphs.push(ShapedGlyph {
                         id,
                         position: point(px(x), px(-offset.ascenderOffset)),
-                        index: context.index_converter.utf8_ix,
+                        index: utf8_ix,
                         is_emoji,
                     });
                 }
@@ -1599,51 +1668,6 @@ unsafe fn slice_from_nullable<'a, T>(
         Ok(&[])
     } else {
         Ok(unsafe { std::slice::from_raw_parts(ptr, len) })
-    }
-}
-
-struct StringIndexConverter<'a> {
-    text: &'a str,
-    utf8_ix: usize,
-    utf16_ix: usize,
-}
-
-impl<'a> StringIndexConverter<'a> {
-    fn new(text: &'a str) -> Self {
-        Self {
-            text,
-            utf8_ix: 0,
-            utf16_ix: 0,
-        }
-    }
-
-    #[allow(dead_code)]
-    fn advance_to_utf8_ix(&mut self, utf8_target: usize) {
-        for (ix, c) in self.text[self.utf8_ix..].char_indices() {
-            if self.utf8_ix + ix >= utf8_target {
-                self.utf8_ix += ix;
-                return;
-            }
-            self.utf16_ix += c.len_utf16();
-        }
-        self.utf8_ix = self.text.len();
-    }
-
-    fn advance_to_utf16_ix(&mut self, utf16_target: usize) {
-        // DirectWrite draws a line's runs in visual order, which is not typing order
-        // once right-to-left text is involved: start over for a run that lies earlier.
-        if utf16_target < self.utf16_ix {
-            self.utf8_ix = 0;
-            self.utf16_ix = 0;
-        }
-        for (ix, c) in self.text[self.utf8_ix..].char_indices() {
-            if self.utf16_ix >= utf16_target {
-                self.utf8_ix += ix;
-                return;
-            }
-            self.utf16_ix += c.len_utf16();
-        }
-        self.utf8_ix = self.text.len();
     }
 }
 
@@ -1886,9 +1910,15 @@ mod tests {
     use super::DirectWriteTextSystem;
     use crate::direct_write::ClusterAnalyzer;
     use anyhow::Result;
-    use gpui::{Font, FontWeight, PlatformTextSystem, TextRun, TextSystem, WindowTextSystem, px};
+    use gpui::{
+        Font, FontWeight, Pixels, PlatformTextSystem, ShapedLine, TextRun, TextSystem,
+        WindowTextSystem, px,
+    };
     use std::sync::Arc;
-    use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_STRETCH_NORMAL, DWRITE_TEXT_METRICS};
+    use windows::Win32::Graphics::DirectWrite::{
+        DWRITE_FONT_STRETCH_NORMAL, DWRITE_READING_DIRECTION_RIGHT_TO_LEFT, DWRITE_TEXT_METRICS,
+        DWRITE_WORD_WRAPPING_NO_WRAP,
+    };
 
     #[test]
     fn tabs_preserve_native_advances_and_cursor() -> Result<()> {
@@ -1930,17 +1960,25 @@ mod tests {
                     "a\tb\tc",
                     "é\t𐐀\tz",
                     "a \tb  ",
-                    // Right-to-left text is placed visually, not at logical x offsets:
-                    // `right_to_left_runs_are_placed_in_visual_order` covers it.
+                    "אב",
+                    "aאבb",
+                    "a\tאב\tb",
+                    "א\t\tב",
                 ] {
+                    let rtl_line =
+                        unicode_bidi::get_base_direction(text) == unicode_bidi::Direction::Rtl;
                     let mut native_metrics = DWRITE_TEXT_METRICS::default();
                     unsafe {
                         let layout = platform_text_system.components.factory.CreateTextLayout(
                             &text.encode_utf16().collect::<Vec<_>>(),
                             &format,
-                            f32::INFINITY,
+                            if rtl_line { 0.0 } else { f32::INFINITY },
                             f32::INFINITY,
                         )?;
+                        if rtl_line {
+                            layout.SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT)?;
+                            layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+                        }
                         layout.GetMetrics(&mut native_metrics)?;
                     }
                     for split_runs in [false, true] {
@@ -1960,52 +1998,26 @@ mod tests {
                             }]
                         };
                         let shaped = text_system.shape_line(text.into(), font_size, &runs, None);
-                        let mut cursor = shaped.cursor();
-                        let mut expected_x = px(0.0);
-                        for (index, character) in text.char_indices() {
-                            let end = index + character.len_utf8();
-                            let expected_end = if character == '\t' {
-                                tab_interval * ((expected_x / tab_interval).floor() + 1.0)
-                            } else {
-                                let character_run = TextRun {
-                                    len: character.len_utf8(),
-                                    font: font.clone(),
-                                    ..Default::default()
-                                };
-                                expected_x
-                                    + text_system
-                                        .shape_line(
-                                            character.to_string().into(),
-                                            font_size,
-                                            &[character_run],
-                                            None,
-                                        )
-                                        .width
-                            };
-                            assert!(
-                                (shaped.x_for_index(index) - expected_x).abs() < px(0.001),
-                                "{family}, {font_size:?}, {text:?}, {split_runs}, index={index}: \
-                                 expected {expected_x:?}, got {:?}",
-                                shaped.x_for_index(index)
+                        if text.contains(is_right_to_left) {
+                            check_right_to_left_tabs(text, &shaped, rtl_line);
+                        } else {
+                            check_left_to_right_tabs(
+                                &text_system,
+                                text,
+                                &shaped,
+                                &font,
+                                font_size,
+                                tab_interval,
                             );
-                            assert_eq!(
-                                shaped.index_for_x(expected_x + px(0.01)),
-                                Some(index),
-                                "{family}, {text:?}, index={index}"
-                            );
-                            let piece = cursor.take_until(end);
-                            assert_eq!(piece.text.as_ref(), character.to_string());
-                            assert!(
-                                (piece.width - (expected_end - expected_x)).abs() < px(0.001),
-                                "{family}, {text:?}, index={index}"
-                            );
-                            expected_x = expected_end;
                         }
-                        assert!((shaped.width - expected_x).abs() < px(0.001));
                         assert!(
                             (shaped.width - px(native_metrics.widthIncludingTrailingWhitespace))
                                 .abs()
-                                < px(0.001)
+                                < px(0.001),
+                            "{family}, {font_size:?}, {text:?}, {split_runs}: width {:?}, \
+                             DirectWrite {}",
+                            shaped.width,
+                            native_metrics.widthIncludingTrailingWhitespace
                         );
                         assert_eq!(shaped.x_for_index(text.len()), shaped.width);
                     }
@@ -2015,53 +2027,172 @@ mod tests {
         Ok(())
     }
 
-    /// DirectWrite hands a right-to-left glyph run over in logical order, advancing
-    /// leftward from the run's right edge. Its glyphs must land at their visual x (the
-    /// first letter typed rightmost) and come out left to right, as on cosmic-text and
-    /// CoreText, or Hebrew and Arabic words read backwards.
-    #[test]
-    fn right_to_left_runs_are_placed_in_visual_order() -> Result<()> {
+    fn is_right_to_left(character: char) -> bool {
+        // Hebrew and Arabic.
+        ('\u{0590}'..='\u{08FF}').contains(&character)
+    }
+
+    /// Left-to-right text sits at logical x offsets: each character at the sum of
+    /// the advances before it, each tab out to the next tab stop.
+    fn check_left_to_right_tabs(
+        text_system: &WindowTextSystem,
+        text: &str,
+        shaped: &ShapedLine,
+        font: &Font,
+        font_size: Pixels,
+        tab_interval: Pixels,
+    ) {
+        let family = &font.family;
+        let mut cursor = shaped.cursor();
+        let mut expected_x = px(0.0);
+        for (index, character) in text.char_indices() {
+            let end = index + character.len_utf8();
+            let expected_end = if character == '\t' {
+                tab_interval * ((expected_x / tab_interval).floor() + 1.0)
+            } else {
+                let character_run = TextRun {
+                    len: character.len_utf8(),
+                    font: font.clone(),
+                    ..Default::default()
+                };
+                expected_x
+                    + text_system
+                        .shape_line(
+                            character.to_string().into(),
+                            font_size,
+                            &[character_run],
+                            None,
+                        )
+                        .width
+            };
+            assert!(
+                (shaped.x_for_index(index) - expected_x).abs() < px(0.001),
+                "{family}, {font_size:?}, {text:?}, index={index}: \
+                 expected {expected_x:?}, got {:?}",
+                shaped.x_for_index(index)
+            );
+            assert_eq!(
+                shaped.index_for_x(expected_x + px(0.01)),
+                Some(index),
+                "{family}, {text:?}, index={index}"
+            );
+            let piece = cursor.take_until(end);
+            assert_eq!(piece.text.as_ref(), character.to_string());
+            assert!(
+                (piece.width - (expected_end - expected_x)).abs() < px(0.001),
+                "{family}, {text:?}, index={index}"
+            );
+            expected_x = expected_end;
+        }
+        assert!((shaped.width - expected_x).abs() < px(0.001));
+    }
+
+    /// Right-to-left text is placed visually, not at logical x offsets, so check what
+    /// a caret needs: every character has one glyph with its own byte index, a hit test
+    /// at a glyph finds that glyph's index, and in a right-to-left line every character,
+    /// tabs included, sits left of the one typed before it (UAX #9 L1 gives the tabs the
+    /// line's level).
+    ///
+    /// The round trip goes through the glyphs rather than `x_for_index`, which returns
+    /// the first glyph in visual order whose index is at least the one asked for and so
+    /// assumes logical order.
+    fn check_right_to_left_tabs(text: &str, shaped: &ShapedLine, rtl_line: bool) {
+        let glyphs: Vec<_> = shaped.runs.iter().flat_map(|run| &run.glyphs).collect();
+        let mut indices: Vec<usize> = glyphs.iter().map(|glyph| glyph.index).collect();
+        indices.sort_unstable();
+        let characters: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
+        assert_eq!(indices, characters, "{text:?}: glyph byte indices");
+        assert_visual_order(text, shaped);
+        for glyph in &glyphs {
+            assert_eq!(
+                shaped.index_for_x(glyph.position.x + px(0.01)),
+                Some(glyph.index),
+                "{text:?}: hit test at the glyph for byte {}",
+                glyph.index
+            );
+        }
+        if rtl_line {
+            assert!(
+                glyphs.windows(2).all(|pair| pair[0].index > pair[1].index),
+                "{text:?}: a right-to-left line should run backwards in typing order, got {:?}",
+                glyphs.iter().map(|glyph| glyph.index).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// Shapes text in Segoe UI at 16px as one run, the way the UI shapes a label.
+    fn segoe_shaper() -> Result<impl Fn(&str) -> ShapedLine> {
         let platform_text_system = Arc::new(DirectWriteTextSystem::new()?);
         let text_system = WindowTextSystem::new(Arc::new(TextSystem::new(platform_text_system)));
         let font = Font {
             family: "Segoe UI".into(),
             ..Default::default()
         };
-        let font_size = px(16.0);
-        let is_hebrew = |character: char| ('\u{0590}'..='\u{05FF}').contains(&character);
-        for text in ["שלום", "אבג דהו", "abc שלום def", "שלום world"] {
+        Ok(move |text: &str| {
             let runs = [TextRun {
                 len: text.len(),
                 font: font.clone(),
                 ..Default::default()
             }];
-            let shaped = text_system.shape_line(text.into(), font_size, &runs, None);
-            let glyphs: Vec<_> = shaped.runs.iter().flat_map(|run| &run.glyphs).collect();
-            assert!(
-                glyphs
-                    .windows(2)
-                    .all(|pair| pair[0].position.x <= pair[1].position.x),
-                "{text:?}: glyphs not in visual order"
-            );
-            assert!(
-                glyphs.iter().all(|glyph| glyph.position.x >= px(-0.001)
-                    && glyph.position.x <= shaped.width + px(0.001)),
-                "{text:?}: glyph outside the line"
-            );
-            let x_of = |index: usize| {
-                glyphs
-                    .iter()
-                    .find(|glyph| glyph.index == index)
-                    .map(|glyph| glyph.position.x)
-            };
-            let hebrew: Vec<usize> = text
+            text_system.shape_line(text.to_owned().into(), px(16.0), &runs, None)
+        })
+    }
+
+    /// The glyphs come out left to right, as on cosmic-text and CoreText, and stay
+    /// inside the line.
+    fn assert_visual_order(text: &str, shaped: &ShapedLine) {
+        let glyphs: Vec<_> = shaped.runs.iter().flat_map(|run| &run.glyphs).collect();
+        assert!(
+            glyphs
+                .windows(2)
+                .all(|pair| pair[0].position.x <= pair[1].position.x),
+            "{text:?}: glyphs not in visual order"
+        );
+        assert!(
+            glyphs.iter().all(|glyph| glyph.position.x >= px(-0.001)
+                && glyph.position.x <= shaped.width + px(0.001)),
+            "{text:?}: glyph outside the line"
+        );
+    }
+
+    /// The x of the glyph for byte `index` of the line.
+    fn glyph_x(shaped: &ShapedLine, index: usize) -> Option<Pixels> {
+        shaped
+            .runs
+            .iter()
+            .flat_map(|run| &run.glyphs)
+            .find(|glyph| glyph.index == index)
+            .map(|glyph| glyph.position.x)
+    }
+
+    /// DirectWrite hands a right-to-left glyph run over in logical order, advancing
+    /// leftward from the run's right edge. Its glyphs must land at their visual x (the
+    /// first letter typed rightmost) and come out left to right, as on cosmic-text and
+    /// CoreText, or Hebrew and Arabic words read backwards. Arabic adds joining forms
+    /// and nonzero advance offsets, which Hebrew without points never has.
+    #[test]
+    fn right_to_left_runs_are_placed_in_visual_order() -> Result<()> {
+        let shape = segoe_shaper()?;
+        for text in [
+            "שלום",
+            "אבג דהו",
+            "abc שלום def",
+            "שלום world",
+            "مرحبا",
+            "abc مرحبا بك def",
+        ] {
+            let shaped = shape(text);
+            assert_visual_order(text, &shaped);
+            let letters: Vec<usize> = text
                 .char_indices()
-                .filter(|&(_, character)| is_hebrew(character))
+                .filter(|&(_, character)| is_right_to_left(character))
                 .map(|(index, _)| index)
                 .collect();
-            for pair in hebrew.windows(2) {
-                let (Some(first), Some(next)) = (x_of(pair[0]), x_of(pair[1])) else {
-                    panic!("{text:?}: no glyph for a Hebrew letter");
+            for pair in letters.windows(2) {
+                let (Some(first), Some(next)) =
+                    (glyph_x(&shaped, pair[0]), glyph_x(&shaped, pair[1]))
+                else {
+                    panic!("{text:?}: no glyph for a right-to-left letter");
                 };
                 assert!(
                     first > next,
@@ -2079,40 +2210,53 @@ mod tests {
     /// instead of pushing the word leftward.
     #[test]
     fn right_to_left_lines_keep_trailing_spaces_at_the_left() -> Result<()> {
-        let platform_text_system = Arc::new(DirectWriteTextSystem::new()?);
-        let text_system = WindowTextSystem::new(Arc::new(TextSystem::new(platform_text_system)));
-        let font = Font {
-            family: "Segoe UI".into(),
-            ..Default::default()
-        };
-        let font_size = px(16.0);
-        for text in ["שלום ", "שלום  ", "אבג דהו ", "123 שלום "] {
-            let runs = [TextRun {
-                len: text.len(),
-                font: font.clone(),
-                ..Default::default()
-            }];
-            let shaped = text_system.shape_line(text.into(), font_size, &runs, None);
-            let glyphs: Vec<_> = shaped.runs.iter().flat_map(|run| &run.glyphs).collect();
+        let shape = segoe_shaper()?;
+        for text in ["שלום ", "שלום  ", "אבג דהו ", "123 שלום ", "مرحبا "] {
+            let shaped = shape(text);
+            assert_visual_order(text, &shaped);
             let last_space = text.trim_end().len();
-            let Some(space) = glyphs.iter().find(|glyph| glyph.index == last_space) else {
+            let Some(space) = glyph_x(&shaped, last_space) else {
                 panic!("{text:?}: no glyph for the trailing space");
             };
-            for glyph in glyphs.iter().filter(|glyph| glyph.index < last_space) {
+            for glyph in shaped
+                .runs
+                .iter()
+                .flat_map(|run| &run.glyphs)
+                .filter(|glyph| glyph.index < last_space)
+            {
                 assert!(
-                    space.position.x < glyph.position.x,
-                    "{text:?}: trailing space at {:?} should sit left of byte {} at {:?}",
-                    space.position.x,
+                    space < glyph.position.x,
+                    "{text:?}: trailing space at {space:?} should sit left of byte {} at {:?}",
                     glyph.index,
                     glyph.position.x
                 );
             }
-            assert!(
-                glyphs
-                    .windows(2)
-                    .all(|pair| pair[0].position.x <= pair[1].position.x),
-                "{text:?}: glyphs not in visual order"
-            );
+        }
+        Ok(())
+    }
+
+    /// A right-to-left line split by a line or paragraph separator reads right to left
+    /// as a whole: the first segment sits rightmost, and every segment takes the line's
+    /// direction, not one of its own.
+    #[test]
+    fn right_to_left_lines_keep_separated_segments_in_order() -> Result<()> {
+        let shape = segoe_shaper()?;
+        for separator in ['\u{2028}', '\u{2029}'] {
+            for second in ["עולם", "123", "abc"] {
+                let text = format!("שלום{separator}{second}");
+                let shaped = shape(&text);
+                assert_visual_order(&text, &shaped);
+                let second_start = text.len() - second.len();
+                let (Some(first), Some(later)) =
+                    (glyph_x(&shaped, 0), glyph_x(&shaped, second_start))
+                else {
+                    panic!("{text:?}: no glyph for a segment's first character");
+                };
+                assert!(
+                    first > later,
+                    "{text:?}: the first segment should sit right of the second"
+                );
+            }
         }
         Ok(())
     }

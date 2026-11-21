@@ -12,10 +12,13 @@
 //! * runs of the other direction (digits, Latin words) are laid out inside the
 //!   paragraph in visual order, per rules L1/L2.
 //!
-//! GPUI's platform text systems disagree on the base direction of a line
-//! (CoreText and cosmic-text pick it from the first strong character,
-//! DirectWrite always lays out left-to-right) and none of them can say where a
-//! *logical* offset sits when a run is right-to-left. This module therefore
+//! GPUI's platform text systems pick the base direction of a line from its
+//! first strong character (CoreText, cosmic-text, and Quill's DirectWrite
+//! backend since third_party/gpui-pre-windows/QUILL-CHANGES.md; upstream
+//! DirectWrite always lays out left-to-right), so a line with no strong
+//! character, such as a lone space, has no direction of its own on any of
+//! them, and none of them can say where a *logical* offset sits when a run is
+//! right-to-left. This module therefore
 //! splits a visual line into runs of one embedding level, which the engine
 //! shapes one by one (a single-direction run shapes identically on every
 //! platform), places them in visual order itself, and maps caret offsets, hit
@@ -128,9 +131,10 @@ impl<'a> Paragraph<'a> {
     ///
     /// A right-to-left run is cut so that the neutral characters at its edges (spaces,
     /// punctuation, brackets) are runs of their own, one character each: shaped inside
-    /// the run they would take the direction the platform guesses for it (DirectWrite
-    /// always guesses left to right and puts a trailing space on the wrong side of the
-    /// word), shaped alone they cannot be misplaced.
+    /// the run they would take the direction the platform guesses for it (upstream
+    /// DirectWrite always guesses left to right and puts a trailing space on the wrong
+    /// side of the word), shaped alone they cannot be misplaced. A lone neutral has no
+    /// strong character, so no platform can give it a direction.
     pub(crate) fn visual_runs(&self, range: Range<usize>) -> Vec<VisualRun> {
         if range.is_empty() {
             return Vec::new();
