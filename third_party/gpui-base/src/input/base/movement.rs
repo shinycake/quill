@@ -3,6 +3,7 @@
 use crate::input::InputModeKind;
 use gpui::{Context, Pixels, Point, Window};
 use sum_tree::Bias;
+use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::input::display_map::HorizontalStep;
 use crate::input::{
@@ -169,25 +170,19 @@ impl<M: InputModeKind> InputBaseState<M> {
         (target, false)
     }
 
-    /// The word step on screen: spaces are passed over, then the characters of one kind (a
-    /// word or a run of punctuation). `None` when the caret cannot move on screen, or the
-    /// paragraph is not laid out with bidi runs.
+    /// The word step on screen: spaces are passed over, then one word or a run of
+    /// punctuation. Words are UAX #29 words, as for Alt+Backspace, so `צה"ל` or `don't` is
+    /// one step. `None` when the caret cannot move on screen, or the paragraph is not laid
+    /// out with bidi runs.
     fn visual_word_step(&self, offset: usize, trailing: bool, left: bool) -> Option<(usize, bool)> {
+        /// What the caret walks over: spaces, a run of punctuation, or the word that starts
+        /// at this paragraph offset.
         #[derive(PartialEq, Clone, Copy)]
         enum Kind {
             Space,
-            Word,
+            Word(usize),
             Other,
         }
-        let kind = |c: char| {
-            if c.is_whitespace() {
-                Kind::Space
-            } else if c.is_alphanumeric() || c == '_' {
-                Kind::Word
-            } else {
-                Kind::Other
-            }
-        };
         if self.masked {
             return None;
         }
@@ -195,6 +190,23 @@ impl<M: InputModeKind> InputBaseState<M> {
         if !line.has_bidi() {
             return None;
         }
+        let paragraph = self
+            .text
+            .slice(line_start..line_start + line.len())
+            .to_string();
+        let words: Vec<(usize, &str)> = paragraph.split_word_bound_indices().collect();
+        let kind = |at: usize, c: char| {
+            if c.is_whitespace() {
+                return Kind::Space;
+            }
+            let ix = words.partition_point(|(start, _)| *start <= at);
+            match ix.checked_sub(1).and_then(|ix| words.get(ix)) {
+                Some((start, word)) if word.chars().any(|c| c.is_alphanumeric() || c == '_') => {
+                    Kind::Word(*start)
+                }
+                _ => Kind::Other,
+            }
+        };
         let mut stop = (offset - line_start, trailing);
         let mut word: Option<Kind> = None;
         let mut moved = false;
@@ -213,8 +225,8 @@ impl<M: InputModeKind> InputBaseState<M> {
                 moved = true;
                 continue;
             }
-            if let Some(c) = line.char_between_stops(stop, next) {
-                match (word, kind(c)) {
+            if let Some((at, c)) = line.char_between_stops(stop, next) {
+                match (word, kind(at, c)) {
                     (None, Kind::Space) => {}
                     (None, k) => word = Some(k),
                     (Some(w), k) if w == k => {}

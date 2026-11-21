@@ -716,8 +716,8 @@ impl BidiLine {
     }
 
     /// The character the caret passes over going from x `a` to x `b` (any order): the first
-    /// character of the cluster that lies between them.
-    pub(crate) fn char_between(&self, a: f32, b: f32) -> Option<char> {
+    /// character of the cluster that lies between them, with the offset it starts at.
+    pub(crate) fn char_between(&self, a: f32, b: f32) -> Option<(usize, char)> {
         let mid = (a + b) / 2.;
         let f = self
             .fragments
@@ -733,6 +733,7 @@ impl BidiLine {
             .unwrap_or_default()
             .chars()
             .next()
+            .map(|c| (f.range.start + cluster.range.start, c))
     }
 }
 
@@ -1258,9 +1259,9 @@ mod tests {
     #[test]
     fn the_character_between_two_stops_is_the_one_in_the_gap() {
         let line = ab_hebrew();
-        assert_eq!(line.char_between(10., 20.), Some('b'));
-        assert_eq!(line.char_between(30., 40.), Some('ש'));
-        assert_eq!(line.char_between(20., 30.), Some('ג'));
+        assert_eq!(line.char_between(10., 20.).map(|(_, c)| c), Some('b'));
+        assert_eq!(line.char_between(30., 40.).map(|(_, c)| c), Some('ש'));
+        assert_eq!(line.char_between(20., 30.).map(|(_, c)| c), Some('ג'));
     }
 
     #[test]

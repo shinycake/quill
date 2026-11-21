@@ -1023,6 +1023,30 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn a_word_step_takes_acronyms_and_geresh_words_whole() {
+        let text = "שלום צה\"ל ג'ירפה";
+        let acronym = text.find("צה").unwrap();
+        let giraffe = text.find("ג'").unwrap();
+        with_composer(None, |cx, handle, input| {
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.click("composer", cx);
+                set_text(&input, text, window, cx);
+                park(&input, 0, window, cx);
+                let left = walk_keys(&input, WORD_LEFT, window, cx);
+                let offsets: Vec<_> = left.iter().map(|((o, _), _)| *o).collect();
+                assert_eq!(
+                    offsets,
+                    vec![0, "שלום".len(), acronym + "צה\"ל".len(), text.len()],
+                    "{left:?}"
+                );
+                assert!(giraffe > acronym);
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
     fn word_movement_follows_the_runs_of_a_mixed_paragraph() {
         // Visually, left to right: עולם  hello  שלום (a right-to-left paragraph).
         let text = "שלום hello עולם";

@@ -1182,17 +1182,19 @@ impl LineLayout {
     }
 
     /// Steps over the characters between two stops: the character the caret passes going
-    /// from `from` to `to`, both `(offset, trailing)` stops of this layout.
+    /// from `from` to `to`, both `(offset, trailing)` stops of this layout, with the
+    /// offset it starts at.
     pub(crate) fn char_between_stops(
         &self,
         from: (usize, bool),
         to: (usize, bool),
-    ) -> Option<char> {
+    ) -> Option<(usize, char)> {
         let (i, acc_len) = self.row_of_stop(from.0, from.1)?;
-        let line = &self.wrapped_lines[i];
+        let line = self.wrapped_lines.get(i)?;
         let a = line.stop_x(from.0 - acc_len, from.1);
         let b = line.stop_x(to.0.checked_sub(acc_len)?, to.1);
         line.char_between(a, b)
+            .map(|(offset, c)| (offset + acc_len, c))
     }
 
     /// Get the closest index for the given x in this line layout.
