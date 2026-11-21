@@ -543,3 +543,15 @@ still adds its total advance to the line width. The test
 `right_to_left_runs_are_placed_in_visual_order` checks Hebrew alone and mixed
 with Latin; the Hebrew cases left `tabs_preserve_native_advances_and_cursor`,
 which assumed logical x offsets.
+
+It also takes a line's direction from its first strong character (UAX #9
+P2/P3, `unicode_bidi::get_base_direction`, a new dependency in `Cargo.toml`),
+as cosmic-text and CoreText do: a right-to-left line gets
+`DWRITE_READING_DIRECTION_RIGHT_TO_LEFT` with no wrapping and a zero-width
+layout box (an infinite one would put every run at x = inf), so the space
+after a Hebrew word sits at its left end instead of its right.
+`DrawGlyphRun` records each run with the left edge DirectWrite gave it
+(`PlacedRun`), and the line lays the runs side by side in that order rather
+than the order they were drawn in; `StringIndexConverter` starts over when a
+run lies earlier in the text than the last one. Test:
+`right_to_left_lines_keep_trailing_spaces_at_the_left`.
