@@ -2695,7 +2695,7 @@ impl<M: InputModeKind> TextElement<M> {
         font_size: Pixels,
         window: &mut Window,
     ) -> (InputLine, bool) {
-        use crate::input::display_map::{Cluster, Fragment};
+        use crate::input::display_map::Fragment;
         let row_text: SharedString = line_text[range.clone()].to_string().into();
         let mut fragments = Vec::new();
         let mut shaped_lines = Vec::new();
@@ -2732,17 +2732,12 @@ impl<M: InputModeKind> TextElement<M> {
                 let text = &line_text[piece.start..piece.end.min(range.end)];
                 if let Some(width) = token_width {
                     let width_f = width.as_f32();
-                    fragments.push(Fragment::new(
+                    fragments.push(Fragment::atomic(
                         local,
                         run.rtl,
                         x.as_f32(),
                         width_f,
                         text.to_owned(),
-                        vec![Cluster {
-                            range: 0..text.len(),
-                            left: 0.,
-                            right: width_f,
-                        }],
                     ));
                     shaped_lines.push(None);
                     x += width;

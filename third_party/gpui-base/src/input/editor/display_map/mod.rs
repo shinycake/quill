@@ -12,9 +12,7 @@ mod bidi;
 /// about `BufferPoint ↔ DisplayPoint` mapping, without worrying about internal wrap/fold complexity.
 mod display_map;
 mod inline_line;
-pub(crate) use bidi::{
-    BidiLine, Cluster, Fragment, Paragraph, mirror_neutral_run, needs_bidi, starts_rtl,
-};
+pub(crate) use bidi::{BidiLine, Fragment, Paragraph, mirror_neutral_run, needs_bidi, starts_rtl};
 pub(crate) use inline_line::{InlineFragment, InputLine, fragment_from_shaped};
 mod fold_map;
 mod folding;
@@ -24,7 +22,7 @@ mod wrap_map;
 
 // Re-export public API
 pub use self::display_map::{DisplayMap, WrappingIndent};
-pub(crate) use self::text_wrapper::{LineLayout, LineWindow};
+pub(crate) use self::text_wrapper::{HorizontalStep, LineLayout, LineWindow};
 
 // Re-export FoldRange and extract_fold_ranges
 pub use folding::FoldRange;

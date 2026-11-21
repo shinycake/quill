@@ -579,6 +579,88 @@ pub(super) mod tests {
         });
     }
 
+    /// Presses `key` until the caret stops moving; returns every offset it visited.
+    fn walk(
+        input: &Entity<TextareaState>,
+        key: &str,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) -> Vec<usize> {
+        let mut visited = vec![input.read(cx).cursor()];
+        for _ in 0..400 {
+            window.press(key, cx);
+            window.render_frame(cx);
+            let at = input.read(cx).cursor();
+            if Some(&at) == visited.last() {
+                return visited;
+            }
+            visited.push(at);
+        }
+        panic!("{key} never stopped: {visited:?}");
+    }
+
+    #[test]
+    fn arrows_cross_the_rows_of_a_wrapped_paragraph() {
+        for text in ["שלום ".repeat(24), "hello שלום ".repeat(12)] {
+            with_composer(None, |cx, handle, input| {
+                cx.update_window(handle, |_, window, cx| {
+                    window.render_frame(cx);
+                    window.click("composer", cx);
+                    set_text(&input, &text, window, cx);
+                    let first = caret(&input, 0, cx);
+                    let last = caret(&input, text.len() - 1, cx);
+                    assert!(last.top() > first.top(), "the paragraph wrapped");
+
+                    // Forward through the whole paragraph, then back again.
+                    let (forward, back) = if text.starts_with('ש') {
+                        ("left", "right")
+                    } else {
+                        ("right", "left")
+                    };
+                    input.update(cx, |state, cx| state.set_selected_range(0..0, cx));
+                    window.render_frame(cx);
+                    let there = walk(&input, forward, window, cx);
+                    assert_eq!(there.last(), Some(&text.len()), "{text}: {there:?}");
+                    let back = walk(&input, back, window, cx);
+                    assert_eq!(back.last(), Some(&0), "{text}: {back:?}");
+                })
+                .unwrap();
+            });
+        }
+    }
+
+    #[test]
+    fn the_caret_never_stops_inside_an_emoji_or_a_letter_with_points() {
+        for text in [
+            "שלום 👍🏽 עולם",
+            "שלום 👨‍👩‍👧 עולם",
+            "שלום 🇮🇱 עולם",
+            "שָׁלוֹם עולם",
+            "hi ❤️ שלום",
+        ] {
+            with_composer(None, |cx, handle, input| {
+                cx.update_window(handle, |_, window, cx| {
+                    window.render_frame(cx);
+                    window.click("composer", cx);
+                    set_text(&input, text, window, cx);
+                    let graphemes: Vec<usize> =
+                        unicode_segmentation::UnicodeSegmentation::grapheme_indices(text, true)
+                            .map(|(at, _)| at)
+                            .chain([text.len()])
+                            .collect();
+                    input.update(cx, |state, cx| state.set_selected_range(0..0, cx));
+                    window.render_frame(cx);
+                    let mut visited = walk(&input, "left", window, cx);
+                    visited.extend(walk(&input, "right", window, cx));
+                    for at in visited {
+                        assert!(graphemes.contains(&at), "{text}: caret stopped at {at}");
+                    }
+                })
+                .unwrap();
+            });
+        }
+    }
+
     #[test]
     fn a_long_hebrew_paragraph_wraps_and_stays_right_aligned() {
         with_composer(None, |cx, handle, input| {

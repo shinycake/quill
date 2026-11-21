@@ -783,6 +783,18 @@ impl WrapDisplayPoint {
     }
 }
 
+/// Where one arrow-key step goes in a paragraph laid out with bidi runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HorizontalStep {
+    /// To this caret stop: an offset within the paragraph and its affinity.
+    Stop(usize, bool),
+    /// One grapheme forward or back in the text, into the neighbouring paragraph or along a
+    /// row drawn left to right.
+    Logical { forward: bool },
+    /// Nowhere: the caret is at the edge it can not leave that way.
+    Stay,
+}
+
 /// The layout info of a line with soft wrapped lines.
 pub(crate) struct LineLayout {
     /// Total bytes length of this line.
@@ -1085,21 +1097,65 @@ impl LineLayout {
         None
     }
 
-    /// The caret stop one step visually left (`left`) or right of the stop `(offset,
-    /// trailing)`, local byte indexes in this line layout. `trailing` is the caret affinity:
-    /// the caret hangs on the character before `offset` (the end of a wrapped row, or the other
-    /// side of a direction change). `None` when the visual row holding the stop has no bidi
-    /// content or the caret is already at its visual edge; the caller then steps logically.
-    pub(crate) fn visual_step(
+    /// One arrow-key step from the stop `(offset, trailing)` on screen, in a paragraph laid
+    /// out with bidi runs: the next stop on the same row, else the facing edge of the
+    /// neighbouring row the text flows to, the way the caret crosses a soft wrap in Qt.
+    pub(crate) fn horizontal_step(
         &self,
         offset: usize,
         trailing: bool,
         left: bool,
-    ) -> Option<(usize, bool)> {
-        let (i, acc_len) = self.row_of_stop(offset, trailing)?;
-        self.wrapped_lines[i]
-            .visual_step(offset - acc_len, trailing, left)
-            .map(|(ix, trailing)| (ix + acc_len, trailing))
+    ) -> HorizontalStep {
+        let Some((i, acc_len)) = self.row_of_stop(offset, trailing) else {
+            return HorizontalStep::Stay;
+        };
+        let Some(row) = self.wrapped_lines.get(i) else {
+            return HorizontalStep::Stay;
+        };
+        if !row.is_bidi() {
+            // A row without bidi runs is drawn left to right.
+            return HorizontalStep::Logical { forward: !left };
+        }
+        if let Some((ix, trailing)) = row.visual_step(offset - acc_len, trailing, left) {
+            return HorizontalStep::Stop(ix + acc_len, trailing);
+        }
+        // At the row's visual edge. The key points forward in the text when it points the
+        // way the paragraph reads.
+        let forward = left == self.is_rtl();
+        let neighbour = if forward {
+            Some(i + 1).filter(|next| *next < self.wrapped_lines.len())
+        } else {
+            i.checked_sub(1)
+        };
+        let Some(next) = neighbour else {
+            // The first or last laid-out row: only the logical end the key points at
+            // flows on into the neighbouring paragraph.
+            let at_end = if forward {
+                offset == self.len()
+            } else {
+                offset == self.first_offset()
+            };
+            return if at_end {
+                HorizontalStep::Logical { forward }
+            } else {
+                HorizontalStep::Stay
+            };
+        };
+        let next_start = if forward {
+            acc_len + row.len
+        } else {
+            acc_len - self.wrapped_lines.get(next).map_or(0, |row| row.len)
+        };
+        let Some(next_row) = self.wrapped_lines.get(next) else {
+            return HorizontalStep::Stay;
+        };
+        // Enter the row at the edge facing the one the caret left.
+        let edge = if left { px(f32::MAX) } else { px(f32::MIN) };
+        let (ix, trailing) = next_row.closest_stop_for_x(edge);
+        // The end of a row that is not the paragraph's last is the next row's start too;
+        // the caret hangs on this row's last character.
+        let trailing = trailing || (ix == next_row.len && !self.ends_line(next));
+        HorizontalStep::Stop(next_start + ix, trailing)
     }
 
     /// The row a caret stop is drawn on, with the offset the row starts at.
@@ -1118,6 +1174,11 @@ impl LineLayout {
             acc_len += line.len;
         }
         None
+    }
+
+    /// Whether two caret stops are drawn on different rows.
+    pub(crate) fn crosses_rows(&self, a: (usize, bool), b: (usize, bool)) -> bool {
+        self.row_of_stop(a.0, a.1).map(|(i, _)| i) != self.row_of_stop(b.0, b.1).map(|(i, _)| i)
     }
 
     /// Steps over the characters between two stops: the character the caret passes going

@@ -284,6 +284,73 @@ fn a_custom_emoji_in_an_arabic_paragraph_is_placed_and_crossed_in_visual_order()
     });
 }
 
+/// The caret's offset and where it is drawn: at a direction change one offset has two
+/// places.
+fn caret_stop(
+    input: &Entity<TextareaState>,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) -> (usize, Option<Pixels>) {
+    window.render_frame(cx);
+    let state = input.read(cx);
+    (state.cursor(), state.caret_bounds().map(|b| b.left()))
+}
+
+#[test]
+fn a_custom_emoji_with_any_fallback_is_one_step_in_a_right_to_left_paragraph() {
+    with_field(|cx, handle, input| {
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("composer", cx);
+            // Fallbacks of several code points, and one of two graphemes.
+            for fallback in ["❤️", "👍🏽", "🇮🇱", "👨‍👩‍👧", "😀😀"] {
+                for (text, forward) in [
+                    (format!("שלום {fallback} עולם"), "left"),
+                    (format!("hi {fallback} שלום"), "right"),
+                ] {
+                    let start = text.find(fallback).unwrap();
+                    let end = start + fallback.len();
+                    let d = doc(
+                        &text,
+                        vec![],
+                        vec![DocEmoji {
+                            range: start..end,
+                            custom_emoji_id: 9,
+                        }],
+                    );
+                    load(&input, &d, window, cx);
+                    // Walk the whole line one way and back: never a stop inside the
+                    // emoji, and the walk gets past it. (Where runs of two directions
+                    // meet, one place on screen is the stop of two offsets.)
+                    let back = if forward == "left" { "right" } else { "left" };
+                    park(&input, 0, window, cx);
+                    for key in [forward, back] {
+                        let mut here = caret_stop(&input, window, cx);
+                        let mut visited = vec![here.0];
+                        for _ in 0..100 {
+                            window.press(key, cx);
+                            let next = caret_stop(&input, window, cx);
+                            if next == here {
+                                break;
+                            }
+                            here = next;
+                            let at = here.0;
+                            assert!(at <= start || at >= end, "{text}: {key} stopped at {at}");
+                            visited.push(at);
+                        }
+                        assert!(
+                            visited.iter().any(|at| *at <= start)
+                                && visited.iter().any(|at| *at >= end),
+                            "{text}: {key} crosses the emoji: {visited:?}"
+                        );
+                    }
+                }
+            }
+        })
+        .unwrap();
+    });
+}
+
 #[test]
 fn a_mention_tag_survives_edits_around_and_inside_it() {
     with_field(|cx, handle, input| {

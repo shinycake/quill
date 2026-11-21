@@ -4,6 +4,7 @@ use crate::input::InputModeKind;
 use gpui::{Context, Pixels, Point, Window};
 use sum_tree::Bias;
 
+use crate::input::display_map::HorizontalStep;
 use crate::input::{
     InputBaseState, MoveDown, MoveEnd, MoveHome, MoveLeft, MovePageDown, MovePageUp, MoveRight,
     MoveToEnd, MoveToNextWord, MoveToPreviousWord, MoveToStart, MoveUp, RopeExt as _,
@@ -111,22 +112,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         if !line.has_bidi() {
             return logical(!left);
         }
-        let column = offset - line_start;
-        if let Some((column, trailing)) = line.visual_step(column, trailing, left) {
-            return (line_start + column, trailing);
-        }
-        // At the visual edge of the row: cross a paragraph boundary only from the logical
-        // end the arrow points at.
-        let forward = left == line.is_rtl();
-        let at_edge = if forward {
-            column == line.len()
-        } else {
-            column == 0
-        };
-        if at_edge {
-            logical(forward)
-        } else {
-            (offset, trailing)
+        match line.horizontal_step(offset - line_start, trailing, left) {
+            HorizontalStep::Stop(column, trailing) => (line_start + column, trailing),
+            HorizontalStep::Logical { forward } => logical(forward),
+            HorizontalStep::Stay => (offset, trailing),
         }
     }
 
@@ -209,7 +198,21 @@ impl<M: InputModeKind> InputBaseState<M> {
         let mut stop = (offset - line_start, trailing);
         let mut word: Option<Kind> = None;
         let mut moved = false;
-        while let Some(next) = line.visual_step(stop.0, stop.1, left) {
+        loop {
+            let next = match line.horizontal_step(stop.0, stop.1, left) {
+                HorizontalStep::Stop(column, trailing) => (column, trailing),
+                HorizontalStep::Logical { .. } | HorizontalStep::Stay => break,
+            };
+            if line.crosses_rows(stop, next) {
+                // A soft wrap falls between words: a word already entered ends at the
+                // row's edge, else the step carries on from the next row.
+                if word.is_some() {
+                    break;
+                }
+                stop = next;
+                moved = true;
+                continue;
+            }
             if let Some(c) = line.char_between_stops(stop, next) {
                 match (word, kind(c)) {
                     (None, Kind::Space) => {}
