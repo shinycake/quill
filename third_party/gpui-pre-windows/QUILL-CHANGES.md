@@ -559,7 +559,8 @@ run lies earlier in the text than the last one. Test:
 
 The RTL sweep (`docs/decisions/rtl-sweep.md`) changed it again in 2026:
 `layout_line` no longer splits a line at U+2028 or U+2029. They reach
-DirectWrite as spaces (one UTF-16 unit each, so indices still map back), and
+DirectWrite as zero-width spaces (no width, no direction, one UTF-16 unit each
+so indices still map back), and
 the line keeps one base direction, as on CoreText and cosmic-text; each piece
 used to take its own. The tab path of `DrawGlyphRun` mirrors the tabs of a
 right-to-left run like the glyph path does. `StringIndexConverter` steps back

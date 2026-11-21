@@ -31,7 +31,11 @@ const MESSAGES: &[(&str, bool, &[Entity])] = &[
     (
         "שלום קישור עולם",
         false,
-        &[Entity(5, 5, r#"{"@type":"textEntityTypeTextUrl","url":"https://example.com"}"#)],
+        &[Entity(
+            5,
+            5,
+            r#"{"@type":"textEntityTypeTextUrl","url":"https://example.com"}"#,
+        )],
     ),
     (
         "ברוכים הבאים @dana לקבוצה שלנו",

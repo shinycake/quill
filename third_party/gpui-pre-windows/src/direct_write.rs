@@ -416,7 +416,7 @@ impl DirectWriteState {
         font_size: Pixels,
         font_runs: &[FontRun],
     ) -> Result<LineLayout> {
-        // QUILL: U+2028 and U+2029 go to DirectWrite as spaces (see
+        // QUILL: U+2028 and U+2029 go to DirectWrite as zero-width spaces (see
         // `layout_line_without_separators`), so the line is one bidi paragraph with one
         // base direction, as on CoreText and cosmic-text.
         self.layout_line_without_separators(components, text, font_size, font_runs)
@@ -438,11 +438,12 @@ impl DirectWriteState {
         unsafe {
             self.layout_line_scratch.clear();
             // QUILL: DirectWrite breaks the line at U+2028 and U+2029 even without
-            // wrapping. Both are one UTF-16 unit, like the space that stands in for them,
-            // so glyph indices still map back to the text.
+            // wrapping. A zero-width space stands in for them: it takes no width, has
+            // no bidi direction of its own and is one UTF-16 unit like them, so glyph
+            // indices still map back to the text.
             self.layout_line_scratch
                 .extend(text.encode_utf16().map(|unit| match unit {
-                    0x2028 | 0x2029 => 0x20,
+                    0x2028 | 0x2029 => 0x200B,
                     unit => unit,
                 }));
             let text_wide = &*self.layout_line_scratch;

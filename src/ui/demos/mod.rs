@@ -5,7 +5,6 @@
 #![deny(clippy::indexing_slicing)]
 
 mod animated_emoji;
-mod rtl_text;
 mod bot_threads;
 mod bots_profile;
 mod chat_list;
@@ -34,6 +33,7 @@ mod privacy_media;
 mod profile_actions;
 pub(crate) mod profile_cover;
 pub(crate) mod reaction_fixtures;
+mod rtl_text;
 mod security;
 pub(crate) mod shared_media;
 mod shared_media_search;
