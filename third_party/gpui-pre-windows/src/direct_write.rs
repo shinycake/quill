@@ -494,6 +494,11 @@ impl DirectWriteState {
             self.layout_line_scratch.extend(text.encode_utf16());
             let text_wide = &*self.layout_line_scratch;
 
+            // DirectWrite lays a paragraph out left to right unless told otherwise.
+            // cosmic-text and CoreText take the direction from the first strong
+            // character (UAX #9 P2/P3); do the same, or the space typed after a Hebrew
+            // word lands on its right and pushes the word leftward.
+            let rtl = unicode_bidi::get_base_direction(text) == unicode_bidi::Direction::Rtl;
             let mut utf8_offset = 0usize;
             let mut utf16_offset = 0u32;
             let text_layout = {
@@ -515,11 +520,19 @@ impl DirectWriteState {
                 if let Some(ref fallbacks) = font_info.fallbacks {
                     format.SetFontFallback(fallbacks)?;
                 }
+                if rtl {
+                    format.SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT)?;
+                    format.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+                }
 
+                // A right-to-left line starts at the right edge of its layout box, so an
+                // infinite box would put every run at x = inf. Without wrapping the box
+                // only anchors the line; runs are laid side by side from their order.
+                let max_width = if rtl { 0.0 } else { f32::INFINITY };
                 let layout = components.factory.CreateTextLayout(
                     text_wide,
                     &format,
-                    f32::INFINITY,
+                    max_width,
                     f32::INFINITY,
                 )?;
                 let current_text = &text[utf8_offset..(utf8_offset + first_run.len)];
@@ -572,14 +585,13 @@ impl DirectWriteState {
                 break_ligatures = !break_ligatures;
             }
 
-            let mut runs = Vec::new();
+            let mut placed = Vec::new();
             let mut renderer_context = RendererContext {
                 text_system: self,
                 components,
                 index_converter: StringIndexConverter::new(text),
-                runs: &mut runs,
+                placed: &mut placed,
                 layout: &text_layout,
-                width: 0.0,
             };
             text_layout.Draw(
                 Some((&raw mut renderer_context).cast::<c_void>().cast_const()),
@@ -587,7 +599,25 @@ impl DirectWriteState {
                 0.0,
                 0.0,
             )?;
-            let width = px(renderer_context.width);
+
+            // Lay the runs side by side in the order DirectWrite placed them on the
+            // line, left to right, whatever order it drew them in.
+            placed.sort_by(|a: &PlacedRun, b: &PlacedRun| a.left.total_cmp(&b.left));
+            let mut runs = Vec::with_capacity(placed.len());
+            let mut x = 0.0f32;
+            for PlacedRun {
+                advance, mut run, ..
+            } in placed
+            {
+                for glyph in &mut run.glyphs {
+                    glyph.position.x += px(x);
+                }
+                x += advance;
+                if !run.glyphs.is_empty() {
+                    runs.push(run);
+                }
+            }
+            let width = px(x);
 
             Ok(LineLayout {
                 font_size,
@@ -1189,9 +1219,29 @@ struct RendererContext<'t, 'a, 'b> {
     text_system: &'t mut DirectWriteState,
     components: &'a DirectWriteComponents,
     index_converter: StringIndexConverter<'a>,
-    runs: &'b mut Vec<ShapedRun>,
+    placed: &'b mut Vec<PlacedRun>,
     layout: &'b IDWriteTextLayout,
-    width: f32,
+}
+
+/// One run as `DrawGlyphRun` saw it: glyph x positions from the run's own left edge,
+/// `left` where DirectWrite put that edge on the line, `advance` the run's width.
+struct PlacedRun {
+    left: f32,
+    advance: f32,
+    run: ShapedRun,
+}
+
+impl PlacedRun {
+    /// `origin_x` is DirectWrite's baseline origin: a right-to-left run (odd bidi
+    /// level) is drawn leftward from it, so its left edge is one advance before it.
+    fn new(origin_x: f32, bidi_level: u32, advance: f32, run: ShapedRun) -> Self {
+        let left = if bidi_level % 2 == 1 {
+            origin_x - advance
+        } else {
+            origin_x
+        };
+        PlacedRun { left, advance, run }
+    }
 }
 
 #[derive(Debug)]
@@ -1290,7 +1340,7 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
     fn DrawGlyphRun(
         &self,
         clientdrawingcontext: *const ::core::ffi::c_void,
-        _baselineoriginx: f32,
+        baselineoriginx: f32,
         _baselineoriginy: f32,
         _measuringmode: DWRITE_MEASURING_MODE,
         glyphrun: *const DWRITE_GLYPH_RUN,
@@ -1355,6 +1405,7 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
             // Tabs have layout advances but no glyph advances. Keep invisible
             // glyphs so LineLayout can map their byte indices to caret positions.
             let mut glyphs = Vec::new();
+            let mut run_advance = 0.0f32;
             for (offset, &character) in text.iter().enumerate() {
                 if character != u16::from(b'\t') {
                     continue;
@@ -1379,14 +1430,19 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                     .advance_to_utf16_ix(position as usize);
                 glyphs.push(ShapedGlyph {
                     id: GlyphId(u32::from(space)),
-                    position: point(px(context.width), px(0.0)),
+                    position: point(px(run_advance), px(0.0)),
                     index: context.index_converter.utf8_ix,
                     is_emoji: false,
                 });
-                context.width += metrics.width;
+                run_advance += metrics.width;
             }
             if !glyphs.is_empty() {
-                context.runs.push(ShapedRun { font_id, glyphs });
+                context.placed.push(PlacedRun::new(
+                    baselineoriginx,
+                    glyphrun.bidiLevel,
+                    run_advance,
+                    ShapedRun { font_id, glyphs },
+                ));
             }
         } else {
             let color_font = unsafe { font_face.IsColorFont().as_bool() };
@@ -1420,6 +1476,15 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                 )?
             };
 
+            // A right-to-left run (odd bidi level) lists its glyphs in logical order, and
+            // they advance leftward from the run's right edge; a positive advance offset
+            // moves a glyph leftward too. Place each glyph at its visual x from the run's
+            // left edge and emit the run in visual order, left to right, as cosmic-text and
+            // CoreText do.
+            let rtl = glyphrun.bidiLevel % 2 == 1;
+            let run_advance: f32 = glyph_advances.iter().sum();
+            let mut pen = if rtl { run_advance } else { 0.0 };
+
             let cluster_analyzer = ClusterAnalyzer::new(cluster_map, glyph_count);
             let mut utf16_idx = desc.textPosition as usize;
             let mut glyph_idx = 0;
@@ -1427,29 +1492,44 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
             for (cluster_utf16_len, cluster_glyph_count) in cluster_analyzer {
                 context.index_converter.advance_to_utf16_ix(utf16_idx);
                 utf16_idx += cluster_utf16_len;
-                for (cluster_glyph_idx, glyph_id) in glyph_ids
-                    [glyph_idx..(glyph_idx + cluster_glyph_count)]
-                    .iter()
-                    .enumerate()
-                {
+                let cluster = glyph_idx..(glyph_idx + cluster_glyph_count);
+                let (Some(ids), Some(advances), Some(offsets)) = (
+                    glyph_ids.get(cluster.clone()),
+                    glyph_advances.get(cluster.clone()),
+                    glyph_offsets.get(cluster),
+                ) else {
+                    break;
+                };
+                for ((glyph_id, &advance), offset) in ids.iter().zip(advances).zip(offsets) {
                     let id = GlyphId(*glyph_id as u32);
                     let is_emoji =
                         color_font && is_color_glyph(font_face, id, &context.components.factory);
-                    let this_glyph_idx = glyph_idx + cluster_glyph_idx;
+                    let x = if rtl {
+                        pen -= advance;
+                        pen - offset.advanceOffset
+                    } else {
+                        let x = pen + offset.advanceOffset;
+                        pen += advance;
+                        x
+                    };
                     glyphs.push(ShapedGlyph {
                         id,
-                        position: point(
-                            px(context.width + glyph_offsets[this_glyph_idx].advanceOffset),
-                            px(-glyph_offsets[this_glyph_idx].ascenderOffset),
-                        ),
+                        position: point(px(x), px(-offset.ascenderOffset)),
                         index: context.index_converter.utf8_ix,
                         is_emoji,
                     });
-                    context.width += glyph_advances[this_glyph_idx];
                 }
                 glyph_idx += cluster_glyph_count;
             }
-            context.runs.push(ShapedRun { font_id, glyphs });
+            if rtl {
+                glyphs.reverse();
+            }
+            context.placed.push(PlacedRun::new(
+                baselineoriginx,
+                glyphrun.bidiLevel,
+                run_advance,
+                ShapedRun { font_id, glyphs },
+            ));
         }
         Ok(())
     }
@@ -1550,6 +1630,12 @@ impl<'a> StringIndexConverter<'a> {
     }
 
     fn advance_to_utf16_ix(&mut self, utf16_target: usize) {
+        // DirectWrite draws a line's runs in visual order, which is not typing order
+        // once right-to-left text is involved: start over for a run that lies earlier.
+        if utf16_target < self.utf16_ix {
+            self.utf8_ix = 0;
+            self.utf16_ix = 0;
+        }
         for (ix, c) in self.text[self.utf8_ix..].char_indices() {
             if self.utf16_ix >= utf16_target {
                 self.utf8_ix += ix;
@@ -1844,9 +1930,8 @@ mod tests {
                     "a\tb\tc",
                     "é\t𐐀\tz",
                     "a \tb  ",
-                    "אב",
-                    "aאבb",
-                    "a\tאב\tb",
+                    // Right-to-left text is placed visually, not at logical x offsets:
+                    // `right_to_left_runs_are_placed_in_visual_order` covers it.
                 ] {
                     let mut native_metrics = DWRITE_TEXT_METRICS::default();
                     unsafe {
@@ -1926,6 +2011,108 @@ mod tests {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// DirectWrite hands a right-to-left glyph run over in logical order, advancing
+    /// leftward from the run's right edge. Its glyphs must land at their visual x (the
+    /// first letter typed rightmost) and come out left to right, as on cosmic-text and
+    /// CoreText, or Hebrew and Arabic words read backwards.
+    #[test]
+    fn right_to_left_runs_are_placed_in_visual_order() -> Result<()> {
+        let platform_text_system = Arc::new(DirectWriteTextSystem::new()?);
+        let text_system = WindowTextSystem::new(Arc::new(TextSystem::new(platform_text_system)));
+        let font = Font {
+            family: "Segoe UI".into(),
+            ..Default::default()
+        };
+        let font_size = px(16.0);
+        let is_hebrew = |character: char| ('\u{0590}'..='\u{05FF}').contains(&character);
+        for text in ["שלום", "אבג דהו", "abc שלום def", "שלום world"] {
+            let runs = [TextRun {
+                len: text.len(),
+                font: font.clone(),
+                ..Default::default()
+            }];
+            let shaped = text_system.shape_line(text.into(), font_size, &runs, None);
+            let glyphs: Vec<_> = shaped.runs.iter().flat_map(|run| &run.glyphs).collect();
+            assert!(
+                glyphs
+                    .windows(2)
+                    .all(|pair| pair[0].position.x <= pair[1].position.x),
+                "{text:?}: glyphs not in visual order"
+            );
+            assert!(
+                glyphs.iter().all(|glyph| glyph.position.x >= px(-0.001)
+                    && glyph.position.x <= shaped.width + px(0.001)),
+                "{text:?}: glyph outside the line"
+            );
+            let x_of = |index: usize| {
+                glyphs
+                    .iter()
+                    .find(|glyph| glyph.index == index)
+                    .map(|glyph| glyph.position.x)
+            };
+            let hebrew: Vec<usize> = text
+                .char_indices()
+                .filter(|&(_, character)| is_hebrew(character))
+                .map(|(index, _)| index)
+                .collect();
+            for pair in hebrew.windows(2) {
+                let (Some(first), Some(next)) = (x_of(pair[0]), x_of(pair[1])) else {
+                    panic!("{text:?}: no glyph for a Hebrew letter");
+                };
+                assert!(
+                    first > next,
+                    "{text:?}: letter at byte {} should sit right of byte {}",
+                    pair[0],
+                    pair[1]
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// A line whose first strong character is right to left reads right to left, as on
+    /// cosmic-text and CoreText: the space typed after a Hebrew word sits at its left end
+    /// instead of pushing the word leftward.
+    #[test]
+    fn right_to_left_lines_keep_trailing_spaces_at_the_left() -> Result<()> {
+        let platform_text_system = Arc::new(DirectWriteTextSystem::new()?);
+        let text_system = WindowTextSystem::new(Arc::new(TextSystem::new(platform_text_system)));
+        let font = Font {
+            family: "Segoe UI".into(),
+            ..Default::default()
+        };
+        let font_size = px(16.0);
+        for text in ["שלום ", "שלום  ", "אבג דהו ", "123 שלום "] {
+            let runs = [TextRun {
+                len: text.len(),
+                font: font.clone(),
+                ..Default::default()
+            }];
+            let shaped = text_system.shape_line(text.into(), font_size, &runs, None);
+            let glyphs: Vec<_> = shaped.runs.iter().flat_map(|run| &run.glyphs).collect();
+            let last_space = text.trim_end().len();
+            let Some(space) = glyphs.iter().find(|glyph| glyph.index == last_space) else {
+                panic!("{text:?}: no glyph for the trailing space");
+            };
+            for glyph in glyphs.iter().filter(|glyph| glyph.index < last_space) {
+                assert!(
+                    space.position.x < glyph.position.x,
+                    "{text:?}: trailing space at {:?} should sit left of byte {} at {:?}",
+                    space.position.x,
+                    glyph.index,
+                    glyph.position.x
+                );
+            }
+            assert!(
+                glyphs
+                    .windows(2)
+                    .all(|pair| pair[0].position.x <= pair[1].position.x),
+                "{text:?}: glyphs not in visual order"
+            );
         }
         Ok(())
     }
