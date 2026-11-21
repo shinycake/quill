@@ -565,6 +565,10 @@ the line keeps one base direction, as on CoreText and cosmic-text; each piece
 used to take its own. The tab path of `DrawGlyphRun` mirrors the tabs of a
 right-to-left run like the glyph path does. `StringIndexConverter` steps back
 to an earlier run instead of restarting at the line start, so a long mixed
-line converts in linear time. `shaping_text_system()` (in `gpui_windows.rs`)
+line converts in linear time. `layout_line` takes the line's runs and levels from UAX #9 (unicode-bidi) and
+has DirectWrite shape each single-direction run on its own: DirectWrite's bidi
+pass did not keep an isolate (FSI…PDI) apart from its neighbours, so a colon
+after an isolated Hebrew name was drawn left of it. The glyphs of each run are
+handed over left to right, a letter's points included. `shaping_text_system()` (in `gpui_windows.rs`)
 hands out the DirectWrite text system without a window for
 `crates/text-conformance`. CI now runs `direct_write::tests` too.

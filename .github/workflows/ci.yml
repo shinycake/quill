@@ -356,6 +356,8 @@ jobs:
       # DirectWrite and cosmic-text alike, and the input engine's own suite,
       # whose bidi tests never ran before. Every OS job runs both, unfiltered.
       - name: tests (text contract, input engine)
+        # bash stops at the first failing command; pwsh would run on past it.
+        shell: bash
         run: |
           cargo test -p quill-text-conformance --locked
           cargo test -p gpui-base --features test-support --lib --locked

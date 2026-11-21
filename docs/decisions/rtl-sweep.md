@@ -55,7 +55,10 @@ CI runs the suite and gpui-base's whole test suite on Linux
   the line's left end. UTF-16 index lookup steps back instead of restarting.
 - cosmic-text: glyphs are handed over left to right (cosmic lists a
   right-to-left line from its right end).
-- DirectWrite (on top of #1490): U+2028 and U+2029 go in as zero-width spaces, so a line
+- DirectWrite (on top of #1490): the runs and their levels come from UAX #9
+  (unicode-bidi) and DirectWrite shapes each single-direction run, because its
+  own bidi pass did not isolate FSI…PDI (a colon after an isolated Hebrew name
+  was drawn left of it). U+2028 and U+2029 go in as zero-width spaces, so a line
   keeps one base direction instead of splitting; tabs in a right-to-left run are
   mirrored like glyphs; index lookup steps back instead of restarting.
 - The input engine: an arrow key that arrives before the first layout (say,

@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     ffi::{c_uint, c_void},
     mem::ManuallyDrop,
+    ops::Range,
 };
 
 use anyhow::{Context, Result};
@@ -416,18 +417,76 @@ impl DirectWriteState {
         font_size: Pixels,
         font_runs: &[FontRun],
     ) -> Result<LineLayout> {
-        // QUILL: U+2028 and U+2029 go to DirectWrite as zero-width spaces (see
-        // `layout_line_without_separators`), so the line is one bidi paragraph with one
-        // base direction, as on CoreText and cosmic-text.
-        self.layout_line_without_separators(components, text, font_size, font_runs)
+        // QUILL: DirectWrite's own bidi pass does not keep an isolate (FSI…PDI) apart
+        // from the text around it: in `Dana \u{2068}דנה\u{2069}: 5` the colon was drawn
+        // left of the name. The runs and their levels come from UAX #9 instead
+        // (unicode-bidi, as the contract in crates/text-conformance checks), and
+        // DirectWrite shapes each single-direction run on its own, laid side by side in
+        // visual order.
+        let runs = visual_runs(text);
+        if runs.len() > 1 {
+            return self.layout_bidi_runs(components, text, font_size, font_runs, &runs);
+        }
+        let rtl = runs.first().is_some_and(|(_, level)| level % 2 == 1);
+        self.layout_line_without_separators(components, text, font_size, font_runs, rtl)
     }
 
+    /// Lays out `text` run by run: `runs` are its single-direction runs in visual order,
+    /// left to right, each a byte range and its UAX #9 level.
+    fn layout_bidi_runs(
+        &mut self,
+        components: &DirectWriteComponents,
+        text: &str,
+        font_size: Pixels,
+        font_runs: &[FontRun],
+        runs: &[(Range<usize>, u8)],
+    ) -> Result<LineLayout> {
+        let mut line = LineLayout {
+            font_size,
+            len: text.len(),
+            ..Default::default()
+        };
+        let mut x = px(0.);
+        for (range, level) in runs {
+            let Some(piece) = text.get(range.clone()) else {
+                continue;
+            };
+            let piece_runs = font_runs_in(font_runs, range.clone());
+            let laid_out = self.layout_line_without_separators(
+                components,
+                piece,
+                font_size,
+                &piece_runs,
+                level % 2 == 1,
+            )?;
+            for mut run in laid_out.runs {
+                for glyph in &mut run.glyphs {
+                    glyph.position.x += x;
+                    glyph.index += range.start;
+                }
+                line.runs.push(run);
+            }
+            x += laid_out.width;
+            if laid_out.ascent > line.ascent {
+                line.ascent = laid_out.ascent;
+            }
+            if laid_out.descent > line.descent {
+                line.descent = laid_out.descent;
+            }
+        }
+        line.width = x;
+        Ok(line)
+    }
+
+    /// Lays out `text` as one line with the base direction `rtl`. Holds no direction
+    /// change of its own when called for a run of [`Self::layout_bidi_runs`].
     fn layout_line_without_separators(
         &mut self,
         components: &DirectWriteComponents,
         text: &str,
         font_size: Pixels,
         font_runs: &[FontRun],
+        rtl: bool,
     ) -> Result<LineLayout> {
         if font_runs.is_empty() {
             return Ok(LineLayout {
@@ -448,11 +507,8 @@ impl DirectWriteState {
                 }));
             let text_wide = &*self.layout_line_scratch;
 
-            // DirectWrite lays a paragraph out left to right unless told otherwise.
-            // cosmic-text and CoreText take the direction from the first strong
-            // character (UAX #9 P2/P3); do the same, or the space typed after a Hebrew
-            // word lands on its right and pushes the word leftward.
-            let rtl = unicode_bidi::get_base_direction(text) == unicode_bidi::Direction::Rtl;
+            // DirectWrite lays a paragraph out left to right unless told otherwise; `rtl`
+            // is the direction UAX #9 gives the line or the run (see `layout_line`).
             let mut utf8_offset = 0usize;
             let mut utf16_offset = 0u32;
             let text_layout = {
@@ -566,6 +622,10 @@ impl DirectWriteState {
                 for glyph in &mut run.glyphs {
                     glyph.position.x += px(x);
                 }
+                // QUILL: the glyphs of one cluster (a letter and its points) can come in
+                // either order on screen; hand them over left to right like the rest.
+                run.glyphs
+                    .sort_by(|a, b| f32::from(a.position.x).total_cmp(&f32::from(b.position.x)));
                 x += advance;
                 if !run.glyphs.is_empty() {
                     runs.push(run);
@@ -1857,6 +1917,45 @@ fn is_color_glyph(
 
 const DEFAULT_LOCALE_NAME: PCWSTR = windows::core::w!("en-US");
 
+
+/// The single-direction runs of `text` in visual order, left to right, with their
+/// UAX #9 levels. U+2029 counts as a line separator, so the line is one paragraph.
+fn visual_runs(text: &str) -> Vec<(Range<usize>, u8)> {
+    let analysed: Cow<'_, str> = if text.contains('\u{2029}') {
+        text.replace('\u{2029}', "\u{2028}").into()
+    } else {
+        text.into()
+    };
+    let bidi = unicode_bidi::BidiInfo::new(&analysed, None);
+    let mut runs = Vec::new();
+    for paragraph in &bidi.paragraphs {
+        let (levels, visual) = bidi.visual_runs(paragraph, paragraph.range.clone());
+        for run in visual {
+            let level = levels.get(run.start).map_or(0, |level| level.number());
+            runs.push((run, level));
+        }
+    }
+    runs
+}
+
+/// The font runs that cover the bytes `range` of the line, cut to it.
+fn font_runs_in(font_runs: &[FontRun], range: Range<usize>) -> Vec<FontRun> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for run in font_runs {
+        let end = start + run.len;
+        let from = start.max(range.start);
+        let to = end.min(range.end);
+        if from < to {
+            out.push(FontRun {
+                len: to - from,
+                font_id: run.font_id,
+            });
+        }
+        start = end;
+    }
+    out
+}
 
 #[cfg(test)]
 mod tests {
