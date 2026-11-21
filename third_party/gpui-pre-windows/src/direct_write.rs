@@ -1420,6 +1420,19 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                 )?
             };
 
+            // A right-to-left run (odd bidi level) lists its glyphs in logical order, and
+            // they advance leftward from the run's right edge; a positive advance offset
+            // moves a glyph leftward too. Place each glyph at its visual x and emit the run
+            // in visual order, left to right, as cosmic-text and CoreText do.
+            let rtl = glyphrun.bidiLevel % 2 == 1;
+            let run_start = context.width;
+            let run_advance: f32 = glyph_advances.iter().sum();
+            let mut pen = if rtl {
+                run_start + run_advance
+            } else {
+                run_start
+            };
+
             let cluster_analyzer = ClusterAnalyzer::new(cluster_map, glyph_count);
             let mut utf16_idx = desc.textPosition as usize;
             let mut glyph_idx = 0;
@@ -1427,28 +1440,39 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
             for (cluster_utf16_len, cluster_glyph_count) in cluster_analyzer {
                 context.index_converter.advance_to_utf16_ix(utf16_idx);
                 utf16_idx += cluster_utf16_len;
-                for (cluster_glyph_idx, glyph_id) in glyph_ids
-                    [glyph_idx..(glyph_idx + cluster_glyph_count)]
-                    .iter()
-                    .enumerate()
-                {
+                let cluster = glyph_idx..(glyph_idx + cluster_glyph_count);
+                let (Some(ids), Some(advances), Some(offsets)) = (
+                    glyph_ids.get(cluster.clone()),
+                    glyph_advances.get(cluster.clone()),
+                    glyph_offsets.get(cluster),
+                ) else {
+                    break;
+                };
+                for ((glyph_id, &advance), offset) in ids.iter().zip(advances).zip(offsets) {
                     let id = GlyphId(*glyph_id as u32);
                     let is_emoji =
                         color_font && is_color_glyph(font_face, id, &context.components.factory);
-                    let this_glyph_idx = glyph_idx + cluster_glyph_idx;
+                    let x = if rtl {
+                        pen -= advance;
+                        pen - offset.advanceOffset
+                    } else {
+                        let x = pen + offset.advanceOffset;
+                        pen += advance;
+                        x
+                    };
                     glyphs.push(ShapedGlyph {
                         id,
-                        position: point(
-                            px(context.width + glyph_offsets[this_glyph_idx].advanceOffset),
-                            px(-glyph_offsets[this_glyph_idx].ascenderOffset),
-                        ),
+                        position: point(px(x), px(-offset.ascenderOffset)),
                         index: context.index_converter.utf8_ix,
                         is_emoji,
                     });
-                    context.width += glyph_advances[this_glyph_idx];
                 }
                 glyph_idx += cluster_glyph_count;
             }
+            if rtl {
+                glyphs.reverse();
+            }
+            context.width = run_start + run_advance;
             context.runs.push(ShapedRun { font_id, glyphs });
         }
         Ok(())
@@ -1844,9 +1868,8 @@ mod tests {
                     "a\tb\tc",
                     "é\t𐐀\tz",
                     "a \tb  ",
-                    "אב",
-                    "aאבb",
-                    "a\tאב\tb",
+                    // Right-to-left text is placed visually, not at logical x offsets:
+                    // `right_to_left_runs_are_placed_in_visual_order` covers it.
                 ] {
                     let mut native_metrics = DWRITE_TEXT_METRICS::default();
                     unsafe {
@@ -1925,6 +1948,65 @@ mod tests {
                         assert_eq!(shaped.x_for_index(text.len()), shaped.width);
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// DirectWrite hands a right-to-left glyph run over in logical order, advancing
+    /// leftward from the run's right edge. Its glyphs must land at their visual x (the
+    /// first letter typed rightmost) and come out left to right, as on cosmic-text and
+    /// CoreText, or Hebrew and Arabic words read backwards.
+    #[test]
+    fn right_to_left_runs_are_placed_in_visual_order() -> Result<()> {
+        let platform_text_system = Arc::new(DirectWriteTextSystem::new()?);
+        let text_system = WindowTextSystem::new(Arc::new(TextSystem::new(platform_text_system)));
+        let font = Font {
+            family: "Segoe UI".into(),
+            ..Default::default()
+        };
+        let font_size = px(16.0);
+        let is_hebrew = |character: char| ('\u{0590}'..='\u{05FF}').contains(&character);
+        for text in ["שלום", "אבג דהו", "abc שלום def", "שלום world"] {
+            let runs = [TextRun {
+                len: text.len(),
+                font: font.clone(),
+                ..Default::default()
+            }];
+            let shaped = text_system.shape_line(text.into(), font_size, &runs, None);
+            let glyphs: Vec<_> = shaped.runs.iter().flat_map(|run| &run.glyphs).collect();
+            assert!(
+                glyphs
+                    .windows(2)
+                    .all(|pair| pair[0].position.x <= pair[1].position.x),
+                "{text:?}: glyphs not in visual order"
+            );
+            assert!(
+                glyphs.iter().all(|glyph| glyph.position.x >= px(-0.001)
+                    && glyph.position.x <= shaped.width + px(0.001)),
+                "{text:?}: glyph outside the line"
+            );
+            let x_of = |index: usize| {
+                glyphs
+                    .iter()
+                    .find(|glyph| glyph.index == index)
+                    .map(|glyph| glyph.position.x)
+            };
+            let hebrew: Vec<usize> = text
+                .char_indices()
+                .filter(|&(_, character)| is_hebrew(character))
+                .map(|(index, _)| index)
+                .collect();
+            for pair in hebrew.windows(2) {
+                let (Some(first), Some(next)) = (x_of(pair[0]), x_of(pair[1])) else {
+                    panic!("{text:?}: no glyph for a Hebrew letter");
+                };
+                assert!(
+                    first > next,
+                    "{text:?}: letter at byte {} should sit right of byte {}",
+                    pair[0],
+                    pair[1]
+                );
             }
         }
         Ok(())
