@@ -163,3 +163,129 @@ pub fn clip_entities(entities: &[TextEntity], max_bytes: usize) -> Vec<TextEntit
         })
         .collect()
 }
+
+/// One piece of a chat-list preview line, in typing order: some text, or a
+/// picture (a custom emoji or emoji sprite) that reads as a neutral object.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewPiece<'a> {
+    Text(&'a str),
+    Picture,
+}
+
+/// Where a piece of [`visual_pieces`] comes from: the index of the typing-order
+/// piece, and for text the byte range of it that this visual run shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VisualPiece {
+    pub piece: usize,
+    pub text: Option<std::ops::Range<usize>>,
+}
+
+/// The pieces of a preview line from left to right, as UAX #9 orders them for
+/// the line's own direction (its first strong letter). A row of separate
+/// elements cannot reorder itself, so a Hebrew preview with a custom emoji
+/// drew its pieces in typing order, left to right, and read backwards. Text
+/// pieces are split where the embedding level changes, so each part is
+/// one direction and lays itself out correctly.
+pub fn visual_pieces(pieces: &[PreviewPiece<'_>]) -> Vec<VisualPiece> {
+    let mut line = String::new();
+    let mut spans = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        let start = line.len();
+        match piece {
+            // Line breaks read as spaces in a preview (one paragraph).
+            PreviewPiece::Text(text) => line.extend(text.chars().map(|c| match c {
+                '\n' | '\r' | '\u{2029}' | '\u{85}' | '\u{1C}'..='\u{1E}' => ' ',
+                c => c,
+            })),
+            PreviewPiece::Picture => line.push('\u{FFFC}'),
+        }
+        spans.push(start..line.len());
+    }
+    let info = unicode_bidi::BidiInfo::new(&line, None);
+    let Some(paragraph) = info.paragraphs.first() else {
+        return Vec::new();
+    };
+    let (levels, runs) = info.visual_runs(paragraph, paragraph.range.clone());
+    let mut out = Vec::new();
+    for run in runs {
+        let rtl = levels.get(run.start).is_some_and(|level| level.is_rtl());
+        let mut hits: Vec<VisualPiece> = spans
+            .iter()
+            .enumerate()
+            .filter_map(|(index, span)| {
+                let start = span.start.max(run.start);
+                let end = span.end.min(run.end);
+                (start < end).then(|| VisualPiece {
+                    piece: index,
+                    text: match pieces.get(index) {
+                        Some(PreviewPiece::Text(_)) => Some(start - span.start..end - span.start),
+                        _ => None,
+                    },
+                })
+            })
+            .collect();
+        if rtl {
+            hits.reverse();
+        }
+        out.extend(hits);
+    }
+    out
+}
+
+#[cfg(test)]
+mod visual_pieces_tests {
+    use super::{PreviewPiece as P, VisualPiece, visual_pieces};
+
+    fn order(pieces: &[P<'_>]) -> Vec<(usize, Option<String>)> {
+        visual_pieces(pieces)
+            .into_iter()
+            .map(|VisualPiece { piece, text }| {
+                let text = text.and_then(|range| match pieces.get(piece) {
+                    Some(P::Text(t)) => t.get(range).map(str::to_string),
+                    _ => None,
+                });
+                (piece, text)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_left_to_right_line_keeps_typing_order() {
+        let pieces = [P::Text("hi "), P::Picture, P::Text(" there")];
+        assert_eq!(
+            order(&pieces),
+            vec![
+                (0, Some("hi ".into())),
+                (1, None),
+                (2, Some(" there".into()))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_hebrew_line_puts_its_first_piece_on_the_right() {
+        let pieces = [P::Text("שלום "), P::Picture, P::Text(" לכולם")];
+        assert_eq!(
+            order(&pieces),
+            vec![
+                (2, Some(" לכולם".into())),
+                (1, None),
+                (0, Some("שלום ".into()))
+            ]
+        );
+    }
+
+    #[test]
+    fn an_english_word_in_a_hebrew_line_is_its_own_left_to_right_run() {
+        let pieces = [P::Text("קראתי את Dune "), P::Picture];
+        assert_eq!(
+            order(&pieces),
+            vec![
+                (1, None),
+                (0, Some(" ".into())),
+                (0, Some("Dune".into())),
+                (0, Some("קראתי את ".into()))
+            ]
+        );
+    }
+}

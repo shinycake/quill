@@ -67,9 +67,41 @@ CI runs the suite and gpui-base's whole test suite on Linux
 - gpui-pre-macos declares the `UNNotificationAttachment` feature it uses; it
   only compiled before because Quill turned that feature on.
 
+- The composer: a double-click selects the whole Hebrew or Arabic word (UAX #29
+  word boundaries replace the old character classes). The caret stops only on
+  grapheme boundaries, never inside an emoji or between a letter and its
+  points, and a custom emoji is one stop. Arrow keys cross the rows of a
+  wrapped paragraph by entering the facing edge of the next row, and a word
+  step keeps צה"ל and acronyms whole. A one-line field (search, rename) lays a
+  Hebrew value out right to left. A rich message's direction comes from its
+  first block with text, and an elided placeholder drops whole graphemes.
+- GPUI wrapping: a line whose glyphs are not in byte order breaks into rows in
+  typing order. Each row is shaped on its own in the paragraph's direction
+  (with an RLM or LRM in front when the row's own first letter would pick the
+  other one), and painting and hit tests go row by row. Before, a wrapped
+  Hebrew label broke the visual line, so its rows read bottom to top. The text
+  contract now checks wrapping on every backend.
+- The window layout stays left to right on every system (as in tdesktop, where
+  only an RTL language pack mirrors it). A Hebrew or Arabic macOS locale used
+  to mirror Quill's kit layout.
+- A chat-list preview with pictures in it (custom emoji, emoji sprites) is a
+  row of separate pieces, which drew in typing order, so a Hebrew preview read
+  backwards. A right-to-left line now places its pieces in UAX #9 visual order
+  (`chatlist_style::visual_pieces`), split where the direction changes, and its
+  logically last text is the one that shrinks to the ellipsis.
+- Names dropped into a sentence (service lines, the typing line, the sender
+  prefix a left-to-right chat-list preview draws on its own, pinned excerpts)
+  go inside a
+  first-strong isolate when they hold right-to-left letters, as tdesktop's
+  `WrapRtl` does, so a Hebrew name no longer pulls the colon, the "and" or
+  the quote marks beside it to its side. A right-to-left preview and a
+  notification body keep tdesktop's single "from: text" string, whose first
+  letter picks the line's direction.
+
 ## Still open
 
-The full register (backends B1–B18, composer C1–C14, display D1–D12) and the
-two follow-up PRs (composer and inputs; display surfaces) are tracked in the
-sweep's findings register. Owner decisions pending: arrow keys stay visual
-(tdesktop moves logically); chat-list previews follow tdesktop's left alignment.
+The full register (backends B1–B18, composer C1–C14, display D1–D12) is
+tracked in the sweep's findings register. Not done here: C10, C13 and C14 in
+the composer, and D5–D12 on display surfaces. Owner decisions
+pending: arrow keys stay visual (tdesktop moves logically); chat-list
+previews follow tdesktop's left alignment.

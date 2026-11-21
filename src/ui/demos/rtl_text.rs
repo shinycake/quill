@@ -5,7 +5,9 @@
 //! its own color and underline and whether every line reads the right way round.
 #![deny(clippy::indexing_slicing)]
 
+use super::animated_emoji::{CUSTOM_FILE, CUSTOM_IDS, custom_sticker};
 use crate::ui::app::QuillApp;
+use crate::ui::demo::{demo_file_json, demo_media_allowlist};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::telegram::client::copy_and_parse;
@@ -58,6 +60,17 @@ const MESSAGES: &[(&str, bool, &[Entity])] = &[
         false,
         &[Entity(87, 24, r#"{"@type":"textEntityTypeUrl"}"#)],
     ),
+    // The chat-list preview of a Hebrew line with a custom emoji in it: the
+    // pieces must read right to left (D3).
+    (
+        "שלום ⭐ לכולם",
+        false,
+        &[Entity(
+            5,
+            1,
+            r#"{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"8801"}"#,
+        )],
+    ),
 ];
 
 fn message_json(id: i64, text: &str, outgoing: bool, entities: &[Entity]) -> String {
@@ -68,7 +81,7 @@ fn message_json(id: i64, text: &str, outgoing: bool, entities: &[Entity]) -> Str
         })
         .collect();
     format!(
-        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{CHAT},"date":1760000000,"is_outgoing":{outgoing},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[{}]}}}}}}}}"#,
+        r#"{{"id":{id},"chat_id":{CHAT},"date":1760000000,"is_outgoing":{outgoing},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[{}]}}}}}}"#,
         entities.join(",")
     )
 }
@@ -81,8 +94,33 @@ impl QuillApp {
         self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
         let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
             self.demo_ui.sink.clone();
+        // The custom emoji's sticker file, shared with the animated-emoji demo.
+        let path = demo_media_allowlist().join("demo-sticker-60.tgs");
+        let file = format!(
+            r#"{{"@type":"updateFile","file":{}}}"#,
+            demo_file_json(CUSTOM_FILE, &path.to_string_lossy(), true)
+        );
+        if let Some(owned) = copy_and_parse(&file, &self.demo_ui.seq, &sink) {
+            session.apply(owned);
+        }
+        session.stickers.emoji.custom_emoji_stickers.update(|list| {
+            list.extend(CUSTOM_IDS.map(custom_sticker));
+        });
+        let mut last_message = None;
         for (id, (text, outgoing, entities)) in (FIRST_MESSAGE..).zip(MESSAGES) {
-            let json = message_json(id, text, *outgoing, entities);
+            let message = message_json(id, text, *outgoing, entities);
+            let json = format!(r#"{{"@type":"updateNewMessage","message":{message}}}"#);
+            if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
+                session.apply(owned);
+            }
+            last_message = Some(message);
+        }
+        // The chat-list row previews the last one (D3: a Hebrew line with a
+        // custom emoji).
+        if let Some(message) = last_message {
+            let json = format!(
+                r#"{{"@type":"updateChatLastMessage","chat_id":{CHAT},"last_message":{message},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"95","is_pinned":false}}]}}"#
+            );
             if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
                 session.apply(owned);
             }

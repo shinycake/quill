@@ -27,7 +27,7 @@ const CHAT: i64 = 11;
 /// The first message id; files take ids from 7_300.
 const FIRST_MESSAGE: i64 = 9_301;
 const HAND_FILE: i32 = 7_301;
-const CUSTOM_FILE: i32 = 7_302;
+pub(super) const CUSTOM_FILE: i32 = 7_302;
 
 /// A `sticker` for `file`, a custom emoji's when `custom_emoji_id` is set.
 fn sticker_json(file: i32, path: &str, emoji: &str, custom_emoji_id: Option<i64>) -> String {
@@ -70,9 +70,9 @@ fn custom_message_json(id: i64, ids: &[i64]) -> String {
 }
 
 /// The demo's custom emoji: one animated sticker under three ids.
-const CUSTOM_IDS: [i64; 3] = [8_801, 8_802, 8_803];
+pub(super) const CUSTOM_IDS: [i64; 3] = [8_801, 8_802, 8_803];
 
-fn custom_sticker(id: i64) -> StickerItem {
+pub(super) fn custom_sticker(id: i64) -> StickerItem {
     StickerItem {
         custom_emoji_id: Some(id),
         id,

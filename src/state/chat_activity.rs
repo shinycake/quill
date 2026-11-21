@@ -93,7 +93,7 @@ fn action_keys(action: ChatAction) -> Option<(Key, Key)> {
 /// where the sender's first name prefixes the action.
 pub fn activity_line(actions: &[SenderAction], named: bool) -> Option<ActivityLine> {
     let typers: Vec<&SenderAction> = actions.iter().filter(|a| is_typing(a.action)).collect();
-    let name_of = |a: &SenderAction| a.name.trim().to_string();
+    let name_of = |a: &SenderAction| crate::text::isolate(a.name.trim());
     if !typers.is_empty() {
         let text = match typers.as_slice() {
             [only] => {
@@ -170,6 +170,18 @@ mod tests {
         assert_eq!(
             text(&[act(1, ChatAction::RecordingVoice, "Dana")], false).as_deref(),
             Some("recording a voice message")
+        );
+    }
+
+    #[test]
+    fn a_hebrew_name_stays_on_its_own_side_of_the_and() {
+        let two = [
+            act(1, ChatAction::Typing, "דנה"),
+            act(2, ChatAction::Typing, "Eli"),
+        ];
+        assert_eq!(
+            text(&two, true).as_deref(),
+            Some("\u{2068}דנה\u{2069} and Eli are typing")
         );
     }
 

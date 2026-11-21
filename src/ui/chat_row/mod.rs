@@ -775,7 +775,9 @@ pub(super) fn session_chat_row(
                                                         } else {
                                                             accent().into()
                                                         })
-                                                        .child(format!("{sender}: ")),
+                                                        // Drawn on its own, so a Hebrew name keeps its colon
+                                                        // on the reading side (isolated, as tdesktop's WrapRtl).
+                                                        .child(format!("{}: ", quill::text::isolate(&sender))),
                                                 )
                                             },
                                         )
