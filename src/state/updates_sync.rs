@@ -335,6 +335,7 @@ impl Session {
         }
         if download.complete_date != 0 {
             self.media.downloads.record_finished(id);
+            self.queue_folder_save_from_map(id);
             self.media.downloads.forget(id);
         } else {
             self.media.downloads.adopt(id, download.is_paused);

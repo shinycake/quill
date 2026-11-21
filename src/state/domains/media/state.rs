@@ -34,6 +34,8 @@ pub struct MediaState {
     /// What was asked to download and how each request ended; the status
     /// rows show is `downloads.status(id, &files)`.
     pub downloads: DownloadIntents,
+    /// Documents to copy into the download folder once they finish.
+    pub folder_saves: FolderSaves,
     /// Avatar file id → number of chats showing it (chat-list photos),
     /// kept where those ids are set.
     pub(crate) avatar_file_refs: HashMap<i32, u32>,
@@ -195,6 +197,7 @@ impl MediaState {
             disk_search: DiskSearch::NotAsked,
             disk_resume_due: Vec::new(),
             downloads: DownloadIntents::default(),
+            folder_saves: FolderSaves::default(),
             avatar_file_refs: HashMap::new(),
             avatar_due: AvatarDue::Everything,
             avatar_claims: Default::default(),

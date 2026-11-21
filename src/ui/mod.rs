@@ -361,6 +361,7 @@ mod focus_return_tests;
 mod folder_extras;
 mod folder_glyphs;
 mod folder_picker_ui;
+mod folder_saves;
 mod folder_share;
 mod folder_tabs;
 mod folder_tabs_drag;

@@ -394,6 +394,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// [`Self::download_user_file`], and once it finishes copy the file to
+    /// `target` (`ui::folder_saves`). The target joins the file's user
+    /// download, the new one or one already running, and leaves with it.
+    pub fn download_user_file_to(
+        &mut self,
+        file_id: FileId,
+        origin: Option<(ChatId, i64)>,
+        target: crate::state::SaveTarget,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let sent = self.download_user_file(file_id, origin)?;
+        self.session.media.downloads.save_to(file_id.0, target);
+        Ok(sent)
+    }
+
     /// Applies one disk reading. A low disk holds automatic downloads and
     /// pauses the listed downloads that would not fit above close; a full
     /// one (a call holds the client open) has no room, so it pauses them

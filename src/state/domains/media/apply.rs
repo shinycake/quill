@@ -72,6 +72,7 @@ impl Session {
                 }
                 if complete_date != 0 {
                     self.record_completed_user_download(file_id);
+                    self.queue_folder_save_from_map(file_id);
                     self.unstick_download(file_id);
                 } else if self.media.downloads.is_user(file_id) {
                     self.media.downloads.set_paused(file_id, is_paused);

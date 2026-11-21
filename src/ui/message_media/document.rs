@@ -149,7 +149,6 @@ pub(in crate::ui) fn document_chip(
             cx,
         );
     }
-    let sponsored = origin.sponsored();
     let file_id = doc.file_id;
     let file = files.get(&file_id.0);
     let ready = file.and_then(|f| f.usable_path()).is_some();
@@ -213,7 +212,7 @@ pub(in crate::ui) fn document_chip(
         } else if downloading_now {
             this.cancel_media_download(file_id, cx);
         } else {
-            this.request_media_download(file_id, sponsored, cx);
+            this.request_document_download(file_id, origin, cx);
         }
     };
     let disc = div()
@@ -324,7 +323,7 @@ pub(in crate::ui) fn document_chip(
                             this.child(
                                 link(("doc-action", row_id), tr(keys::Q_MISC_RETRY)).on_click(
                                     cx.listener(move |this, _, _, cx| {
-                                        this.request_media_download(file_id, sponsored, cx);
+                                        this.request_document_download(file_id, origin, cx);
                                     }),
                                 ),
                             )

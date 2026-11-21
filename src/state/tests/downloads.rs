@@ -617,3 +617,114 @@ fn paused_download_survives_idle_file_updates_in_either_order() {
         assert!(!session.media.downloads.is_paused(31));
     }
 }
+
+fn doc_file(id: i32, active: bool, completed: bool) -> ParsedFile {
+    let path = if completed {
+        "/td/documents/report.pdf"
+    } else {
+        ""
+    };
+    ParsedFile {
+        id: FileId(id),
+        size: 100,
+        expected_size: 100,
+        local: LocalFileState::from_parts(
+            path,
+            true,
+            active,
+            completed,
+            if completed { 100 } else { 0 },
+        ),
+    }
+}
+
+fn to_folder() -> crate::state::SaveTarget {
+    crate::state::SaveTarget::Folder {
+        dir: std::path::PathBuf::from("/dl"),
+        name: "report.pdf".to_string(),
+    }
+}
+
+#[test]
+fn a_download_saved_to_the_folder_is_due_once_when_it_finishes() {
+    let (mut session, _sink) = session();
+    session.begin_user_download(FileId(61));
+    session.media.downloads.save_to(61, to_folder());
+    session.upsert_file(doc_file(61, true, false), true);
+    assert!(!session.media.folder_saves.has_due());
+    session.upsert_file(doc_file(61, false, true), true);
+    session.upsert_file(doc_file(61, false, true), true);
+    let due = session.media.folder_saves.take_due();
+    assert_eq!(due.len(), 1);
+    assert_eq!(
+        due.first().map(|d| d.source.clone()),
+        Some(std::path::PathBuf::from("/td/documents/report.pdf"))
+    );
+    // TDLib's copy stays: the row and the Recent list still see the file.
+    assert!(
+        session
+            .media
+            .downloads
+            .recent(&session.media.files)
+            .any(|id| id == 61)
+    );
+}
+
+#[test]
+fn a_cancelled_or_removed_download_copies_nothing_later() {
+    let (mut session, _sink) = session();
+    for id in [62, 64] {
+        session.begin_user_download(FileId(id));
+        session.media.downloads.save_to(id, to_folder());
+    }
+    session.abort_download(FileId(62));
+    session.apply_download_removed(64);
+    for id in [62, 64] {
+        // The same file finishing later through another path.
+        session.begin_user_download(FileId(id));
+        session.upsert_file(doc_file(id, false, true), true);
+    }
+    assert!(!session.media.folder_saves.has_due());
+}
+
+#[test]
+fn a_download_that_stopped_and_resumed_is_still_copied() {
+    let (mut session, _sink) = session();
+    session.begin_user_download(FileId(63));
+    session.media.downloads.save_to(63, to_folder());
+    // TDLib's idle update before the list's pause event, then the resume.
+    session.upsert_file(doc_file(63, true, false), true);
+    session.upsert_file(doc_file(63, false, false), true);
+    assert!(session.media.downloads.is_failed(63));
+    session.media.downloads.adopt(63, false);
+    session.upsert_file(doc_file(63, false, true), true);
+    assert_eq!(session.media.folder_saves.take_due().len(), 1);
+}
+
+#[test]
+fn a_completion_from_the_download_list_queues_the_copy_too() {
+    let (mut session, _sink) = session();
+    session.upsert_file(doc_file(67, true, false), true);
+    session.begin_user_download(FileId(67));
+    session.media.downloads.save_to(67, to_folder());
+    // The file map already has the finished file when the list says so.
+    session.media.files.insert(doc_file(67, false, true));
+    session.queue_folder_save_from_map(67);
+    session.media.downloads.settle(67);
+    session.upsert_file(doc_file(67, false, true), true);
+    assert_eq!(session.media.folder_saves.take_due().len(), 1);
+}
+
+#[test]
+fn a_target_needs_a_user_download_that_is_out() {
+    let (mut session, _sink) = session();
+    session.media.downloads.save_to(65, to_folder());
+    session
+        .media
+        .downloads
+        .begin(66, crate::state::DownloadOrigin::Auto);
+    session.media.downloads.save_to(66, to_folder());
+    session.upsert_file(doc_file(65, false, true), true);
+    session.upsert_file(doc_file(66, false, true), true);
+    assert!(!session.media.folder_saves.has_due());
+}

@@ -5,7 +5,7 @@
 //! ended. Status is computed from both, never stored.
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use super::FileMap;
+use super::{FileMap, SaveTarget};
 use crate::ids::ChatId;
 
 const RECENT_CAP: usize = 50;
@@ -95,6 +95,12 @@ pub struct DownloadIntents {
     /// the chat. Kept while the file has an intent or a place in
     /// `finished`.
     chats: HashMap<i32, (ChatId, i64)>,
+    /// Where the user wants a user download copied when it finishes
+    /// (`save_to`; `ui::folder_saves`). Kept while the file has a user
+    /// intent that is not cancelled (an end keeps it: TDLib's idle update
+    /// can come before a pause, and Retry resumes the same download);
+    /// `put` drops it on a cancel, a removal, another origin or `clear`.
+    targets: HashMap<i32, SaveTarget>,
 }
 
 impl DownloadIntents {
@@ -146,6 +152,11 @@ impl DownloadIntents {
                 self.entries.remove(&file_id)
             }
         };
+        let keeps_target = intent
+            .is_some_and(|new| new.origin == DownloadOrigin::User && new.phase != Phase::Cancelled);
+        if !keeps_target {
+            self.targets.remove(&file_id);
+        }
         if let Some(old) = old {
             if old.phase.is_out() {
                 self.requested = self.requested.saturating_sub(1);
@@ -171,6 +182,19 @@ impl DownloadIntents {
                 self.requested += 1;
             }
         }
+    }
+
+    /// Copy the requested user download `file_id` to `target` when it
+    /// finishes. Ignored unless that download is out.
+    pub fn save_to(&mut self, file_id: i32, target: SaveTarget) {
+        if self.is_user(file_id) {
+            self.targets.insert(file_id, target);
+        }
+    }
+
+    /// The file finished: where it is to be copied, if anywhere.
+    pub fn take_target(&mut self, file_id: i32) -> Option<SaveTarget> {
+        self.targets.remove(&file_id)
     }
 
     /// The request ended without completing. A user's cancel is not a
@@ -345,6 +369,7 @@ impl DownloadIntents {
         self.requested = 0;
         self.finished.clear();
         self.chats.clear();
+        self.targets.clear();
     }
 
     fn get(&self, file_id: i32) -> Option<&Intent> {

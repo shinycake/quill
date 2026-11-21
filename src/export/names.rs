@@ -62,7 +62,9 @@ fn truncate(s: &str, max_chars: usize, max_bytes: usize) -> &str {
 }
 
 /// A file name safe on every platform: path separators, control and
-/// reserved characters become `_`; leading dots and surrounding spaces go,
+/// reserved characters become `_`, as do the invisible format characters
+/// that reorder or hide text (`is_hidden_format`), so a sender cannot show
+/// `…exe.pdf` for an `.exe`; leading dots and surrounding spaces go,
 /// as do trailing dots and spaces (Windows drops them silently); Windows
 /// device names (`CON`, `NUL.txt`, `COM1`, …) get a `_` prefix. Long names
 /// are cut at 120 characters / 200 bytes on a char boundary, keeping the
@@ -71,7 +73,10 @@ pub fn sanitize(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| {
-            if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+            if c.is_control()
+                || is_hidden_format(c)
+                || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            {
                 '_'
             } else {
                 c
@@ -103,6 +108,16 @@ pub fn sanitize(name: &str) -> String {
         out.insert(0, '_');
     }
     out
+}
+
+/// Bidirectional controls: they change how a name reads (U+202E turns
+/// `fdp.exe` into `exe.pdf`) without being seen. Joiners (U+200C/D) stay:
+/// Persian words and emoji sequences need them.
+fn is_hidden_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+    )
 }
 
 /// A single, safe file-name component from a sender-controlled name: only
@@ -340,6 +355,13 @@ mod tests {
         // Case-insensitive file systems must not merge them either.
         let upper = media(MediaKind::File, "REPORT.PDF", "");
         assert_eq!(namer.path(&upper, 0, 0, ""), "files/REPORT (4).PDF");
+    }
+
+    #[test]
+    fn sanitize_shows_the_real_extension() {
+        assert_eq!(sanitize("invoice\u{202E}fdp.exe"), "invoice_fdp.exe");
+        assert_eq!(sanitize("a\u{2066}b\u{2069}.pdf"), "a_b_.pdf");
+        assert_eq!(sanitize("می\u{200C}خواهم.pdf"), "می\u{200C}خواهم.pdf");
     }
 
     #[test]

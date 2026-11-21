@@ -12,7 +12,6 @@ use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
 use quill::lang::{keys, tr, tr_with};
 use quill::platform::OsOpen;
-use std::path::PathBuf;
 
 /// Which list a downloads-manager row is in: one value, so a row is never
 /// both running and failed.
@@ -30,6 +29,18 @@ impl QuillApp {
         sponsored: Option<(ChatId, i64)>,
         cx: &mut Context<Self>,
     ) {
+        self.request_media_download_to(file_id, sponsored, None, cx);
+    }
+
+    /// [`Self::request_media_download`], copying the file to `target` once
+    /// it finishes (`ui::folder_saves`).
+    pub(super) fn request_media_download_to(
+        &mut self,
+        file_id: FileId,
+        sponsored: Option<(ChatId, i64)>,
+        target: Option<quill::state::SaveTarget>,
+        cx: &mut Context<Self>,
+    ) {
         if file_id.0 == 0 {
             return;
         }
@@ -37,7 +48,12 @@ impl QuillApp {
             self.click_sponsored_message(chat_id, message_id, true, cx);
         }
         if let Some(live) = self.live.as_mut() {
-            let result = live.driver.download_user_file(file_id, sponsored);
+            let result = match target {
+                Some(target) => live
+                    .driver
+                    .download_user_file_to(file_id, sponsored, target),
+                None => live.driver.download_user_file(file_id, sponsored),
+            };
             let note = match result {
                 Ok(Some(_)) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOADING)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_OPS_ALREADY_LOCAL_OR_IN_PROGRESS)),
@@ -81,11 +97,7 @@ impl QuillApp {
     /// MED3: open a fully-downloaded file with the system viewer
     /// (`platform::open_local_file` — `xdg-open` / `open`).
     pub(super) fn open_downloaded_file(&mut self, file_id: FileId, cx: &mut Context<Self>) {
-        let path: Option<PathBuf> = self
-            .session()
-            .and_then(|s| s.media.files.get(&file_id.0))
-            .and_then(|f| f.usable_path())
-            .map(PathBuf::from);
+        let path = self.document_local_path(file_id);
         match path {
             // B13: tdesktop asks before running executables, unknown types
             // and files that may reveal the IP address.
@@ -100,11 +112,7 @@ impl QuillApp {
     /// MED3: reveal a downloaded file in the file manager
     /// (`platform::reveal_in_file_manager`).
     pub(super) fn reveal_downloaded_file(&mut self, file_id: FileId, cx: &mut Context<Self>) {
-        let path: Option<PathBuf> = self
-            .session()
-            .and_then(|s| s.media.files.get(&file_id.0))
-            .and_then(|f| f.usable_path())
-            .map(PathBuf::from);
+        let path = self.document_local_path(file_id);
         let failure = tr(keys::Q_OPS_COULD_NOT_REVEAL_THE_FILE);
         match path {
             Some(path) => self.reveal_in_folder_or(&path, failure, cx),

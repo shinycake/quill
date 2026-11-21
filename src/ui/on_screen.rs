@@ -202,6 +202,8 @@ on_screen_fields! {
     links: super::links_state::LinkUi,
     /// The QR code box (`ui/peer_qr`).
     peer_qr: super::peer_qr::PeerQrUi,
+    /// Save dialogs and copies of downloaded documents (`ui/folder_saves.rs`).
+    folder_copies: super::folder_saves::FolderCopies,
     /// The profile cover's rating and last seen boxes (`ui/profile_cover`).
     profile_cover: super::profile_cover::ProfileCoverUi,
     /// The info cover's video profile photo (`ui/video_avatar`).
@@ -374,6 +376,7 @@ impl OnScreen {
             twofa: super::twofa_state::TwoStepUi::new(window, cx),
             links: super::links_state::LinkUi::new(),
             peer_qr: super::peer_qr::PeerQrUi::new(cx),
+            folder_copies: Default::default(),
             profile_cover: Default::default(),
             video_avatar: Default::default(),
             inline_bot: Default::default(),
