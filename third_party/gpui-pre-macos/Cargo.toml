@@ -274,6 +274,7 @@ features = [
     "std",
     "block2",
     "UNNotification",
+    "UNNotificationAttachment",
     "UNNotificationAction",
     "UNNotificationCategory",
     "UNNotificationContent",

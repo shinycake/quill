@@ -1726,7 +1726,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             .value_memo
             .take()
             .unwrap_or_else(|| SharedString::new(self.text.to_string()));
-        debug_assert!(self.text == value.as_ref(), "a text edit kept the old value");
+        debug_assert!(
+            self.text == value.as_ref(),
+            "a text edit kept the old value"
+        );
         self.value_memo.set(Some(value.clone()));
         value
     }
@@ -4485,10 +4488,15 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub fn caret_bounds(&self) -> Option<Bounds<Pixels>> {
         let last_layout = self.last_layout.as_ref()?;
         let last_bounds = self.last_bounds?;
-        let (_, _, pos) =
-            self.line_and_position_for_offset_with_affinity(self.cursor(), self.cursor_line_end_affinity);
+        let (_, _, pos) = self.line_and_position_for_offset_with_affinity(
+            self.cursor(),
+            self.cursor_line_end_affinity,
+        );
         let pos = last_bounds.origin + pos?;
-        Some(Bounds::new(pos, gpui::size(px(0.), last_layout.line_height)))
+        Some(Bounds::new(
+            pos,
+            gpui::size(px(0.), last_layout.line_height),
+        ))
     }
 
     /// Whether the caret hangs on the character before its offset: at the end of a soft
@@ -10860,7 +10868,8 @@ mod tests {
         // The focus observer restarts the blink once the focus lands.
         cx.run_until_parked();
         cx.update(|_, cx| {
-            view.input.update(cx, |state, cx| state.pause_blink_cursor(cx));
+            view.input
+                .update(cx, |state, cx| state.pause_blink_cursor(cx));
         });
         cx.run_until_parked();
         cx.executor()
@@ -10953,9 +10962,7 @@ mod tests {
     /// deactivated with the menu open stopped the blink no more, and the
     /// inactive window, which never shows the caret, repainted twice a second.
     #[gpui::test]
-    fn an_open_completion_menu_does_not_blink_the_caret_in_the_background(
-        cx: &mut TestAppContext,
-    ) {
+    fn an_open_completion_menu_does_not_blink_the_caret_in_the_background(cx: &mut TestAppContext) {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         cx.update(|window, cx| {
@@ -10968,17 +10975,28 @@ mod tests {
         assert!(caret_repaints(&view.input, &mut cx) >= 5, "it blinks");
 
         cx.deactivate_window();
-        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "no blink while inactive");
+        assert_eq!(
+            caret_repaints(&view.input, &mut cx),
+            0,
+            "no blink while inactive"
+        );
         view.input.read_with(&cx, |state, cx| {
             assert!(state.is_context_menu_open(cx), "the menu stays open");
         });
 
         cx.update(|window, _| window.activate_window());
         cx.run_until_parked();
-        assert!(caret_repaints(&view.input, &mut cx) >= 5, "it blinks once active");
-        view.input.update(&mut cx, |state, cx| state.hide_context_menu(cx));
+        assert!(
+            caret_repaints(&view.input, &mut cx) >= 5,
+            "it blinks once active"
+        );
+        view.input
+            .update(&mut cx, |state, cx| state.hide_context_menu(cx));
         cx.run_until_parked();
-        assert!(caret_repaints(&view.input, &mut cx) >= 5, "and after the menu closes");
+        assert!(
+            caret_repaints(&view.input, &mut cx) >= 5,
+            "and after the menu closes"
+        );
     }
 
     /// QUILL: a field that loses its focus while the completion menu is open
@@ -11003,13 +11021,18 @@ mod tests {
             "the menu keeps the caret blinking"
         );
 
-        view.input.update(&mut cx, |state, cx| state.hide_context_menu(cx));
+        view.input
+            .update(&mut cx, |state, cx| state.hide_context_menu(cx));
         cx.run_until_parked();
         // The next blink finds nothing to show and stops.
         cx.executor()
             .advance_clock(std::time::Duration::from_millis(500));
         cx.run_until_parked();
-        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "no blink left behind");
+        assert_eq!(
+            caret_repaints(&view.input, &mut cx),
+            0,
+            "no blink left behind"
+        );
     }
 
     /// QUILL: a field drawn in another window than the one it was made in
@@ -11039,17 +11062,28 @@ mod tests {
         assert!(caret_repaints(&view.input, &mut cx) >= 5, "it blinks");
 
         cx.deactivate_window();
-        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "not behind another app");
+        assert_eq!(
+            caret_repaints(&view.input, &mut cx),
+            0,
+            "not behind another app"
+        );
 
         cx.update(|window, _| window.activate_window());
         cx.run_until_parked();
         let shown = cx.update(|window, cx| view.input.read(cx).show_cursor(window, cx));
         assert!(shown, "the caret is back with its window");
-        assert!(caret_repaints(&view.input, &mut cx) >= 5, "and blinks again");
+        assert!(
+            caret_repaints(&view.input, &mut cx) >= 5,
+            "and blinks again"
+        );
 
         cx.update(|window, cx| window.blur(cx));
         cx.run_until_parked();
-        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "not once it loses its focus");
+        assert_eq!(
+            caret_repaints(&view.input, &mut cx),
+            0,
+            "not once it loses its focus"
+        );
     }
 
     #[gpui::test]
@@ -13101,10 +13135,15 @@ mod tests {
         });
         assert_eq!(selection(&mut cx).2, text.find(' ').unwrap());
 
-        // Left to right keeps the logical meaning.
+        // QUILL: the paragraph's own direction decides, not the layout direction, so a
+        // right-to-left paragraph in a left-to-right window still steps toward its start.
+        // Nothing has been drawn here, so this also covers the step before the first layout.
         cx.update(|_, cx| crate::LayoutDirection::Ltr.set_global(cx));
         place(&mut cx, 4);
         cx.update(|window, cx| input.update(cx, |s, cx| s.right(&MoveRight, window, cx)));
+        assert_eq!(selection(&mut cx).2, 2);
+        place(&mut cx, 4);
+        cx.update(|window, cx| input.update(cx, |s, cx| s.left(&MoveLeft, window, cx)));
         assert_eq!(selection(&mut cx).2, 6);
     }
 

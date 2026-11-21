@@ -29,10 +29,10 @@ pub(super) mod tests {
 
     /// A text system that shapes like CoreText and cosmic-text do: glyphs come
     /// back in *visual* order, runs of a right-to-left level reversed, every
-    /// character `0.6 em` wide. gpui's own test text system lays characters
-    /// out in typing order and so cannot show bidi at all. `base_rtl` forces
-    /// the paragraph direction (DirectWrite always lays out left to right:
-    /// `Some(false)`); `None` takes it from the first strong character.
+    /// character `0.6 em` wide, and records what it shapes. `base_rtl` forces
+    /// the paragraph direction (`Some(false)` is how DirectWrite laid lines out
+    /// before it took the first strong character, kept as a regression mode);
+    /// `None` takes it from the first strong character.
     pub(in crate::ui) struct BidiTextSystem {
         pub(in crate::ui) base_rtl: Option<bool>,
     }

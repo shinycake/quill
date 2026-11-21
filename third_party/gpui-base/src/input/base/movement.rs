@@ -37,7 +37,10 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     /// The laid-out paragraph `offset` is in, with the byte offset of its start.
-    fn laid_out_paragraph(&self, offset: usize) -> Option<(&crate::input::display_map::LineLayout, usize)> {
+    fn laid_out_paragraph(
+        &self,
+        offset: usize,
+    ) -> Option<(&crate::input::display_map::LineLayout, usize)> {
         let last_layout = self.last_layout.as_ref()?;
         let row = self.text.offset_to_point(offset).row;
         let line_start = self.text.line_start_offset(row);
@@ -50,10 +53,26 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Whether the paragraph at `offset` has a right-to-left base direction, which swaps what
     /// the arrow keys mean: Left moves visually left, so logically forward.
     pub(super) fn is_rtl_paragraph_at(&self, offset: usize) -> bool {
-        self.last_layout
+        let row = self.text.offset_to_point(offset).row;
+        match self
+            .last_layout
             .as_ref()
-            .and_then(|layout| layout.line(self.text.offset_to_point(offset).row))
-            .is_some_and(|line| line.is_rtl())
+            .and_then(|layout| layout.line(row))
+        {
+            Some(line) => line.is_rtl(),
+            None => self.text_starts_rtl(row),
+        }
+    }
+
+    /// The base direction of buffer line `row` read from its text (UAX #9 P2/P3), for a
+    /// line that has not been laid out yet, such as right after `set_value`.
+    fn text_starts_rtl(&self, row: usize) -> bool {
+        let start = self.text.line_start_offset(row);
+        crate::input::display_map::starts_rtl(
+            self.text
+                .slice(start..self.text.line_end_offset(row))
+                .chars(),
+        )
     }
 
     /// One arrow-key step from the caret stop `(offset, trailing)`, `left` or right of it on
@@ -84,7 +103,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             )
         };
         let Some((line, line_start)) = self.laid_out_paragraph(offset) else {
-            return logical(!left);
+            // No layout to follow yet: in a right-to-left paragraph Left still means
+            // logically forward, as it does once the glyphs are on screen.
+            let rtl = self.text_starts_rtl(self.text.offset_to_point(offset).row);
+            return logical(left == rtl);
         };
         if !line.has_bidi() {
             return logical(!left);

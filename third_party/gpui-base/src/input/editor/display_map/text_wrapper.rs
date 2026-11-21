@@ -9,8 +9,8 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, ContentMask, Font, Pixels, Point, ShapedLine, Size, TextAlign,
-    Window, point, px, size,
+    App, Bounds, ContentMask, Font, Pixels, Point, ShapedLine, Size, TextAlign, Window, point, px,
+    size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -600,8 +600,8 @@ impl TextWrapper {
             .then(|| self.line(start_row))
             .flatten();
         let old_line_start = self.text.line_start_offset(start_row);
-        let edit = range.start.saturating_sub(old_line_start)
-            ..range.end.saturating_sub(old_line_start);
+        let edit =
+            range.start.saturating_sub(old_line_start)..range.end.saturating_sub(old_line_start);
 
         // line not contains `\n`.
         for row in new_start_row..=new_end_row {
@@ -1739,7 +1739,12 @@ mod tests {
         let range = start..end;
         let new_text = "a very very long first line now";
         text.replace(range.clone(), new_text);
-        wrapper._update(&text, &range, &Rope::from(new_text), &mut |_, _, _, _| vec![]);
+        wrapper._update(
+            &text,
+            &range,
+            &Rope::from(new_text),
+            &mut |_, _, _, _| vec![],
+        );
         assert_eq!(wrapper.longest_row(), 0);
     }
 
@@ -1756,7 +1761,12 @@ mod tests {
         let range = start..text.len();
         let new_text = "THREE EDITED";
         text.replace(range.clone(), new_text);
-        wrapper._update(&text, &range, &Rope::from(new_text), &mut |_, _, _, _| vec![]);
+        wrapper._update(
+            &text,
+            &range,
+            &Rope::from(new_text),
+            &mut |_, _, _, _| vec![],
+        );
         assert_eq!(wrapper.lines_count(), 3);
         assert_eq!(wrapper.line(2).unwrap().len(), "THREE EDITED".len());
 

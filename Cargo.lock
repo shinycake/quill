@@ -3021,8 +3021,10 @@ dependencies = [
  "gpui-fast",
  "gpui-pre",
  "gpui-pre-macros",
+ "gpui-pre-platform",
  "gpui-pre-sum-tree",
  "html5ever 0.27.0",
+ "indoc",
  "instant",
  "itertools 0.13.0",
  "lsp-types",
@@ -3035,6 +3037,7 @@ dependencies = [
  "raw-window-handle",
  "regex",
  "ropey",
+ "rust_decimal",
  "schemars",
  "serde",
  "serde_json",
@@ -3518,6 +3521,7 @@ dependencies = [
  "taffy",
  "thiserror 2.0.21",
  "ttf-parser",
+ "unicode-bidi",
  "unicode-segmentation",
  "url",
  "usvg 0.46.0",
@@ -3942,6 +3946,7 @@ dependencies = [
  "rand 0.9.5",
  "raw-window-handle",
  "smallvec",
+ "unicode-bidi",
  "uuid",
  "windows 0.62.2",
  "windows-core 0.62.2",
@@ -4606,6 +4611,15 @@ dependencies = [
  "hashbrown 0.17.1",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "indoc"
+version = "2.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a37b2691796cffeb8a8cd305ac66e65841559f147f4e63231d0eafa4db5384d1"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -7410,6 +7424,17 @@ name = "quill-panic-guard"
 version = "0.1.0"
 
 [[package]]
+name = "quill-text-conformance"
+version = "0.1.0"
+dependencies = [
+ "gpui-pre",
+ "gpui-pre-apple",
+ "gpui-pre-wgpu",
+ "gpui-pre-windows",
+ "unicode-bidi",
+]
+
+[[package]]
 name = "quill-webview"
 version = "0.1.0"
 dependencies = [
@@ -8023,6 +8048,23 @@ dependencies = [
  "siphasher",
  "toml 0.8.23",
  "triomphe",
+]
+
+[[package]]
+name = "rust_decimal"
+version = "1.43.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7653272e75dcac41dc199fbea6f5797633994fafd339943c06c9af16bf29cd3a"
+dependencies = [
+ "arrayvec",
+ "borsh",
+ "bytes",
+ "num-traits",
+ "rand 0.8.8",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -10157,6 +10199,7 @@ checksum = "a0181c14ddd6c7b8b0b0132a5f1ea2f32be0d893cd3ea97b6e3b28886b8a3d1c"
 dependencies = [
  "cfg-if",
  "rustversion",
+ "serde",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
 ]
