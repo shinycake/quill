@@ -12,7 +12,7 @@
 
 use std::ops::Range;
 
-use crate::{Hsla, LineLayout, Pixels, StrikethroughStyle, UnderlineStyle};
+use crate::{Hsla, LineLayout, Pixels, ShapedRun, StrikethroughStyle, UnderlineStyle, WrapBoundary, px};
 
 use super::DecorationRun;
 
@@ -27,6 +27,82 @@ pub fn glyphs_in_byte_order(layout: &LineLayout) -> bool {
         last = glyph.index;
     }
     true
+}
+
+/// The rows of a wrapped line, each as a line of its own: its glyphs moved so the row
+/// starts at x = 0, byte indices kept, and `len` the byte offset the next row starts at.
+/// The rows of a line holding right-to-left text follow each other left to right in
+/// `layout`, one wrap boundary at the first glyph of each row after the first.
+pub fn wrapped_rows(layout: &LineLayout, boundaries: &[WrapBoundary]) -> Vec<LineLayout> {
+    let row_x = |boundary: &WrapBoundary| {
+        layout
+            .runs
+            .get(boundary.run_ix)
+            .and_then(|run| run.glyphs.get(boundary.glyph_ix))
+            .map(|glyph| glyph.position.x)
+    };
+    let mut rows: Vec<LineLayout> = (0..=boundaries.len())
+        .map(|row| {
+            let start = row
+                .checked_sub(1)
+                .and_then(|ix| boundaries.get(ix))
+                .and_then(row_x)
+                .unwrap_or(px(0.));
+            let end = boundaries.get(row).and_then(row_x).unwrap_or(layout.width);
+            LineLayout {
+                font_size: layout.font_size,
+                width: end - start,
+                ascent: layout.ascent,
+                descent: layout.descent,
+                runs: Vec::new(),
+                len: layout.len,
+            }
+        })
+        .collect();
+    let mut starts = vec![px(0.); rows.len()];
+    for (row, start) in starts.iter_mut().enumerate().skip(1) {
+        *start = boundaries
+            .get(row - 1)
+            .and_then(row_x)
+            .unwrap_or(px(0.));
+    }
+    // The run of `layout` each row's last shaped run came from.
+    let mut last_run: Vec<Option<usize>> = vec![None; rows.len()];
+    for (run_ix, run) in layout.runs.iter().enumerate() {
+        for (glyph_ix, glyph) in run.glyphs.iter().enumerate() {
+            let row = boundaries.partition_point(|boundary| {
+                (boundary.run_ix, boundary.glyph_ix) <= (run_ix, glyph_ix)
+            });
+            let (Some(target), Some(start), Some(last)) =
+                (rows.get_mut(row), starts.get(row), last_run.get_mut(row))
+            else {
+                continue;
+            };
+            let mut glyph = glyph.clone();
+            glyph.position.x -= *start;
+            match target.runs.last_mut() {
+                Some(shaped) if *last == Some(run_ix) => shaped.glyphs.push(glyph),
+                _ => {
+                    target.runs.push(ShapedRun {
+                        font_id: run.font_id,
+                        glyphs: vec![glyph],
+                    });
+                    *last = Some(run_ix);
+                }
+            }
+        }
+    }
+    // Each row ends where the text of the next one starts.
+    let firsts: Vec<Option<usize>> = rows
+        .iter()
+        .map(|row| row.runs.iter().flat_map(|run| &run.glyphs).map(|g| g.index).min())
+        .collect();
+    for (row, layout_row) in rows.iter_mut().enumerate() {
+        if let Some(Some(next)) = firsts.get(row + 1) {
+            layout_row.len = *next;
+        }
+    }
+    rows
 }
 
 /// One glyph to paint: where it sits in `layout.runs` and the decoration run it takes.

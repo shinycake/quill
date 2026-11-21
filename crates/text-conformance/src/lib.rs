@@ -22,11 +22,13 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
+use std::sync::Arc;
+
 use gpui::{
     DecorationPlan, DecorationRun, Font, FontId, FontRun, Hsla, LineLayout, PlatformTextSystem,
-    UnderlineStyle, px,
+    SharedString, TextRun, TextSystem, UnderlineStyle, WindowTextSystem, px,
 };
-use unicode_bidi::{BidiClass, BidiInfo, bidi_class};
+use unicode_bidi::{BidiClass, BidiInfo, Level, bidi_class};
 
 /// Lines that every backend must lay out the way UAX #9 orders them.
 pub const CASES: &[&str] = &[
@@ -339,4 +341,134 @@ pub fn check(system: &dyn PlatformTextSystem, family: &str) -> Vec<String> {
     }
     found.extend(decoration_violations(system, font_id));
     found
+}
+
+/// Paragraphs long enough to wrap at [`WRAP_WIDTH`], each with what its first row must
+/// hold: right-to-left ones start at the right of their first row, with their first
+/// word, as Telegram Desktop wraps them.
+pub const WRAP_CASES: &[&str] = &[
+    "שלום עולם זה משפט ארוך מאוד שצריך לעבור כמה שורות כדי לבדוק את הסדר",
+    "مرحبا بالعالم هذه جملة طويلة جدا يجب أن تلتف على عدة أسطر للتحقق من الترتيب",
+    "שלום world זה משפט עם English words באמצע שצריך לעבור שורה",
+    "Hello עולם this is a long English sentence with some עברית inside it",
+    "הודעה ארוכה שמסתיימת בקישור https://example.com/a/long/path/here",
+];
+
+/// The width paragraphs wrap at, about twelve characters of 16 px text.
+pub const WRAP_WIDTH: f32 = 130.;
+
+/// Wrapping a paragraph that holds right-to-left text: rows follow the text (the first
+/// row holds its first characters), each row lies in visual order for the paragraph's
+/// direction, and a caret placed at a row's offsets lands on that row.
+pub fn wrap_violations(system: Arc<dyn PlatformTextSystem>, family: &str) -> Vec<String> {
+    let text_system = WindowTextSystem::new(Arc::new(TextSystem::new(system)));
+    let font = gpui::font(family);
+    let mut found = Vec::new();
+    for text in WRAP_CASES {
+        let runs = [TextRun {
+            len: text.len(),
+            font: font.clone(),
+            color: gpui::black(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }];
+        let lines = match text_system.shape_text(
+            SharedString::from(*text),
+            px(16.),
+            &runs,
+            Some(px(WRAP_WIDTH)),
+            None,
+        ) {
+            Ok(lines) => lines,
+            Err(error) => {
+                found.push(format!("{text:?}: {error}"));
+                continue;
+            }
+        };
+        let Some(line) = lines.first() else {
+            found.push(format!("{text:?}: no line"));
+            continue;
+        };
+        let rows = gpui::wrapped_rows(&line.unwrapped_layout, &line.wrap_boundaries);
+        if rows.len() < 2 {
+            found.push(format!("{text:?}: did not wrap ({} row)", rows.len()));
+            continue;
+        }
+        let rtl = unicode_bidi::get_base_direction_full(*text) == unicode_bidi::Direction::Rtl;
+        let mut start = 0;
+        for (ix, row) in rows.iter().enumerate() {
+            let end = row.len;
+            if end <= start || end > text.len() {
+                found.push(format!("{text:?}: row {ix} covers {start}..{end}"));
+                break;
+            }
+            let indices: Vec<usize> = row
+                .runs
+                .iter()
+                .flat_map(|run| &run.glyphs)
+                .map(|glyph| glyph.index)
+                .collect();
+            if let Some(outside) = indices.iter().find(|i| **i < start || **i >= end) {
+                found.push(format!(
+                    "{text:?}: row {ix} ({start}..{end}) holds byte {outside}"
+                ));
+            }
+            let row_text = text.get(start..end).unwrap_or_default();
+            let expected: Vec<usize> = visual_order_with(row_text, rtl)
+                .into_iter()
+                .map(|i| i + start)
+                .filter(|i| compared(text, *i))
+                .collect();
+            let mut seen: Vec<usize> = Vec::new();
+            for index in indices.into_iter().filter(|i| compared(text, *i)) {
+                if seen.last() != Some(&index) {
+                    seen.push(index);
+                }
+            }
+            if seen != expected {
+                found.push(format!(
+                    "{text:?}: row {ix} glyphs {seen:?}, expected {expected:?}"
+                ));
+            }
+            start = end;
+        }
+        if start != text.len() {
+            found.push(format!("{text:?}: rows end at {start} of {}", text.len()));
+        }
+        // The caret at the paragraph's start sits on the first row, at its start edge.
+        match line.position_for_index(0, px(20.)) {
+            Some(at) if at.y == px(0.) => {
+                let width = rows.first().map_or(px(0.), |row| row.width);
+                let start_edge = if rtl { width } else { px(0.) };
+                if (at.x - start_edge).abs() > px(1.) {
+                    found.push(format!(
+                        "{text:?}: caret 0 at x {:?}, expected {start_edge:?}",
+                        at.x
+                    ));
+                }
+            }
+            other => found.push(format!("{text:?}: caret 0 at {other:?}")),
+        }
+    }
+    found
+}
+
+/// [`visual_order`] with the paragraph direction given rather than found.
+fn visual_order_with(text: &str, rtl: bool) -> Vec<usize> {
+    let level = if rtl { Level::rtl() } else { Level::ltr() };
+    let info = BidiInfo::new(text, Some(level));
+    let mut order = Vec::with_capacity(text.len());
+    for paragraph in &info.paragraphs {
+        let (levels, runs) = info.visual_runs(paragraph, paragraph.range.clone());
+        for run in runs {
+            let starts = char_starts(text, run.clone());
+            if levels.get(run.start).is_some_and(|level| level.is_rtl()) {
+                order.extend(starts.into_iter().rev());
+            } else {
+                order.extend(starts);
+            }
+        }
+    }
+    order
 }

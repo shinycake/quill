@@ -250,6 +250,10 @@ fn ui_main(args: &[String]) {
         cx.set_app_identity(quill::desktop_app_id::get(), "Quill");
         #[cfg(windows)]
         quill::notify::register_toast_icon("org.shinycake.quill");
+        // The kit mirrors itself on a Hebrew or Arabic system; Quill, like
+        // Telegram Desktop, keeps one left-to-right layout and lets each text
+        // take its own direction (docs/decisions/rtl-sweep.md).
+        gpui_kit::base::LayoutDirection::Ltr.set_global(cx);
         gpui_kit::init(cx);
         // kit Phase 8: the kit defaults to its light theme on init;
         // Quill boots dark (kit dialogs match the app from here on).
@@ -643,6 +647,8 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             cx.set_app_identity(quill::desktop_app_id::get(), "Quill");
             #[cfg(windows)]
             quill::notify::register_toast_icon("org.shinycake.quill");
+            // One left-to-right layout whatever the system language, as above.
+            gpui_kit::base::LayoutDirection::Ltr.set_global(cx);
             gpui_kit::init(cx);
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).

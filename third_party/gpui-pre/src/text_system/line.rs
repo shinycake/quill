@@ -552,19 +552,39 @@ fn paint_line(
     );
     // QUILL: right-to-left glyphs come in falling byte order, which the forward walk
     // below cannot follow (super::bidi_paint).
-    if wrap_boundaries.is_empty() && !super::glyphs_in_byte_order(layout) {
+    if !super::glyphs_in_byte_order(layout) {
         return window.paint_layer(line_bounds, |window| {
-            paint_unordered_line(
-                origin,
-                layout,
-                line_height,
-                align,
-                align_width,
-                decoration_runs,
-                window,
-                cx,
-                paint_underline,
-            )
+            if wrap_boundaries.is_empty() {
+                return paint_unordered_line(
+                    origin,
+                    layout,
+                    line_height,
+                    align,
+                    align_width,
+                    decoration_runs,
+                    window,
+                    cx,
+                    paint_underline,
+                );
+            }
+            // A wrapped line holding right-to-left text: each row on its own.
+            for (row_ix, row) in super::wrapped_rows(layout, wrap_boundaries)
+                .iter()
+                .enumerate()
+            {
+                paint_unordered_line(
+                    point(origin.x, origin.y + line_height * row_ix as f32),
+                    row,
+                    line_height,
+                    align,
+                    align_width,
+                    decoration_runs,
+                    window,
+                    cx,
+                    paint_underline,
+                )?;
+            }
+            Ok(())
         });
     }
     window.paint_layer(line_bounds, |window| {
@@ -830,24 +850,37 @@ fn paint_line_background(
         align_width,
         wrap_boundaries,
     );
-    if wrap_boundaries.is_empty() && !super::glyphs_in_byte_order(layout) {
+    if !super::glyphs_in_byte_order(layout) {
         return window.paint_layer(line_bounds, |window| {
-            let line_x = aligned_origin_x(
-                origin,
-                align_width.unwrap_or(layout.width),
-                px(0.0),
-                &align,
-                layout,
-                None,
-            );
-            for span in super::DecorationPlan::new(layout, decoration_runs).backgrounds {
-                window.paint_quad(fill(
-                    Bounds {
-                        origin: point(line_x + span.start, origin.y),
-                        size: size(span.end - span.start, line_height),
-                    },
-                    span.style,
-                ));
+            let rows = if wrap_boundaries.is_empty() {
+                Vec::new()
+            } else {
+                super::wrapped_rows(layout, wrap_boundaries)
+            };
+            let rows: Vec<&LineLayout> = if rows.is_empty() {
+                vec![layout]
+            } else {
+                rows.iter().collect()
+            };
+            for (row_ix, row) in rows.into_iter().enumerate() {
+                let row_y = origin.y + line_height * row_ix as f32;
+                let line_x = aligned_origin_x(
+                    origin,
+                    align_width.unwrap_or(row.width),
+                    px(0.0),
+                    &align,
+                    row,
+                    None,
+                );
+                for span in super::DecorationPlan::new(row, decoration_runs).backgrounds {
+                    window.paint_quad(fill(
+                        Bounds {
+                            origin: point(line_x + span.start, row_y),
+                            size: size(span.end - span.start, line_height),
+                        },
+                        span.style,
+                    ));
+                }
             }
             Ok(())
         });

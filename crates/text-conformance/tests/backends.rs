@@ -8,7 +8,8 @@ use std::sync::Arc;
 use gpui::PlatformTextSystem;
 
 fn assert_holds(system: Arc<dyn PlatformTextSystem>, family: &str) {
-    let violations = quill_text_conformance::check(system.as_ref(), family);
+    let mut violations = quill_text_conformance::check(system.as_ref(), family);
+    violations.extend(quill_text_conformance::wrap_violations(system, family));
     assert!(
         violations.is_empty(),
         "{} contract violations:\n{}",
