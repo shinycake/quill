@@ -123,6 +123,14 @@ jobs:
         run: >-
           cargo test -p gpui-pre-linux -p quill --lib --features quill/demo-capture --locked --
           battery_signal tray_sni present_retry recovery_timers wayland::client::tests wayland::clipboard::tests
+      # Right-to-left text on this OS's real text engine
+      # (docs/decisions/rtl-sweep.md): one contract checked against CoreText,
+      # DirectWrite and cosmic-text alike, and the input engine's own suite,
+      # whose bidi tests never ran before. Every OS job runs both, unfiltered.
+      - name: tests (text contract, input engine)
+        run: |
+          cargo test -p quill-text-conformance --locked
+          cargo test -p gpui-base --features test-support --lib --locked
       # Launch smoke (docs/decisions/ci-launch-smoke.md), pushes only so the
       # required PR check stays as it is: the real window under Xvfb with
       # Mesa lavapipe (software Vulkan). Reuses the target/ the tests just built.
@@ -342,7 +350,17 @@ jobs:
       - name: tests (vendored GPUI timer and file picker)
         run: >-
           cargo test -p gpui-pre-windows -p quill --lib --features quill/demo-capture --locked --
-          timer_thread::tests file_picker_tests
+          timer_thread::tests file_picker_tests direct_write::tests
+      # Right-to-left text on this OS's real text engine
+      # (docs/decisions/rtl-sweep.md): one contract checked against CoreText,
+      # DirectWrite and cosmic-text alike, and the input engine's own suite,
+      # whose bidi tests never ran before. Every OS job runs both, unfiltered.
+      - name: tests (text contract, input engine)
+        # bash stops at the first failing command; pwsh would run on past it.
+        shell: bash
+        run: |
+          cargo test -p quill-text-conformance --locked
+          cargo test -p gpui-base --features test-support --lib --locked
 
   # The message-widget runtime on Windows (docs/decisions/message-widgets.md):
   # MSVC builds of QuickJS, litehtml and the sandbox, and Intl on the system
@@ -456,6 +474,24 @@ jobs:
         env:
           QUILL_REQUIRE_METALLIB: '1'
         run: cargo test -p gpui-pre-apple --lib --locked -- metal_renderer::tests text_system::tests::test_kept_fonts text_system::tests::test_adjacent_runs
+
+  # Right-to-left text on CoreText (docs/decisions/rtl-sweep.md), on every PR:
+  # the same text contract the Linux and Windows jobs check on their engines,
+  # and the input engine's suite. Not a required check.
+  macos-text:
+    name: macos-text
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.100.0
+      - uses: Swatinem/rust-cache@v2
+      - name: tests (text contract, input engine)
+        run: |
+          cargo test -p quill-text-conformance --locked
+          cargo test -p gpui-base --features test-support --lib --locked
 
   # Packaging runs on pushes to main only; PRs get the Linux check. The macOS UI
   # build runs after merge through quill-ui-build.yml (push to main). Public PR

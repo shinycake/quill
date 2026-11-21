@@ -210,3 +210,12 @@ from its link callbacks. `MetalFrameSource::new` and a draw without a link
 (`MetalRenderer::draw`, before `nextDrawable`) invalidate any such link first,
 so none is left attached to the layer. Invalidating mid-update is the suspect
 for a null-pointer crash about a second after launch on macOS 14.
+
+## Right-to-left lines (RTL sweep)
+
+Changed by the Quill project in 2026 (`docs/decisions/rtl-sweep.md`):
+`src/text_system.rs` moves the glyphs of a line CoreText laid out left of x = 0
+(the trailing whitespace of a right-to-left line) back inside the line, so it
+sits at the line's left end as on the other backends. `StringIndexConverter`
+steps back to an earlier glyph (`seek_to_utf16_ix`) instead of restarting at
+the line start for every right-to-left glyph.

@@ -189,3 +189,10 @@ fewer copies and textures (sweep finding media-7,
 The Quill project also changed it in 2026 so text glyphs can be swept: the atlas
 forwards `text_glyph_count` and `remove_text_glyphs_unused_since` to its
 `AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).
+
+## Right-to-left lines (RTL sweep)
+
+Changed by the Quill project in 2026 (`docs/decisions/rtl-sweep.md`):
+`src/cosmic_text_system.rs` hands a line's glyphs over left to right on screen
+(a stable sort by x). cosmic-text lists a right-to-left line from its right end,
+which every `LineLayout` consumer read backwards.

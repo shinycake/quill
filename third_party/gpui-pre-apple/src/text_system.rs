@@ -821,17 +821,29 @@ impl AppleTextSystemState {
                 let Ok(glyph_utf16_ix) = usize::try_from(glyph_utf16_ix) else {
                     continue;
                 };
-                if ix_converter.utf16_ix > glyph_utf16_ix {
-                    // We cannot reuse current index converter, as it can only seek forward. Restart the search.
-                    ix_converter = StringIndexConverter::new(text);
-                }
-                ix_converter.advance_to_utf16_ix(glyph_utf16_ix);
+                // QUILL: right-to-left glyphs come in falling text order; step back to
+                // them instead of restarting from the line start, which made a long
+                // Hebrew line cost its length squared.
+                ix_converter.seek_to_utf16_ix(glyph_utf16_ix);
                 glyphs.push(ShapedGlyph {
                     id: GlyphId(glyph_id as u32),
                     position: point(position.x as f32, position.y as f32).map(px),
                     index: ix_converter.utf8_ix,
                     is_emoji: self.is_emoji(font_id),
                 });
+            }
+        }
+        // QUILL: CoreText hangs the trailing whitespace of a right-to-left line left of
+        // the origin (x < 0) while the width counts it. Every other backend puts it at the
+        // line's left end, inside [0, width]; shift the line there too.
+        let leftmost = runs
+            .iter()
+            .flat_map(|run| &run.glyphs)
+            .map(|glyph| glyph.position.x)
+            .fold(px(0.), |a, b| a.min(b));
+        if leftmost < px(0.) {
+            for glyph in runs.iter_mut().flat_map(|run| &mut run.glyphs) {
+                glyph.position.x -= leftmost;
             }
         }
         let typographic_bounds = line.get_typographic_bounds();
@@ -862,6 +874,22 @@ impl<'a> StringIndexConverter<'a> {
             utf8_ix: 0,
             utf16_ix: 0,
         }
+    }
+
+    /// QUILL: moves to `utf16_target` from wherever the converter is, backwards too.
+    fn seek_to_utf16_ix(&mut self, utf16_target: usize) {
+        while self.utf16_ix > utf16_target {
+            let Some(c) = self
+                .text
+                .get(..self.utf8_ix)
+                .and_then(|before| before.chars().next_back())
+            else {
+                break;
+            };
+            self.utf8_ix -= c.len_utf8();
+            self.utf16_ix -= c.len_utf16();
+        }
+        self.advance_to_utf16_ix(utf16_target);
     }
 
     fn advance_to_utf16_ix(&mut self, utf16_target: usize) {

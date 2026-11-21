@@ -33,6 +33,7 @@ mod privacy_media;
 mod profile_actions;
 pub(crate) mod profile_cover;
 pub(crate) mod reaction_fixtures;
+mod rtl_text;
 mod security;
 pub(crate) mod shared_media;
 mod shared_media_search;

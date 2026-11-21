@@ -488,3 +488,14 @@ fn rtl_detection_honours_explicit_direction_marks() {
     // Hebrew first wins over a later Latin word.
     assert!(is_rtl_text("ש abc"));
 }
+
+#[test]
+fn a_right_to_left_name_is_isolated_and_a_left_to_right_one_is_not() {
+    assert_eq!(super::isolate("עידן"), "\u{2068}עידן\u{2069}");
+    assert_eq!(super::isolate("Idan"), "Idan");
+    assert_eq!(super::isolate(""), "");
+    // The isolate leaves the sentence's own direction: an English line that
+    // starts with a Hebrew name still reads left to right.
+    let line = format!("{} pinned a message", super::isolate("עידן"));
+    assert!(!super::is_rtl_text(&line));
+}

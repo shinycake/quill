@@ -2,8 +2,9 @@
 //! Telegram Desktop's `InputField` (Qt `QTextEdit` with
 //! `Qt::LayoutDirectionAuto`): each paragraph takes the direction of its first
 //! strong character, a Hebrew or Arabic paragraph is right-aligned, its caret
-//! starts at the right edge and advances leftwards, and left/right arrows
-//! follow the glyphs.
+//! starts at the right edge and advances leftwards. Left/right arrows follow
+//! the glyphs, as on AppKit; Qt's default is logical movement (see
+//! docs/decisions/rtl-sweep.md).
 //!
 //! The layout lives in the bidi-aware input engine (`third_party/gpui-base`,
 //! see `docs/decisions/codex-rtl-composer.md`); these tests drive the real
@@ -29,10 +30,10 @@ pub(super) mod tests {
 
     /// A text system that shapes like CoreText and cosmic-text do: glyphs come
     /// back in *visual* order, runs of a right-to-left level reversed, every
-    /// character `0.6 em` wide. gpui's own test text system lays characters
-    /// out in typing order and so cannot show bidi at all. `base_rtl` forces
-    /// the paragraph direction (DirectWrite always lays out left to right:
-    /// `Some(false)`); `None` takes it from the first strong character.
+    /// character `0.6 em` wide, and records what it shapes. `base_rtl` forces
+    /// the paragraph direction (`Some(false)` is how DirectWrite laid lines out
+    /// before it took the first strong character, kept as a regression mode);
+    /// `None` takes it from the first strong character.
     pub(in crate::ui) struct BidiTextSystem {
         pub(in crate::ui) base_rtl: Option<bool>,
     }
@@ -579,6 +580,171 @@ pub(super) mod tests {
         });
     }
 
+    /// Presses `key` until the caret stops moving; returns every offset it visited.
+    fn walk(
+        input: &Entity<TextareaState>,
+        key: &str,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) -> Vec<usize> {
+        let mut visited = vec![input.read(cx).cursor()];
+        for _ in 0..400 {
+            window.press(key, cx);
+            window.render_frame(cx);
+            let at = input.read(cx).cursor();
+            if Some(&at) == visited.last() {
+                return visited;
+            }
+            visited.push(at);
+        }
+        panic!("{key} never stopped: {visited:?}");
+    }
+
+    #[test]
+    fn arrows_cross_the_rows_of_a_wrapped_paragraph() {
+        for text in ["שלום ".repeat(24), "hello שלום ".repeat(12)] {
+            with_composer(None, |cx, handle, input| {
+                cx.update_window(handle, |_, window, cx| {
+                    window.render_frame(cx);
+                    window.click("composer", cx);
+                    set_text(&input, &text, window, cx);
+                    let first = caret(&input, 0, cx);
+                    let last = caret(&input, text.len() - 1, cx);
+                    assert!(last.top() > first.top(), "the paragraph wrapped");
+
+                    // Forward through the whole paragraph, then back again.
+                    let (forward, back) = if text.starts_with('ש') {
+                        ("left", "right")
+                    } else {
+                        ("right", "left")
+                    };
+                    input.update(cx, |state, cx| state.set_selected_range(0..0, cx));
+                    window.render_frame(cx);
+                    let there = walk(&input, forward, window, cx);
+                    assert_eq!(there.last(), Some(&text.len()), "{text}: {there:?}");
+                    let back = walk(&input, back, window, cx);
+                    assert_eq!(back.last(), Some(&0), "{text}: {back:?}");
+                })
+                .unwrap();
+            });
+        }
+    }
+
+    #[test]
+    fn the_caret_never_stops_inside_an_emoji_or_a_letter_with_points() {
+        for text in [
+            "שלום 👍🏽 עולם",
+            "שלום 👨‍👩‍👧 עולם",
+            "שלום 🇮🇱 עולם",
+            "שָׁלוֹם עולם",
+            "hi ❤️ שלום",
+        ] {
+            with_composer(None, |cx, handle, input| {
+                cx.update_window(handle, |_, window, cx| {
+                    window.render_frame(cx);
+                    window.click("composer", cx);
+                    set_text(&input, text, window, cx);
+                    let graphemes: Vec<usize> =
+                        unicode_segmentation::UnicodeSegmentation::grapheme_indices(text, true)
+                            .map(|(at, _)| at)
+                            .chain([text.len()])
+                            .collect();
+                    input.update(cx, |state, cx| state.set_selected_range(0..0, cx));
+                    window.render_frame(cx);
+                    let mut visited = walk(&input, "left", window, cx);
+                    visited.extend(walk(&input, "right", window, cx));
+                    for at in visited {
+                        assert!(graphemes.contains(&at), "{text}: caret stopped at {at}");
+                    }
+                })
+                .unwrap();
+            });
+        }
+    }
+
+    struct OneLine {
+        input: Entity<gpui_kit::component::input::InputState>,
+    }
+
+    impl Render for OneLine {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().p_4().child(
+                div()
+                    .id("field")
+                    .test_support()
+                    .w(px(300.))
+                    .child(gpui_kit::component::input::Input::new(&self.input)),
+            )
+        }
+    }
+
+    #[test]
+    fn a_one_line_field_lays_hebrew_out_right_to_left() {
+        let dispatcher = gpui_kit::TestDispatcher::new(0);
+        let mut cx = TestAppContext::build_with_text_system(
+            dispatcher,
+            None,
+            Arc::new(BidiTextSystem { base_rtl: None }),
+        );
+        cx.update(gpui_kit::init);
+        let slot = Rc::new(RefCell::new(None));
+        let handle = cx.open_window(size(px(640.), px(240.)), {
+            let slot = slot.clone();
+            move |window, cx| {
+                let input = cx.new(|cx| gpui_kit::component::input::InputState::new(window, cx));
+                *slot.borrow_mut() = Some(input.clone());
+                let view = cx.new(|_| OneLine { input });
+                Root::new(view, window, cx)
+            }
+        });
+        let input = slot.borrow().clone().expect("the field opened");
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("field", cx);
+            for ch in "אבג".chars() {
+                type_char(window, ch, cx);
+            }
+            let caret_x = |cx: &gpui_kit::App| input.read(cx).caret_bounds().unwrap().left();
+            // The caret follows the newest letter, at the left end of the word.
+            let end = caret_x(cx);
+            window.press("right", cx);
+            window.render_frame(cx);
+            let middle = caret_x(cx);
+            assert!(middle > end, "Right goes back towards the word's start");
+            window.press("right", cx);
+            window.render_frame(cx);
+            window.press("right", cx);
+            window.render_frame(cx);
+            assert_eq!(input.read(cx).cursor(), 0);
+            let start = caret_x(cx);
+            assert!(start > middle);
+            // A right-to-left value is right-aligned: its start is at the field's right.
+            let field = window.find("field").bounds();
+            assert!(start > field.right() - px(40.), "{start:?} in {field:?}");
+            // Shift+Left selects one letter, drawn over that letter only.
+            window.press("shift-left", cx);
+            window.render_frame(cx);
+            assert_eq!(input.read(cx).selected_range(), 0..2);
+
+            // A value longer than the field scrolls so the caret stays in view, at either end.
+            input.update(cx, |state, cx| {
+                state.set_value("שלום ".repeat(20), window, cx)
+            });
+            window.render_frame(cx);
+            for key in ["end", "home", "end"] {
+                window.press(key, cx);
+                window.render_frame(cx);
+                let x = caret_x(cx);
+                assert!(
+                    x >= field.left() - px(1.) && x <= field.right() + px(1.),
+                    "{key}: caret at {x:?}, field {field:?}"
+                );
+            }
+        })
+        .unwrap();
+        cx.quit();
+    }
+
     #[test]
     fn a_long_hebrew_paragraph_wraps_and_stays_right_aligned() {
         with_composer(None, |cx, handle, input| {
@@ -935,6 +1101,30 @@ pub(super) mod tests {
                     (drawn - hebrew_right).abs() < px(1.),
                     "{drawn:?} vs {hebrew_right:?}"
                 );
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn a_word_step_takes_acronyms_and_geresh_words_whole() {
+        let text = "שלום צה\"ל ג'ירפה";
+        let acronym = text.find("צה").unwrap();
+        let giraffe = text.find("ג'").unwrap();
+        with_composer(None, |cx, handle, input| {
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                window.click("composer", cx);
+                set_text(&input, text, window, cx);
+                park(&input, 0, window, cx);
+                let left = walk_keys(&input, WORD_LEFT, window, cx);
+                let offsets: Vec<_> = left.iter().map(|((o, _), _)| *o).collect();
+                assert_eq!(
+                    offsets,
+                    vec![0, "שלום".len(), acronym + "צה\"ל".len(), text.len()],
+                    "{left:?}"
+                );
+                assert!(giraffe > acronym);
             })
             .unwrap();
         });

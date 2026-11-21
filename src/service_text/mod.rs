@@ -404,6 +404,7 @@ impl ServiceCtx<'_> {
 
     fn user(&self, user_id: i64) -> B {
         let name = self.names.user_name(user_id).unwrap_or_else(someone_string);
+        let name = crate::text::isolate(&name);
         B::default().link(name, ServiceLink::Sender(MessageSender::User { user_id }))
     }
 
@@ -412,6 +413,7 @@ impl ServiceCtx<'_> {
             .names
             .user_short_name(user_id)
             .unwrap_or_else(someone_string);
+        let name = crate::text::isolate(&name);
         B::default().link(name, ServiceLink::Sender(MessageSender::User { user_id }))
     }
 
@@ -420,6 +422,7 @@ impl ServiceCtx<'_> {
             .names
             .chat_name(chat_id)
             .unwrap_or_else(|| tr(keys::Q_SERVICE_A_CHAT).to_string());
+        let name = crate::text::isolate(&name);
         B::default().link(name, ServiceLink::Sender(MessageSender::Chat { chat_id }))
     }
 
@@ -564,10 +567,12 @@ fn pin_text(target: PinTarget) -> (String, bool) {
             // tdesktop cuts at 16 characters and only adds the ellipsis
             // when more than 5 remain.
             let rest = chars.count();
+            // A Hebrew excerpt in an English line (or the reverse) keeps its
+            // ellipsis and the quote marks around it on the right side.
             if rest > 5 {
-                (format!("{head}\u{2026}"), false)
+                (crate::text::isolate(&format!("{head}\u{2026}")), false)
             } else {
-                (text, false)
+                (crate::text::isolate(&text), false)
             }
         }
         PinTarget::Media(phrase) => (phrase, true),

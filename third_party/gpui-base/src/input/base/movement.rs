@@ -3,7 +3,9 @@
 use crate::input::InputModeKind;
 use gpui::{Context, Pixels, Point, Window};
 use sum_tree::Bias;
+use unicode_segmentation::UnicodeSegmentation as _;
 
+use crate::input::display_map::HorizontalStep;
 use crate::input::{
     InputBaseState, MoveDown, MoveEnd, MoveHome, MoveLeft, MovePageDown, MovePageUp, MoveRight,
     MoveToEnd, MoveToNextWord, MoveToPreviousWord, MoveToStart, MoveUp, RopeExt as _,
@@ -37,7 +39,10 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     /// The laid-out paragraph `offset` is in, with the byte offset of its start.
-    fn laid_out_paragraph(&self, offset: usize) -> Option<(&crate::input::display_map::LineLayout, usize)> {
+    fn laid_out_paragraph(
+        &self,
+        offset: usize,
+    ) -> Option<(&crate::input::display_map::LineLayout, usize)> {
         let last_layout = self.last_layout.as_ref()?;
         let row = self.text.offset_to_point(offset).row;
         let line_start = self.text.line_start_offset(row);
@@ -50,10 +55,26 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Whether the paragraph at `offset` has a right-to-left base direction, which swaps what
     /// the arrow keys mean: Left moves visually left, so logically forward.
     pub(super) fn is_rtl_paragraph_at(&self, offset: usize) -> bool {
-        self.last_layout
+        let row = self.text.offset_to_point(offset).row;
+        match self
+            .last_layout
             .as_ref()
-            .and_then(|layout| layout.line(self.text.offset_to_point(offset).row))
-            .is_some_and(|line| line.is_rtl())
+            .and_then(|layout| layout.line(row))
+        {
+            Some(line) => line.is_rtl(),
+            None => self.text_starts_rtl(row),
+        }
+    }
+
+    /// The base direction of buffer line `row` read from its text (UAX #9 P2/P3), for a
+    /// line that has not been laid out yet, such as right after `set_value`.
+    fn text_starts_rtl(&self, row: usize) -> bool {
+        let start = self.text.line_start_offset(row);
+        crate::input::display_map::starts_rtl(
+            self.text
+                .slice(start..self.text.line_end_offset(row))
+                .chars(),
+        )
     }
 
     /// One arrow-key step from the caret stop `(offset, trailing)`, `left` or right of it on
@@ -61,12 +82,14 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// direction change an offset has two places on screen, and the step starts from, and may
     /// land on, either of them.
     ///
-    /// Like Qt's visual cursor navigation (Telegram Desktop's input field), a caret in a
-    /// paragraph that holds right-to-left text follows the glyphs: it moves to the caret
-    /// stop next to it on screen, whatever the logical order there. At the visual edge of a
-    /// row it stays put, except at the logical end of the paragraph where it crosses into the
-    /// neighbouring paragraph the way the text flows. Plain left-to-right paragraphs step
-    /// logically, as always.
+    /// A caret in a paragraph that holds right-to-left text follows the glyphs, as AppKit
+    /// and browsers move it: to the caret stop next to it on screen, whatever the logical
+    /// order there. (Telegram Desktop keeps Qt's default logical movement, where Left is
+    /// forward in a right-to-left paragraph whatever run the caret is in; Quill moves
+    /// visually on purpose, see docs/decisions/rtl-sweep.md.) At the visual edge of a row
+    /// it enters the facing edge of the next or previous row; at the logical end of the
+    /// paragraph it crosses into the neighbouring paragraph the way the text flows. Plain
+    /// left-to-right paragraphs step logically, as always.
     pub(super) fn step_horizontally(
         &self,
         offset: usize,
@@ -84,27 +107,18 @@ impl<M: InputModeKind> InputBaseState<M> {
             )
         };
         let Some((line, line_start)) = self.laid_out_paragraph(offset) else {
-            return logical(!left);
+            // No layout to follow yet: in a right-to-left paragraph Left still means
+            // logically forward, as it does once the glyphs are on screen.
+            let rtl = self.text_starts_rtl(self.text.offset_to_point(offset).row);
+            return logical(left == rtl);
         };
         if !line.has_bidi() {
             return logical(!left);
         }
-        let column = offset - line_start;
-        if let Some((column, trailing)) = line.visual_step(column, trailing, left) {
-            return (line_start + column, trailing);
-        }
-        // At the visual edge of the row: cross a paragraph boundary only from the logical
-        // end the arrow points at.
-        let forward = left == line.is_rtl();
-        let at_edge = if forward {
-            column == line.len()
-        } else {
-            column == 0
-        };
-        if at_edge {
-            logical(forward)
-        } else {
-            (offset, trailing)
+        match line.horizontal_step(offset - line_start, trailing, left) {
+            HorizontalStep::Stop(column, trailing) => (line_start + column, trailing),
+            HorizontalStep::Logical { forward } => logical(forward),
+            HorizontalStep::Stay => (offset, trailing),
         }
     }
 
@@ -158,25 +172,19 @@ impl<M: InputModeKind> InputBaseState<M> {
         (target, false)
     }
 
-    /// The word step on screen: spaces are passed over, then the characters of one kind (a
-    /// word or a run of punctuation). `None` when the caret cannot move on screen, or the
-    /// paragraph is not laid out with bidi runs.
+    /// The word step on screen: spaces are passed over, then one word or a run of
+    /// punctuation. Words are UAX #29 words, as for Alt+Backspace, so `צה"ל` or `don't` is
+    /// one step. `None` when the caret cannot move on screen, or the paragraph is not laid
+    /// out with bidi runs.
     fn visual_word_step(&self, offset: usize, trailing: bool, left: bool) -> Option<(usize, bool)> {
+        /// What the caret walks over: spaces, a run of punctuation, or the word that starts
+        /// at this paragraph offset.
         #[derive(PartialEq, Clone, Copy)]
         enum Kind {
             Space,
-            Word,
+            Word(usize),
             Other,
         }
-        let kind = |c: char| {
-            if c.is_whitespace() {
-                Kind::Space
-            } else if c.is_alphanumeric() || c == '_' {
-                Kind::Word
-            } else {
-                Kind::Other
-            }
-        };
         if self.masked {
             return None;
         }
@@ -184,12 +192,42 @@ impl<M: InputModeKind> InputBaseState<M> {
         if !line.has_bidi() {
             return None;
         }
+        let paragraph = self
+            .text
+            .slice(line_start..line_start + line.len())
+            .to_string();
+        let words: Vec<(usize, &str)> = paragraph.split_word_bound_indices().collect();
+        let kind = |at: usize, c: char| {
+            if c.is_whitespace() {
+                return Kind::Space;
+            }
+            let ix = words.partition_point(|(start, _)| *start <= at);
+            match ix.checked_sub(1).and_then(|ix| words.get(ix)) {
+                Some((start, word)) if word.chars().any(|c| c.is_alphanumeric() || c == '_') => {
+                    Kind::Word(*start)
+                }
+                _ => Kind::Other,
+            }
+        };
         let mut stop = (offset - line_start, trailing);
         let mut word: Option<Kind> = None;
         let mut moved = false;
-        while let Some(next) = line.visual_step(stop.0, stop.1, left) {
-            if let Some(c) = line.char_between_stops(stop, next) {
-                match (word, kind(c)) {
+        while let HorizontalStep::Stop(column, trailing) =
+            line.horizontal_step(stop.0, stop.1, left)
+        {
+            let next = (column, trailing);
+            if line.crosses_rows(stop, next) {
+                // A soft wrap falls between words: a word already entered ends at the
+                // row's edge, else the step carries on from the next row.
+                if word.is_some() {
+                    break;
+                }
+                stop = next;
+                moved = true;
+                continue;
+            }
+            if let Some((at, c)) = line.char_between_stops(stop, next) {
+                match (word, kind(at, c)) {
                     (None, Kind::Space) => {}
                     (None, k) => word = Some(k),
                     (Some(w), k) if w == k => {}

@@ -170,8 +170,9 @@ impl InputLine {
         }
     }
 
-    /// The character the caret passes between two x positions of a bidi row.
-    pub(crate) fn char_between(&self, a: Pixels, b: Pixels) -> Option<char> {
+    /// The character the caret passes between two x positions of a bidi row, with the
+    /// row offset it starts at.
+    pub(crate) fn char_between(&self, a: Pixels, b: Pixels) -> Option<(usize, char)> {
         match &self.content {
             Content::Bidi { geo, .. } => geo.char_between(a.as_f32(), b.as_f32()),
             _ => None,

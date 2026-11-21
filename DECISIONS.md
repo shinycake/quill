@@ -4697,9 +4697,10 @@ greps.
   - `inputPageBlockSectionHeading.size` is schema-documented (:5978): 1-6,
     1 is the largest — the editor's H1/H2/H3 map to sizes 1/2/3, and incoming
     `pageBlockSectionHeading` (:4213) sizes clamp to levels 1-3.
-  - `is_rtl` is a known simplification: `parse_rich_message` ignores the
-    `richMessage.is_rtl` flag and `input_rich_message` always sends `false`
-    — Hebrew/Arabic rich messages render LTR. RTL layout is out of slice.
+  - `is_rtl`: `input_rich_message` sends the direction of the first text
+    that is not blank, as Telegram Desktop's `DetermineRichPageRtl` does
+    (RTL sweep, docs/decisions/rtl-sweep.md). `parse_rich_message` still
+    ignores the incoming flag; that is display item D8 of the sweep.
   - Rich-text max length is 32,768 UTF-8 characters (Unicode scalar values,
     per Telegram's "Rich Message Limits" — not UTF-16 code units, even though
     entity offsets are UTF-16), summed over every block's text. Over-limit

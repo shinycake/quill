@@ -18,14 +18,12 @@ use std::rc::Rc;
 
 use unicode_segmentation::UnicodeSegmentation as _;
 
-use gpui::{
-    App, Bounds, Pixels, Point, SharedString, TextAlign, TextRun, Window, point, px, size,
-};
+use gpui::{App, Bounds, Pixels, Point, SharedString, TextAlign, TextRun, Window, point, px, size};
 
-use crate::RunGeometry;
 use super::display_map::{
     BidiLine, InputLine, Paragraph, fragment_from_shaped, mirror_neutral_run,
 };
+use crate::RunGeometry;
 
 /// One visual row of the paragraph.
 struct Row {
@@ -66,10 +64,7 @@ fn runs_in(runs: &[TextRun], range: &Range<usize>) -> Vec<TextRun> {
         }
         let len = end.min(range.end) - start.max(range.start);
         if len > 0 {
-            out.push(TextRun {
-                len,
-                ..run.clone()
-            });
+            out.push(TextRun { len, ..run.clone() });
         }
     }
     out
@@ -364,12 +359,7 @@ impl BidiParagraph {
             Some(paragraph) => paragraph
                 .visual_runs(range.start - hard_start..range.end - hard_start)
                 .into_iter()
-                .map(|r| {
-                    (
-                        r.range.start + hard_start..r.range.end + hard_start,
-                        r.rtl,
-                    )
-                })
+                .map(|r| (r.range.start + hard_start..r.range.end + hard_start, r.rtl))
                 .collect(),
             None if range.is_empty() => Vec::new(),
             None => vec![(range.clone(), false)],
@@ -412,7 +402,11 @@ impl BidiParagraph {
     /// For a cache that keeps laid-out paragraphs to a budget of bytes.
     pub fn heap_size(&self) -> usize {
         self.rows.capacity() * std::mem::size_of::<Row>()
-            + self.rows.iter().map(|row| row.line.heap_size()).sum::<usize>()
+            + self
+                .rows
+                .iter()
+                .map(|row| row.line.heap_size())
+                .sum::<usize>()
     }
 
     /// Row height.
@@ -465,7 +459,11 @@ impl BidiParagraph {
     }
 
     /// The byte offset under `position` (`Ok`), else the nearest caret offset (`Err`).
-    pub fn index_for_position(&self, position: Point<Pixels>, width: Pixels) -> Result<usize, usize> {
+    pub fn index_for_position(
+        &self,
+        position: Point<Pixels>,
+        width: Pixels,
+    ) -> Result<usize, usize> {
         if self.rows.is_empty() {
             return Err(0);
         }
@@ -486,15 +484,11 @@ impl BidiParagraph {
         if self.rows.is_empty() {
             return 0;
         }
-        match self.index_for_position(position, width) {
-            _ => {
-                // Over the left half of a character the caret goes before it, over the
-                // right half after it: the nearest boundary, not the character.
-                let row = &self.rows[self.row_at_y(position.y)];
-                let x = position.x - self.row_offset(row, width);
-                row.range.start + row.line.closest_index_for_x(x).min(row.shaped_len)
-            }
-        }
+        // Over the left half of a character the caret goes before it, over the
+        // right half after it: the nearest boundary, not the character.
+        let row = &self.rows[self.row_at_y(position.y)];
+        let x = position.x - self.row_offset(row, width);
+        row.range.start + row.line.closest_index_for_x(x).min(row.shaped_len)
     }
 
     /// The rectangles covering the byte `range`, relative to the paragraph's top-left.

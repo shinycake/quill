@@ -12,10 +12,12 @@
 //! * runs of the other direction (digits, Latin words) are laid out inside the
 //!   paragraph in visual order, per rules L1/L2.
 //!
-//! GPUI's platform text systems disagree on the base direction of a line
-//! (CoreText and cosmic-text pick it from the first strong character,
-//! DirectWrite always lays out left-to-right) and none of them can say where a
-//! *logical* offset sits when a run is right-to-left. This module therefore
+//! GPUI's platform text systems used to disagree on how they lay out a mixed
+//! line (DirectWrite took no base direction and drew right-to-left runs in
+//! typing order; cosmic-text listed right-to-left lines from their right end).
+//! They now share one contract, checked on every OS by `crates/text-conformance`,
+//! but a shaped line still cannot say which edge of a character is its leading
+//! one at a direction change, so the caret needs more than it gives. This module therefore
 //! splits a visual line into runs of one embedding level, which the engine
 //! shapes one by one (a single-direction run shapes identically on every
 //! platform), places them in visual order itself, and maps caret offsets, hit
@@ -368,6 +370,17 @@ pub(crate) fn fragment_extent(
     (-left, right - left)
 }
 
+/// Where a caret may stop inside a [`Fragment`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stops {
+    /// Between grapheme clusters, as Qt's cursor positions do: never inside an emoji
+    /// sequence or between a letter and its niqqud or harakat.
+    Graphemes,
+    /// Only at the two ends: an inline token (a custom emoji) is one caret step, whatever
+    /// its fallback text holds.
+    Ends,
+}
+
 /// One shaped single-direction run of a visual line, placed at `x`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Fragment {
@@ -383,6 +396,8 @@ pub(crate) struct Fragment {
     /// How far right the shaped line is painted from `x` so that its glyph box starts at `x`
     /// (platforms may hang trailing whitespace outside the shaped width).
     pub paint_shift: f32,
+    /// Where the caret may stop inside the fragment.
+    pub stops: Stops,
 }
 
 impl Fragment {
@@ -402,6 +417,20 @@ impl Fragment {
             text,
             clusters,
             paint_shift: 0.,
+            stops: Stops::Graphemes,
+        }
+    }
+
+    /// A fragment the caret crosses in one step, drawn as one box `width` wide.
+    pub(crate) fn atomic(range: Range<usize>, rtl: bool, x: f32, width: f32, text: String) -> Self {
+        let clusters = vec![Cluster {
+            range: 0..text.len(),
+            left: 0.,
+            right: width,
+        }];
+        Self {
+            stops: Stops::Ends,
+            ..Self::new(range, rtl, x, width, text, clusters)
         }
     }
 
@@ -426,20 +455,22 @@ impl Fragment {
         let Some(cluster) = self.cluster_at(local) else {
             return if self.rtl { self.width } else { 0. };
         };
-        let chars = self
+        // A cluster holding several graphemes (a lam-alef ligature) splits its width
+        // between them.
+        let graphemes = self
             .text
             .get(cluster.range.clone())
             .unwrap_or_default()
-            .chars()
+            .graphemes(true)
             .count()
             .max(1);
         let before = self
             .text
             .get(cluster.range.start..local)
             .unwrap_or_default()
-            .chars()
+            .graphemes(true)
             .count();
-        let frac = before as f32 / chars as f32;
+        let frac = before as f32 / graphemes as f32;
         let span = cluster.right - cluster.left;
         if self.rtl {
             cluster.right - span * frac
@@ -448,12 +479,13 @@ impl Fragment {
         }
     }
 
-    /// Character boundaries of the fragment, as byte offsets within it.
+    /// The caret stops of the fragment, as byte offsets within it, first to last.
     fn boundaries(&self) -> impl Iterator<Item = usize> + '_ {
-        self.text
-            .char_indices()
-            .map(|(i, _)| i)
-            .chain(std::iter::once(self.text.len()))
+        let starts: Vec<usize> = match self.stops {
+            Stops::Graphemes => self.text.grapheme_indices(true).map(|(i, _)| i).collect(),
+            Stops::Ends => vec![0],
+        };
+        starts.into_iter().chain(std::iter::once(self.text.len()))
     }
 }
 
@@ -684,8 +716,8 @@ impl BidiLine {
     }
 
     /// The character the caret passes over going from x `a` to x `b` (any order): the first
-    /// character of the cluster that lies between them.
-    pub(crate) fn char_between(&self, a: f32, b: f32) -> Option<char> {
+    /// character of the cluster that lies between them, with the offset it starts at.
+    pub(crate) fn char_between(&self, a: f32, b: f32) -> Option<(usize, char)> {
         let mid = (a + b) / 2.;
         let f = self
             .fragments
@@ -701,6 +733,7 @@ impl BidiLine {
             .unwrap_or_default()
             .chars()
             .next()
+            .map(|c| (f.range.start + cluster.range.start, c))
     }
 }
 
@@ -1226,9 +1259,9 @@ mod tests {
     #[test]
     fn the_character_between_two_stops_is_the_one_in_the_gap() {
         let line = ab_hebrew();
-        assert_eq!(line.char_between(10., 20.), Some('b'));
-        assert_eq!(line.char_between(30., 40.), Some('ש'));
-        assert_eq!(line.char_between(20., 30.), Some('ג'));
+        assert_eq!(line.char_between(10., 20.).map(|(_, c)| c), Some('b'));
+        assert_eq!(line.char_between(30., 40.).map(|(_, c)| c), Some('ש'));
+        assert_eq!(line.char_between(20., 30.).map(|(_, c)| c), Some('ג'));
     }
 
     #[test]
