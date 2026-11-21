@@ -105,6 +105,65 @@ pub fn pick(id: Option<i64>, secs: i32, premium: bool) -> StatusPick {
     }
 }
 
+/// "Set Status" or "Remove Status" in the right-click menu of a custom
+/// emoji outside the selector (tdesktop `EmojiStatusMenu::AddSetAsStatusAction`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuStatusAction {
+    Set(i64),
+    /// The emoji is the status now: the item removes it.
+    Remove,
+}
+
+/// The menu's status item for `emoji` while the account's status is
+/// `current` (`0`: none, or a collectible). Only Premium accounts get one.
+pub fn menu_status_action(premium: bool, current: i64, emoji: i64) -> Option<MenuStatusAction> {
+    if !premium || emoji <= 0 {
+        return None;
+    }
+    Some(if current == emoji {
+        MenuStatusAction::Remove
+    } else {
+        MenuStatusAction::Set(emoji)
+    })
+}
+
+/// The status a change replaced, which the done toast's Undo puts back
+/// (tdesktop `ShowDoneToast`'s `was` and `wasUntil`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatusUndo {
+    /// There was no status.
+    Remove,
+    /// `id` until the Unix time `until` (`0`: no end).
+    Set { id: i64, until: i32 },
+}
+
+/// What Undo restores for a status of `id` ending at `until` (`None`: no
+/// status). A collectible (a status with no custom emoji id) has no Undo.
+pub fn status_undo(id: i64, until: Option<i32>) -> Option<StatusUndo> {
+    match until {
+        None => Some(StatusUndo::Remove),
+        Some(until) if id > 0 => Some(StatusUndo::Set {
+            id,
+            until: until.max(0),
+        }),
+        Some(_) => None,
+    }
+}
+
+/// The change Undo sends at `now`: the emoji (`None` removes) and how long
+/// it stays (`0`: no end). A timed status that has run out since is not
+/// put back.
+pub fn undo_change(undo: StatusUndo, now: i64) -> (Option<i64>, i32) {
+    match undo {
+        StatusUndo::Remove => (None, 0),
+        StatusUndo::Set { id, until: 0 } => (Some(id), 0),
+        StatusUndo::Set { id, until } => match i32::try_from(i64::from(until) - now) {
+            Ok(left) if left > 0 => (Some(id), left),
+            _ => (None, 0),
+        },
+    }
+}
+
 /// The row a time falls on (`TimePickerBox`): the nearest value, the
 /// later one on a tie.
 pub fn picker_start_index(values: &[i32], start: i32) -> usize {
@@ -214,6 +273,49 @@ mod tests {
             StatusPick::Set { id: 4, secs: 3600 }
         );
         assert_eq!(pick(Some(4), -5, true), StatusPick::Set { id: 4, secs: 0 });
+    }
+
+    #[test]
+    fn the_menu_removes_the_status_it_shows_and_sets_any_other() {
+        assert_eq!(menu_status_action(false, 0, 7), None);
+        assert_eq!(menu_status_action(true, 0, 0), None);
+        assert_eq!(
+            menu_status_action(true, 0, 7),
+            Some(MenuStatusAction::Set(7))
+        );
+        assert_eq!(
+            menu_status_action(true, 5, 7),
+            Some(MenuStatusAction::Set(7))
+        );
+        assert_eq!(
+            menu_status_action(true, 7, 7),
+            Some(MenuStatusAction::Remove)
+        );
+    }
+
+    #[test]
+    fn undo_puts_back_what_was_there() {
+        assert_eq!(status_undo(0, None), Some(StatusUndo::Remove));
+        assert_eq!(
+            status_undo(9, Some(0)),
+            Some(StatusUndo::Set { id: 9, until: 0 })
+        );
+        // A collectible: a status with no custom emoji id.
+        assert_eq!(status_undo(0, Some(0)), None);
+        assert_eq!(undo_change(StatusUndo::Remove, 100), (None, 0));
+        assert_eq!(
+            undo_change(StatusUndo::Set { id: 9, until: 0 }, 100),
+            (Some(9), 0)
+        );
+        assert_eq!(
+            undo_change(StatusUndo::Set { id: 9, until: 400 }, 100),
+            (Some(9), 300)
+        );
+        // Ran out meanwhile: nothing to put back.
+        assert_eq!(
+            undo_change(StatusUndo::Set { id: 9, until: 100 }, 100),
+            (None, 0)
+        );
     }
 
     #[test]

@@ -246,6 +246,18 @@ impl ToastQueue {
         if !note.is_toast() {
             return;
         }
+        // A newer Undo takes the place of an older one: putting back what
+        // the older change replaced would undo the newer one too.
+        if note.click().is_undo() {
+            self.waiting.retain(|queued| !queued.note.click().is_undo());
+            if self
+                .showing
+                .as_ref()
+                .is_some_and(|showing| showing.toast.note.click().is_undo())
+            {
+                self.showing = None;
+            }
+        }
         let toast = Toast { note, host };
         let Some(showing) = self.showing.as_mut() else {
             self.show(toast, false, now);
@@ -430,6 +442,24 @@ mod tests {
         assert_eq!(queue.waiting(), 1);
         queue.tick(secs(t0, 6));
         assert_eq!(text(&queue), Some("Saved to Downloads"));
+    }
+
+    #[test]
+    fn a_newer_undo_takes_the_place_of_an_older_one() {
+        use crate::ui::status_note::NoteClick;
+        use quill::emoji_status_selector::StatusUndo;
+        let undo = |text: &str| {
+            StatusNote::info(text).with_click(NoteClick::UndoEmojiStatus(StatusUndo::Remove))
+        };
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.push(undo("set"), t0);
+        queue.push(StatusNote::info("copied"), t0);
+        queue.push(undo("removed"), t0);
+        assert_eq!(text(&queue), Some("removed"), "the stale Undo is gone");
+        assert_eq!(queue.waiting(), 1);
+        queue.dismiss(t0);
+        assert_eq!(text(&queue), Some("copied"));
     }
 
     #[test]

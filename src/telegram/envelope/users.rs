@@ -174,8 +174,12 @@ pub struct ParsedUser {
     pub verification: crate::peer_badge::VerificationStatus,
     /// `user.emoji_status.type` custom emoji id (schema line 2343), 0 when
     /// there is no status or it is not a custom emoji. TDLib sends
-    /// `updateUser` when a status expires, so the expiry is not tracked.
+    /// `updateUser` when a status expires.
     pub emoji_status_id: i64,
+    /// `user.emoji_status.expiration_date` (`0`: no end), or `None` when
+    /// the user has no status at all. A collectible status has this but
+    /// no `emoji_status_id`. Undo after a change puts it back.
+    pub emoji_status_until: Option<i32>,
 }
 
 impl ParsedUser {
@@ -435,6 +439,15 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(|t| t.get("custom_emoji_id"))
         .and_then(|id| int64(Some(id)))
         .unwrap_or(0);
+    let emoji_status_until = value
+        .get("emoji_status")
+        .filter(|s| s.is_object())
+        .map(|s| {
+            s.get("expiration_date")
+                .and_then(Value::as_i64)
+                .and_then(|t| i32::try_from(t).ok())
+                .unwrap_or(0)
+        });
     Some(ParsedUser {
         id,
         first_name,
@@ -474,6 +487,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         is_premium,
         verification,
         emoji_status_id,
+        emoji_status_until,
     })
 }
 

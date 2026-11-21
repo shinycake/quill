@@ -3,7 +3,7 @@
 //! a toast, and for how long, follows the kind, never the words, so every
 //! interface language behaves like English.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// How a note is presented.
@@ -20,14 +20,32 @@ pub(crate) enum NoteKind {
     Silent,
 }
 
+/// What a click on the note's toast does besides dismissing it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum NoteClick {
+    #[default]
+    Dismiss,
+    /// Show a saved file in the file manager (tdesktop's "saved to your
+    /// Downloads folder" link).
+    Reveal(PathBuf),
+    /// Put back the emoji status a change replaced (tdesktop's "Emoji
+    /// status set. Undo").
+    UndoEmojiStatus(quill::emoji_status_selector::StatusUndo),
+}
+
+impl NoteClick {
+    /// The click undoes a change.
+    pub(crate) fn is_undo(&self) -> bool {
+        matches!(self, Self::UndoEmojiStatus(_))
+    }
+}
+
 /// The current status line: text plus how it is presented.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct StatusNote {
     text: String,
     kind: NoteKind,
-    /// A saved file a click on the toast shows in the file manager
-    /// (tdesktop's "saved to your Downloads folder" link).
-    reveal: Option<PathBuf>,
+    click: NoteClick,
 }
 
 impl StatusNote {
@@ -35,18 +53,22 @@ impl StatusNote {
         Self {
             text: text.into(),
             kind,
-            reveal: None,
+            click: NoteClick::Dismiss,
         }
     }
 
     /// The same note, and a click on its toast reveals `path`.
-    pub(crate) fn with_reveal(mut self, path: PathBuf) -> Self {
-        self.reveal = Some(path);
+    pub(crate) fn with_reveal(self, path: PathBuf) -> Self {
+        self.with_click(NoteClick::Reveal(path))
+    }
+
+    pub(crate) fn with_click(mut self, click: NoteClick) -> Self {
+        self.click = click;
         self
     }
 
-    pub(crate) fn reveal(&self) -> Option<&Path> {
-        self.reveal.as_deref()
+    pub(crate) fn click(&self) -> &NoteClick {
+        &self.click
     }
 
     pub(crate) fn info(text: impl Into<String>) -> Self {
@@ -79,10 +101,12 @@ impl StatusNote {
     }
 
     /// How long the toast stays: failures longer than confirmations.
+    /// An Undo toast stays 5 s (tdesktop `kToastDuration`).
     pub(crate) fn toast_duration(&self) -> Duration {
-        Duration::from_millis(match self.kind {
-            NoteKind::Error => 6000,
-            NoteKind::Info | NoteKind::Silent => 3000,
+        Duration::from_millis(match (self.kind, &self.click) {
+            (NoteKind::Error, _) => 6000,
+            (_, NoteClick::UndoEmojiStatus(_)) => 5000,
+            (NoteKind::Info | NoteKind::Silent, _) => 3000,
         })
     }
 }

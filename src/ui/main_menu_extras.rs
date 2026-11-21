@@ -70,12 +70,13 @@ impl QuillApp {
 
     /// Set `id` as the status for `secs` (`0` keeps it until removed);
     /// `None` removes the status. A collectible goes out as its gift.
+    /// `false`: nothing was sent (another change is out, or it failed).
     pub(super) fn change_emoji_status_for(
         &mut self,
         id: Option<i64>,
         secs: i32,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         if let Some(live) = self.live.as_mut() {
             let collectible = id.is_some_and(|id| {
                 live.driver
@@ -94,20 +95,27 @@ impl QuillApp {
                 Some(id) if collectible => live.driver.change_collectible_emoji_status(id, secs),
                 _ => live.driver.change_emoji_status(id, secs),
             };
+            let out = matches!(sent, Ok(Some(_)));
             self.set_note(match sent {
                 Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_EMOJI_STATUS)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_MISC_AN_EMOJI_STATUS_IS_ALREADY)),
                 Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_UPDATE_EMOJI_STATUS)),
             });
-        } else if let Some(session) = self.demo_session.as_mut() {
-            // The offline demo accepts the change the way TDLib would.
-            if let Some(me) = session.my_user_id
-                && let Some(user) = session.users.get_mut(&me)
-            {
-                user.emoji_status_id = id.unwrap_or(0);
-            }
+            cx.notify();
+            return out;
+        }
+        let Some(session) = self.demo_session.as_mut() else {
+            return false;
+        };
+        // The offline demo accepts the change the way TDLib would.
+        if let Some(me) = session.my_user_id
+            && let Some(user) = session.users.get_mut(&me)
+        {
+            user.emoji_status_id = id.unwrap_or(0);
+            user.emoji_status_until = id.map(|_| 0);
         }
         cx.notify();
+        true
     }
 
     fn my_chat_rows(&self, channels: bool) -> Vec<MyChatRow> {

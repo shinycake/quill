@@ -990,9 +990,11 @@ mod reveal;
 mod status;
 #[cfg(feature = "demo-capture")]
 mod status_demo;
+mod status_menu;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod status_tests;
+pub(in crate::ui) use status_menu::with_status_item;
 mod status_time_box;
 pub(in crate::ui) use custom_emoji_cell::section_chip;
 #[cfg(test)]
