@@ -39,6 +39,16 @@ Anything merged to `main` runs with the release secrets at the next release,
 so a maintainer's pull request is the line of defence for code outside
 `CODEOWNERS` too (build scripts, `build.rs`, crates).
 
+## No self-hosted runners
+
+The owner's Mac (`idan-m1pro`) was a self-hosted runner for
+`quill-ui-build.yml`. Anyone with write access could dispatch that workflow on
+their own commit, or push a branch with a workflow aimed at the runner, and run
+code on the Mac as the owner. The runner and the workflow were removed on
+2026-11-22; `macos-smoke-fallback.yml` (GitHub-hosted) and `ci.yml`'s
+`macos-package` cover the macOS build. Do not register a self-hosted runner on
+this repository again.
+
 ## Collaborators
 
 `shinycake/quill` is a personal repository: a collaborator always gets write
