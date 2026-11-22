@@ -197,10 +197,38 @@ Changed by the Quill project in 2026 (`docs/decisions/rtl-sweep.md`):
 (a stable sort by x). cosmic-text lists a right-to-left line from its right end,
 which every `LineLayout` consumer read backwards.
 
-## Backdrop glass (stage 1)
+## Backdrop glass
 
-Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
-`src/wgpu_renderer.rs` draws `PrimitiveBatch::Lenses` as each lens's fallback
-quad (`BackdropLens::fallback_quad`, a rounded quad of the glass's colour)
-through the quad pipeline, from a `lens_fallbacks` instance binding. Real
-glass on wgpu is a later stage.
+Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
+
+- Stage 1: `src/wgpu_renderer.rs` drew `PrimitiveBatch::Lenses` as each
+  lens's fallback quad (`BackdropLens::fallback_quad`) through the quad
+  pipeline, from a `lens_fallbacks` instance binding.
+- Stage 2, real glass, as gpui-pre-apple's `metal_renderer/lens.rs` draws it:
+  - `src/wgpu_renderer/lens.rs` (new): a lens batch ends the frame's pass,
+    copies each footprint out of the target into a pooled five-level atlas
+    (`copy_texture_to_texture`), fills the levels with dual-Kawase
+    downsamples, resumes the pass with `LoadOp::Load` and draws the lenses.
+    The pipelines are built on the first frame with glass (again if the
+    window's alpha mode changes), inside validation and internal error
+    scopes; when they fail, glass draws flat for the rest of the renderer's
+    life instead of failing every frame. The atlas goes after the first frame
+    without glass and on a resize; everything goes with the other resources
+    on a device loss. Footprints that don't fit a 16384 atlas, a target
+    without `COPY_SRC` and the WebGL instance transport draw the fallback
+    quads.
+  - `src/shaders_lens.wgsl` (new, after `shaders.wgsl` and
+    `shaders_storage.wgsl`): `vs_lens` / `fs_lens`, a line-by-line port of
+    `lens_fragment` in gpui-pre-apple's `shaders.metal`. Its bindings are
+    group 1's 4 to 7, clear of the surfaces' 0 to 3. `lens.rs` asserts the
+    `BackdropLens` offsets that WGSL's vec2 alignment could move.
+  - `src/shaders_lens_post.wgsl` (new): the downsample pass and the frame copy.
+  - `src/wgpu_renderer.rs`: the surface asks for `COPY_SRC` whenever its
+    capabilities offer it (Vulkan, as a rule). A surface without it (OpenGL)
+    gets frames with glass drawn into a readable texture of its size, which a
+    full-screen pass copies onto it (`glass_frame`, `copy_frame`); frames
+    without glass draw straight to it. `render_frame` and `record_frame`
+    take the target texture instead of a view (the glass copies from it);
+    `write_instance_binding` writes through the new `write_instance_data`,
+    which the glass uses for its storage slices. The headless target lost its
+    unused view.
