@@ -572,3 +572,10 @@ after an isolated Hebrew name was drawn left of it. The glyphs of each run are
 handed over left to right, a letter's points included. `shaping_text_system()` (in `gpui_windows.rs`)
 hands out the DirectWrite text system without a window for
 `crates/text-conformance`. CI now runs `direct_write::tests` too.
+
+`tabs_preserve_native_advances_and_cursor` checks Hebrew lines again (`אב`,
+`aאבb`, `a\tאב\tb`, `א\t\tב`): every character keeps one glyph, a hit test at
+a glyph finds its index, a right-to-left line runs backwards in typing order,
+and a one-direction line is as wide as DirectWrite's own layout of it. A
+cluster that lies past a run's glyphs logs a warning before the rest of the
+run is dropped.
