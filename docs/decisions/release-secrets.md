@@ -20,9 +20,10 @@ CI builds of `package-macos.yml` (from `ci.yml`) get no environment and stay
 ad-hoc signed, as before.
 
 A reusable workflow cannot take an environment from its caller, so the
-environment is set on the called job, and environment secrets override any
-the caller passes. That is why `release.yml` no longer passes the `MACOS_*`
-secrets.
+environment is set on the called job. That job sees the environment's secrets
+only when the caller passes `secrets: inherit` (tested 2026-11-22: with
+declared-but-unpassed secrets, or without `inherit`, they come through empty
+and the build is silently ad-hoc signed).
 
 ## Branch and tag protection
 

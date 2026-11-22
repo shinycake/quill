@@ -168,14 +168,13 @@ jobs:
     name: macos
     needs: prepare
     # The signing and notarization secrets live in the `release` environment,
-    # which package-macos.yml's job uses; this job waits for the owner's approval.
+    # which package-macos.yml's job uses; that job waits for the owner's
+    # approval. A called job only sees environment secrets with `inherit`.
     uses: ./.github/workflows/package-macos.yml
     with:
       version: ${{ needs.prepare.outputs.version }}
       embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
-    secrets:
-      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+    secrets: inherit
 
   # Corresponding source for the shipped LGPL libraries (FFmpeg and the
   # tgcalls inside libquill_calls).
