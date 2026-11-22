@@ -25,11 +25,16 @@ pub fn window_title(
     } else {
         String::new()
     };
-    let account = account.map(single_line).filter(|name| !name.is_empty());
+    // Names are isolated: a Hebrew chat name must not turn the counts and the
+    // dash around it into a right-to-left sentence.
+    let account = account
+        .map(single_line)
+        .filter(|name| !name.is_empty())
+        .map(|name| crate::text::isolate(&name));
     let Some(chat) = chat else {
         return format!("{}{added}", account.as_deref().unwrap_or(APP_NAME));
     };
-    let name = single_line(chat.name);
+    let name = crate::text::isolate(&single_line(chat.name));
     let primary = if chat.unread > 0 {
         format!("({}) {name}", chat.unread)
     } else {
@@ -74,6 +79,14 @@ mod tests {
     fn open_chat_leads_with_its_name_and_own_count() {
         assert_eq!(window_title(chat("Ada", 0), 0, None), "Ada");
         assert_eq!(window_title(chat("Ada", 3), 0, None), "(3) Ada");
+    }
+
+    #[test]
+    fn a_hebrew_name_is_isolated_from_the_counts() {
+        assert_eq!(
+            window_title(chat("שלום", 3), 12, None),
+            "(3) \u{2068}שלום\u{2069} \u{2013} (12)"
+        );
     }
 
     #[test]

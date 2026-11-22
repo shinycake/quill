@@ -252,3 +252,5 @@
 "qll_chatlist_suggestion_password_about" = "Your account is protected by 2-Step Verification. Do you still remember your password?";
 "qll_chatlist_suggestion_premium_title" = "Upgrade to Telegram Premium";
 "qll_chatlist_suggestion_premium_about" = "Switch from monthly to annual payments for Telegram Premium.";
+"lng_archived_last#one" = "{chats} and {count} more chat";
+"lng_archived_last#other" = "{chats} and {count} more chats";

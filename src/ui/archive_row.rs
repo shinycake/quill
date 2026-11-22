@@ -77,23 +77,20 @@ fn names_line(summary: &ArchiveRowSummary, cx: &App) -> AnyElement {
     let strong = cx.theme().foreground;
     // One text run so an overlong list ends in an ellipsis; unread names
     // are highlighted ranges.
-    let text = summary.text();
-    let mut highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = Vec::new();
-    let mut at = 0;
-    for name in &summary.names {
-        let end = at + name.title.len();
-        if name.unread {
-            highlights.push((
-                at..end,
+    let (text, unread) = summary.text_and_unread();
+    let highlights: Vec<(std::ops::Range<usize>, HighlightStyle)> = unread
+        .into_iter()
+        .map(|range| {
+            (
+                range,
                 HighlightStyle {
                     color: Some(strong),
                     font_weight: Some(FontWeight::SEMIBOLD),
                     ..Default::default()
                 },
-            ));
-        }
-        at = end + 2; // ", "
-    }
+            )
+        })
+        .collect();
     div()
         .min_w_0()
         .flex_1()

@@ -7,7 +7,7 @@
 
 use super::animated_emoji::{CUSTOM_FILE, CUSTOM_IDS, custom_sticker};
 use crate::ui::app::QuillApp;
-use crate::ui::demo::{demo_file_json, demo_media_allowlist};
+use crate::ui::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::telegram::client::copy_and_parse;
@@ -73,6 +73,21 @@ const MESSAGES: &[(&str, bool, &[Entity])] = &[
     ),
 ];
 
+/// A Hebrew rich message: a bulleted list and a numbered one.
+const RICH_LIST: &str = concat!(
+    r#"{"@type":"updateNewMessage","message":{"id":9399,"chat_id":11,"date":1760000000,"is_outgoing":false,"content":{"@type":"messageRichMessage","message":{"@type":"richMessage","is_rtl":true,"is_full":true,"blocks":["#,
+    r#"{"@type":"pageBlockList","items":["#,
+    r#"{"@type":"pageBlockListItem","label":"","blocks":[{"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"חלב ולחם"}}],"has_checkbox":false,"is_checked":false},"#,
+    r#"{"@type":"pageBlockListItem","label":"","blocks":[{"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"ביצים"}}],"has_checkbox":false,"is_checked":false}]},"#,
+    r#"{"@type":"pageBlockList","items":["#,
+    r#"{"@type":"pageBlockListItem","label":"1.","blocks":[{"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"לקנות מצרכים"}}],"has_checkbox":false,"is_checked":false},"#,
+    r#"{"@type":"pageBlockListItem","label":"2.","blocks":[{"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"לבשל ארוחת ערב"}}],"has_checkbox":false,"is_checked":false}]}"#,
+    r#"]}}}}"#
+);
+
+/// A forward from a hidden user with a Hebrew name, in an English line.
+const FORWARD: &str = r#"{"@type":"updateNewMessage","message":{"id":9400,"chat_id":11,"date":1760000000,"is_outgoing":false,"forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginHiddenUser","sender_name":"דנה כהן"},"date":1759990000,"source":null,"public_service_announcement_type":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Forwarded note","entities":[]}}}}"#;
+
 fn message_json(id: i64, text: &str, outgoing: bool, entities: &[Entity]) -> String {
     let entities: Vec<String> = entities
         .iter()
@@ -106,6 +121,20 @@ impl QuillApp {
         session.stickers.emoji.custom_emoji_stickers.update(|list| {
             list.extend(CUSTOM_IDS.map(custom_sticker));
         });
+        // Older messages above the rest: a Hebrew rich message with a
+        // bulleted and a numbered list (D8), and a forward from a Hebrew name
+        // (D7).
+        // And a wide photo whose caption mixes an English and a Hebrew
+        // paragraph: each rests against its own reading edge (D9).
+        let photo_file = demo_file_json(7_401, &demo_thumb_png_path(), true);
+        let photo = format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":9398,"chat_id":11,"is_outgoing":false,"date":1760000000,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{photo_file},"width":640,"height":300,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"Sunset at the beach\nשקיעה בחוף","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#
+        );
+        for json in [photo.as_str(), RICH_LIST, FORWARD] {
+            if let Some(owned) = copy_and_parse(json, &self.demo_ui.seq, &sink) {
+                session.apply(owned);
+            }
+        }
         let mut last_message = None;
         for (id, (text, outgoing, entities)) in (FIRST_MESSAGE..).zip(MESSAGES) {
             let message = message_json(id, text, *outgoing, entities);
@@ -129,7 +158,7 @@ impl QuillApp {
         if let Some(history) = session.histories.get_mut(&CHAT) {
             history
                 .messages
-                .retain(|id, _| (FIRST_MESSAGE..last).contains(id));
+                .retain(|id, _| (FIRST_MESSAGE - 3..last).contains(id));
         }
         cx.notify();
     }

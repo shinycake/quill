@@ -216,8 +216,12 @@ pub(super) fn inline_paragraph(
         layered,
     );
     let label = text.clone();
-    // Right-to-left paragraphs align right in the bubble (Telegram Desktop).
+    // Right-to-left paragraphs align right in the bubble. A caption under a
+    // photo is narrower than its bubble: when it holds right-to-left text it
+    // spans the bubble, so each of its paragraphs (Hebrew and English mixed)
+    // rests against its own reading edge.
     let rtl = quill::text::is_rtl_text(&text);
+    let fill = is_caption && quill::text::has_rtl_text(&text);
     if let Some(reserve) = reserve {
         // Em spaces track the font size, so `reserve / font` of them span
         // the footer's width at any text size.
@@ -251,6 +255,7 @@ pub(super) fn inline_paragraph(
         styled,
     )
     .bidi(bidi_source.0, bidi_source.1)
+    .when(fill, |this| this.fill_width())
     .source_map(source)
     .selection_color(accent().opacity(0.35).into())
     .message(msg_key)
@@ -303,7 +308,8 @@ pub(super) fn inline_paragraph(
         .role(Role::Label)
         .aria_label(label)
         .min_w_0()
-        .when(rtl, |this| this.w_full().flex().justify_end())
+        .when(fill, |this| this.w_full())
+        .when(rtl && !fill, |this| this.w_full().flex().justify_end())
         .child(paragraph)
         .into_any_element()
 }

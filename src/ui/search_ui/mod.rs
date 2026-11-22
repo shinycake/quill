@@ -3,9 +3,12 @@
 
 /// A search-row preview is one elided line, like tdesktop's dialog rows:
 /// every line break (and other control whitespace) becomes a space. GPUI
-/// lays a literal `\n` out as a second line even under `truncate()`.
+/// lays a literal `\n` out as a second line even under `truncate()`. What
+/// message text drops before shaping goes too (`quill::display_text`), so a
+/// highlight is found in the text that is drawn.
 pub(super) fn one_line_preview(text: &str) -> String {
-    text.chars()
+    let spaced: String = text
+        .chars()
         .map(|c| {
             if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
                 ' '
@@ -13,7 +16,8 @@ pub(super) fn one_line_preview(text: &str) -> String {
                 c
             }
         })
-        .collect()
+        .collect();
+    quill::display_text::filtered(&spaced).into_owned()
 }
 
 use super::app::{PaneMode, QuillApp};
@@ -217,23 +221,47 @@ fn chat_search_hit_row(
     })
 }
 
-/// Byte ranges in `text` matching `query` case-insensitively. Empty when the
-/// query is empty or lowercasing would shift byte offsets (no highlight is
-/// better than a misplaced one).
+/// Byte ranges in `text` matching `query` case-insensitively and whatever
+/// the points: Hebrew niqqud and Arabic harakat (nonspacing marks) are
+/// skipped on both sides, so "שלום" finds "שָׁלוֹם", and a match takes the
+/// marks of its last letter with it.
 fn match_ranges(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
-    let query = query.trim();
-    if query.is_empty() {
+    use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
+    let is_mark = |c: char| c.general_category() == GeneralCategory::NonspacingMark;
+    let needle: String = query
+        .trim()
+        .chars()
+        .filter(|c| !is_mark(*c))
+        .flat_map(char::to_lowercase)
+        .collect();
+    if needle.is_empty() {
         return Vec::new();
     }
-    let haystack = text.to_lowercase();
-    let needle = query.to_lowercase();
-    if haystack.len() != text.len() {
-        return Vec::new();
+    // The folded text, and for each of its bytes the source character's range.
+    let mut folded = String::new();
+    let mut source: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut chars = text.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        if is_mark(c) {
+            continue;
+        }
+        let mut end = at + c.len_utf8();
+        while let Some((mark_at, mark)) = chars.peek().copied().filter(|(_, m)| is_mark(*m)) {
+            end = mark_at + mark.len_utf8();
+            chars.next();
+        }
+        for lower in c.to_lowercase() {
+            folded.push(lower);
+            source.extend(std::iter::repeat_n(at..end, lower.len_utf8()));
+        }
     }
-    haystack
+    folded
         .match_indices(&needle)
-        .map(|(start, matched)| start..start + matched.len())
-        .filter(|range| text.is_char_boundary(range.start) && text.is_char_boundary(range.end))
+        .filter_map(|(start, matched)| {
+            let first = source.get(start)?;
+            let last = source.get(start + matched.len() - 1)?;
+            Some(first.start..last.end)
+        })
         .collect()
 }
 
@@ -965,8 +993,17 @@ mod match_tests {
     fn matches_case_insensitively_and_skips_unsafe_text() {
         assert_eq!(match_ranges("Hello hello", "HELLO"), vec![0..5, 6..11]);
         assert!(match_ranges("Hello", "").is_empty());
-        // Lowercasing İ changes the byte length: no highlight at all.
-        assert!(match_ranges("İstanbul hello", "hello").is_empty());
+        // Lowercasing İ changes its length; the match still lands on "hello".
+        assert_eq!(match_ranges("İstanbul hello", "hello"), vec![10..15]);
+    }
+
+    #[test]
+    fn hebrew_points_do_not_stop_a_match() {
+        let text = "אמר שָׁלוֹם לכולם";
+        let ranges = match_ranges(text, "שלום");
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(text.get(ranges[0].clone()), Some("שָׁלוֹם"));
+        assert_eq!(match_ranges("שלום", "שָׁלוֹם"), vec![0..8]);
     }
 }
 

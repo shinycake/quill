@@ -556,3 +556,28 @@ fn markup_loads_into_the_field_and_reads_back_the_same() {
         .unwrap();
     });
 }
+
+#[test]
+fn backspace_after_a_point_takes_the_point_and_keeps_the_letter() {
+    with_field(|cx, handle, input| {
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("composer", cx);
+            // shin, shin dot, qamats: Backspace removes the qamats, then the
+            // dot, then the letter.
+            let text = "\u{05E9}\u{05C1}\u{05B8}";
+            load(&input, &doc(text, vec![], vec![]), window, cx);
+            park(&input, text.len(), window, cx);
+            window.press("backspace", cx);
+            assert_eq!(input.read(cx).value().as_ref(), "\u{05E9}\u{05C1}");
+            window.press("backspace", cx);
+            assert_eq!(input.read(cx).value().as_ref(), "\u{05E9}");
+            // An emoji with a skin tone still goes whole.
+            load(&input, &doc("a👍🏽", vec![], vec![]), window, cx);
+            park(&input, "a👍🏽".len(), window, cx);
+            window.press("backspace", cx);
+            assert_eq!(input.read(cx).value().as_ref(), "a");
+        })
+        .unwrap();
+    });
+}

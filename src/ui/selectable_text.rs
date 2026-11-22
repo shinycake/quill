@@ -90,6 +90,8 @@ pub(super) struct SelectableRichText {
     layer: Option<super::anim_layer::Layer>,
     /// What the text is made of, for the bidirectional path (see [`Self::bidi`]).
     bidi_source: Option<BidiSource>,
+    /// Span the box, so each bidi row rests at its own reading edge.
+    fill_width: bool,
     /// The paragraph laid out by the bidirectional path, once prepainted.
     paragraph: Option<Rc<BidiParagraph>>,
     /// Custom emoji painted over placeholder glyphs.
@@ -155,6 +157,7 @@ impl SelectableRichText {
             spoilers: Vec::new(),
             layer: None,
             bidi_source: None,
+            fill_width: false,
             paragraph: None,
             emoji: Vec::new(),
             source: None,
@@ -194,6 +197,13 @@ impl SelectableRichText {
                 font_families,
             });
         }
+        self
+    }
+
+    /// Spans its box, not its widest row (bidi layout only): a Hebrew row
+    /// rests at the right edge and an English one at the left.
+    pub(super) fn fill_width(mut self) -> Self {
+        self.fill_width = true;
         self
     }
 
@@ -436,6 +446,9 @@ impl Element for SelectableRichText {
             // paragraph spill out of the bubble instead of wrapping.
             let mut layout_style = Style::default();
             layout_style.min_size.width = px(0.).into();
+            if self.fill_width {
+                layout_style.size.width = relative(1.).into();
+            }
             let layout_id = window.request_measured_layout(layout_style, {
                 move |known, available, window, _| {
                     let wrap = known.width.or(match available.width {
@@ -494,29 +507,27 @@ impl Element for SelectableRichText {
         if let Some(reveal) = &self.reveal {
             match &self.paragraph {
                 Some(paragraph) => {
+                    // Each row reveals from its own reading edge.
                     let line = f32::from(paragraph.line_height()).max(1.);
-                    let count =
-                        (f32::from(paragraph.size().height) / line).round().max(1.) as usize;
                     let top = f32::from(bounds.origin.y);
-                    let width = f32::from(paragraph.width());
-                    let lines: Vec<super::text_reveal::LaidLine> = (0..count)
-                        .map(|ix| super::text_reveal::LaidLine {
+                    let lines: Vec<super::text_reveal::LaidLine> = paragraph
+                        .row_shapes()
+                        .enumerate()
+                        .map(|(ix, (width, rtl))| super::text_reveal::LaidLine {
                             top: top + line * ix as f32,
                             bottom: top + line * (ix + 1) as f32,
-                            width,
+                            width: f32::from(width),
                             trailing: 0.,
+                            rtl,
                         })
                         .collect();
-                    reveal.report(&lines, paragraph.is_rtl());
+                    reveal.report(&lines);
                 }
-                None => reveal.report(
-                    &super::text_reveal::styled_lines(
-                        self.styled.layout(),
-                        &self.text,
-                        bounds.origin,
-                    ),
-                    false,
-                ),
+                None => reveal.report(&super::text_reveal::styled_lines(
+                    self.styled.layout(),
+                    &self.text,
+                    bounds.origin,
+                )),
             }
         }
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);

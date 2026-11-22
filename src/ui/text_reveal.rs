@@ -231,6 +231,8 @@ pub(crate) struct LaidLine {
     pub(crate) width: f32,
     /// How much of `width` is trailing spaces.
     pub(crate) trailing: f32,
+    /// Whether the line reads right to left (revealed from its right edge).
+    pub(crate) rtl: bool,
 }
 
 /// The visual lines of `text` laid out in `layout` with its top left at
@@ -275,6 +277,7 @@ pub(crate) fn styled_lines(
                 bottom: top + line_height,
                 width: (next_x - x).max(0.),
                 trailing: (next_x - spaces_x).max(0.),
+                rtl: false,
             });
             top += line_height;
         }
@@ -284,7 +287,7 @@ pub(crate) fn styled_lines(
 
 impl RevealPaint {
     /// Note a paragraph's lines (window coordinates) for the next frame.
-    pub(crate) fn report(&self, lines: &[LaidLine], rtl: bool) {
+    pub(crate) fn report(&self, lines: &[LaidLine]) {
         let Ok(mut geometry) = self.sink.try_borrow_mut() else {
             return;
         };
@@ -294,7 +297,7 @@ impl RevealPaint {
                 top: line.top - y,
                 bottom: line.bottom - y,
                 width: line.width,
-                rtl,
+                rtl: line.rtl,
             });
             geometry.skip = line.trailing;
         }
