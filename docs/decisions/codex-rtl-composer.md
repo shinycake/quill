@@ -15,9 +15,11 @@ user types."
   `AlignAbsolute`, which Qt reads as "start edge": the right edge of an RTL
   paragraph. Mixed runs (digits, Latin words) are ordered by the bidi
   algorithm inside the paragraph; the caret starts at the paragraph's start
-  edge and advances against the reading direction; arrows follow Qt's visual
-  cursor movement (Left moves visually left, which in an RTL run is forward
-  in typing order).
+  edge and advances against the reading direction; arrows move visually
+  (Left moves visually left, which in an RTL run is forward in typing order),
+  as AppKit does. Correction from the RTL sweep: tdesktop never sets a cursor
+  move style, so Qt's default logical movement applies there; visual movement
+  is Quill's own choice (docs/decisions/rtl-sweep.md).
 - The placeholder keeps the UI direction (task brief), so it stays left in an
   LTR UI; here an empty composer is not a bidi paragraph, so it is untouched.
 - `lib_ui/ui/text/text.cpp` (`StringDirection`, `computeParagraphDirection`)

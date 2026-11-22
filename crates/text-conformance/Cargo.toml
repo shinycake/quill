@@ -1,0 +1,25 @@
+[package]
+name = "quill-text-conformance"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "MIT"
+description = "What every platform text system must do with right-to-left and mixed text, checked against the real CoreText, DirectWrite and cosmic-text backends"
+repository = "https://github.com/shinycake/quill"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.12", default-features = false }
+unicode-bidi = "0.3.18"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui_apple = { package = "gpui-pre-apple", version = "=0.3.12", default-features = false, features = ["font-kit"] }
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+gpui_windows = { package = "gpui-pre-windows", version = "=0.3.12", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.12", default-features = false }

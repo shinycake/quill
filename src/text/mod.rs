@@ -539,6 +539,22 @@ pub fn is_rtl_text(text: &str) -> bool {
     unicode_bidi::get_base_direction_full(text) == unicode_bidi::Direction::Rtl
 }
 
+/// `name` ready to drop into a sentence: a name with right-to-left letters
+/// goes inside a first-strong isolate (FSI ... PDI), so it reads in its own
+/// direction and cannot drag the words, colon or number beside it to its
+/// side. Telegram Desktop wraps names the same way (`TextUtilities::
+/// WrapRtl`); left-to-right names stay as they are, since they cannot reorder
+/// a left-to-right sentence and adding marks would change every copied line.
+/// Isolates are skipped when the paragraph's direction is chosen (UAX #9 P2),
+/// so the sentence keeps the direction of its own words.
+pub fn isolate(name: &str) -> String {
+    if has_rtl_text(name) {
+        format!("\u{2068}{name}\u{2069}")
+    } else {
+        name.to_string()
+    }
+}
+
 /// Whether `text` holds a right-to-left character (or one that starts a
 /// right-to-left run), so it needs bidirectional layout: wrapping in typing
 /// order and visual reordering per row. Plain left-to-right text, ASCII

@@ -57,4 +57,10 @@ pub(crate) use wrapper::*;
 
 pub use platform::WindowsPlatform;
 
+/// QUILL: the DirectWrite text system on its own, without a window, so
+/// `crates/text-conformance` can check its layout against the other backends.
+pub fn shaping_text_system() -> anyhow::Result<std::sync::Arc<dyn gpui::PlatformTextSystem>> {
+    Ok(std::sync::Arc::new(DirectWriteTextSystem::new()?))
+}
+
 pub(crate) use windows::Win32::Foundation::HWND;

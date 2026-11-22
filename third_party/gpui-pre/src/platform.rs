@@ -1726,7 +1726,10 @@ impl PlatformTextSystem for NoopTextSystem {
                 .width
             / metrics.units_per_em as f32;
         let mut glyphs = Vec::new();
-        for (ix, c) in text.char_indices() {
+        // QUILL: characters in the order the Unicode Bidirectional Algorithm shows them,
+        // as CoreText, DirectWrite and cosmic-text return them, so tests of right-to-left
+        // text on this stand-in see what the real backends draw.
+        for (ix, c) in visual_chars(text) {
             if let Some(glyph) = self.glyph_for_char(FontId(0), c) {
                 glyphs.push(ShapedGlyph {
                     id: glyph,
@@ -1770,6 +1773,28 @@ impl PlatformTextSystem for NoopTextSystem {
     ) -> TextRenderingMode {
         TextRenderingMode::Grayscale
     }
+}
+
+/// QUILL: `text`'s characters with their byte indices, left to right on screen (UAX #9,
+/// base direction from the first strong character outside an isolate).
+fn visual_chars(text: &str) -> Vec<(usize, char)> {
+    let info = unicode_bidi::BidiInfo::new(text, None);
+    let mut chars = Vec::with_capacity(text.len());
+    for paragraph in &info.paragraphs {
+        let (levels, runs) = info.visual_runs(paragraph, paragraph.range.clone());
+        for run in runs {
+            let Some(part) = text.get(run.clone()) else {
+                continue;
+            };
+            let indexed = part.char_indices().map(|(ix, c)| (run.start + ix, c));
+            if levels.get(run.start).is_some_and(|level| level.is_rtl()) {
+                chars.extend(indexed.rev());
+            } else {
+                chars.extend(indexed);
+            }
+        }
+    }
+    chars
 }
 
 // Adapted from https://github.com/microsoft/terminal/blob/1283c0f5b99a2961673249fa77c6b986efb5086c/src/renderer/atlas/dwrite.cpp

@@ -816,7 +816,12 @@ impl CosmicTextSystemState {
         });
 
         let mut runs: Vec<ShapedRun> = Vec::new();
-        for glyph in &layout.glyphs {
+        // QUILL: cosmic-text lists the glyphs of a right-to-left line from its right end;
+        // CoreText and DirectWrite (and everything that reads a `LineLayout`) go left to
+        // right on screen. The sort is stable, so glyphs at one x keep their order.
+        let mut glyphs: Vec<_> = layout.glyphs.iter().collect();
+        glyphs.sort_by(|a, b| a.x.total_cmp(&b.x));
+        for glyph in glyphs {
             let mut font_id = FontId(glyph.metadata);
             let mut loaded_font = self.loaded_font(font_id);
             if loaded_font.font.id() != glyph.font_id {

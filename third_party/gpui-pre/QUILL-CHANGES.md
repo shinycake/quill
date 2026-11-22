@@ -603,3 +603,32 @@ The Quill project added `MenuRole` and `Menu::role` / `OwnedMenu::role` in
 `src/platform/app_menu.rs` in 2026, so the platform finds the Window menu by
 its role instead of by the English name "Window", which a translated menu bar
 does not have.
+
+## Right-to-left glyphs (RTL sweep)
+
+Changed by the Quill project in 2026 (`docs/decisions/rtl-sweep.md`):
+
+- `src/text_system/bidi_paint.rs` (new): `DecorationPlan` gives each glyph of a
+  line the decoration run that holds its byte index, and each underline,
+  strikethrough and background the span of the glyphs that carry it.
+  `paint_line` and `paint_line_background` (`src/text_system/line.rs`) use it
+  for a one-row line whose glyphs are not in byte order (right-to-left text),
+  where the forward walk over decoration runs gave every glyph the last run's
+  style.
+- `src/text_system/line_layout.rs`: `x_for_index`, `index_for_x` and
+  `closest_index_for_x` work from character clusters with a direction on such
+  lines, so the caret of a right-to-left character is its right edge.
+  Byte-ordered lines keep the upstream walks.
+- `src/platform.rs`: `NoopTextSystem::layout_line` lays characters out in UAX
+  #9 visual order (`unicode-bidi`, a new dependency), as the real backends do,
+  so tests of right-to-left text on it mean something.
+- `src/text_system/line_layout.rs`: `layout_wrapped_line` breaks a line whose
+  glyphs are not in byte order at logical row starts (`logical_row_starts`)
+  and shapes each row on its own in the paragraph's direction
+  (`LineLayoutCache::layout_rows`), with a direction mark in front where the
+  row's first strong character would choose the other one; the mark's glyphs
+  and advance are removed. `WrappedLineLayout` finds positions row by row on
+  such lines. `bidi_paint::wrapped_rows` splits the result for painting, which
+  `paint_line` and `paint_line_background` use. Upstream reordered the whole
+  line and then wrapped the visual order, so the rows of a wrapped Hebrew
+  paragraph read bottom to top.

@@ -528,8 +528,7 @@ waitable timer end well inside twenty 15.6 ms system ticks, and
 `file_picker_tests` checks that a shell item for a file with a non-ASCII name
 gives back its exact path. CI runs them with `cargo test -p gpui-pre-windows -p quill
 --lib --features quill/demo-capture --locked -- timer_thread::tests
-file_picker_tests direct_write::tests`, the last for the DirectWrite text tests
-below.
+file_picker_tests`.
 
 The Quill project changed it in 2026 so right-to-left text reads the right
 way round. DirectWrite hands `DrawGlyphRun` a right-to-left run (odd
@@ -539,29 +538,44 @@ every Hebrew or Arabic word came out mirrored (the bidi engine in gpui-base
 shapes each right-to-left run on its own and reads glyph x positions back).
 `src/direct_write.rs`: `DrawGlyphRun` places such a run's glyphs from its
 right edge (a positive advance offset moves a glyph leftward too) and emits
-them in visual order, left to right, as cosmic-text and CoreText do; the run
-still adds its total advance to the line width. A run of tabs in a
-right-to-left line (they take the line's level, UAX #9 L1) is placed the same
-way. Cluster slices use `get` instead of indexing, and a cluster map that runs
-past the run's glyphs logs a warning instead of panicking.
+them in visual order, left to right, as every backend now must
+(`crates/text-conformance`); the run
+still adds its total advance to the line width. The test
+`right_to_left_runs_are_placed_in_visual_order` checks Hebrew alone and mixed
+with Latin; the Hebrew cases left `tabs_preserve_native_advances_and_cursor`,
+which assumed logical x offsets.
 
 It also takes a line's direction from its first strong character (UAX #9
 P2/P3, `unicode_bidi::get_base_direction`, a new dependency in `Cargo.toml`),
-as cosmic-text and CoreText do, so the space after a Hebrew word sits at its
-left end instead of its right. A right-to-left line gets
-`DWRITE_READING_DIRECTION_RIGHT_TO_LEFT`; every line is laid out with no
-wrapping in a zero-width box, which anchors both directions at x = 0 (an
-infinite box would put every right-to-left run at x = inf). `DrawGlyphRun`
-records each run with the left edge DirectWrite gave it (`PlacedRun`), and the
-line lays the runs side by side in that order, at their summed advances,
-whatever order they were drawn in. Byte offsets come from a UTF-16 to UTF-8
-table built once per line (`utf8_offsets_by_utf16`), which replaced the
-forward-only `StringIndexConverter`. A line split by U+2028 or U+2029 takes
-one direction for all its segments, and a right-to-left one lays them from
-the right.
+as the other backends do: a right-to-left line gets
+`DWRITE_READING_DIRECTION_RIGHT_TO_LEFT` with no wrapping and a zero-width
+layout box (an infinite one would put every run at x = inf), so the space
+after a Hebrew word sits at its left end instead of its right.
+`DrawGlyphRun` records each run with the left edge DirectWrite gave it
+(`PlacedRun`), and the line lays the runs side by side in that order rather
+than the order they were drawn in; `StringIndexConverter` steps back when a
+run lies earlier in the text than the last one. Test:
+`right_to_left_lines_keep_trailing_spaces_at_the_left`.
 
-Tests: `right_to_left_runs_are_placed_in_visual_order` (Hebrew and Arabic,
-alone and mixed with Latin), `right_to_left_lines_keep_trailing_spaces_at_the_left`,
-`right_to_left_lines_keep_separated_segments_in_order`, and Hebrew cases in
-`tabs_preserve_native_advances_and_cursor`, which check glyph byte indices, hit
-tests and tab order instead of the logical x offsets left-to-right text gets.
+The RTL sweep (`docs/decisions/rtl-sweep.md`) changed it again in 2026:
+`layout_line` no longer splits a line at U+2028 or U+2029. They reach
+DirectWrite as zero-width spaces (no width, no direction, one UTF-16 unit each
+so indices still map back), and
+the line keeps one base direction, as on CoreText and cosmic-text; each piece
+used to take its own. The tab path of `DrawGlyphRun` mirrors the tabs of a
+right-to-left run like the glyph path does. `StringIndexConverter` steps back
+to an earlier run instead of restarting at the line start, so a long mixed
+line converts in linear time. `layout_line` takes the line's runs and levels from UAX #9 (unicode-bidi) and
+has DirectWrite shape each single-direction run on its own: DirectWrite's bidi
+pass did not keep an isolate (FSI…PDI) apart from its neighbours, so a colon
+after an isolated Hebrew name was drawn left of it. The glyphs of each run are
+handed over left to right, a letter's points included. `shaping_text_system()` (in `gpui_windows.rs`)
+hands out the DirectWrite text system without a window for
+`crates/text-conformance`. CI now runs `direct_write::tests` too.
+
+`tabs_preserve_native_advances_and_cursor` checks Hebrew lines again (`אב`,
+`aאבb`, `a\tאב\tb`, `א\t\tב`): every character keeps one glyph, a hit test at
+a glyph finds its index, a right-to-left line runs backwards in typing order,
+and a one-direction line is as wide as DirectWrite's own layout of it. A
+cluster that lies past a run's glyphs logs a warning before the rest of the
+run is dropped.

@@ -550,6 +550,43 @@ fn paint_line(
         align_width,
         wrap_boundaries,
     );
+    // QUILL: right-to-left glyphs come in falling byte order, which the forward walk
+    // below cannot follow (super::bidi_paint).
+    if !super::glyphs_in_byte_order(layout) {
+        return window.paint_layer(line_bounds, |window| {
+            if wrap_boundaries.is_empty() {
+                return paint_unordered_line(
+                    origin,
+                    layout,
+                    line_height,
+                    align,
+                    align_width,
+                    decoration_runs,
+                    window,
+                    cx,
+                    paint_underline,
+                );
+            }
+            // A wrapped line holding right-to-left text: each row on its own.
+            for (row_ix, row) in super::wrapped_rows(layout, wrap_boundaries)
+                .iter()
+                .enumerate()
+            {
+                paint_unordered_line(
+                    point(origin.x, origin.y + line_height * row_ix as f32),
+                    row,
+                    line_height,
+                    align,
+                    align_width,
+                    decoration_runs,
+                    window,
+                    cx,
+                    paint_underline,
+                )?;
+            }
+            Ok(())
+        });
+    }
     window.paint_layer(line_bounds, |window| {
         let padding_top = (line_height - layout.ascent - layout.descent) / 2.;
         let baseline_offset = point(px(0.), padding_top + layout.ascent);
@@ -813,6 +850,41 @@ fn paint_line_background(
         align_width,
         wrap_boundaries,
     );
+    if !super::glyphs_in_byte_order(layout) {
+        return window.paint_layer(line_bounds, |window| {
+            let rows = if wrap_boundaries.is_empty() {
+                Vec::new()
+            } else {
+                super::wrapped_rows(layout, wrap_boundaries)
+            };
+            let rows: Vec<&LineLayout> = if rows.is_empty() {
+                vec![layout]
+            } else {
+                rows.iter().collect()
+            };
+            for (row_ix, row) in rows.into_iter().enumerate() {
+                let row_y = origin.y + line_height * row_ix as f32;
+                let line_x = aligned_origin_x(
+                    origin,
+                    align_width.unwrap_or(row.width),
+                    px(0.0),
+                    &align,
+                    row,
+                    None,
+                );
+                for span in super::DecorationPlan::new(row, decoration_runs).backgrounds {
+                    window.paint_quad(fill(
+                        Bounds {
+                            origin: point(line_x + span.start, row_y),
+                            size: size(span.end - span.start, line_height),
+                        },
+                        span.style,
+                    ));
+                }
+            }
+            Ok(())
+        });
+    }
     window.paint_layer(line_bounds, |window| {
         let mut decoration_runs = decoration_runs.iter();
         let mut wraps = wrap_boundaries.iter().peekable();
@@ -942,6 +1014,97 @@ fn paint_line_background(
 
         Ok(())
     })
+}
+
+/// QUILL: paints a one-row line whose glyphs are not in byte order, each glyph in the
+/// color of the decoration run that holds it (super::bidi_paint).
+#[allow(clippy::too_many_arguments)]
+fn paint_unordered_line(
+    origin: Point<Pixels>,
+    layout: &LineLayout,
+    line_height: Pixels,
+    align: TextAlign,
+    align_width: Option<Pixels>,
+    decoration_runs: &[DecorationRun],
+    window: &mut Window,
+    cx: &mut App,
+    paint_underline: &mut dyn FnMut(
+        Range<usize>,
+        Point<Pixels>,
+        Pixels,
+        &UnderlineStyle,
+        &mut Window,
+    ),
+) -> Result<()> {
+    let padding_top = (line_height - layout.ascent - layout.descent) / 2.;
+    let baseline_offset = point(px(0.), padding_top + layout.ascent);
+    let line_x = aligned_origin_x(
+        origin,
+        align_width.unwrap_or(layout.width),
+        px(0.0),
+        &align,
+        layout,
+        None,
+    );
+    let plan = super::DecorationPlan::new(layout, decoration_runs);
+    let text_system = cx.text_system().clone();
+    let content_mask = window.content_mask();
+    for planned in &plan.glyphs {
+        let Some(run) = layout.runs.get(planned.run) else {
+            continue;
+        };
+        let Some(glyph) = run.glyphs.get(planned.glyph) else {
+            continue;
+        };
+        let color = planned
+            .decoration
+            .and_then(|ix| decoration_runs.get(ix))
+            .map_or_else(black, |run| run.color);
+        let glyph_origin = point(line_x + glyph.position.x, origin.y);
+        let max_glyph_bounds = Bounds {
+            origin: glyph_origin,
+            size: text_system.bounding_box(run.font_id, layout.font_size).size,
+        };
+        if !max_glyph_bounds.intersects(&content_mask.bounds) {
+            continue;
+        }
+        let vertical_offset = point(px(0.0), glyph.position.y);
+        if glyph.is_emoji {
+            window.paint_emoji(
+                glyph_origin + baseline_offset + vertical_offset,
+                run.font_id,
+                glyph.id,
+                layout.font_size,
+            )?;
+        } else {
+            window.paint_glyph(
+                glyph_origin + baseline_offset + vertical_offset,
+                run.font_id,
+                glyph.id,
+                layout.font_size,
+                color,
+            )?;
+        }
+    }
+    let underline_y = origin.y + underline_y_offset(line_height, layout.ascent, layout.descent);
+    for span in &plan.underlines {
+        paint_underline(
+            span.text.clone(),
+            point(line_x + span.start, underline_y),
+            span.end - span.start,
+            &span.style,
+            window,
+        );
+    }
+    let strikethrough_y = origin.y + ((layout.ascent * 0.5) + baseline_offset.y) * 0.5;
+    for span in &plan.strikethroughs {
+        window.paint_strikethrough(
+            point(line_x + span.start, strikethrough_y),
+            span.end - span.start,
+            &span.style,
+        );
+    }
+    Ok(())
 }
 
 fn line_paint_bounds(

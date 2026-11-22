@@ -1,55 +1,35 @@
 use std::ops::Range;
 
-#[derive(Clone, Copy)]
-enum CharacterKind {
-    Word,
-    Whitespace,
-    Newline,
-    Other,
-}
+use unicode_segmentation::UnicodeSegmentation;
 
-impl From<char> for CharacterKind {
-    fn from(character: char) -> Self {
-        if character == '_'
-            || character.is_ascii_alphanumeric()
-            || matches!(character, '\u{00C0}'..='\u{024F}' | '\u{0400}'..='\u{04FF}' | '\u{1E00}'..='\u{1EFF}' | '\u{0300}'..='\u{036F}')
-        {
-            Self::Word
-        } else if matches!(character, '\n' | '\r') {
-            Self::Newline
-        } else if character.is_whitespace() {
-            Self::Whitespace
-        } else {
-            Self::Other
-        }
-    }
-}
+/// How far a double-click looks on each side of the clicked character, in characters.
+const WORD_WINDOW: usize = 128;
 
+// QUILL: words follow UAX #29 word boundaries, as Qt's WordUnderCursor does in tdesktop.
+// The old rule only knew Latin and Cyrillic letters, so a double-click on a Hebrew or
+// Arabic word selected one letter. UAX #29 also keeps `צה"ל`, `don't` and words with
+// niqqud, harakat or ZWNJ whole, and still takes CJK one ideograph at a time.
 pub(crate) fn word_range_from_chars(
     offset: usize,
     character: char,
     previous: impl Iterator<Item = char>,
     following: impl Iterator<Item = char>,
 ) -> Range<usize> {
-    let kind = CharacterKind::from(character);
-    let connects = |next| {
-        matches!(
-            (kind, CharacterKind::from(next)),
-            (CharacterKind::Word, CharacterKind::Word)
-                | (CharacterKind::Whitespace, CharacterKind::Whitespace)
-        )
-    };
-    let start = previous
-        .take(128)
-        .take_while(|character| connects(*character))
-        .fold(offset, |offset, character| offset - character.len_utf8());
-    let end = following
-        .take(128)
-        .take_while(|character| connects(*character))
-        .fold(offset + character.len_utf8(), |offset, character| {
-            offset + character.len_utf8()
-        });
-    start..end
+    let mut window: Vec<char> = previous.take(WORD_WINDOW).collect();
+    window.reverse();
+    let before: usize = window.iter().map(|c| c.len_utf8()).sum();
+    window.push(character);
+    window.extend(following.take(WORD_WINDOW));
+    let window: String = window.into_iter().collect();
+
+    let clicked = before..before + character.len_utf8();
+    let word = window
+        .split_word_bound_indices()
+        .map(|(start, word)| start..start + word.len())
+        .find(|word| word.start <= clicked.start && clicked.end <= word.end)
+        .unwrap_or(clicked);
+    // `before` bytes of the window lie in front of `offset`.
+    offset - (before - word.start)..offset + (word.end - before)
 }
 
 pub(crate) fn word_range_at(text: &str, offset: usize) -> Option<Range<usize>> {
@@ -79,4 +59,43 @@ fn clip_offset_left(text: &str, offset: usize) -> usize {
         offset -= 1;
     }
     offset
+}
+
+#[cfg(test)]
+mod tests {
+    use super::word_range_at;
+
+    fn word_at(text: &str, needle: &str) -> String {
+        let offset = text.find(needle).unwrap_or_default() + needle.len() / 2;
+        let offset = (0..=offset)
+            .rev()
+            .find(|offset| text.is_char_boundary(*offset))
+            .unwrap_or_default();
+        word_range_at(text, offset)
+            .map(|range| text[range].to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn right_to_left_words_select_whole() {
+        for (text, word) in [
+            ("שלום עולם", "עולם"),
+            ("שלום עולם", "שלום"),
+            ("שָׁלוֹם עולם", "שָׁלוֹם"),
+            ("مرحبا مُحَمَّد هنا", "مُحَمَّد"),
+            ("من می\u{200c}خواهم", "می\u{200c}خواهم"),
+            ("אני בצה\"ל עכשיו", "בצה\"ל"),
+            ("ג'ירפה גדולה", "ג'ירפה"),
+            ("hello שלום world", "שלום"),
+        ] {
+            assert_eq!(word_at(text, word), word, "{text}");
+        }
+    }
+
+    #[test]
+    fn ideographs_and_punctuation_stay_single() {
+        assert_eq!(word_at("中文", "文"), "文");
+        assert_eq!(word_at("שלום, עולם", ","), ",");
+        assert_eq!(word_at("don't stop", "don't"), "don't");
+    }
 }

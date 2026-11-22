@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/quill-calls-sys", "crates/webview-protocol", "crates/webview-host", "crates/panic-guard"]
+members = [".", "third_party/gpui-base", "crates/text-conformance", "crates/quill-calls-sys", "crates/webview-protocol", "crates/webview-host", "crates/panic-guard"]
 resolver = "2"
 
 # Never crash (docs/contributing/panic-safety.md, phases A and B). Test code is

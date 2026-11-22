@@ -705,8 +705,7 @@ impl RenderOnce for Slider {
             .when_some(self.focus, |this, focus| this.track_focus(&focus))
             .role(Role::Slider)
             .when_some(
-                self.accessibility_label
-                    .or_else(|| state.label.clone()),
+                self.accessibility_label.or_else(|| state.label.clone()),
                 |this, label| this.aria_label(label),
             )
             .aria_numeric_value(state.value().end() as f64)

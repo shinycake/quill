@@ -8,7 +8,47 @@ use super::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::text::{TextEntity, styled_runs};
+use quill::chatlist_style::{PreviewPiece, VisualPiece, visual_pieces};
+use quill::text::{RunStyle, TextEntity, styled_runs};
+
+/// A piece of the preview line before it is ordered for display.
+enum Item {
+    /// The sender ("Name: ") in the accent color.
+    Prefix(String),
+    Text(String, RunStyle),
+    /// A custom emoji or emoji sprite, taken once it is placed.
+    Picture(Option<Box<Div>>),
+}
+
+impl Item {
+    fn picture(picture: Div) -> Self {
+        Self::Picture(Some(Box::new(picture)))
+    }
+}
+
+/// One styled text part of the preview line.
+fn text_part(segment: String, style: &RunStyle) -> Div {
+    let mut el = div().whitespace_nowrap().child(segment);
+    if style.bold {
+        el = el.font_weight(FontWeight::BOLD);
+    }
+    if style.italic {
+        el = el.italic();
+    }
+    if style.underline {
+        el = el.underline();
+    }
+    if style.strikethrough {
+        el = el.line_through();
+    }
+    if style.code || style.pre {
+        el = el.font_family(MONO_FONT);
+    }
+    if style.spoiler {
+        el = el.bg(fill_muted()).text_color(fill_muted()).rounded_sm();
+    }
+    el
+}
 /// The chat-row preview line — optional media icon plus the preview
 /// text, plain or formatted via `styled_runs`. Single line: the
 /// container truncates, so runs never wrap. Spoilers render hidden
@@ -154,12 +194,14 @@ pub(crate) fn chat_list_preview_line_layered(
                 .into_any_element();
         }
     }
-    let mut parts: Vec<(bool, Div)> = Vec::new();
+    // The line's pieces in typing order; a right-to-left line is drawn in
+    // the order UAX #9 gives them (`quill::chatlist_style::visual_pieces`).
+    let mut items: Vec<Item> = Vec::new();
     if let Some(prefix) = prefix {
-        parts.push((false, div().text_color(accent()).child(prefix)));
+        items.push(Item::Prefix(prefix));
     }
     if let Some(glyph) = icon {
-        parts.push((false, div().child(format!("{glyph} "))));
+        items.push(Item::Text(format!("{glyph} "), RunStyle::default()));
     }
     let key = line_key(&preview);
     for (index, run) in shown_runs(&preview, entities).into_iter().enumerate() {
@@ -168,12 +210,11 @@ pub(crate) fn chat_list_preview_line_layered(
         }
         if let Some(clip) = run.custom_emoji_id.and_then(|id| layered.get(&id)) {
             let frames = super::anim_layer::frames(clip.clone());
-            parts.push((false, div().child(frames.size(px(14.)).flex_none())));
+            items.push(Item::picture(div().child(frames.size(px(14.)).flex_none())));
             continue;
         }
         if let Some(source) = run.custom_emoji_id.and_then(|id| emoji.get(&id)) {
-            parts.push((
-                false,
+            items.push(Item::picture(
                 div().child(
                     img(source.clone())
                         .id(SharedString::from(format!("preview-emoji-{key}-{index}")))
@@ -184,60 +225,73 @@ pub(crate) fn chat_list_preview_line_layered(
             ));
             continue;
         }
-        let style = &run.style;
-        let segments: Vec<(String, Option<std::sync::Arc<RenderImage>>)> =
-            match (!style.spoiler && !style.code && !style.pre)
-                .then(|| super::emoji_sprites::pieces(&run.text))
-                .flatten()
-            {
-                Some(pieces) => pieces
-                    .into_iter()
-                    .map(|p| {
-                        (
-                            run.text.get(p.range).unwrap_or_default().to_string(),
-                            p.image,
-                        )
-                    })
-                    .collect(),
-                None => vec![(run.text, None)],
-            };
-        for (segment, sprite) in segments {
-            if let Some(image) = sprite {
-                parts.push((
-                    false,
-                    div().child(
-                        img(ImageSource::Render(image))
-                            .size(px(14.))
-                            .object_fit(ObjectFit::Contain),
-                    ),
-                ));
-                continue;
+        let style = run.style;
+        let pieces = (!style.spoiler && !style.code && !style.pre)
+            .then(|| super::emoji_sprites::pieces(&run.text))
+            .flatten();
+        match pieces {
+            Some(pieces) => {
+                for piece in pieces {
+                    let segment = run.text.get(piece.range).unwrap_or_default().to_string();
+                    items.push(match piece.image {
+                        Some(image) => Item::picture(
+                            div().child(
+                                img(ImageSource::Render(image))
+                                    .size(px(14.))
+                                    .object_fit(ObjectFit::Contain),
+                            ),
+                        ),
+                        None => Item::Text(segment, style.clone()),
+                    });
+                }
             }
-            let mut el = div().whitespace_nowrap().child(segment);
-            if style.bold {
-                el = el.font_weight(FontWeight::BOLD);
+            None => items.push(Item::Text(run.text, style)),
+        }
+    }
+    let rtl = quill::text::has_rtl_text(&preview);
+    let order: Vec<VisualPiece> = if rtl {
+        let pieces: Vec<PreviewPiece<'_>> = items
+            .iter()
+            .map(|item| match item {
+                Item::Prefix(text) | Item::Text(text, _) => PreviewPiece::Text(text),
+                Item::Picture(_) => PreviewPiece::Picture,
+            })
+            .collect();
+        visual_pieces(&pieces)
+    } else {
+        (0..items.len())
+            .map(|piece| VisualPiece { piece, text: None })
+            .collect()
+    };
+    let mut parts: Vec<(bool, Div)> = Vec::new();
+    for VisualPiece { piece, text } in order {
+        let Some(item) = items.get_mut(piece) else {
+            continue;
+        };
+        let shown = |whole: &str| match &text {
+            Some(range) => whole.get(range.clone()).unwrap_or_default().to_string(),
+            None => whole.to_string(),
+        };
+        match item {
+            Item::Prefix(prefix) => {
+                parts.push((false, div().text_color(accent()).child(shown(prefix))));
             }
-            if style.italic {
-                el = el.italic();
+            Item::Picture(picture) => {
+                if let Some(picture) = picture.take() {
+                    parts.push((false, *picture));
+                }
             }
-            if style.underline {
-                el = el.underline();
-            }
-            if style.strikethrough {
-                el = el.line_through();
-            }
-            if style.code || style.pre {
-                el = el.font_family(MONO_FONT);
-            }
-            if style.spoiler {
-                el = el.bg(fill_muted()).text_color(fill_muted()).rounded_sm();
-            }
-            parts.push((true, el));
+            Item::Text(whole, style) => parts.push((true, text_part(shown(whole), style))),
         }
     }
     // The last text run shrinks and ends in the ellipsis; everything
     // before it keeps its width.
-    let last_text = parts.iter().rposition(|(is_text, _)| *is_text);
+    // A right-to-left line ends on the left, so its first text part shrinks.
+    let last_text = if rtl {
+        parts.iter().position(|(is_text, _)| *is_text)
+    } else {
+        parts.iter().rposition(|(is_text, _)| *is_text)
+    };
     let mut line = div()
         .text_xs()
         .overflow_hidden()
@@ -247,9 +301,7 @@ pub(crate) fn chat_list_preview_line_layered(
         .flex_row()
         .items_center()
         // A right-to-left line rests against the end edge (Telegram Desktop).
-        .when(quill::text::has_rtl_text(&preview), |line| {
-            line.justify_end()
-        });
+        .when(rtl, |line| line.justify_end());
     for (position, (_, part)) in parts.into_iter().enumerate() {
         line = line.child(if Some(position) == last_text {
             part.min_w_0().flex_shrink(1.).truncate()

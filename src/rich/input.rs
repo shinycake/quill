@@ -307,6 +307,35 @@ pub fn rich_blocks_char_len(blocks: &[RichBlock]) -> usize {
     blocks.iter().map(RichBlock::text_char_len).sum()
 }
 
+/// Whether the message reads right to left, as Telegram Desktop decides it
+/// (`DetermineRichPageRtl`): by the first text that is not blank, in block
+/// order, taking the direction of its first strong character.
+fn blocks_are_rtl(blocks: &[RichBlock]) -> bool {
+    blocks
+        .iter()
+        .flat_map(block_texts)
+        .find(|text| !text.trim().is_empty())
+        .is_some_and(crate::text::is_rtl_text)
+}
+
+/// The texts of a block in reading order.
+fn block_texts(block: &RichBlock) -> Vec<&str> {
+    match block {
+        RichBlock::Paragraph { text, .. } | RichBlock::Heading { text, .. } => vec![text],
+        RichBlock::List { items, .. } => items.iter().map(|item| item.text.as_str()).collect(),
+        RichBlock::Collapsible { header, body, .. } => vec![header, body],
+        RichBlock::Document {
+            file_name, caption, ..
+        } => vec![caption, file_name],
+        RichBlock::Photo { caption, .. } | RichBlock::Video { caption, .. } => vec![caption],
+        RichBlock::Table { rows } => rows.iter().flatten().map(String::as_str).collect(),
+        RichBlock::ButtonRow { .. }
+        | RichBlock::Divider
+        | RichBlock::Empty
+        | RichBlock::Unsupported { .. } => Vec::new(),
+    }
+}
+
 /// Build the `inputRichMessage` object for `inputMessageRichMessage`.
 /// `None` when no block survives (the send is then invalid), or when the
 /// blocks exceed the rich-text max length.
@@ -321,8 +350,7 @@ pub fn input_rich_message(blocks: &[RichBlock]) -> Option<Value> {
     Some(json!({
         "@type": "inputRichMessage",
         "source": { "@type": "richMessageSourceBlocks", "blocks": inputs },
-        // Known simplification (DECISIONS.md): always LTR.
-        "is_rtl": false,
+        "is_rtl": blocks_are_rtl(blocks),
         "detect_automatic_blocks": true,
     }))
 }
@@ -330,6 +358,38 @@ pub fn input_rich_message(blocks: &[RichBlock]) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn paragraph(text: &str) -> RichBlock {
+        RichBlock::Paragraph {
+            text: text.into(),
+            entities: Vec::new(),
+            buttons: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_first_text_that_is_not_blank_sets_the_direction() {
+        let rtl = |blocks: &[RichBlock]| input_rich_message(blocks).map(|m| m["is_rtl"].clone());
+        assert_eq!(rtl(&[paragraph("שלום עולם")]), Some(json!(true)));
+        assert_eq!(rtl(&[paragraph("مرحبا")]), Some(json!(true)));
+        assert_eq!(rtl(&[paragraph("hello שלום")]), Some(json!(false)));
+        // A blank first block is skipped, and a divider holds no text.
+        assert_eq!(
+            rtl(&[paragraph("  "), RichBlock::Divider, paragraph("שלום")]),
+            Some(json!(true))
+        );
+        assert_eq!(
+            rtl(&[
+                RichBlock::Heading {
+                    level: 1,
+                    text: "Title".into(),
+                    entities: Vec::new(),
+                },
+                paragraph("שלום")
+            ]),
+            Some(json!(false))
+        );
+    }
 
     #[test]
     fn formatting_inside_bold_is_sent() {
