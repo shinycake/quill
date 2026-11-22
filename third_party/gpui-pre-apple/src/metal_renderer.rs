@@ -1,11 +1,15 @@
 // Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
-// window capture renders the scene offscreen and reads it back. See third_party/gpui-pre-apple/QUILL-CHANGES.md.
+// window capture renders the scene offscreen and reads it back; backdrop glass
+// (`metal_renderer/lens.rs`). See third_party/gpui-pre-apple/QUILL-CHANGES.md.
 use crate::metal_atlas::MetalAtlas;
+
+mod lens;
+pub use lens::{LensDownsampleIndex, LensDownsampleSlot, LensInputIndex, LensSlot};
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
 use gpui::{
-    AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, PaintSurface, Path, Point,
-    PrimitiveBatch, ScaledPixels, Scene, Size, point, size,
+    AtlasTextureId, BackdropLens, Background, Bounds, ContentMask, DevicePixels, PaintSurface,
+    Path, Point, PrimitiveBatch, ScaledPixels, Scene, Size, point, size,
 };
 use image::RgbaImage;
 use objc2::{Message, rc::Retained, runtime::ProtocolObject};
@@ -191,6 +195,10 @@ pub struct MetalRenderer {
     /// QUILL: when each drawable of the layer's pool, known by its
     /// IOSurface, was last handed out (`trim_spare_drawables`).
     drawables_handed_out: Vec<(usize, Instant)>,
+    /// QUILL: backdrop glass's pipelines and atlas (`lens.rs`).
+    lens: lens::LensState,
+    /// QUILL: whether the layer hands out drawables glass can read.
+    drawable_reads: lens::DrawableReads,
 }
 
 #[repr(C)]
@@ -515,6 +523,8 @@ impl MetalRenderer {
             #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
             headless_render_target: None,
             drawables_handed_out: Vec::new(),
+            lens: lens::LensState::default(),
+            drawable_reads: lens::DrawableReads::default(),
         })
     }
 
@@ -607,9 +617,14 @@ impl MetalRenderer {
     /// allocates a fresh drawable.
     pub fn release_idle_drawables(&mut self) {
         self.drawables_handed_out.clear();
+        // QUILL: the glass atlas goes too, and the drawables the pool
+        // allocates next are framebuffer-only again until glass is drawn.
+        self.lens.release();
+        self.drawable_reads = lens::DrawableReads::FramebufferOnly;
         let Some(layer) = &self.layer else {
             return;
         };
+        Self::follow_drawable_reads(layer, self.drawable_reads);
         let size = layer.drawableSize();
         if size.width <= 1.0 || size.height <= 1.0 {
             return;
@@ -762,6 +777,10 @@ impl MetalRenderer {
         };
         // QUILL: free spares a burst left before taking the next drawable.
         self.trim_spare_drawables();
+        // QUILL: glass reads the drawable back, so a frame with lenses asks
+        // the layer for readable drawables (`lens::DrawableReads`).
+        self.drawable_reads = self.drawable_reads.after_frame(scene.lenses.len());
+        Self::follow_drawable_reads(&layer, self.drawable_reads);
         let drawable = match &mut self.display_link_mode {
             DisplayLinkMode::Attached { drawable } => {
                 let Some(drawable) = drawable.take() else {
@@ -775,7 +794,9 @@ impl MetalRenderer {
                 layer.nextDrawable()
             }
         };
-        let Some(drawable) = drawable.and_then(|drawable| self.usable_drawable(&layer, drawable))
+        let Some(drawable) = drawable
+            .and_then(|drawable| self.usable_drawable(&layer, drawable))
+            .map(|drawable| self.readable_drawable(&layer, drawable, !scene.lenses.is_empty()))
         else {
             log::error!(
                 "failed to retrieve next drawable, drawable size: {:?}",
@@ -825,6 +846,32 @@ impl MetalRenderer {
         log::error!("leaving extended range: {error:#}");
         leave_extended_range(layer);
         layer.nextDrawable()
+    }
+
+    /// QUILL: the layer's drawables are readable while glass is drawn.
+    /// Debug builds with `test-support` keep them readable throughout, for
+    /// captures.
+    fn follow_drawable_reads(layer: &CAMetalLayer, reads: lens::DrawableReads) {
+        let framebuffer_only =
+            !reads.readable() && !cfg!(all(feature = "test-support", debug_assertions));
+        if layer.framebufferOnly() != framebuffer_only {
+            layer.setFramebufferOnly(framebuffer_only);
+        }
+    }
+
+    /// QUILL: a frame with glass needs a drawable it can read. One handed
+    /// out before the layer turned readable (a display link's) is swapped
+    /// for the layer's next; when none comes, the glass draws flat.
+    fn readable_drawable(
+        &self,
+        layer: &CAMetalLayer,
+        drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
+        has_glass: bool,
+    ) -> Retained<ProtocolObject<dyn CAMetalDrawable>> {
+        if !has_glass || !drawable.texture().isFramebufferOnly() {
+            return drawable;
+        }
+        layer.nextDrawable().unwrap_or(drawable)
     }
 
     fn render_frame(
@@ -1083,9 +1130,12 @@ impl MetalRenderer {
                 PrimitiveBatch::Shadows(range) => {
                     self.draw_shadows(range, instance_bindings, viewport_size, &command_encoder)
                 }
-                PrimitiveBatch::Quads(range) => {
-                    self.draw_quads(range, instance_bindings, viewport_size, &command_encoder)
-                }
+                PrimitiveBatch::Quads(range) => self.draw_quads(
+                    range,
+                    &instance_bindings.quads,
+                    viewport_size,
+                    &command_encoder,
+                ),
                 PrimitiveBatch::Paths(range) => {
                     let paths = &scene.paths[range];
                     command_encoder.endEncoding();
@@ -1147,6 +1197,19 @@ impl MetalRenderer {
                         command_encoder.endEncoding();
                         return Err(error);
                     }
+                }
+                PrimitiveBatch::Lenses(range) => {
+                    let lenses = scene.lenses.get(range.clone()).unwrap_or_default();
+                    self.draw_lenses(
+                        lenses,
+                        range,
+                        instance_bindings,
+                        writer,
+                        texture,
+                        viewport_size,
+                        &command_buffer,
+                        &mut command_encoder,
+                    )?;
                 }
                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),
             }
@@ -1289,7 +1352,7 @@ impl MetalRenderer {
     fn draw_quads(
         &self,
         quads: Range<usize>,
-        instance_bindings: &InstanceBindings,
+        binding: &InstanceBinding,
         viewport_size: Size<DevicePixels>,
         command_encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
     ) {
@@ -1307,13 +1370,13 @@ impl MetalRenderer {
                 QuadInputIndex::Vertices as usize,
             );
             command_encoder.setVertexBuffer_offset_atIndex(
-                Some(&instance_bindings.quads.buffer),
-                instance_bindings.quads.offset,
+                Some(&binding.buffer),
+                binding.offset,
                 QuadInputIndex::Quads as usize,
             );
             command_encoder.setFragmentBuffer_offset_atIndex(
-                Some(&instance_bindings.quads.buffer),
-                instance_bindings.quads.offset,
+                Some(&binding.buffer),
+                binding.offset,
                 QuadInputIndex::Quads as usize,
             );
             command_encoder.setVertexBytes_length_atIndex(
@@ -2110,6 +2173,8 @@ struct InstanceBindings {
     monochrome_sprites: InstanceBinding,
     polychrome_sprites: InstanceBinding,
     surfaces: InstanceBinding,
+    /// QUILL: each lens's fallback quad, for batches that draw flat.
+    lens_fallbacks: InstanceBinding,
 }
 
 fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<InstanceBindings> {
@@ -2123,6 +2188,7 @@ fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<I
             bounds: surface.bounds,
             content_mask: surface.content_mask,
         }))?,
+        lens_fallbacks: writer.write_iter(scene.lenses.iter().map(BackdropLens::fallback_quad))?,
     })
 }
 

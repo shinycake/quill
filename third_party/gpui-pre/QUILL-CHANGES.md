@@ -632,3 +632,27 @@ Changed by the Quill project in 2026 (`docs/decisions/rtl-sweep.md`):
   `paint_line` and `paint_line_background` use. Upstream reordered the whole
   line and then wrapped the visual order, so the rows of a wrapped Hebrew
   paragraph read bottom to top.
+
+## Backdrop glass (stage 1)
+
+Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
+
+- `src/scene/backdrop_lens.rs` (new): `BackdropLens`, a scene primitive for
+  liquid glass that bends, frosts and lights what the frame drew under it,
+  and `LensStyle` (with `LensMaterial`, `LensBend`, `LensBorder`,
+  `LensTune`), the look a caller asks for. `BackdropLens::fallback_quad` is
+  the rounded quad of the glass's colour that renderers which can't read the
+  frame draw instead.
+- `src/scene.rs`: `Primitive::Lens` (boxed, so the rare lens does not grow
+  every recorded primitive), `PrimitiveKind::Lens`, `PrimitiveBatch::Lenses`
+  and `Scene::lenses`. A lens takes the next band (a multiple of 2^24) above
+  every order it intersects, so it draws after what it covers, lenses with no
+  glass under them share one batch, and what is painted over a lens draws
+  above it. A lens inside a paint layer, or above the last band, is inserted
+  as its fallback quad. A replayed range that holds a lens is repainted
+  operation by operation, so the lens is banded against what is under it in
+  the new frame.
+- `src/bounds_tree.rs`: `insert_band`, the banded insert (computed in `u64`,
+  `None` past `u32::MAX`); `insert_span` and it share `insert_ordered`.
+- `src/window.rs`: `Window::paint_backdrop_lens(bounds, corner_radius,
+  &LensStyle)`.

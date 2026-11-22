@@ -219,3 +219,30 @@ Changed by the Quill project in 2026 (`docs/decisions/rtl-sweep.md`):
 sits at the line's left end as on the other backends. `StringIndexConverter`
 steps back to an earlier glyph (`seek_to_utf16_ix`) instead of restarting at
 the line start for every right-to-left glyph.
+
+## Backdrop glass (stage 1)
+
+Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
+
+- `src/metal_renderer/lens.rs` (new): the `PrimitiveBatch::Lenses` arm ends
+  the render pass, blits each lens's footprint into a pooled, mip-mapped
+  atlas (16 px gutters, shelf-packed, sized up in steps of 256 and kept
+  between frames), fills four more levels with dual-Kawase passes whose taps
+  stay inside each slot, reopens the pass with `Load` and draws the lenses.
+  The pipelines (one set per pixel format) are built on the first frame that
+  has glass. When the drawable can't be read, the pipelines failed or the
+  atlas can't hold the batch, the lenses draw as their fallback quads.
+  `DrawableReads` keeps the layer's drawables readable
+  (`framebufferOnly = false`) while frames have glass and for 120 frames
+  after, and a display-link drawable handed out as framebuffer-only is
+  swapped for `nextDrawable()`.
+- `src/metal_renderer.rs`: wires the above in; `release_idle_drawables` frees
+  the atlas and returns the layer to framebuffer-only; `draw_quads` takes its
+  instance binding so the fallback quads (`lens_fallbacks`) reuse it.
+- `src/shaders.metal`: `lens_vertex`/`lens_fragment`, a port of the CPU optics
+  in quill-tools/gpui-liquid-glass (itself a port of bilalgursen/liquid-glass,
+  MIT): bevel height field, edge or radial bend, colour split,
+  magnification, mip-chain frost, inner shading, rim light, caustic, drop
+  shadow and border; and `lens_downsample_vertex`/`lens_downsample_fragment`.
+- `build.rs` and `vendor/gpui/src/scene.rs`: the shader header exports
+  `BackdropLens` and the lens slot and index types.

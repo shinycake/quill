@@ -264,7 +264,7 @@ fn drawn(scene: &Scene) -> Vec<u32> {
             PrimitiveBatch::PolychromeSprites { range, .. } => {
                 tags.extend(scene.polychrome_sprites[range].iter().map(|s| s.pad));
             }
-            PrimitiveBatch::Surfaces(_) => {}
+            PrimitiveBatch::Surfaces(_) | PrimitiveBatch::Lenses(_) => {}
         }
     }
     tags
@@ -287,7 +287,7 @@ fn tag_of(primitive: &Primitive) -> u32 {
         Primitive::MonochromeSprite(sprite) => sprite.pad,
         Primitive::SubpixelSprite(sprite) => sprite.pad,
         Primitive::PolychromeSprite(sprite) => sprite.pad,
-        Primitive::Surface(_) => 0,
+        Primitive::Surface(_) | Primitive::Lens(_) => 0,
     }
 }
 

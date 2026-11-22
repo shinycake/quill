@@ -763,6 +763,55 @@ impl From<PolychromeSprite> for Primitive {
     }
 }
 
+/// QUILL: mirror of gpui-pre's `BackdropLens` (`src/scene/backdrop_lens.rs`),
+/// read by `build.rs` for the shader header. Keep the fields in step.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct BackdropLens {
+    pub order: DrawOrder,
+    pub material: u32,
+    pub bounds: Bounds<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    pub body: Bounds<ScaledPixels>,
+    pub corner_radius: ScaledPixels,
+    pub scale_factor: f32,
+    pub unit: f32,
+    pub bevel: f32,
+    pub band: f32,
+    pub shadow: f32,
+    pub shadow_softness: f32,
+    pub shadow_offset: f32,
+    pub strength: f32,
+    pub opacity: f32,
+    pub color: Hsla,
+    pub surface: Hsla,
+    pub bend: u32,
+    pub refract: f32,
+    pub magnify: f32,
+    pub dispersion: f32,
+    pub blur_center: f32,
+    pub blur_edge: f32,
+    pub frost: f32,
+    pub blur: f32,
+    pub blur_mix: f32,
+    pub radial_amount: f32,
+    pub edge_clear: f32,
+    pub border_color: Hsla,
+    pub border_width: f32,
+    pub tune_rim: f32,
+    pub tune_rim_width: f32,
+    pub tune_fresnel: f32,
+    pub tune_inner: f32,
+    pub tune_reflection: f32,
+    pub tune_caustic: f32,
+    pub tune_bend_curve: f32,
+    pub tune_bend_depth: f32,
+    pub tune_saturation: f32,
+    pub light_x: f32,
+    pub light_y: f32,
+    pub light_mix: f32,
+}
+
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub struct PaintSurface {

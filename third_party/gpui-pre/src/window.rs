@@ -1,6 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
 // `Window::paint_surface_frame`; the paint filter and `Window::capture_frame`;
-// `Window::frame_number`.
+// `Window::frame_number`; `Window::paint_backdrop_lens`.
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
@@ -13,12 +13,13 @@ use crate::taffy::TaffyLayoutEngine;
 use crate::input_rate::InputRateTracker;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow,
+    AsyncWindowContext, AtlasTile, AvailableSpace, BackdropLens, Background, BorderStyle, Bounds,
+    BoxShadow,
     Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
     DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity,
     EntityId, EventEmitter, FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs,
     Hsla, InputHandler, InputPreference, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent,
-    Keystroke, KeystrokeEvent, LayoutId, LineLayoutIndex, Modifiers, ModifiersChangedEvent,
+    Keystroke, KeystrokeEvent, LayoutId, LensStyle, LineLayoutIndex, Modifiers, ModifiersChangedEvent,
     MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent, Path, Pixels,
     PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
     PolychromeSprite, Priority, PromptButton, PromptLevel, Quad, Render, RenderGlyphParams,
@@ -5291,6 +5292,39 @@ impl Window {
                 });
             }
         }
+    }
+
+    /// QUILL: paint backdrop glass whose body fills `bounds`, with corners of
+    /// `corner_radius` (clamped to a pill). The glass bends, frosts and
+    /// lights whatever this frame painted under it before; what is painted
+    /// over it afterwards draws on top. The shadow reaches past `bounds`.
+    /// Renderers that can't read the frame draw a rounded quad of the
+    /// glass's colour instead, as does a lens inside a `paint_layer`.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_backdrop_lens(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radius: Pixels,
+        style: &LensStyle,
+    ) {
+        self.invalidator.debug_assert_paint();
+        if bounds.size.width <= px(0.) || bounds.size.height <= px(0.) {
+            return;
+        }
+        let scale_factor = self.scale_factor();
+        let body = self.snap_bounds(bounds);
+        let footprint = self.snap_bounds(style.footprint(bounds));
+        let mut lens = BackdropLens::new(
+            body,
+            corner_radius.scale(scale_factor),
+            footprint,
+            self.snapped_content_mask(),
+            scale_factor,
+            style,
+        );
+        lens.opacity = self.element_opacity();
+        self.next_frame.scene.insert_primitive(lens);
     }
 
     /// Paint the given `Path` into the scene for the next frame at the current z-index.

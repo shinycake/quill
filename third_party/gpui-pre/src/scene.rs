@@ -1,7 +1,8 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
 // `SurfaceFrame` (RGBA16F and NV12, `YuvColor`) and the non-Apple `PaintSurface::frame`;
 // primitives a window's paint filter refuses never enter the scene; a replayed
-// range enters the bounds tree once.
+// range enters the bounds tree once; backdrop glass (`BackdropLens`, banded
+// orders).
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
@@ -13,6 +14,9 @@ use crate::{
     AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels,
     Point, Radians, ScaledPixels, Size, bounds_tree::BoundsTree, point,
 };
+mod backdrop_lens;
+pub use backdrop_lens::*;
+
 use std::{
     fmt::Debug,
     iter::Peekable,
@@ -56,6 +60,8 @@ pub struct Scene {
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
+    /// Quill: backdrop glass, drawn over what the frame holds under it.
+    pub lenses: Vec<BackdropLens>,
     /// Quill: the sort keys of `finish`, kept so it allocates nothing once
     /// the scene has grown.
     sort_keys: Vec<(u64, u32)>,
@@ -82,6 +88,7 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.lenses.clear();
         self.sort_keys.clear();
         self.suppressed = false;
         self.filtered = false;
@@ -114,12 +121,35 @@ impl Scene {
             return;
         }
 
+        if let Primitive::Lens(lens) = primitive {
+            self.insert_lens(lens, clipped_bounds);
+            return;
+        }
+
         let order = self
             .layer_stack
             .last()
             .copied()
             .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
         self.push_primitive(primitive, order);
+    }
+
+    /// QUILL: a lens takes the next band above everything it covers, so it
+    /// is drawn after what is under it and every lens with no glass under
+    /// it shares one batch. Inside a paint layer (one order for all) or
+    /// above the last band it can't be ordered so, and draws as its
+    /// fallback quad.
+    fn insert_lens(&mut self, lens: Box<BackdropLens>, clipped_bounds: Bounds<ScaledPixels>) {
+        let order = if self.layer_stack.is_empty() {
+            self.primitive_bounds
+                .insert_band(clipped_bounds, LENS_BAND_BITS)
+        } else {
+            None
+        };
+        match order {
+            Some(order) => self.push_primitive(Primitive::Lens(lens), order),
+            None => self.insert_primitive(lens.fallback_quad()),
+        }
     }
 
     fn push_primitive(&mut self, mut primitive: Primitive, order: DrawOrder) {
@@ -157,6 +187,10 @@ impl Scene {
                 surface.order = order;
                 self.surfaces.push(surface.clone());
             }
+            Primitive::Lens(lens) => {
+                lens.order = order;
+                self.lenses.push(**lens);
+            }
         }
         self.paint_operations
             .push(PaintOperation::Primitive(primitive));
@@ -167,7 +201,12 @@ impl Scene {
             return;
         }
         let operations = &prev_scene.paint_operations[range];
-        if self.suppressed || !self.layer_stack.is_empty() {
+        // QUILL: a lens is banded against what is under it now, so a range
+        // holding one goes in primitive by primitive.
+        let has_lens = operations
+            .iter()
+            .any(|operation| matches!(operation, PaintOperation::Primitive(Primitive::Lens(_))));
+        if self.suppressed || !self.layer_stack.is_empty() || has_lens {
             self.repaint_operations(operations);
         } else {
             self.replay_as_one(operations);
@@ -188,9 +227,11 @@ impl Scene {
         let extent = operations
             .iter()
             .filter_map(|operation| match operation {
-                PaintOperation::Primitive(primitive) => {
-                    Some((primitive.clipped_bounds(), primitive.order(), primitive.order()))
-                }
+                PaintOperation::Primitive(primitive) => Some((
+                    primitive.clipped_bounds(),
+                    primitive.order(),
+                    primitive.order(),
+                )),
                 PaintOperation::StartLayer(_) | PaintOperation::EndLayer => None,
             })
             .reduce(|(bounds, lowest, highest), (next, low, high)| {
@@ -238,9 +279,8 @@ impl Scene {
         sort_primitives(&mut self.polychrome_sprites, keys, |sprite| {
             sprite_sort_key(sprite.order, &sprite.tile)
         });
-        sort_primitives(&mut self.surfaces, keys, |surface| {
-            u64::from(surface.order)
-        });
+        sort_primitives(&mut self.surfaces, keys, |surface| u64::from(surface.order));
+        sort_primitives(&mut self.lenses, keys, |lens| u64::from(lens.order));
     }
 
     #[cfg_attr(
@@ -268,6 +308,8 @@ impl Scene {
             polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
             surfaces_start: 0,
             surfaces_iter: self.surfaces.iter().peekable(),
+            lenses_start: 0,
+            lenses_iter: self.lenses.iter().peekable(),
         }
     }
 }
@@ -322,6 +364,7 @@ pub(crate) enum PrimitiveKind {
     SubpixelSprite,
     PolychromeSprite,
     Surface,
+    Lens,
 }
 
 pub(crate) enum PaintOperation {
@@ -341,6 +384,9 @@ pub enum Primitive {
     SubpixelSprite(SubpixelSprite),
     PolychromeSprite(PolychromeSprite),
     Surface(PaintSurface),
+    /// QUILL: backdrop glass, boxed so the rare lens does not grow every
+    /// primitive the frame records.
+    Lens(Box<BackdropLens>),
 }
 
 #[expect(missing_docs)]
@@ -355,6 +401,7 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.bounds,
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
             Primitive::Surface(surface) => &surface.bounds,
+            Primitive::Lens(lens) => &lens.bounds,
         }
     }
 
@@ -368,6 +415,7 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Surface(surface) => &surface.content_mask,
+            Primitive::Lens(lens) => &lens.content_mask,
         }
     }
 
@@ -383,8 +431,7 @@ impl Primitive {
     }
 
     fn clipped_bounds(&self) -> Bounds<ScaledPixels> {
-        self.painted_bounds()
-            .intersect(&self.content_mask().bounds)
+        self.painted_bounds().intersect(&self.content_mask().bounds)
     }
 
     fn order(&self) -> DrawOrder {
@@ -397,6 +444,7 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => sprite.order,
             Primitive::PolychromeSprite(sprite) => sprite.order,
             Primitive::Surface(surface) => surface.order,
+            Primitive::Lens(lens) => lens.order,
         }
     }
 }
@@ -425,6 +473,8 @@ struct BatchIterator<'a> {
     polychrome_sprites_iter: Peekable<slice::Iter<'a, PolychromeSprite>>,
     surfaces_start: usize,
     surfaces_iter: Peekable<slice::Iter<'a, PaintSurface>>,
+    lenses_start: usize,
+    lenses_iter: Peekable<slice::Iter<'a, BackdropLens>>,
 }
 
 impl<'a> Iterator for BatchIterator<'a> {
@@ -457,6 +507,10 @@ impl<'a> Iterator for BatchIterator<'a> {
             (
                 self.surfaces_iter.peek().map(|s| s.order),
                 PrimitiveKind::Surface,
+            ),
+            (
+                self.lenses_iter.peek().map(|lens| lens.order),
+                PrimitiveKind::Lens,
             ),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
@@ -603,6 +657,24 @@ impl<'a> Iterator for BatchIterator<'a> {
                 self.surfaces_start = surfaces_end;
                 Some(PrimitiveBatch::Surfaces(surfaces_start..surfaces_end))
             }
+            PrimitiveKind::Lens => {
+                let lenses_start = self.lenses_start;
+                let mut lenses_end = lenses_start + 1;
+                // A batch is one band: a lens in a higher band covers one of
+                // these, so it needs a copy of the frame they are drawn into.
+                let band = self.lenses_iter.next().map(|lens| lens.order);
+                while self
+                    .lenses_iter
+                    .next_if(|lens| {
+                        Some(lens.order) == band && (lens.order, batch_kind) < max_order_and_kind
+                    })
+                    .is_some()
+                {
+                    lenses_end += 1;
+                }
+                self.lenses_start = lenses_end;
+                Some(PrimitiveBatch::Lenses(lenses_start..lenses_end))
+            }
         }
     }
 }
@@ -635,6 +707,9 @@ pub enum PrimitiveBatch {
         range: Range<usize>,
     },
     Surfaces(Range<usize>),
+    /// QUILL: backdrop glass. Lenses of one batch share an order, so none
+    /// covers another.
+    Lenses(Range<usize>),
 }
 
 impl PrimitiveBatch {
@@ -667,6 +742,7 @@ impl PrimitiveBatch {
                 )
             }
             Self::Surfaces(range) => format!("surfaces ({})", range.len()),
+            Self::Lenses(range) => format!("lenses ({})", range.len()),
         }
     }
 }
@@ -1152,7 +1228,11 @@ impl SurfaceFrame {
     /// The display headroom to tone-map to (at least 1.0).
     pub fn headroom(&self) -> f32 {
         let headroom = f32::from_bits(self.headroom.load(std::sync::atomic::Ordering::Relaxed));
-        if headroom.is_finite() { headroom.max(1.0) } else { 1.0 }
+        if headroom.is_finite() {
+            headroom.max(1.0)
+        } else {
+            1.0
+        }
     }
 
     /// Set the display headroom to tone-map to.
@@ -1210,6 +1290,12 @@ impl PartialEq for SurfaceFrame {
 }
 
 impl Eq for SurfaceFrame {}
+
+impl From<BackdropLens> for Primitive {
+    fn from(lens: BackdropLens) -> Self {
+        Primitive::Lens(Box::new(lens))
+    }
+}
 
 impl From<PaintSurface> for Primitive {
     fn from(surface: PaintSurface) -> Self {
