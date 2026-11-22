@@ -1528,8 +1528,12 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                 let (Some(ids), Some(advances), Some(offsets)) = (
                     glyph_ids.get(cluster.clone()),
                     glyph_advances.get(cluster.clone()),
-                    glyph_offsets.get(cluster),
+                    glyph_offsets.get(cluster.clone()),
                 ) else {
+                    log::warn!(
+                        "DirectWrite cluster {cluster:?} lies past the run's {glyph_count} \
+                         glyphs; dropping the rest of the run"
+                    );
                     break;
                 };
                 for ((glyph_id, &advance), offset) in ids.iter().zip(advances).zip(offsets) {
@@ -1917,7 +1921,6 @@ fn is_color_glyph(
 
 const DEFAULT_LOCALE_NAME: PCWSTR = windows::core::w!("en-US");
 
-
 /// The single-direction runs of `text` in visual order, left to right, with their
 /// UAX #9 levels. U+2029 counts as a line separator, so the line is one paragraph.
 fn visual_runs(text: &str) -> Vec<(Range<usize>, u8)> {
@@ -1962,9 +1965,15 @@ mod tests {
     use super::DirectWriteTextSystem;
     use crate::direct_write::ClusterAnalyzer;
     use anyhow::Result;
-    use gpui::{Font, FontWeight, PlatformTextSystem, TextRun, TextSystem, WindowTextSystem, px};
+    use gpui::{
+        Font, FontWeight, Pixels, PlatformTextSystem, ShapedLine, TextRun, TextSystem,
+        WindowTextSystem, px,
+    };
     use std::sync::Arc;
-    use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_STRETCH_NORMAL, DWRITE_TEXT_METRICS};
+    use windows::Win32::Graphics::DirectWrite::{
+        DWRITE_FONT_STRETCH_NORMAL, DWRITE_READING_DIRECTION_RIGHT_TO_LEFT, DWRITE_TEXT_METRICS,
+        DWRITE_WORD_WRAPPING_NO_WRAP,
+    };
 
     #[test]
     fn tabs_preserve_native_advances_and_cursor() -> Result<()> {
@@ -2006,19 +2015,35 @@ mod tests {
                     "a\tb\tc",
                     "é\t𐐀\tz",
                     "a \tb  ",
-                    // Right-to-left text is placed visually, not at logical x offsets:
-                    // `right_to_left_runs_are_placed_in_visual_order` covers it.
+                    "אב",
+                    "aאבb",
+                    "a\tאב\tb",
+                    "א\t\tב",
                 ] {
+                    let rtl_line =
+                        unicode_bidi::get_base_direction(text) == unicode_bidi::Direction::Rtl;
                     let mut native_metrics = DWRITE_TEXT_METRICS::default();
                     unsafe {
                         let layout = platform_text_system.components.factory.CreateTextLayout(
                             &text.encode_utf16().collect::<Vec<_>>(),
                             &format,
-                            f32::INFINITY,
+                            if rtl_line { 0.0 } else { f32::INFINITY },
                             f32::INFINITY,
                         )?;
+                        if rtl_line {
+                            layout.SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT)?;
+                            layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+                        }
                         layout.GetMetrics(&mut native_metrics)?;
                     }
+                    // A line that changes direction is shaped run by run (`layout_bidi_runs`),
+                    // so a tab after the first run counts its stop from that run's start,
+                    // as `BidiParagraph` does on every platform. Only a one-direction line
+                    // matches DirectWrite's own layout of the whole line.
+                    let one_direction = !(text.contains(is_right_to_left)
+                        && text
+                            .chars()
+                            .any(|character| character.is_ascii_alphabetic()));
                     for split_runs in [false, true] {
                         let runs = if split_runs {
                             text.chars()
@@ -2036,59 +2061,140 @@ mod tests {
                             }]
                         };
                         let shaped = text_system.shape_line(text.into(), font_size, &runs, None);
-                        let mut cursor = shaped.cursor();
-                        let mut expected_x = px(0.0);
-                        for (index, character) in text.char_indices() {
-                            let end = index + character.len_utf8();
-                            let expected_end = if character == '\t' {
-                                tab_interval * ((expected_x / tab_interval).floor() + 1.0)
-                            } else {
-                                let character_run = TextRun {
-                                    len: character.len_utf8(),
-                                    font: font.clone(),
-                                    ..Default::default()
-                                };
-                                expected_x
-                                    + text_system
-                                        .shape_line(
-                                            character.to_string().into(),
-                                            font_size,
-                                            &[character_run],
-                                            None,
-                                        )
-                                        .width
-                            };
-                            assert!(
-                                (shaped.x_for_index(index) - expected_x).abs() < px(0.001),
-                                "{family}, {font_size:?}, {text:?}, {split_runs}, index={index}: \
-                                 expected {expected_x:?}, got {:?}",
-                                shaped.x_for_index(index)
+                        if text.contains(is_right_to_left) {
+                            check_right_to_left_tabs(text, &shaped, rtl_line);
+                        } else {
+                            check_left_to_right_tabs(
+                                &text_system,
+                                text,
+                                &shaped,
+                                &font,
+                                font_size,
+                                tab_interval,
                             );
-                            assert_eq!(
-                                shaped.index_for_x(expected_x + px(0.01)),
-                                Some(index),
-                                "{family}, {text:?}, index={index}"
-                            );
-                            let piece = cursor.take_until(end);
-                            assert_eq!(piece.text.as_ref(), character.to_string());
-                            assert!(
-                                (piece.width - (expected_end - expected_x)).abs() < px(0.001),
-                                "{family}, {text:?}, index={index}"
-                            );
-                            expected_x = expected_end;
                         }
-                        assert!((shaped.width - expected_x).abs() < px(0.001));
-                        assert!(
-                            (shaped.width - px(native_metrics.widthIncludingTrailingWhitespace))
+                        if one_direction {
+                            assert!(
+                                (shaped.width
+                                    - px(native_metrics.widthIncludingTrailingWhitespace))
                                 .abs()
-                                < px(0.001)
+                                    < px(0.001),
+                                "{family}, {font_size:?}, {text:?}, {split_runs}: width {:?}, \
+                                 DirectWrite {}",
+                                shaped.width,
+                                native_metrics.widthIncludingTrailingWhitespace
+                            );
+                        }
+                        // The end of a right-to-left line is its left edge.
+                        let end_x = if rtl_line { px(0.0) } else { shaped.width };
+                        assert_eq!(
+                            shaped.x_for_index(text.len()),
+                            end_x,
+                            "{text:?}: end of line"
                         );
-                        assert_eq!(shaped.x_for_index(text.len()), shaped.width);
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    fn is_right_to_left(character: char) -> bool {
+        // Hebrew and Arabic.
+        ('\u{0590}'..='\u{08FF}').contains(&character)
+    }
+
+    /// Left-to-right text sits at logical x offsets: each character at the sum of
+    /// the advances before it, each tab out to the next tab stop.
+    fn check_left_to_right_tabs(
+        text_system: &WindowTextSystem,
+        text: &str,
+        shaped: &ShapedLine,
+        font: &Font,
+        font_size: Pixels,
+        tab_interval: Pixels,
+    ) {
+        let family = &font.family;
+        let mut cursor = shaped.cursor();
+        let mut expected_x = px(0.0);
+        for (index, character) in text.char_indices() {
+            let end = index + character.len_utf8();
+            let expected_end = if character == '\t' {
+                tab_interval * ((expected_x / tab_interval).floor() + 1.0)
+            } else {
+                let character_run = TextRun {
+                    len: character.len_utf8(),
+                    font: font.clone(),
+                    ..Default::default()
+                };
+                expected_x
+                    + text_system
+                        .shape_line(
+                            character.to_string().into(),
+                            font_size,
+                            &[character_run],
+                            None,
+                        )
+                        .width
+            };
+            assert!(
+                (shaped.x_for_index(index) - expected_x).abs() < px(0.001),
+                "{family}, {font_size:?}, {text:?}, index={index}: \
+                 expected {expected_x:?}, got {:?}",
+                shaped.x_for_index(index)
+            );
+            assert_eq!(
+                shaped.index_for_x(expected_x + px(0.01)),
+                Some(index),
+                "{family}, {text:?}, index={index}"
+            );
+            let piece = cursor.take_until(end);
+            assert_eq!(piece.text.as_ref(), character.to_string());
+            assert!(
+                (piece.width - (expected_end - expected_x)).abs() < px(0.001),
+                "{family}, {text:?}, index={index}"
+            );
+            expected_x = expected_end;
+        }
+        assert!((shaped.width - expected_x).abs() < px(0.001));
+    }
+
+    /// Right-to-left text is placed visually, not at logical x offsets, so check what
+    /// a caret needs: every character has one glyph with its own byte index, glyphs run
+    /// left to right, a hit test at a glyph finds that glyph's index, and in a
+    /// right-to-left line every character, tabs included, sits left of the one typed
+    /// before it (UAX #9 L1 gives the tabs the line's level).
+    ///
+    /// The round trip goes through the glyphs rather than `x_for_index`, which returns
+    /// the first glyph in visual order whose index is at least the one asked for and so
+    /// assumes logical order.
+    fn check_right_to_left_tabs(text: &str, shaped: &ShapedLine, rtl_line: bool) {
+        let glyphs: Vec<_> = shaped.runs.iter().flat_map(|run| &run.glyphs).collect();
+        let mut indices: Vec<usize> = glyphs.iter().map(|glyph| glyph.index).collect();
+        indices.sort_unstable();
+        let characters: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
+        assert_eq!(indices, characters, "{text:?}: glyph byte indices");
+        assert!(
+            glyphs
+                .windows(2)
+                .all(|pair| pair[0].position.x <= pair[1].position.x),
+            "{text:?}: glyphs not in visual order"
+        );
+        for glyph in &glyphs {
+            assert_eq!(
+                shaped.index_for_x(glyph.position.x + px(0.01)),
+                Some(glyph.index),
+                "{text:?}: hit test at the glyph for byte {}",
+                glyph.index
+            );
+        }
+        if rtl_line {
+            assert!(
+                glyphs.windows(2).all(|pair| pair[0].index > pair[1].index),
+                "{text:?}: a right-to-left line should run backwards in typing order, got {:?}",
+                glyphs.iter().map(|glyph| glyph.index).collect::<Vec<_>>()
+            );
+        }
     }
 
     /// DirectWrite hands a right-to-left glyph run over in logical order, advancing
