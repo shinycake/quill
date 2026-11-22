@@ -261,13 +261,11 @@ impl Session {
             MessagesPayload::UpdateMessageSendSucceeded {
                 message,
                 old_message_id,
-            } if message.scheduling_state.is_some() => {
-                self.settle_scheduled_send(message, old_message_id, false);
-            }
-            MessagesPayload::UpdateMessageSendSucceeded {
-                message,
-                old_message_id,
             } => {
+                if message.scheduling_state.is_some() {
+                    self.settle_scheduled_send(message, old_message_id, false);
+                    return;
+                }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id();
                 let thread_id = message.thread_id();
@@ -314,16 +312,12 @@ impl Session {
                 message,
                 old_message_id,
                 error,
-            } if message.scheduling_state.is_some() => {
-                self.note_send_error(&error);
-                self.settle_scheduled_send(message, old_message_id, true);
-            }
-            MessagesPayload::UpdateMessageSendFailed {
-                message,
-                old_message_id,
-                error,
             } => {
                 self.note_send_error(&error);
+                if message.scheduling_state.is_some() {
+                    self.settle_scheduled_send(message, old_message_id, true);
+                    return;
+                }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id();
                 // The send never became a message: whatever waited on its
