@@ -165,6 +165,23 @@ bilalgursen/liquid-glass, MIT). No product UI uses the glass yet.
   cost on Linux. `lens.rs`'s packing tests do not build in this repository,
   for the same reason as gpui-pre's.
 
+## Verification, stage 3
+
+- GitHub Actions run 45076289992 (windows-latest, 2026-11-22), on a scratch
+  branch that has since been deleted. Every step passed:
+  - the glass shaders compile on WARP in a debug build, through
+    D3DCompileFromFile (`shared_shader_tests`);
+  - the demo-capture UI binary builds;
+  - fxc compiles the release shaders in `build.rs` (`cargo check -p
+    gpui-pre-windows --release`).
+- `ready-glass` was captured under WARP in light, dark and glass off, both
+  in-app and as screen grabs. In both themes the magnifier bends the bubble
+  text, the card frosts the photo and the chat, the tab lens sits on its
+  track, and the labels stay crisp above the glass. No garbage. The glass
+  matches the Vulkan capture from stage 2.
+- Not run: a real GPU, HDR, device loss on a live window, feature level 10,
+  and frame cost on Windows.
+
 ## Not done here (later stages)
 
 - Moving gpui-liquid-glass onto the primitive (stage 4) and the stage 5
