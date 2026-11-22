@@ -22,6 +22,49 @@ impl Session {
         });
     }
 
+    /// A send's error notice: no right to send, or a rate limit (the
+    /// failed row keeps its retry affordance; `can_retry` comes from TDLib,
+    /// which marks rate limits retryable).
+    fn note_send_error(&mut self, error: &crate::telegram::envelope::TdError) {
+        if let Some(notice) = error.send_permission_notice() {
+            self.messages.send_permission_error.push(notice.into());
+        } else if let Some(notice) = error.flood_notice() {
+            self.messages.flood_notice.push(notice);
+        }
+    }
+
+    /// The send of a scheduled message ended. It stays in the scheduled
+    /// list (never the chat's history, where it would show as sent), and
+    /// the slot it went from lets its draft go, or keeps it on failure.
+    fn settle_scheduled_send(
+        &mut self,
+        message: ParsedMessage,
+        old_message_id: MessageId,
+        failed: bool,
+    ) {
+        let chat_id = message.chat_id;
+        let slot = self.draft_slot_of_message(
+            chat_id,
+            message.topic_id(),
+            message.thread_id(),
+            message.extras.direct_messages_topic_id(),
+        );
+        let ack = SendAck {
+            chat_id,
+            slot,
+            old_message_id,
+        };
+        if failed {
+            self.messages.failed_sends.push(ack);
+        } else {
+            self.messages.draft_clears.push(ack);
+        }
+        self.remember_files(&message.files);
+        self.messages
+            .scheduled_messages
+            .replace_id(old_message_id, message);
+    }
+
     /// Applies one messages payload; called by
     /// [`Session::apply_payload`].
     pub(crate) fn apply_messages_payload(
@@ -218,6 +261,12 @@ impl Session {
             MessagesPayload::UpdateMessageSendSucceeded {
                 message,
                 old_message_id,
+            } if message.scheduling_state.is_some() => {
+                self.settle_scheduled_send(message, old_message_id, false);
+            }
+            MessagesPayload::UpdateMessageSendSucceeded {
+                message,
+                old_message_id,
             } => {
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id();
@@ -265,15 +314,16 @@ impl Session {
                 message,
                 old_message_id,
                 error,
+            } if message.scheduling_state.is_some() => {
+                self.note_send_error(&error);
+                self.settle_scheduled_send(message, old_message_id, true);
+            }
+            MessagesPayload::UpdateMessageSendFailed {
+                message,
+                old_message_id,
+                error,
             } => {
-                if let Some(notice) = error.send_permission_notice() {
-                    self.messages.send_permission_error.push(notice.into());
-                } else if let Some(notice) = error.flood_notice() {
-                    // Q1: the failed row keeps its retry affordance
-                    // (`can_retry` comes from TDLib, which marks rate
-                    // limits retryable); the text stays in the history.
-                    self.messages.flood_notice.push(notice);
-                }
+                self.note_send_error(&error);
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id();
                 // The send never became a message: whatever waited on its
@@ -462,6 +512,11 @@ impl Session {
                     list.retain(|message| !message_ids.contains(&message.id));
                 }
                 self.forget_conference_invite(chat_id, &message_ids);
+                // A scheduled send leaves its list when it goes out at its
+                // time (TDLib deletes the scheduled copy) or is deleted.
+                self.messages
+                    .scheduled_messages
+                    .forget(chat_id, &message_ids);
                 if !message_ids.is_empty() {
                     self.history_entry(chat_id)
                         .forget_deleted_latest(&message_ids);
@@ -561,17 +616,7 @@ impl Session {
                     && message.scheduling_state.is_some()
                 {
                     self.remember_files(&message.files);
-                    if let Some(slot) = self
-                        .messages
-                        .scheduled_messages
-                        .rows
-                        .iter_mut()
-                        .find(|m| m.chat_id == message.chat_id && m.id == message.id)
-                    {
-                        *slot = message;
-                    } else {
-                        self.messages.scheduled_messages.rows.push(message);
-                    }
+                    self.messages.scheduled_messages.upsert(message);
                 } else if let Some(request) =
                     pending.filter(|p| p.purpose == RequestPurpose::SendMessage)
                 {
