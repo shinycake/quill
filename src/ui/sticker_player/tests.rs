@@ -653,11 +653,19 @@ fn an_open_nobody_answers_stops_asking_for_ticks_after_the_give_up() {
         file: FileId(8),
         ..spec
     };
+    // Nobody answers the open while the test runs: the decode waits on the
+    // engine's worker until `release` is dropped at the end. A fixture that
+    // decodes at once let the worker answer before the give-up was checked.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let held = std::sync::Mutex::new(held);
     player.set_fixture(
         8,
-        Arc::new(|edge| DecodedFrames {
-            frames: vec![vec![1; (edge as usize).pow(2) * 4]],
-            fps: FPS,
+        Arc::new(move |edge| {
+            let _ = held.lock().map(|held| held.recv());
+            DecodedFrames {
+                frames: vec![vec![1; (edge as usize).pow(2) * 4]],
+                fps: FPS,
+            }
         }),
     );
     let view = super::StickerView {
@@ -684,6 +692,7 @@ fn an_open_nobody_answers_stops_asking_for_ticks_after_the_give_up() {
     view.player.skip(ms(1));
     assert_eq!(view.fps(), 0, "given up: it rests");
     assert!(!view.changes_in(draw));
+    drop(release);
 }
 
 /// The engine always answers an open, so a clip that opened late (queued

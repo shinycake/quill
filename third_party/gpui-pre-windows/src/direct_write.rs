@@ -2085,7 +2085,13 @@ mod tests {
                                 native_metrics.widthIncludingTrailingWhitespace
                             );
                         }
-                        assert_eq!(shaped.x_for_index(text.len()), shaped.width);
+                        // The end of a right-to-left line is its left edge.
+                        let end_x = if rtl_line { px(0.0) } else { shaped.width };
+                        assert_eq!(
+                            shaped.x_for_index(text.len()),
+                            end_x,
+                            "{text:?}: end of line"
+                        );
                     }
                 }
             }
