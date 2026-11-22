@@ -7379,6 +7379,7 @@ dependencies = [
  "rand 0.10.3",
  "raw-window-handle",
  "resvg 0.50.0",
+ "ring",
  "rodio",
  "rustls",
  "rusty-opus",

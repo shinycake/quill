@@ -199,6 +199,8 @@ hkdf = "0.13"
 aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# Verifies the Ed25519 signature on update packages (src/update_install/signature.rs).
+ring = { version = "0.17", default-features = false, features = ["alloc"] }
 webpki-roots = "1"
 interprocess = { version = "2", default-features = false }
 # Interface language packs (docs/decisions/language-packs.md): lock-free reads

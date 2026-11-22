@@ -8,6 +8,7 @@
 |---|---|---|
 | `MACOS_SIGNING_P12`, `MACOS_SIGNING_P12_PASSWORD`, `MACOS_NOTARY_KEY`, `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER_ID` | `release` environment | `package-macos.yml` when it builds a release (a version is set) |
 | `CHOCO_API_KEY`, `FLATPAK_GPG_KEY`, `AUR_SSH_KEY` (not set yet) | `publish` environment | `chocolatey.yml` and `aur.yml` when they push, `pages.yml` build |
+| `UPDATE_SIGNING_KEY` | `update-signing` environment | `release.yml` assemble job (`scripts/release-sign-updates.sh`) |
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | repository | release packaging; these are compiled into every shipped binary, so they are not treated as signing secrets |
 
 Both environments accept only `main` and `v*` tags, so a workflow pushed on any
@@ -38,6 +39,19 @@ and the build is silently ad-hoc signed).
 Anything merged to `main` runs with the release secrets at the next release,
 so a maintainer's pull request is the line of defence for code outside
 `CODEOWNERS` too (build scripts, `build.rs`, crates).
+
+## Signed updates
+
+Anyone with write access can replace a release file, and GitHub's asset
+digest then describes the replacement. So every update package carries a
+`.sig` beside it: an Ed25519 signature over
+`quill-update-v1\n<version>\n<file name>\n<sha256>\n`, made by the
+release workflow with `UPDATE_SIGNING_KEY`, and Quill installs an update
+only when it verifies against the public key in
+`src/update_install/signature.rs`. The private key's backup is in the
+owner's `~/.quill-signing/update-ed25519.pem`. Releases made before this
+change are not signed, so the first signed release still reaches older
+installs through their old, digest-only check.
 
 ## No self-hosted runners
 

@@ -24,6 +24,8 @@ mod layout;
 mod macos;
 mod manifest;
 mod parent;
+#[cfg(any(feature = "ui", test))]
+mod signature;
 mod staged;
 mod swap;
 
@@ -694,6 +696,10 @@ pub fn download_and_stage(
         {
             let _ = fs::remove_file(&archive);
             return Err(fetch::MISMATCH);
+        }
+        if let Err(unsigned) = signature::check(&asset.url, &release.version, &asset.sha256) {
+            let _ = fs::remove_file(&archive);
+            return Err(unsigned);
         }
         let unpacked = unpack_package(&archive, &staged);
         let _ = fs::remove_file(&archive);

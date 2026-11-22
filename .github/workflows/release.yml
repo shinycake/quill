@@ -198,6 +198,9 @@ jobs:
     needs: [prepare, calls-tests, linux, windows, macos, sources]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # UPDATE_SIGNING_KEY signs the in-app update packages. The environment
+    # takes main and v* tags only, so dry runs from other branches go unsigned.
+    environment: ${{ (github.ref == 'refs/heads/main' || github.ref_type == 'tag') && 'update-signing' || '' }}
     permissions:
       # generate-notes needs write; the release itself is only created on a tag push.
       contents: write
@@ -252,6 +255,19 @@ jobs:
           done
           cp in/sources/* release-out/
           ls -l release-out
+      # Quill installs an update only with a valid signature beside it
+      # (src/update_install/signature.rs): release files can be replaced by
+      # anyone with write access, the key cannot.
+      - name: sign the update packages
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            if [ "$PUBLISH" = true ]; then echo "::error::UPDATE_SIGNING_KEY is not set: a release must be signed"; exit 1; fi
+            echo "::warning::UPDATE_SIGNING_KEY is not available here: update packages are unsigned (dry run)"
+            exit 0
+          fi
+          bash scripts/release-sign-updates.sh release-out "$VERSION"
       - name: previous release tag
         id: prev
         run: |
@@ -293,6 +309,10 @@ jobs:
                     quill-linux-x86_64-bundle.tar.gz quill-linux-aarch64 quill-linux-aarch64-bundle.tar.gz
                     quill-macos-aarch64.zip quill-macos-aarch64.dmg
                     quill-windows-x86_64.zip quill-windows-x86_64-setup.exe)
+          if compgen -G 'release-out/*.sig' >/dev/null; then
+            expected+=(quill-macos-aarch64.zip.sig quill-linux-x86_64-bundle.tar.gz.sig
+                       quill-linux-aarch64-bundle.tar.gz.sig quill-windows-x86_64.zip.sig)
+          fi
           for f in "${expected[@]}"; do
             [ -f "release-out/$f" ] || { echo "::error::missing release file $f"; exit 1; }
           done
