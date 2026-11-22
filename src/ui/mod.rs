@@ -45,8 +45,6 @@ mod appearance_power;
 mod auth_recovery;
 mod auth_state;
 mod autoscroll_ui;
-#[cfg(test)]
-mod backdrop_lens_tests;
 mod background_accounts;
 mod bar_report;
 pub(crate) mod battery_watch;

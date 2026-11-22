@@ -355,3 +355,7 @@ impl Render for GlassOverlay {
             )
     }
 }
+
+#[cfg(test)]
+#[path = "backdrop_lens_tests.rs"]
+mod backdrop_lens_tests;
