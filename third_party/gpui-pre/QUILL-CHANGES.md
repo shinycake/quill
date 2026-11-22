@@ -656,3 +656,9 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
   `None` past `u32::MAX`); `insert_span` and it share `insert_ordered`.
 - `src/window.rs`: `Window::paint_backdrop_lens(bounds, corner_radius,
   &LensStyle)`.
+- Stage 3: `src/scene/backdrop_lens.rs` holds the atlas packing every
+  renderer shares, moved out of the Metal and wgpu renderers:
+  `LensPacking::pack` shelves a batch's footprints, clipped to the target,
+  into slots aligned to `LENS_ATLAS_ALIGN` with `LENS_ATLAS_GUTTER` between
+  them (`LensCopy` per lens), and `LENS_ATLAS_LEVELS` is the atlas's mip
+  count. Its tests are in Quill's `src/ui/backdrop_lens_tests.rs`.

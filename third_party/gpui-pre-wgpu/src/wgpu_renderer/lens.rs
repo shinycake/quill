@@ -18,7 +18,7 @@
 use super::{InstanceData, WgpuRendererCore};
 use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
-use gpui::BackdropLens;
+use gpui::{BackdropLens, LENS_ATLAS_LEVELS, LensCopy, LensPacking};
 use std::num::NonZeroU64;
 
 /// The lens shader over the shared definitions it uses (and the storage
@@ -32,13 +32,8 @@ const LENS_SHADERS: &str = concat!(
 /// The downsample and frame copy passes.
 const LENS_POST_SHADERS: &str = include_str!("../shaders_lens_post.wgsl");
 
-/// Mip levels of the atlas: level k is blurred over about 2^k pixels.
-const LEVELS: u32 = 5;
-/// Slots start on multiples of this, so each level's slot starts on a
-/// whole texel.
-const ALIGN: u32 = 1 << (LEVELS - 1);
-/// Room between slots; no tap crosses it (the shaders clamp to the slot).
-const GUTTER: u32 = 16;
+/// Mip levels of the atlas (the packing gpui-pre does assumes this many).
+const LEVELS: u32 = LENS_ATLAS_LEVELS;
 /// The atlas's sides are multiples of this, so every level halves exactly.
 const ATLAS_STEP: u32 = 256;
 /// The largest atlas side asked for, on devices that allow more.
@@ -85,85 +80,6 @@ struct LensDownsampleSlot {
     src_y0: f32,
     src_x1: f32,
     src_y1: f32,
-}
-
-/// One footprint to copy: from the target at `from` to the atlas at `to`,
-/// `size` pixels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Copy {
-    from: (u32, u32),
-    to: (u32, u32),
-    size: (u32, u32),
-}
-
-/// Where a batch's footprints go in the atlas, and the atlas size they need.
-#[derive(Debug, PartialEq, Eq)]
-struct Packing {
-    copies: Vec<Copy>,
-    width: u32,
-    height: u32,
-}
-
-fn align_up(value: u32) -> u32 {
-    value.div_ceil(ALIGN).saturating_mul(ALIGN)
-}
-
-/// Shelves the footprints of `lenses`, clipped to the target, into an
-/// atlas; `None` when they don't fit in `max_side`.
-fn pack(lenses: &[BackdropLens], target: (u32, u32), max_side: u32) -> Option<Packing> {
-    let clipped: Vec<((u32, u32), (u32, u32))> = lenses
-        .iter()
-        .map(|lens| {
-            let bounds = lens.bounds;
-            let clamp_x = |v: f32| v.clamp(0.0, target.0 as f32);
-            let clamp_y = |v: f32| v.clamp(0.0, target.1 as f32);
-            let x0 = clamp_x(bounds.origin.x.0.floor());
-            let y0 = clamp_y(bounds.origin.y.0.floor());
-            let x1 = clamp_x((bounds.origin.x.0 + bounds.size.width.0).ceil());
-            let y1 = clamp_y((bounds.origin.y.0 + bounds.size.height.0).ceil());
-            let size = ((x1 - x0).max(0.0) as u32, (y1 - y0).max(0.0) as u32);
-            ((x0 as u32, y0 as u32), size)
-        })
-        .collect();
-    let widest = clipped
-        .iter()
-        .map(|(_, (w, _))| align_up(*w))
-        .max()
-        .unwrap_or(0);
-    let one_row: u32 = clipped
-        .iter()
-        .map(|(_, (w, _))| align_up(*w).saturating_add(GUTTER))
-        .fold(0, u32::saturating_add);
-    let width = one_row
-        .min(align_up(target.0).saturating_add(GUTTER))
-        .max(widest)
-        .max(ALIGN);
-    if width > max_side {
-        return None;
-    }
-    let (mut x, mut y, mut row) = (0u32, 0u32, 0u32);
-    let mut copies = Vec::with_capacity(clipped.len());
-    for (from, size) in clipped {
-        let slot_w = align_up(size.0);
-        if x > 0 && x.saturating_add(slot_w) > width {
-            x = 0;
-            y = y.saturating_add(row).saturating_add(GUTTER);
-            row = 0;
-        }
-        copies.push(Copy {
-            from,
-            to: (x, y),
-            size,
-        });
-        x = x.saturating_add(slot_w).saturating_add(GUTTER);
-        row = row.max(align_up(size.1));
-    }
-    let height = y.saturating_add(row).max(ALIGN);
-    (height <= max_side).then_some(Packing {
-        copies,
-        width,
-        height,
-    })
 }
 
 /// The pooled atlas: a mip-chained texture in the target's format, a view
@@ -546,7 +462,7 @@ pub(super) struct LensPlan {
     lens_pipeline: wgpu::RenderPipeline,
     downsample_pipeline: wgpu::RenderPipeline,
     atlas: wgpu::Texture,
-    copies: Vec<Copy>,
+    copies: Vec<LensCopy>,
     glass: wgpu::BindGroup,
     downsamples: Vec<DownsamplePass>,
     count: u32,
@@ -674,7 +590,8 @@ impl WgpuRendererCore {
             return Ok(None);
         };
         let max_side = self.lens_max_side();
-        let Some(packing) = pack(lenses, (target.width(), target.height()), max_side) else {
+        let Some(packing) = LensPacking::pack(lenses, (target.width(), target.height()), max_side)
+        else {
             return Ok(None);
         };
         let Some(lens_data) = self.write_lens_storage(instance_offset, lenses)? else {
@@ -886,56 +803,5 @@ impl WgpuRendererCore {
             .resources
             .queue
             .submit(std::iter::once(encoder.finish())))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gpui::{Bounds, ContentMask, ScaledPixels, point, size};
-
-    fn lens(x: f32, y: f32, w: f32, h: f32) -> BackdropLens {
-        let bounds = Bounds {
-            origin: point(ScaledPixels(x), ScaledPixels(y)),
-            size: size(ScaledPixels(w), ScaledPixels(h)),
-        };
-        BackdropLens {
-            bounds,
-            body: bounds,
-            content_mask: ContentMask { bounds },
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn footprints_are_clipped_to_the_target_and_aligned_in_the_atlas() {
-        let packing = pack(
-            &[
-                lens(-10.5, 20.0, 100.0, 50.0),
-                lens(900.0, 700.0, 200.0, 200.0),
-            ],
-            (1000, 800),
-            MAX_SIDE,
-        )
-        .unwrap();
-        assert_eq!(
-            packing.copies[0],
-            Copy {
-                from: (0, 20),
-                to: (0, 0),
-                size: (90, 50),
-            }
-        );
-        assert_eq!(packing.copies[1].from, (900, 700));
-        assert_eq!(packing.copies[1].size, (100, 100));
-        assert_eq!(packing.copies[1].to, (96 + GUTTER, 0));
-        assert_eq!(packing.width, 96 + GUTTER + 112 + GUTTER);
-        assert_eq!(packing.height, 112);
-    }
-
-    #[test]
-    fn footprints_past_the_largest_atlas_draw_flat() {
-        let lenses = [lens(0.0, 0.0, 3000.0, 40.0)];
-        assert!(pack(&lenses, (4000, 800), 2048).is_none());
     }
 }

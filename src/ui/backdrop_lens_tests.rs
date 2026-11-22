@@ -4,8 +4,9 @@
 //! what is painted over a lens draws on top of it.
 
 use gpui_kit::{
-    BackdropLens, Background, Bounds, ContentMask, LensBend, LensMaterial, LensStyle, LensTune,
-    Quad, ScaledPixels, Scene, bounds, hsla, point, px, size,
+    BackdropLens, Background, Bounds, ContentMask, LENS_ATLAS_GUTTER, LensBend, LensCopy,
+    LensMaterial, LensPacking, LensStyle, LensTune, Quad, ScaledPixels, Scene, bounds, hsla, point,
+    px, size,
 };
 
 fn style() -> LensStyle {
@@ -182,4 +183,57 @@ fn the_fallback_quad_is_the_body_in_the_glass_colour() {
 #[test]
 fn a_lens_does_not_grow_every_recorded_primitive() {
     assert!(std::mem::size_of::<gpui_kit::Primitive>() <= std::mem::size_of::<Quad>() + 16);
+}
+
+// The atlas packing every renderer shares (`LensPacking::pack`).
+
+#[test]
+fn footprints_are_clipped_to_the_target_and_aligned_in_the_atlas() {
+    let packing = LensPacking::pack(
+        &[
+            lens(-10.5, 20.0, 100.0, 50.0),
+            lens(900.0, 700.0, 200.0, 200.0),
+        ],
+        (1000, 800),
+        16384,
+    );
+    let Some(packing) = packing else {
+        panic!("two small footprints fit");
+    };
+    assert_eq!(
+        packing.copies,
+        [
+            LensCopy {
+                from: (0, 20),
+                to: (0, 0),
+                size: (90, 50),
+            },
+            LensCopy {
+                from: (900, 700),
+                to: (96 + LENS_ATLAS_GUTTER, 0),
+                size: (100, 100),
+            },
+        ]
+    );
+    assert_eq!(
+        packing.width,
+        96 + LENS_ATLAS_GUTTER + 112 + LENS_ATLAS_GUTTER
+    );
+    assert_eq!(packing.height, 112);
+}
+
+#[test]
+fn a_full_row_starts_a_shelf() {
+    let lenses = [lens(0.0, 0.0, 600.0, 40.0), lens(0.0, 100.0, 600.0, 40.0)];
+    let packing = LensPacking::pack(&lenses, (1000, 800), 16384);
+    assert_eq!(
+        packing.map(|packing| (packing.copies[1].to, packing.height)),
+        Some(((0, 48 + LENS_ATLAS_GUTTER), 48 + LENS_ATLAS_GUTTER + 48))
+    );
+}
+
+#[test]
+fn footprints_past_the_largest_atlas_draw_flat() {
+    let lenses = [lens(0.0, 0.0, 3000.0, 40.0)];
+    assert_eq!(LensPacking::pack(&lenses, (4000, 800), 2048), None);
 }

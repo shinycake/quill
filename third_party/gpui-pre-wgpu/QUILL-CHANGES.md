@@ -232,3 +232,6 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
     `write_instance_binding` writes through the new `write_instance_data`,
     which the glass uses for its storage slices. The headless target lost its
     unused view.
+- Stage 3: `src/wgpu_renderer/lens.rs` packs with gpui-pre's shared
+  `LensPacking::pack` (and `LENS_ATLAS_LEVELS`) instead of its own copy; the
+  packing tests moved with it.

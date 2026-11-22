@@ -14,7 +14,7 @@ use super::{
     new_command_encoder_for_texture,
 };
 use anyhow::{Context as _, Result};
-use gpui::{BackdropLens, DevicePixels, Size, size};
+use gpui::{BackdropLens, DevicePixels, LENS_ATLAS_LEVELS, LensCopy, LensPacking, Size, size};
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_foundation::{NSRange, NSString};
 use objc2_metal::{
@@ -26,13 +26,8 @@ use objc2_metal::{
 };
 use std::{mem, ops::Range, ptr};
 
-/// Mip levels of the atlas: level k is blurred over about 2^k pixels.
-const LEVELS: usize = 5;
-/// Slots start on multiples of this, so each level's slot starts on a
-/// whole texel.
-const ALIGN: u32 = 1 << (LEVELS - 1);
-/// Room between slots; no tap crosses it (the shaders clamp to the slot).
-const GUTTER: u32 = 16;
+/// Mip levels of the atlas (the packing gpui-pre does assumes this many).
+const LEVELS: usize = LENS_ATLAS_LEVELS as usize;
 /// The largest atlas side every Mac GPU supports.
 const MAX_SIDE: u32 = 16384;
 
@@ -82,85 +77,6 @@ pub enum LensDownsampleIndex {
     Slots = 1,
     TargetSize = 2,
     Source = 3,
-}
-
-/// One footprint to copy: from the target at `from` to the atlas at `to`,
-/// `size` pixels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Copy {
-    from: (u32, u32),
-    to: (u32, u32),
-    size: (u32, u32),
-}
-
-/// Where a batch's footprints go in the atlas, and the atlas size they need.
-#[derive(Debug, PartialEq, Eq)]
-struct Packing {
-    copies: Vec<Copy>,
-    width: u32,
-    height: u32,
-}
-
-fn align_up(value: u32) -> u32 {
-    value.div_ceil(ALIGN).saturating_mul(ALIGN)
-}
-
-/// Shelves the footprints of `lenses`, clipped to the target, into an
-/// atlas; `None` when they don't fit in [`MAX_SIDE`].
-fn pack(lenses: &[BackdropLens], target: (u32, u32)) -> Option<Packing> {
-    let clipped: Vec<((u32, u32), (u32, u32))> = lenses
-        .iter()
-        .map(|lens| {
-            let bounds = lens.bounds;
-            let clamp_x = |v: f32| v.clamp(0.0, target.0 as f32);
-            let clamp_y = |v: f32| v.clamp(0.0, target.1 as f32);
-            let x0 = clamp_x(bounds.origin.x.0.floor());
-            let y0 = clamp_y(bounds.origin.y.0.floor());
-            let x1 = clamp_x((bounds.origin.x.0 + bounds.size.width.0).ceil());
-            let y1 = clamp_y((bounds.origin.y.0 + bounds.size.height.0).ceil());
-            let size = ((x1 - x0).max(0.0) as u32, (y1 - y0).max(0.0) as u32);
-            ((x0 as u32, y0 as u32), size)
-        })
-        .collect();
-    let widest = clipped
-        .iter()
-        .map(|(_, (w, _))| align_up(*w))
-        .max()
-        .unwrap_or(0);
-    let one_row: u32 = clipped
-        .iter()
-        .map(|(_, (w, _))| align_up(*w).saturating_add(GUTTER))
-        .fold(0, u32::saturating_add);
-    let width = one_row
-        .min(align_up(target.0).saturating_add(GUTTER))
-        .max(widest)
-        .max(ALIGN);
-    if width > MAX_SIDE {
-        return None;
-    }
-    let (mut x, mut y, mut row) = (0u32, 0u32, 0u32);
-    let mut copies = Vec::with_capacity(clipped.len());
-    for (from, size) in clipped {
-        let slot_w = align_up(size.0);
-        if x > 0 && x.saturating_add(slot_w) > width {
-            x = 0;
-            y = y.saturating_add(row).saturating_add(GUTTER);
-            row = 0;
-        }
-        copies.push(Copy {
-            from,
-            to: (x, y),
-            size,
-        });
-        x = x.saturating_add(slot_w).saturating_add(GUTTER);
-        row = row.max(align_up(size.1));
-    }
-    let height = y.saturating_add(row).max(ALIGN);
-    (height <= MAX_SIDE).then_some(Packing {
-        copies,
-        width,
-        height,
-    })
 }
 
 /// The pooled atlas: a mip-chained texture in the target's format, and a
@@ -344,7 +260,7 @@ struct LensPlan {
     atlas: Retained<ProtocolObject<dyn MTLTexture>>,
     levels: Vec<Retained<ProtocolObject<dyn MTLTexture>>>,
     atlas_size: Size<DevicePixels>,
-    copies: Vec<Copy>,
+    copies: Vec<LensCopy>,
     lenses: InstanceBinding,
     slots: InstanceBinding,
     /// Per level from 1: the slots that pass writes.
@@ -418,7 +334,7 @@ impl MetalRenderer {
             return Ok(None);
         };
         let target = (texture.width() as u32, texture.height() as u32);
-        let Some(packing) = pack(lenses, target) else {
+        let Some(packing) = LensPacking::pack(lenses, target, MAX_SIDE) else {
             return Ok(None);
         };
         let atlas = self
@@ -661,53 +577,6 @@ impl DrawableReads {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Bounds, ContentMask, ScaledPixels, point};
-
-    fn lens(x: f32, y: f32, w: f32, h: f32) -> BackdropLens {
-        let bounds = Bounds {
-            origin: point(ScaledPixels(x), ScaledPixels(y)),
-            size: size(ScaledPixels(w), ScaledPixels(h)),
-        };
-        BackdropLens {
-            bounds,
-            body: bounds,
-            content_mask: ContentMask { bounds },
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn footprints_are_clipped_to_the_target_and_aligned_in_the_atlas() {
-        let packing = pack(
-            &[
-                lens(-10.5, 20.0, 100.0, 50.0),
-                lens(900.0, 700.0, 200.0, 200.0),
-            ],
-            (1000, 800),
-        )
-        .unwrap();
-        assert_eq!(
-            packing.copies[0],
-            Copy {
-                from: (0, 20),
-                to: (0, 0),
-                size: (90, 50),
-            }
-        );
-        assert_eq!(packing.copies[1].from, (900, 700));
-        assert_eq!(packing.copies[1].size, (100, 100));
-        assert_eq!(packing.copies[1].to, (96 + GUTTER, 0));
-        assert_eq!(packing.width, 96 + GUTTER + 112 + GUTTER);
-        assert_eq!(packing.height, 112);
-    }
-
-    #[test]
-    fn a_full_row_starts_a_shelf() {
-        let lenses = [lens(0.0, 0.0, 600.0, 40.0), lens(0.0, 100.0, 600.0, 40.0)];
-        let packing = pack(&lenses, (1000, 800)).unwrap();
-        assert_eq!(packing.copies[1].to, (0, 48 + GUTTER));
-        assert_eq!(packing.height, 48 + GUTTER + 48);
-    }
 
     #[test]
     fn readable_drawables_last_a_stretch_after_the_glass() {

@@ -355,6 +355,105 @@ impl BackdropLens {
     }
 }
 
+/// Mip levels of a lens atlas: level k is blurred over about 2^k pixels.
+pub const LENS_ATLAS_LEVELS: u32 = 5;
+/// Atlas slots start on multiples of this, so each level's slot starts on
+/// a whole texel.
+pub const LENS_ATLAS_ALIGN: u32 = 1 << (LENS_ATLAS_LEVELS - 1);
+/// Room between atlas slots; no tap crosses it (the shaders clamp to the
+/// slot).
+pub const LENS_ATLAS_GUTTER: u32 = 16;
+
+/// One lens footprint a renderer copies: from the target at `from` to the
+/// atlas at `to`, `size` device pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LensCopy {
+    /// Where the footprint starts in the target.
+    pub from: (u32, u32),
+    /// Where its slot starts in the atlas.
+    pub to: (u32, u32),
+    /// The footprint, clipped to the target.
+    pub size: (u32, u32),
+}
+
+/// Where a lens batch's footprints go in the atlas, and the atlas size they
+/// need. Every backend packs the same way.
+#[derive(Debug, PartialEq, Eq)]
+pub struct LensPacking {
+    /// One per lens, in the batch's order.
+    pub copies: Vec<LensCopy>,
+    /// The atlas width the slots need.
+    pub width: u32,
+    /// The atlas height the slots need.
+    pub height: u32,
+}
+
+fn align_up(value: u32) -> u32 {
+    value
+        .div_ceil(LENS_ATLAS_ALIGN)
+        .saturating_mul(LENS_ATLAS_ALIGN)
+}
+
+impl LensPacking {
+    /// Shelves the footprints of `lenses`, clipped to a `target` of that
+    /// size, into an atlas; `None` when they don't fit in `max_side`.
+    pub fn pack(lenses: &[BackdropLens], target: (u32, u32), max_side: u32) -> Option<Self> {
+        let clipped: Vec<((u32, u32), (u32, u32))> = lenses
+            .iter()
+            .map(|lens| {
+                let bounds = lens.bounds;
+                let clamp_x = |v: f32| v.clamp(0.0, target.0 as f32);
+                let clamp_y = |v: f32| v.clamp(0.0, target.1 as f32);
+                let x0 = clamp_x(bounds.origin.x.0.floor());
+                let y0 = clamp_y(bounds.origin.y.0.floor());
+                let x1 = clamp_x((bounds.origin.x.0 + bounds.size.width.0).ceil());
+                let y1 = clamp_y((bounds.origin.y.0 + bounds.size.height.0).ceil());
+                let size = ((x1 - x0).max(0.0) as u32, (y1 - y0).max(0.0) as u32);
+                ((x0 as u32, y0 as u32), size)
+            })
+            .collect();
+        let widest = clipped
+            .iter()
+            .map(|(_, (w, _))| align_up(*w))
+            .max()
+            .unwrap_or(0);
+        let one_row: u32 = clipped
+            .iter()
+            .map(|(_, (w, _))| align_up(*w).saturating_add(LENS_ATLAS_GUTTER))
+            .fold(0, u32::saturating_add);
+        let width = one_row
+            .min(align_up(target.0).saturating_add(LENS_ATLAS_GUTTER))
+            .max(widest)
+            .max(LENS_ATLAS_ALIGN);
+        if width > max_side {
+            return None;
+        }
+        let (mut x, mut y, mut row) = (0u32, 0u32, 0u32);
+        let mut copies = Vec::with_capacity(clipped.len());
+        for (from, size) in clipped {
+            let slot_w = align_up(size.0);
+            if x > 0 && x.saturating_add(slot_w) > width {
+                x = 0;
+                y = y.saturating_add(row).saturating_add(LENS_ATLAS_GUTTER);
+                row = 0;
+            }
+            copies.push(LensCopy {
+                from,
+                to: (x, y),
+                size,
+            });
+            x = x.saturating_add(slot_w).saturating_add(LENS_ATLAS_GUTTER);
+            row = row.max(align_up(size.1));
+        }
+        let height = y.saturating_add(row).max(LENS_ATLAS_ALIGN);
+        (height <= max_side).then_some(Self {
+            copies,
+            width,
+            height,
+        })
+    }
+}
+
 impl LensStyle {
     /// Where a lens whose body fills `body` draws: the body and the room
     /// its shadow and rim light take around it.

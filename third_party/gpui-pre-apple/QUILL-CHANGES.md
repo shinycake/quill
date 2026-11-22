@@ -246,3 +246,5 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
   shadow and border; and `lens_downsample_vertex`/`lens_downsample_fragment`.
 - `build.rs` and `vendor/gpui/src/scene.rs`: the shader header exports
   `BackdropLens` and the lens slot and index types.
+- Stage 3: `src/metal_renderer/lens.rs` packs with gpui-pre's shared
+  `LensPacking::pack` (and `LENS_ATLAS_LEVELS`) instead of its own copy.
