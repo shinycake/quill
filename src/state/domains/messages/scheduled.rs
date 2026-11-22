@@ -1,6 +1,6 @@
 //! The scheduled sends of the chats asked for, and the `getChatScheduledMessages`
 //! each chat waits for.
-use crate::ids::{ChatId, RequestId};
+use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::PendingRequest;
 use crate::telegram::envelope::ParsedMessage;
 use std::collections::HashMap;
@@ -45,5 +45,32 @@ impl ScheduledMessages {
         {
             self.asks.remove(&chat);
         }
+    }
+
+    /// A scheduled send TDLib told of (a new one, its send answer, an
+    /// edit): its row, in place of the one with its id in its chat.
+    pub fn upsert(&mut self, message: ParsedMessage) {
+        match self
+            .rows
+            .iter_mut()
+            .find(|m| m.chat_id == message.chat_id && m.id == message.id)
+        {
+            Some(slot) => *slot = message,
+            None => self.rows.push(message),
+        }
+    }
+
+    /// The send of the scheduled row `old` ended (`updateMessageSendSucceeded`
+    /// or `updateMessageSendFailed`): `message` takes its place.
+    pub fn replace_id(&mut self, old: MessageId, message: ParsedMessage) {
+        let chat = message.chat_id;
+        self.rows.retain(|m| !(m.chat_id == chat && m.id == old));
+        self.upsert(message);
+    }
+
+    /// `ids` of `chat` were deleted (sent at their time, or deleted).
+    pub fn forget(&mut self, chat: ChatId, ids: &[MessageId]) {
+        self.rows
+            .retain(|m| m.chat_id != chat || !ids.contains(&m.id));
     }
 }

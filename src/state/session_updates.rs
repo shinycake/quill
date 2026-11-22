@@ -211,6 +211,13 @@ impl Session {
 
     pub(crate) fn upsert_message(&mut self, message: ParsedMessage, pending: bool) {
         self.remember_files(&message.files);
+        // A scheduled send is not in the chat yet: it lives in the
+        // scheduled list until TDLib sends it at its time (tdesktop keeps
+        // it out of the history too).
+        if message.scheduling_state.is_some() {
+            self.messages.scheduled_messages.upsert(message);
+            return;
+        }
         self.note_message_effect(&message, pending);
         let chat_id = message.chat_id;
         // Slice bots-games: remember games seen in a bot's chat so the bot

@@ -468,6 +468,11 @@ impl Session {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_new_message(&mut self, message: ParsedMessage) {
+        // A scheduled send: no notification, no history row, only its list.
+        if message.scheduling_state.is_some() {
+            self.upsert_message(message, false);
+            return;
+        }
         self.note_conference_invite(&message, crate::local_time::now_unix());
         if !message.is_outgoing {
             self.messages

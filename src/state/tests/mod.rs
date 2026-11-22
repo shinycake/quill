@@ -64,6 +64,7 @@ mod redraw;
 mod requests;
 mod requests_download_index;
 mod rollback_shown;
+mod scheduled_sends;
 mod screen_outcomes;
 mod search;
 mod search_upgrades;
