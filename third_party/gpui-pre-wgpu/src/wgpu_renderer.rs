@@ -1,7 +1,8 @@
 // Modified for gpui-pre (snapshot of zed@d2a4fb6): adapt device queues and sRGB detection to wgpu 30.0.1.
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back; NV12 video
-// surfaces (`yuv_surfaces`). See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
+// surfaces (`yuv_surfaces`); backdrop glass draws as its fallback quads.
+// See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
 use crate::device_recovery::{
     install_once_built, Adapters, Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
 };
@@ -11,8 +12,8 @@ use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
 use collections::FxHashMap;
 use gpui::{
-    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, Path, Point, PrimitiveBatch,
-    ScaledPixels, Scene, Size, get_gamma_correction_ratios,
+    AtlasTextureId, BackdropLens, Background, Bounds, DevicePixels, GpuSpecs, Path, Point,
+    PrimitiveBatch, ScaledPixels, Scene, Size, get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -139,6 +140,9 @@ struct InstanceBindings {
     monochrome_sprites: InstanceBinding,
     subpixel_sprites: InstanceBinding,
     polychrome_sprites: InstanceBinding,
+    /// QUILL: each lens's fallback quad; this renderer draws backdrop
+    /// glass flat until it gets the glass shader.
+    lens_fallbacks: InstanceBinding,
 }
 
 struct WgpuBindGroupLayouts {
@@ -1786,6 +1790,12 @@ impl WgpuRendererCore {
                             &mut pass,
                         )?;
                     }
+                    PrimitiveBatch::Lenses(range) => self.draw_instances(
+                        &instance_bindings.lens_fallbacks,
+                        &self.resources().pipelines.quads,
+                        instance_range(range),
+                        &mut pass,
+                    ),
                     PrimitiveBatch::Surfaces(range) => {
                         let resources = self.resources();
                         resources.yuv_surfaces.draw(
@@ -1842,6 +1852,15 @@ impl WgpuRendererCore {
                 "polychrome_sprites_bind_group",
                 instance_offset,
                 &scene.polychrome_sprites,
+            )?,
+            lens_fallbacks: self.write_instance_binding(
+                "lens_fallbacks_bind_group",
+                instance_offset,
+                &scene
+                    .lenses
+                    .iter()
+                    .map(BackdropLens::fallback_quad)
+                    .collect::<Vec<_>>(),
             )?,
         })
     }

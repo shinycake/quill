@@ -2,8 +2,8 @@
 // drawing returns an error instead of panicking when device-loss recovery
 // failed, and every recovery attempt keeps DirectComposition; HDR stills and the scRGB
 // swap chain (`hdr_surfaces`); NV12 video surfaces (`yuv_surfaces`); shaders shared
-// by every window on a device (`shared_shaders`). See
-// third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// by every window on a device (`shared_shaders`); backdrop glass draws as its
+// fallback quads. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     slice,
     sync::{Arc, OnceLock},
@@ -431,6 +431,9 @@ impl DirectXRenderer {
                     self.draw_polychrome_sprites(texture_id, range.start, range.len())
                 }
                 PrimitiveBatch::Surfaces(range) => self.draw_surfaces(&scene.surfaces[range]),
+                PrimitiveBatch::Lenses(range) => {
+                    self.draw_quads(scene.quads.len() + range.start, range.len())
+                }
             }
             .with_context(|| {
                 format!(
@@ -612,11 +615,25 @@ impl DirectXRenderer {
             )?;
         }
 
-        if !scene.quads.is_empty() {
+        // QUILL: backdrop glass draws as its fallback quads here, uploaded
+        // after the scene's own (`PrimitiveBatch::Lenses` draws them at
+        // `scene.quads.len()` on).
+        if scene.lenses.is_empty() {
+            if !scene.quads.is_empty() {
+                self.pipelines.quad_pipeline.update_buffer(
+                    &devices.device,
+                    &devices.device_context,
+                    &scene.quads,
+                )?;
+            }
+        } else {
+            let mut quads = Vec::with_capacity(scene.quads.len() + scene.lenses.len());
+            quads.extend_from_slice(&scene.quads);
+            quads.extend(scene.lenses.iter().map(BackdropLens::fallback_quad));
             self.pipelines.quad_pipeline.update_buffer(
                 &devices.device,
                 &devices.device_context,
-                &scene.quads,
+                &quads,
             )?;
         }
 

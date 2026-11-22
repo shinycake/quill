@@ -196,3 +196,11 @@ Changed by the Quill project in 2026 (`docs/decisions/rtl-sweep.md`):
 `src/cosmic_text_system.rs` hands a line's glyphs over left to right on screen
 (a stable sort by x). cosmic-text lists a right-to-left line from its right end,
 which every `LineLayout` consumer read backwards.
+
+## Backdrop glass (stage 1)
+
+Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
+`src/wgpu_renderer.rs` draws `PrimitiveBatch::Lenses` as each lens's fallback
+quad (`BackdropLens::fallback_quad`, a rounded quad of the glass's colour)
+through the quad pipeline, from a `lens_fallbacks` instance binding. Real
+glass on wgpu is a later stage.

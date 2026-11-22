@@ -579,3 +579,11 @@ a glyph finds its index, a right-to-left line runs backwards in typing order,
 and a one-direction line is as wide as DirectWrite's own layout of it. A
 cluster that lies past a run's glyphs logs a warning before the rest of the
 run is dropped.
+
+## Backdrop glass (stage 1)
+
+Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
+`src/directx_renderer.rs` draws `PrimitiveBatch::Lenses` as each lens's
+fallback quad (`BackdropLens::fallback_quad`): the quads are uploaded after
+the scene's own quads and drawn by the quad pipeline. Real glass on DirectX
+is a later stage.
