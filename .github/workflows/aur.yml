@@ -28,6 +28,9 @@ permissions:
 jobs:
   aur:
     if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
+    # Pushing uses AUR_SSH_KEY, which lives in the `publish` environment (main
+    # and v* tags only); test runs get no environment and push nothing.
+    environment: ${{ (github.event_name == 'release' || inputs.push) && 'publish' || '' }}
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     timeout-minutes: 30

@@ -1,0 +1,21 @@
+# Changes here need the owner's review before they merge to main
+# (docs/decisions/release-secrets.md). These files decide what runs with the
+# release signing, notarization and package-publishing secrets.
+
+/.github/                          @shinycake
+
+# Run by the release and packaging workflows.
+/scripts/build-*                   @shinycake
+/scripts/check-bundle-*            @shinycake
+/scripts/check-ffmpeg-tools.sh     @shinycake
+/scripts/ensure-metal-toolchain.sh @shinycake
+/scripts/linux-package.sh          @shinycake
+/scripts/macos-*                   @shinycake
+/scripts/release-*                 @shinycake
+/scripts/site-flatpak-repo.sh      @shinycake
+/scripts/site-release-data.py      @shinycake
+/scripts/test_release_assemble.py  @shinycake
+/scripts/windows-common.ps1        @shinycake
+/scripts/windows-package.ps1       @shinycake
+/packaging/                        @shinycake
+/release-notes/                    @shinycake

@@ -24,6 +24,9 @@ permissions:
 jobs:
   chocolatey:
     if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
+    # Pushing uses CHOCO_API_KEY, which lives in the `publish` environment (main
+    # and v* tags only); test runs get no environment and push nothing.
+    environment: ${{ (github.event_name == 'release' || inputs.push) && 'publish' || '' }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:

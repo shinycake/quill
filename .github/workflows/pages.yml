@@ -26,6 +26,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # FLATPAK_GPG_KEY lives in the `publish` environment (main and v* tags only).
+    environment: publish
     steps:
       - uses: actions/checkout@v7
       - name: Release data

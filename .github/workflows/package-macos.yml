@@ -26,6 +26,8 @@ on:
         required: false
       TELEGRAM_API_HASH:
         required: false
+      # Not passed by callers: a release build reads these from the `release`
+      # environment, which overrides caller secrets.
       MACOS_SIGNING_P12:
         description: 'Base64 PKCS#12 holding the Apple Development or Developer ID Application identity'
         required: false
@@ -60,6 +62,11 @@ jobs:
   macos-package:
     name: macos-package
     needs: calls
+    # Release builds (a version is set) run in the protected `release`
+    # environment, which holds the MACOS_* signing and notarization secrets and
+    # waits for the owner's approval. CI builds get no environment and stay
+    # ad-hoc signed (docs/decisions/release-secrets.md).
+    environment: ${{ inputs.version != '' && 'release' || '' }}
     # arm64. The deployment target above, not the runner, sets the oldest
     # macOS Quill runs on; check-bundle-macho.sh fails on any library that
     # needs a newer one.
