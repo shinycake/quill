@@ -2381,7 +2381,15 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.delete_selections(
             false,
             EditIntent::Backspace,
-            |s, offset| s.previous_boundary(offset)..offset,
+            // QUILL: after a Hebrew or Arabic point (niqqud, harakat) Backspace
+            // takes that point alone, so a writer fixing a vowel keeps the
+            // letter; anything else goes a grapheme at a time.
+            |s, offset| match s.text.chars_at(offset).reversed().next() {
+                Some(c) if crate::text_boundary::is_detachable_point(c) => {
+                    offset.saturating_sub(c.len_utf8())..offset
+                }
+                _ => s.previous_boundary(offset)..offset,
+            },
             window,
             cx,
         );

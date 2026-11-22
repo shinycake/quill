@@ -59,6 +59,8 @@ pub const CASES: &[&str] = &[
     "אב\t\tגד",
     "שלום\u{2028}abc",
     "abc שלום\u{2028}עולם",
+    "\u{200F}1.",
+    "\u{200F}12)",
 ];
 
 /// Two x positions closer than this are the same place.

@@ -162,6 +162,23 @@ impl<'a> Paragraph<'a> {
             let (run, level) = &logical[index];
             if level.is_rtl() {
                 out.extend(split_rtl_run(text, run.clone()));
+            } else if text
+                .get(run.clone())
+                .is_some_and(|run| run.chars().any(is_rtl_letter))
+            {
+                // QUILL: Hebrew or Arabic letters at an even level are under a
+                // left-to-right override (LRO). Shaped together the platform
+                // would read them right to left again, so each grapheme is its
+                // own piece, in typing order.
+                out.extend(
+                    text.get(run.clone())
+                        .unwrap_or_default()
+                        .grapheme_indices(true)
+                        .map(|(i, g)| VisualRun {
+                            range: run.start + i..run.start + i + g.len(),
+                            rtl: false,
+                        }),
+                );
             } else {
                 out.push(VisualRun {
                     range: run.clone(),
@@ -812,6 +829,25 @@ mod tests {
                 range: 0..8,
                 rtl: true
             }]
+        );
+    }
+
+    #[test]
+    fn a_left_to_right_override_keeps_hebrew_letters_in_typing_order() {
+        // ש ל ו ם ␠ LRO א ב ג PDF ␠ ע ו ל ם
+        let text = "שלום \u{202D}אבג\u{202C} עולם";
+        let p = Paragraph::analyze(text).unwrap();
+        let runs = p.visual_runs(0..text.len());
+        let alef = text.find('א').unwrap();
+        let pieces: Vec<_> = runs
+            .iter()
+            .filter(|run| !run.rtl && run.range.start >= alef && run.range.end <= alef + 6)
+            .map(|run| run.range.clone())
+            .collect();
+        // One piece per letter, left to right in typing order: א then ב then ג.
+        assert_eq!(
+            pieces,
+            vec![alef..alef + 2, alef + 2..alef + 4, alef + 4..alef + 6]
         );
     }
 

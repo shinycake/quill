@@ -123,7 +123,10 @@ impl QuillApp {
                 .overflow_y_scroll();
             for message in call.messages.iter().rev().take(50).rev() {
                 let sender = self.group_call_participant_name(&message.sender_id);
-                list = list.child(div().text_xs().child(format!("{sender}: {}", message.text)));
+                // The sender is isolated, so the message's own first letter sets
+                // the line's direction and a Hebrew message reads right to left.
+                let line = format!("{}: {}", quill::text::isolate(&sender), message.text);
+                list = list.child(super::bidi_line::aligned_block(line).text_xs());
             }
             section = section.child(list);
         }

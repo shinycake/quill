@@ -92,6 +92,14 @@ pub(in crate::ui) fn rich_block_element(
             )
         }
         RichBlock::List { ordered, items } => {
+            // A list reads in the direction of its first item with text, so
+            // a Hebrew list carries its bullets and numbers on the right
+            // (".1" as a right-to-left reader writes "1.").
+            let rtl = items
+                .iter()
+                .map(|item| item.text.as_str())
+                .find(|text| !text.trim().is_empty())
+                .is_some_and(quill::text::is_rtl_text);
             let mut col = div()
                 .id(format!("rich-list-{row_id}-{index}"))
                 .flex()
@@ -110,19 +118,30 @@ pub(in crate::ui) fn rich_block_element(
                         .id(format!("rich-list-item-{row_id}-{index}-{item_index}"))
                         .flex()
                         .gap_2()
-                        .child(div().text_size(font).child(marker.to_string()))
-                        .child(div().flex_1().min_w_0().child(rich_part_line(
-                            RichPart {
-                                block: index,
-                                part: item_index,
-                            },
-                            &item.text,
-                            &item.entities,
-                            msg_key,
-                            revealed,
-                            font,
-                            cx,
-                        ))),
+                        .when(rtl, |this| this.flex_row_reverse())
+                        .child(div().text_size(font).child(if rtl {
+                            format!("\u{200F}{marker}")
+                        } else {
+                            marker.to_string()
+                        }))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .when(rtl, |this| this.flex().justify_end())
+                                .child(rich_part_line(
+                                    RichPart {
+                                        block: index,
+                                        part: item_index,
+                                    },
+                                    &item.text,
+                                    &item.entities,
+                                    msg_key,
+                                    revealed,
+                                    font,
+                                    cx,
+                                )),
+                        ),
                 );
             }
             Some(col.into_any_element())

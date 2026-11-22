@@ -98,10 +98,35 @@ CI runs the suite and gpui-base's whole test suite on Linux
   notification body keep tdesktop's single "from: text" string, whose first
   letter picks the line's direction.
 
-## Still open
+## Second round (owner, 2026-11-22)
 
-The full register (backends B1–B18, composer C1–C14, display D1–D12) is
-tracked in the sweep's findings register. Not done here: C10, C13 and C14 in
-the composer, and D5–D12 on display surfaces. Owner decisions
-pending: arrow keys stay visual (tdesktop moves logically); chat-list
-previews follow tdesktop's left alignment.
+The owner's rule for Hebrew and right-to-left text: do what reads correctly,
+not what Telegram Desktop does. So the two pending decisions are settled
+that way: arrow keys stay visual, and a Hebrew chat-list preview stays
+right-aligned in reading order (tdesktop forces it left to right). This round
+closes the rest of the register:
+
+- D7: "Forwarded from", the name and "via @bot" are separate boxes (the name
+  is a button); the row takes the direction of the whole sentence with the
+  name isolated, so a Hebrew label puts them right to left. "via {bot}" is
+  `lng_inline_bot_via`, no longer hard-coded English.
+- D8: a rich list reads in the direction of its first item with text: a
+  Hebrew list has its bullets and numbers on the right, written ".1" as a
+  right-to-left reader sees "1.", and its items rest against them.
+- D9: a caption with right-to-left text under a wider photo spans the bubble,
+  so an English paragraph starts at the left and a Hebrew one at the right.
+- D10: the bot stream reveal sweeps each row from its own reading edge (it
+  used the first row's direction and the widest row's width for all rows).
+- D11 and D2 leftovers: names are isolated in the window title, the group
+  call chat (whose lines now align by the message's own direction) and the
+  archive row, whose "and N more chats" is `lng_archived_last`; the reply
+  header lays its name out by direction.
+- D12: search highlights ignore niqqud and harakat on both sides ("שלום"
+  finds "שָׁלוֹם") and are found in the filtered text that is drawn.
+- C10: Backspace after a Hebrew or Arabic point removes only that point.
+- C13: Hebrew letters under a left-to-right override (LRO) keep typing order
+  in the composer: each is shaped on its own, so the platform cannot reverse
+  them again.
+- C14 stays as is: a quote or code block's lines are separate paragraphs, and
+  each takes its own direction, as UAX #9 says.
+- D5 is covered by the isolated sender prefix (round one).

@@ -844,6 +844,7 @@
 "lng_sr_message_not_seen" = "Not seen";
 "lng_sr_message_reply_to" = "In reply to {name}: {text}";
 "lng_forwarded" = "Forwarded from {user}";
+"lng_inline_bot_via" = "via {inline_bot}";
 "lng_sr_chat_pinned" = "Pinned";
 "lng_sr_chat_failed" = "Failed";
 "lng_sr_chat_sending" = "Sending";

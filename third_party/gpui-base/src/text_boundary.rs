@@ -61,6 +61,26 @@ fn clip_offset_left(text: &str, offset: usize) -> usize {
     offset
 }
 
+/// QUILL: a Hebrew or Arabic point (niqqud, cantillation, harakat) that a
+/// writer deletes on its own: Backspace after it removes just the point,
+/// as Hebrew and Arabic keyboards and editors do, not the letter it sits on.
+pub(crate) fn is_detachable_point(c: char) -> bool {
+    matches!(c,
+        '\u{0591}'..='\u{05BD}'
+        | '\u{05BF}'
+        | '\u{05C1}'..='\u{05C2}'
+        | '\u{05C4}'..='\u{05C5}'
+        | '\u{05C7}'
+        | '\u{0610}'..='\u{061A}'
+        | '\u{064B}'..='\u{065F}'
+        | '\u{0670}'
+        | '\u{06D6}'..='\u{06DC}'
+        | '\u{06DF}'..='\u{06E4}'
+        | '\u{06E7}'..='\u{06E8}'
+        | '\u{06EA}'..='\u{06ED}'
+        | '\u{FB1E}')
+}
+
 #[cfg(test)]
 mod tests {
     use super::word_range_at;

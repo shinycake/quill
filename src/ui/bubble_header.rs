@@ -156,7 +156,7 @@ pub(super) fn reply_header_strip(
                                     .text_sm()
                                     .font_semibold()
                                     .text_color(color)
-                                    .child(name),
+                                    .child(super::bidi_line::name_line(name)),
                             )
                             .when(header.is_quote, |this| {
                                 this.child(
@@ -264,6 +264,12 @@ pub(super) fn forward_header_line(
                     ForwardLink::Hidden | ForwardLink::None => {}
                 }))
         });
+    let label = known.then(|| tr(keys::Q_MISC_FORWARDED_FROM_2).to_string());
+    let via = via_bot.map(|bot| tr_with(keys::INLINE_BOT_VIA, &[("inline_bot", bot.as_str())]));
+    // The label, the name and "via @bot" are separate boxes (the name is a
+    // button), so the row itself takes the line's reading direction: the
+    // label's language decides, as the name is isolated (UAX #9 P2).
+    let rtl = forward_line_is_rtl(label.as_deref(), &name, via.as_deref());
     div()
         .id(("forward-from", row_id.0 as u64))
         .role(Role::Group)
@@ -278,18 +284,29 @@ pub(super) fn forward_header_line(
         .items_baseline()
         .gap_x_1()
         .text_sm()
-        .when(known, |this| {
-            this.child(
-                div()
-                    .text_color(muted)
-                    .child(tr(keys::Q_MISC_FORWARDED_FROM_2)),
-            )
+        .when(rtl, |this| this.flex_row_reverse())
+        .when_some(label, |this, label| {
+            this.child(div().text_color(muted).child(label))
         })
         .child(name_el)
-        .when_some(via_bot, |this, bot| {
-            this.child(div().text_color(muted).child(format!("via {bot}")))
+        .when_some(via, |this, via| {
+            this.child(div().text_color(muted).child(via))
         })
         .into_any_element()
+}
+
+/// Whether the forward line reads right to left: the direction of the whole
+/// sentence with the name isolated, so a Hebrew name in an English line keeps
+/// the line left to right and an English name in a Hebrew one keeps it right
+/// to left.
+fn forward_line_is_rtl(label: Option<&str>, name: &str, via: Option<&str>) -> bool {
+    // With no label the name is the whole sentence ("Forwarded message").
+    let name = match label {
+        Some(_) => format!("\u{2068}{name}\u{2069}"),
+        None => name.to_string(),
+    };
+    let line = [label.unwrap_or_default(), &name, via.unwrap_or_default()].join(" ");
+    quill::text::is_rtl_text(&line)
 }
 
 /// "via @bot" on a message that is not a forward.
@@ -303,7 +320,10 @@ pub(super) fn via_bot_line(row_id: MessageId, bot: String, on_fill: bool) -> Any
         } else {
             text_muted().into()
         })
-        .child(format!("via {bot}"))
+        .child(tr_with(
+            keys::INLINE_BOT_VIA,
+            &[("inline_bot", bot.as_str())],
+        ))
         .into_any_element()
 }
 
@@ -340,5 +360,22 @@ impl QuillApp {
                 .and_then(|file| file.usable_path())
                 .and_then(|path| quill::local_path::sandboxed_display_path(path, media_roots))
         })
+    }
+}
+
+#[cfg(test)]
+mod forward_line_tests {
+    use super::forward_line_is_rtl;
+
+    #[test]
+    fn the_label_decides_and_the_name_does_not() {
+        assert!(!forward_line_is_rtl(Some("Forwarded from"), "עידן", None));
+        assert!(forward_line_is_rtl(
+            Some("הועבר מאת"),
+            "Idan",
+            Some("via @bot")
+        ));
+        assert!(forward_line_is_rtl(None, "הודעה שהועברה", None));
+        assert!(!forward_line_is_rtl(None, "Forwarded message", None));
     }
 }

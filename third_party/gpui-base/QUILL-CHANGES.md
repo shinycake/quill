@@ -248,3 +248,10 @@ the arrow keys step by the paragraph's own direction (read from its text), so
 Right in a Hebrew paragraph moves toward its start as it does once drawn;
 `test_rtl_arrow_keys_move_visually` checks it with no layout. The Quill-modified
 files are formatted with `cargo fmt`.
+
+Second RTL round (Quill project, 2026-11-22): `input/base/state.rs` Backspace
+after a Hebrew or Arabic point removes only that point
+(`text_boundary::is_detachable_point`); `display_map/bidi.rs` shapes Hebrew or
+Arabic letters at an even level (a left-to-right override) one grapheme at a
+time, so the platform cannot reorder them; `input/bidi_paragraph.rs` adds
+`BidiParagraph::row_shapes` (each row's width and direction).

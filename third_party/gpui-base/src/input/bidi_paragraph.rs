@@ -221,6 +221,12 @@ impl BidiParagraph {
         self.rows.first().is_some_and(|row| row.rtl)
     }
 
+    /// QUILL: each row's width and whether its hard line reads right to
+    /// left, top to bottom (a reveal sweeps each row from its own start edge).
+    pub fn row_shapes(&self) -> impl Iterator<Item = (Pixels, bool)> + '_ {
+        self.rows.iter().map(|row| (row.line.width, row.rtl))
+    }
+
     /// The paragraph's widest row.
     pub fn width(&self) -> Pixels {
         self.width

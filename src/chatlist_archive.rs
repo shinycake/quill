@@ -117,26 +117,40 @@ impl ArchiveRowSummary {
 
     /// The plain preview text ("A, B, C and 2 more chats").
     pub fn text(&self) -> String {
-        let joined = self
-            .names
-            .iter()
-            .map(|name| name.title.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        match self.more {
-            0 => joined,
-            1 => format!("{joined} and 1 more chat"),
-            more => format!("{joined} and {more} more chats"),
-        }
+        self.text_and_unread().0
     }
 
-    /// The tail after the names ("and 2 more chats"), if any.
-    pub fn more_text(&self) -> Option<String> {
-        match self.more {
-            0 => None,
-            1 => Some("and 1 more chat".into()),
-            more => Some(format!("and {more} more chats")),
+    /// [`Self::text`] and the byte ranges of the unread chats' names in it.
+    /// Each name is isolated (a Hebrew title cannot carry the commas or the
+    /// "and 2 more chats" over to its side), and the tail is the language
+    /// pack's `lng_archived_last`.
+    pub fn text_and_unread(&self) -> (String, Vec<std::ops::Range<usize>>) {
+        let mut joined = String::new();
+        let mut unread = Vec::new();
+        for (index, name) in self.names.iter().enumerate() {
+            if index > 0 {
+                joined.push_str(", ");
+            }
+            let start = joined.len();
+            joined.push_str(&crate::text::isolate(&name.title));
+            if name.unread {
+                unread.push(start..joined.len());
+            }
         }
+        if self.more == 0 {
+            return (joined, unread);
+        }
+        let text = crate::lang::trn_with(
+            crate::lang::keys::ARCHIVED_LAST,
+            self.more,
+            &[("chats", joined.as_str())],
+        );
+        let shift = text.find(joined.as_str()).unwrap_or_default();
+        let unread = unread
+            .into_iter()
+            .map(|range| range.start + shift..range.end + shift)
+            .collect();
+        (text, unread)
     }
 
     /// Badge text of the muted unread counter; `None` when nothing is
@@ -230,6 +244,16 @@ mod tests {
         assert!(!summary.names[1].unread);
         assert_eq!(summary.unread_chats, 1);
         assert_eq!(summary.badge().as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn hebrew_titles_are_isolated_and_unread_ranges_follow_them() {
+        let summary =
+            ArchiveRowSummary::build(&[chat("Old", 10, false), chat("שלום", 30, true)]).unwrap();
+        let (text, unread) = summary.text_and_unread();
+        assert_eq!(text, "\u{2068}שלום\u{2069}, Old");
+        assert_eq!(unread.len(), 1);
+        assert_eq!(text.get(unread[0].clone()), Some("\u{2068}שלום\u{2069}"));
     }
 
     #[test]
