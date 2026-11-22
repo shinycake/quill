@@ -2,8 +2,8 @@
 // drawing returns an error instead of panicking when device-loss recovery
 // failed, and every recovery attempt keeps DirectComposition; HDR stills and the scRGB
 // swap chain (`hdr_surfaces`); NV12 video surfaces (`yuv_surfaces`); shaders shared
-// by every window on a device (`shared_shaders`); backdrop glass draws as its
-// fallback quads. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// by every window on a device (`shared_shaders`); backdrop glass
+// (`backdrop_glass`). See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     slice,
     sync::{Arc, OnceLock},
@@ -26,6 +26,7 @@ use windows::{
 };
 
 use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
+use backdrop_glass::{Glass, LensState};
 use hdr_surfaces::{HdrSurfaces, OutputMode};
 use yuv_surfaces::YuvSurfaces;
 use crate::*;
@@ -37,6 +38,8 @@ const RENDER_TARGET_FORMAT: DXGI_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;
 const PATH_MULTISAMPLE_COUNT: u32 = 4;
 const MAX_INSTANCE_BUFFER_SIZE: usize = 256 * 1024 * 1024;
 
+#[path = "backdrop_glass.rs"]
+mod backdrop_glass;
 #[path = "hdr_surfaces.rs"]
 mod hdr_surfaces;
 #[path = "yuv_surfaces.rs"]
@@ -117,6 +120,8 @@ struct DirectXRenderPipelines {
     /// Quill: `None` when the NV12 pipeline couldn't be made (this window
     /// then refuses NV12 frames).
     yuv_surfaces: Option<YuvSurfaces>,
+    /// Quill: backdrop glass, built on the first frame with glass.
+    lenses: LensState,
 }
 
 struct DirectXGlobalElements {
@@ -431,8 +436,19 @@ impl DirectXRenderer {
                     self.draw_polychrome_sprites(texture_id, range.start, range.len())
                 }
                 PrimitiveBatch::Surfaces(range) => self.draw_surfaces(&scene.surfaces[range]),
+                // Quill: glass copies and blurs what is under it
+                // (`backdrop_glass`); else the batch draws as its fallback
+                // quads, uploaded after the scene's own.
                 PrimitiveBatch::Lenses(range) => {
-                    self.draw_quads(scene.quads.len() + range.start, range.len())
+                    let lenses = scene.lenses.get(range.clone()).unwrap_or_default();
+                    let glass = self.draw_lenses(lenses).unwrap_or_else(|error| {
+                        log::error!("glass draws flat: {error:#}");
+                        Glass::Flat
+                    });
+                    match glass {
+                        Glass::Drawn => Ok(()),
+                        Glass::Flat => self.draw_quads(scene.quads.len() + range.start, range.len()),
+                    }
                 }
             }
             .with_context(|| {
@@ -456,6 +472,7 @@ impl DirectXRenderer {
         if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
             yuv.end_frame();
         }
+        self.pipelines.lenses.release_idle_atlas(scene.lenses.len());
         if scene.surfaces.is_empty() {
             self.pipelines.hdr_surfaces.release();
             if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
@@ -615,8 +632,8 @@ impl DirectXRenderer {
             )?;
         }
 
-        // QUILL: backdrop glass draws as its fallback quads here, uploaded
-        // after the scene's own (`PrimitiveBatch::Lenses` draws them at
+        // QUILL: backdrop glass's fallback quads, uploaded after the scene's
+        // own: a lens batch that can't draw as glass draws them (at
         // `scene.quads.len()` on).
         if scene.lenses.is_empty() {
             if !scene.quads.is_empty() {
@@ -1125,6 +1142,7 @@ impl DirectXRenderPipelines {
             poly_sprites,
             hdr_surfaces,
             yuv_surfaces,
+            lenses: LensState::default(),
         })
     }
 }
@@ -1882,6 +1900,9 @@ pub(crate) mod shader_resources {
         PolychromeSprite,
         HdrSurface,
         YuvSurface,
+        // Quill: backdrop glass (shaders_lens.hlsl).
+        Lens,
+        LensDownsample,
     }
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -1963,6 +1984,14 @@ pub(crate) mod shader_resources {
                     ShaderTarget::Vertex => YUV_SURFACE_VERTEX_BYTES,
                     ShaderTarget::Fragment => YUV_SURFACE_FRAGMENT_BYTES,
                 },
+                ShaderModule::Lens => match target {
+                    ShaderTarget::Vertex => LENS_VERTEX_BYTES,
+                    ShaderTarget::Fragment => LENS_FRAGMENT_BYTES,
+                },
+                ShaderModule::LensDownsample => match target {
+                    ShaderTarget::Vertex => LENS_DOWNSAMPLE_VERTEX_BYTES,
+                    ShaderTarget::Fragment => LENS_DOWNSAMPLE_FRAGMENT_BYTES,
+                },
             };
             Self { inner: bytes }
         }
@@ -1975,6 +2004,7 @@ pub(crate) mod shader_resources {
                 Direct3D::ID3DInclude, Hlsl::D3D_COMPILE_STANDARD_FILE_INCLUDE,
             };
 
+            let entry_file = entry.file();
             let entry = format!(
                 "{}_{}\0",
                 entry.as_str(),
@@ -1991,7 +2021,7 @@ pub(crate) mod shader_resources {
             let mut compile_blob = None;
             let mut error_blob = None;
             let shader_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("src/shaders.hlsl")
+                .join(entry_file)
                 .canonicalize()?;
 
             let entry_point = PCSTR::from_raw(entry.as_ptr());
@@ -2045,6 +2075,26 @@ pub(crate) mod shader_resources {
                 ShaderModule::PolychromeSprite => "polychrome_sprite",
                 ShaderModule::HdrSurface => "hdr_surface",
                 ShaderModule::YuvSurface => "yuv_surface",
+                ShaderModule::Lens => "lens",
+                ShaderModule::LensDownsample => "lens_downsample",
+            }
+        }
+
+        /// Quill: the file the module's entry points are compiled from.
+        /// The glass has its own, so an error in it can't fail the rest.
+        pub fn file(self) -> &'static str {
+            match self {
+                ShaderModule::Lens | ShaderModule::LensDownsample => "src/shaders_lens.hlsl",
+                ShaderModule::Quad
+                | ShaderModule::Shadow
+                | ShaderModule::Underline
+                | ShaderModule::PathRasterization
+                | ShaderModule::PathSprite
+                | ShaderModule::MonochromeSprite
+                | ShaderModule::SubpixelSprite
+                | ShaderModule::PolychromeSprite
+                | ShaderModule::HdrSurface
+                | ShaderModule::YuvSurface => "src/shaders.hlsl",
             }
         }
     }
@@ -2292,5 +2342,16 @@ mod shared_shader_tests {
                 .map(|shared| (shared.device == recovered, shared.pairs.len()))
         });
         assert_eq!(held, Some((true, 2)), "only the new device's shaders stay");
+    }
+
+    /// Quill: the backdrop glass compiles from its own file
+    /// (shaders_lens.hlsl); a debug build compiles it here, at run time.
+    #[::core::prelude::v1::test]
+    fn the_glass_shaders_build() {
+        let device = warp_device();
+        for module in [ShaderModule::Lens, ShaderModule::LensDownsample] {
+            let (vertex, _) = shared_shaders(&device, module).expect("glass shaders");
+            assert_eq!(owner(&vertex), device);
+        }
     }
 }

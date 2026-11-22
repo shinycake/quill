@@ -1,4 +1,4 @@
-# Backdrop glass: the primitive, Metal (stage 1) and wgpu (stage 2)
+# Backdrop glass: the primitive, Metal (stage 1), wgpu (stage 2) and DirectX (stage 3)
 
 Liquid glass that bends, frosts and lights what the window drew under it,
 drawn by the GPU. The design is quill-tools/gpui-liquid-glass/GPU-PLAN.md;
@@ -24,7 +24,7 @@ bilalgursen/liquid-glass, MIT). No product UI uses the glass yet.
   drawables. When the drawable can't be read, the lens draws as its
   fallback.
 - **wgpu and DirectX** drew the fallback quad, so Linux and Windows built and
-  showed something sensible. Stage 2 gives wgpu the real glass (below).
+  showed something sensible. Stages 2 and 3 give them the real glass (below).
 - **Demo.** `ready-glass` (`src/ui/glass_demo.rs`) lays a clear and a tinted
   button, a tab bar with its selection lens, a frosted card and a magnifier
   over the live showcase conversation. `QUILL_DEMO_GLASS=off` draws the same
@@ -51,6 +51,35 @@ bilalgursen/liquid-glass, MIT). No product UI uses the glass yet.
   footprints too large for the atlas and the WebGL instance transport also
   draw flat.
 
+## What stage 3 adds (DirectX 11: Windows)
+
+- **The same passes again** (`third_party/gpui-pre-windows/src/backdrop_glass.rs`):
+  the lens batch unbinds the back buffer, copies each footprint into a
+  pooled five-level atlas with `CopySubresourceRegion`, fills the levels with
+  four dual-Kawase downsamples (a render target and a shader view per
+  level), binds the back buffer and the frame's viewport again and draws the
+  lenses with `lens_fragment` (`shaders_lens.hlsl`), an HLSL port of the WGSL
+  `fs_lens`.
+- **Readable back buffers.** No swap chain flag is needed: a flip-model back
+  buffer can always be a copy source, and it always has one sample. The
+  renderer checks the sample count anyway and draws flat if it is ever more.
+  The atlas takes the back buffer's format, so it is scRGB half floats while
+  the window shows an HDR still; there the lens reads the backdrop back to
+  the sRGB-encoded colour the optics work in, and writes through `to_output`
+  like every other shader.
+- **Failing safe.** The shaders are built on the first frame with glass. A
+  shader that does not build makes the glass draw flat for the rest of the
+  renderer's life, logged once. The glass shaders compile from their own file
+  (which includes `shaders.hlsl`), so an error in them cannot take the
+  window's other shaders down with them. Footprints too large for an atlas
+  (16384, or 8192 on feature level 10) and a failed draw also draw flat. The
+  state lives in `DirectXRenderPipelines`, so a device loss drops it with the
+  device, and the next frame with glass builds it again.
+- **One packing.** `LensPacking::pack` (gpui-pre, `scene/backdrop_lens.rs`)
+  replaces the copies in the Metal and wgpu renderers; all three backends
+  pack the same way, and its tests run in Quill's
+  `src/ui/backdrop_lens_tests.rs`.
+
 ## Decisions
 
 - `Primitive::Lens` holds a `Box<BackdropLens>`. The lens is about 240
@@ -75,8 +104,13 @@ bilalgursen/liquid-glass, MIT). No product UI uses the glass yet.
   `shaders.wgsl`, whose surfaces use 0 to 3. `lens.rs` asserts at compile
   time the `BackdropLens` offsets WGSL's 8-byte `Bounds` alignment could
   move.
-- `pack` (the atlas shelving) is a copy of the Metal one; DirectX (stage 3)
-  is the moment to lift it into gpui-pre.
+- `pack` (the atlas shelving) was a copy of the Metal one in stage 2; stage
+  3 lifted it into gpui-pre (`LensPacking::pack`).
+- DirectX uploads the lenses, their slots and the downsample slots per batch
+  with `WRITE_DISCARD`, so glass over glass (two batches) gets fresh buffers
+  the way the HDR stills do. The four downsample passes read one upload of
+  all levels' slots, each from its own start (`batch_start_index`).
+- DirectX frees the atlas after the first frame without glass, as wgpu does.
 - The ordering tests live in `src/ui/backdrop_lens_tests.rs`: gpui-pre's own
   unit tests do not build in this repository (missing `util_macros` and
   font assets).
@@ -133,7 +167,6 @@ bilalgursen/liquid-glass, MIT). No product UI uses the glass yet.
 
 ## Not done here (later stages)
 
-- Real glass on DirectX (stage 3).
 - Moving gpui-liquid-glass onto the primitive (stage 4) and the stage 5
   ideas (merging lens groups, skipping the copy when the backdrop did not
   change, label contrast, a sharp magnifier).
