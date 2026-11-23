@@ -9,7 +9,7 @@
 | `MACOS_SIGNING_P12`, `MACOS_SIGNING_P12_PASSWORD`, `MACOS_NOTARY_KEY`, `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER_ID` | `release` environment | `package-macos.yml` when it builds a release (a version is set) |
 | `CHOCO_API_KEY`, `FLATPAK_GPG_KEY`, `AUR_SSH_KEY` (not set yet) | `publish` environment | `chocolatey.yml` and `aur.yml` when they push, `pages.yml` build |
 | `UPDATE_SIGNING_KEY` | `update-signing` environment | `release.yml` assemble job (`scripts/release-sign-updates.sh`) |
-| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | repository | release packaging; these are compiled into every shipped binary, so they are not treated as signing secrets |
+| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | `build-credentials` (main only, no reviewer) and `release` | release packaging (release.yml prepare, the Linux and Windows build jobs, the macOS job). They are compiled into every shipped binary, but a repository-level secret can be read by a workflow pushed to any branch, so no secret is kept at repository level |
 
 All three environments accept only `main` (not tags: a release recreated on
 an old tag would run that old commit's workflows), so a workflow pushed on any

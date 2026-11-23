@@ -71,6 +71,9 @@ jobs:
       credentials: ${{ steps.v.outputs.credentials }}
       publish: ${{ steps.v.outputs.publish }}
       prerelease: ${{ steps.v.outputs.prerelease }}
+    # Only to see whether TELEGRAM_API_ID/HASH are set; the environment
+    # deploys from main only (docs/decisions/release-secrets.md).
+    environment: ${{ github.ref == 'refs/heads/main' && 'build-credentials' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -149,9 +152,8 @@ jobs:
     with:
       version: ${{ needs.prepare.outputs.version }}
       embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
-    secrets:
-      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+    # TELEGRAM_API_ID/HASH live in the `build-credentials` environment.
+    secrets: inherit
 
   windows:
     name: windows
@@ -160,9 +162,8 @@ jobs:
     with:
       version: ${{ needs.prepare.outputs.version }}
       embed_credentials: ${{ needs.prepare.outputs.embed == 'true' }}
-    secrets:
-      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+    # TELEGRAM_API_ID/HASH live in the `build-credentials` environment.
+    secrets: inherit
 
   macos:
     name: macos

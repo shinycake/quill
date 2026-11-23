@@ -49,6 +49,9 @@ jobs:
           - { arch: x86_64, runner: ubuntu-22.04 }
           - { arch: aarch64, runner: ubuntu-22.04-arm }
     runs-on: ${{ matrix.runner }}
+    # The Telegram credentials live in the `build-credentials` environment,
+    # which deploys from main only; the caller passes `secrets: inherit`.
+    environment: ${{ inputs.embed_credentials && github.ref == 'refs/heads/main' && 'build-credentials' || '' }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7

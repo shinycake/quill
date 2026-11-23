@@ -42,6 +42,9 @@ jobs:
   windows-build:
     name: windows-build
     runs-on: windows-latest
+    # The Telegram credentials live in the `build-credentials` environment,
+    # which deploys from main only; the caller passes `secrets: inherit`.
+    environment: ${{ inputs.embed_credentials && github.ref == 'refs/heads/main' && 'build-credentials' || '' }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
@@ -209,6 +212,8 @@ jobs:
   windows-package:
     name: windows-package
     runs-on: windows-latest
+    # For the embedded-credentials check below (see windows-build).
+    environment: ${{ inputs.embed_credentials && github.ref == 'refs/heads/main' && 'build-credentials' || '' }}
     needs: [calls, windows-build, windows-test, windows-native, windows-ffmpeg]
     timeout-minutes: 30
     steps:
