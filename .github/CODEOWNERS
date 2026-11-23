@@ -2,6 +2,10 @@
 # (docs/decisions/release-secrets.md). These files decide what runs with the
 # release signing, notarization and package-publishing secrets.
 
+# For now every change needs the owner (owner's call, 2026-11-23). The
+# entries below stay so this line can be removed later without losing them.
+*                                  @shinycake
+
 /.github/                          @shinycake
 
 # Run by the release and packaging workflows.

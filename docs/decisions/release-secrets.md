@@ -106,3 +106,10 @@ this repository again.
 access (no maintain or triage roles, which only organisations have), and 2FA
 cannot be required of collaborators. Write access cannot change settings,
 secrets, environments or protection rules.
+
+For now `* @shinycake` in CODEOWNERS makes every merge to main wait for the
+owner's review, so a collaborator cannot approve and merge someone else's
+change to the app either. Releases made before signing existed are deleted
+together with their tags once the first signed release is published: those
+releases cannot be made immutable, and a collaborator could otherwise mark one
+"latest" and swap its files for clients that only check digests.
