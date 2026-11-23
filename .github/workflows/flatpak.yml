@@ -68,6 +68,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The image ships its runtimes in a lower overlayfs layer. When Flathub
+      # has a newer build, flatpak-builder updates them, and renaming a
+      # directory from a lower layer fails with "Invalid cross-device link"
+      # (release run 45134483691). A copy lives in the upper layer only.
+      - name: Make the preinstalled runtimes updatable
+        run: |
+          cp -a /var/lib/flatpak /var/lib/flatpak.copy
+          rm -rf /var/lib/flatpak
+          mv /var/lib/flatpak.copy /var/lib/flatpak
+          flatpak list --runtime --columns=ref
+
       - uses: actions/download-artifact@v8
         if: env.ARTIFACT != ''
         with:
