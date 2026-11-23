@@ -410,6 +410,9 @@ pub(crate) struct ChatListUi {
     /// put back on top by the next build of the list. Another view or
     /// leaving the rows (`show_view`, `leave_rows`) drops it.
     pub(super) keep_top: Option<super::chat_list::ListTop>,
+    /// The glass header's height at its last paint: the rows' top padding
+    /// while it floats over them (`chat_list/header_glass.rs`).
+    pub(super) header_inset: super::chat_list::HeaderInset,
 }
 
 /// Which list the sidebar shows (the tab strip under its header).
@@ -444,6 +447,7 @@ impl ChatListUi {
             drop_topic: None,
             keys: Default::default(),
             keep_top: None,
+            header_inset: Default::default(),
         }
     }
 }

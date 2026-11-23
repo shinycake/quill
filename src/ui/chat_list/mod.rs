@@ -828,6 +828,8 @@ mod pin_drag_tests;
 pub(in crate::ui) use drop_on_row::DropOnRow;
 pub(in crate::ui) use drop_topic::DropTopic;
 mod header_fit;
+mod header_glass;
+pub(in crate::ui) use header_glass::HeaderInset;
 mod keep_top;
 pub(in crate::ui) use keep_top::ListTop;
 mod listed;

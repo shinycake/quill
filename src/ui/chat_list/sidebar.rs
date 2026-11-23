@@ -352,7 +352,11 @@ impl QuillApp {
         self.chat_list.begin_row_pass();
         self.chat_list.items = items;
         self.chat_list.folder_tags = folder_tags;
-        list.child(self.chat_list_rows(sizes, focus_visible, window, cx))
+        let rows = self.chat_list_rows(sizes, focus_visible, window, cx);
+        match self.chat_list_bar_glass(cx) {
+            Some(lens) => self.float_chat_list_header(list, rows, lens, cx),
+            None => list.child(rows),
+        }
     }
 
     /// The empty main list: the reason it is empty and what to do.
@@ -433,7 +437,8 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let pull_gap = self.story_pull_gap(cx);
+        let inset = self.chat_list_top_inset(cx);
+        let pull_gap = self.story_pull_gap(inset, cx);
         self.players.userpic_videos.begin_render(
             super::userpic_videos::Surface::ChatList,
             self.slices.current(),
@@ -453,6 +458,8 @@ impl QuillApp {
         // The app-owned handle keeps scroll position across re-renders
         // (scroll restoration).
         .track_scroll(&self.chat_list.scroll)
+        // Under a glass header the rows start below it and scroll under it.
+        .pt(inset)
         .flex_1()
         .min_h_0()
         .w_full();
@@ -472,6 +479,7 @@ impl QuillApp {
         let reordering = self.chat_list.pin.held().is_some();
         div()
             .id("chat-rows")
+            .debug_selector(|| "chat-list-rows".into())
             .role(gpui_kit::Role::Group)
             .a11y_tag(quill::agent::ui_driver::redact::PART_ROWS)
             .relative()
