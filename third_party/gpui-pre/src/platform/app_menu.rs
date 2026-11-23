@@ -10,6 +10,20 @@ pub struct Menu {
 
     /// Whether this menu is disabled
     pub disabled: bool,
+
+    /// What the OS does with this menu, whatever its (translated) name
+    pub role: MenuRole,
+}
+
+/// What the OS does with a menu of the menu bar. The role, not the menu's
+/// name, tells the platform which menu it is, so a translated name works.
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq)]
+pub enum MenuRole {
+    /// An ordinary menu
+    #[default]
+    Plain,
+    /// The Window menu: on macOS, AppKit lists the open windows in it
+    Window,
 }
 
 impl Menu {
@@ -19,7 +33,14 @@ impl Menu {
             name: name.into(),
             items: vec![],
             disabled: false,
+            role: MenuRole::Plain,
         }
+    }
+
+    /// Set what the OS does with this menu
+    pub fn role(mut self, role: MenuRole) -> Self {
+        self.role = role;
+        self
     }
 
     /// Set items to be in this menu
@@ -40,6 +61,7 @@ impl Menu {
             name: self.name.to_string().into(),
             items: self.items.into_iter().map(|item| item.owned()).collect(),
             disabled: self.disabled,
+            role: self.role,
         }
     }
 }
@@ -244,6 +266,9 @@ pub struct OwnedMenu {
 
     /// Whether this menu is disabled
     pub disabled: bool,
+
+    /// What the OS does with this menu, whatever its (translated) name
+    pub role: MenuRole,
 }
 
 /// The different kinds of items that can be in a menu
@@ -412,6 +437,7 @@ mod tests {
             name: "Submenu".into(),
             items: vec![],
             disabled: true,
+            role: super::MenuRole::Plain,
         });
         assert_eq!(
             match &submenu {

@@ -39,6 +39,7 @@ mod geometry;
 mod gestures;
 mod global;
 mod input;
+mod input_rate;
 mod inspector;
 mod interactive;
 mod key_dispatch;

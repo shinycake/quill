@@ -107,6 +107,8 @@ use accesskit::{Action, NodeId, TreeUpdate};
 use collections::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::hash::{Hash, Hasher};
+use std::mem;
+use std::ops::Range;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -145,10 +147,28 @@ pub(crate) struct A11y {
     /// At the end of the frame, we re-call [`Self::sync_active_flag`] to
     /// determine whether we should actually send the finished [`TreeUpdate`].
     active_this_frame: bool,
+    /// Whether the system (assistive technology) asked for the tree this
+    /// frame, as opposed to a tree built only because it was [forced].
+    /// Only a tree the system asked for is sent to the platform adapter.
+    ///
+    /// [forced]: Self::set_forced
+    system_active_this_frame: bool,
+    /// Build the tree every frame even while no assistive technology is
+    /// connected, for an in-process reader ([`crate::Window::set_a11y_forced`]).
+    forced: bool,
     pub(crate) nodes: A11yNodeBuilder,
     pub(crate) focus_ids: FxHashMap<NodeId, FocusId>,
     pub(crate) node_bounds: FxHashMap<NodeId, Bounds<Pixels>>,
+    /// [`crate::InteractiveElement::a11y_tag`] per node, for the snapshot
+    /// only; never part of the [`TreeUpdate`].
+    pub(crate) node_tags: FxHashMap<NodeId, SharedString>,
     pub(crate) action_listeners: FxHashMap<NodeId, Vec<(Action, A11yActionListener)>>,
+    /// The tables above as the last frame filled them, for [`Self::replay`].
+    rendered: RenderedTables,
+    /// The last frame built a tree, the one [`Self::replay`] reads.
+    replayable: bool,
+    /// A range this frame could not be replayed ([`Self::replay`]).
+    replay_refused: bool,
     /// The window's title, used to label the root node so assistive
     /// technology can tell windows apart.
     window_title: Option<SharedString>,
@@ -173,10 +193,16 @@ impl A11y {
             force_disabled,
             active_flag,
             active_this_frame: false,
+            system_active_this_frame: false,
+            forced: false,
             nodes: A11yNodeBuilder::new(),
             focus_ids: FxHashMap::default(),
             node_bounds: FxHashMap::default(),
+            node_tags: FxHashMap::default(),
             action_listeners: FxHashMap::default(),
+            rendered: RenderedTables::default(),
+            replayable: false,
+            replay_refused: false,
             window_title,
             last_focus_without_node: None,
             debug: debug::A11yDebug::default(),
@@ -210,7 +236,27 @@ impl A11y {
     /// See the docs for [`Self::active_flag`] and [`Self::active_this_frame`]
     /// for more commentary.
     pub(crate) fn sync_active_flag(&mut self) {
-        self.active_this_frame = self.is_enabled() && self.active_flag.load(Ordering::SeqCst);
+        self.system_active_this_frame =
+            self.is_enabled() && self.active_flag.load(Ordering::SeqCst);
+        self.active_this_frame = self.system_active_this_frame || (self.is_enabled() && self.forced);
+    }
+
+    /// Whether assistive technology asked for the tree this frame (so the
+    /// finished update goes to the platform adapter).
+    pub(crate) fn is_system_active(&self) -> bool {
+        self.system_active_this_frame
+    }
+
+    /// Build the tree every frame whether or not assistive technology is
+    /// connected. Returns whether the setting changed.
+    pub(crate) fn set_forced(&mut self, on: bool) -> bool {
+        let changed = self.forced != on;
+        self.forced = on;
+        changed
+    }
+
+    pub(crate) fn is_forced(&self) -> bool {
+        self.forced
     }
 
     pub(crate) fn is_enabled(&self) -> bool {
@@ -245,13 +291,41 @@ impl A11y {
             // The focused element is properly exposed; reset the dedup so a
             // later focus on a node-less element logs again.
             self.last_focus_without_node = None;
-            self.nodes.set_focus(node_id);
-        } else {
+            self.nodes.claim(FocusClaim::Owner(node_id));
+        } else if !self.focus_nearest_focusable_ancestor() {
             // The element registered a focus handle and an id, but never got a
             // node because it has no role.
             if let Some(focus_id) = self.focus_ids.get(&node_id).copied() {
                 self.note_focus_without_node(focus_id, "it has an id but no role");
             }
+        }
+    }
+
+    /// The focused element has no node of its own (no role, or no id):
+    /// report the nearest enclosing node that is focusable this frame
+    /// instead. A composite control puts its role on a frame that tracks a
+    /// focus handle of its own around the element that takes the focus (a
+    /// text input's frame around its editor), and that frame is what has
+    /// the focus to assistive technology. Returns whether the focus is
+    /// reported now.
+    pub(crate) fn focus_nearest_focusable_ancestor(&mut self) -> bool {
+        if self.nodes.focus.is_some() {
+            return true;
+        }
+        let ancestor = self
+            .nodes
+            .ids_stack
+            .iter()
+            .rev()
+            .find(|id| **id != ROOT_NODE_ID && self.focus_ids.contains_key(*id))
+            .copied();
+        match ancestor {
+            Some(id) => {
+                self.last_focus_without_node = None;
+                self.nodes.claim(FocusClaim::Fallback(id));
+                true
+            }
+            None => false,
         }
     }
 
@@ -267,20 +341,108 @@ impl A11y {
             return;
         }
         if self.nodes.has_node(node_id) && self.nodes.focus_is_ancestor_of_current() {
-            self.nodes.set_active_descendant(node_id);
+            self.nodes.claim(FocusClaim::ActiveDescendant(node_id));
         }
     }
 
     /// Clear per-frame state and push the root node to start a new frame.
-    pub(crate) fn begin_frame(&mut self) {
+    /// Returns whether a cached view can replay its part of the last
+    /// frame's tree ([`Self::replay`]): not when the last frame built none.
+    pub(crate) fn begin_frame(&mut self) -> bool {
+        let rendered = &mut self.rendered;
+        mem::swap(&mut self.focus_ids, &mut rendered.focus_ids);
+        mem::swap(&mut self.node_bounds, &mut rendered.node_bounds);
+        mem::swap(&mut self.node_tags, &mut rendered.node_tags);
+        mem::swap(&mut self.action_listeners, &mut rendered.action_listeners);
         self.focus_ids.clear();
         self.node_bounds.clear();
+        self.node_tags.clear();
         self.action_listeners.clear();
         self.nodes.begin_frame(self.window_title.as_ref());
+        mem::take(&mut self.replayable)
+    }
+
+    /// A frame is drawn without a tree.
+    pub(crate) fn skip_frame(&mut self) {
+        self.replayable = false;
+    }
+
+    /// Quill: the last frame's tree still serves whoever wants one, so a
+    /// frame that only redraws live views can leave it alone.
+    pub(crate) fn tree_is_current(&self) -> bool {
+        let wanted = self.is_enabled() && (self.forced || self.active_flag.load(Ordering::SeqCst));
+        !wanted || self.replayable
+    }
+
+    /// Quill: nothing built from now on joins the tree, until
+    /// [`Self::resume_tree`] gets what this returned.
+    pub(crate) fn pause_tree(&mut self) -> bool {
+        mem::take(&mut self.active_this_frame)
+    }
+
+    pub(crate) fn resume_tree(&mut self, active: bool) {
+        self.active_this_frame = active;
+    }
+
+    /// How far the frame being built has got.
+    pub(crate) fn index(&self) -> A11yIndex {
+        self.nodes.index()
+    }
+
+    /// Adds again what the last frame added between `range`'s ends, for a
+    /// cached view that replays its last frame instead of prepainting it:
+    /// the nodes (those whose parent is outside the range become children
+    /// of the node being built now), their bounds, tags, focus handles and
+    /// action listeners, and the focus claims made in between. Only after
+    /// [`Self::begin_frame`] said the last frame can be replayed.
+    pub(crate) fn replay(&mut self, range: Range<A11yIndex>) {
+        // The last frame's nodes, in the order `all_nodes` had them.
+        let Some(nodes) = self
+            .debug
+            .last_update()
+            .and_then(|update| update.nodes.get(range.start.nodes..range.end.nodes))
+        else {
+            return;
+        };
+        // Fresh content already holds one of these ids (an element drawn
+        // twice): adding the range would list a node under two parents,
+        // which AccessKit rejects. It is left out, and the next frame
+        // renders every view.
+        if nodes.iter().any(|(id, _)| self.nodes.has_node(*id)) {
+            self.replay_refused = true;
+            return;
+        }
+        let nested: FxHashSet<NodeId> = nodes
+            .iter()
+            .flat_map(|(_, node)| node.children().iter().copied())
+            .collect();
+        for (id, node) in nodes {
+            self.nodes.replay(*id, node.clone(), !nested.contains(id));
+            let rendered = &mut self.rendered;
+            if let Some(bounds) = rendered.node_bounds.get(id) {
+                self.node_bounds.insert(*id, *bounds);
+            }
+            if let Some(tag) = rendered.node_tags.get(id) {
+                self.node_tags.insert(*id, tag.clone());
+            }
+            if let Some(focus_id) = rendered.focus_ids.get(id) {
+                self.focus_ids.insert(*id, *focus_id);
+            }
+            if let Some(listeners) = rendered.action_listeners.remove(id) {
+                self.action_listeners.insert(*id, listeners);
+            }
+            #[cfg(debug_assertions)]
+            if let Some(info) = self.debug.node_info(*id) {
+                self.nodes.record_node_info(*id, info.clone());
+            }
+        }
+        self.nodes
+            .replay_claims(range.start.claims..range.end.claims);
     }
 
     /// Finalize the tree and produce a [`TreeUpdate`] for the platform adapter.
     pub(crate) fn end_frame(&mut self, frame: debug::FrameDebugInfo) -> TreeUpdate {
+        self.replayable = !mem::take(&mut self.replay_refused);
         let update = self.nodes.finalize();
         self.debug.capture(
             &update,
@@ -297,6 +459,161 @@ impl A11y {
     pub(crate) fn debug_tree_json(&self) -> Option<String> {
         self.debug.to_json()
     }
+
+    /// How many frames built a tree so far.
+    pub(crate) fn frame_number(&self) -> u64 {
+        self.debug.frame_number()
+    }
+
+    /// The last finished tree as plain data, with each node's bounds in
+    /// window logical pixels. `None` before the first frame built a tree.
+    pub(crate) fn snapshot(&self, scale_factor: f32) -> Option<A11yTreeSnapshot> {
+        let update = self.debug.last_update()?;
+        let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+            scale_factor
+        } else {
+            1.0
+        };
+        let nodes = update
+            .nodes
+            .iter()
+            .map(|(id, node)| {
+                // Elements record logical bounds; synthetic children carry
+                // only the physical rectangle AccessKit sees, if any.
+                let bounds = self.node_bounds.get(id).copied().or_else(|| {
+                    node.bounds().map(|rect| Bounds {
+                        origin: point(px(rect.x0 as f32 / scale), px(rect.y0 as f32 / scale)),
+                        size: size(
+                            px((rect.x1 - rect.x0) as f32 / scale),
+                            px((rect.y1 - rect.y0) as f32 / scale),
+                        ),
+                    })
+                });
+                let mut next_action = 0u8;
+                let actions = std::iter::from_fn(move || {
+                    let action = Action::n(next_action)?;
+                    next_action += 1;
+                    Some(action)
+                })
+                .filter(|action| node.supports_action(*action))
+                .collect();
+                A11yNodeSnapshot {
+                    id: *id,
+                    tag: self.node_tags.get(id).map(|tag| tag.to_string()),
+                    role: node.role(),
+                    label: node.label().map(str::to_string),
+                    description: node.description().map(str::to_string),
+                    value: node.value().map(str::to_string),
+                    placeholder: node.placeholder().map(str::to_string),
+                    tooltip: node.tooltip().map(str::to_string),
+                    bounds,
+                    actions,
+                    children: node.children().to_vec(),
+                    selected: node.is_selected(),
+                    expanded: node.is_expanded(),
+                    toggled: node.toggled(),
+                    disabled: node.is_disabled(),
+                    hidden: node.is_hidden(),
+                    read_only: node.is_read_only(),
+                    modal: node.is_modal(),
+                }
+            })
+            .collect();
+        Some(A11yTreeSnapshot {
+            root: update.tree.as_ref().map(|tree| tree.root).unwrap_or(ROOT_NODE_ID),
+            focus: self.debug.last_focus(),
+            frame_number: self.debug.frame_number(),
+            nodes,
+        })
+    }
+}
+
+/// One node of an [`A11yTreeSnapshot`].
+#[derive(Debug, Clone)]
+pub struct A11yNodeSnapshot {
+    /// AccessKit's id, stable across frames for the same element.
+    pub id: NodeId,
+    /// The element's [`crate::InteractiveElement::a11y_tag`], if it set one.
+    pub tag: Option<String>,
+    /// The node's role.
+    pub role: accesskit::Role,
+    /// The accessible name.
+    pub label: Option<String>,
+    /// The longer description, when the element set one.
+    pub description: Option<String>,
+    /// The value of an input, slider or status.
+    pub value: Option<String>,
+    /// The placeholder of an empty input.
+    pub placeholder: Option<String>,
+    /// The tooltip text.
+    pub tooltip: Option<String>,
+    /// In window logical pixels; `None` for a node without a rectangle.
+    pub bounds: Option<Bounds<Pixels>>,
+    /// The actions the node says it supports (Click, Focus, ...).
+    pub actions: Vec<Action>,
+    /// The child nodes, in order.
+    pub children: Vec<NodeId>,
+    /// Whether a selectable node is selected.
+    pub selected: Option<bool>,
+    /// Whether an expandable node is expanded.
+    pub expanded: Option<bool>,
+    /// A checkbox's or toggle's state.
+    pub toggled: Option<accesskit::Toggled>,
+    /// The node does not take input.
+    pub disabled: bool,
+    /// The node is excluded from assistive technology and hit testing.
+    pub hidden: bool,
+    /// A text node that allows focus and selection but not input.
+    pub read_only: bool,
+    /// An explicitly modal dialog.
+    pub modal: bool,
+}
+
+/// The accessibility tree of the last frame that built one, as plain data
+/// ([`crate::Window::a11y_tree_snapshot`]).
+#[derive(Debug, Clone)]
+pub struct A11yTreeSnapshot {
+    /// The window node.
+    pub root: NodeId,
+    /// The node GPUI reported as focused, if any.
+    pub focus: Option<NodeId>,
+    /// Counts the frames that built a tree; two reads with the same number
+    /// saw the same frame.
+    pub frame_number: u64,
+    /// Every node, parents before their children.
+    pub nodes: Vec<A11yNodeSnapshot>,
+}
+
+/// How far a frame's tree has got, so a cached view can record the part it
+/// added ([`A11y::index`]) and add it again next frame ([`A11y::replay`]).
+#[derive(Clone, Copy, Default, Debug)]
+pub(crate) struct A11yIndex {
+    /// Finished nodes (`A11yNodeBuilder::all_nodes`).
+    nodes: usize,
+    /// Focus claims (`A11yNodeBuilder::claims`).
+    claims: usize,
+}
+
+/// What a frame reports as focused, claimed by the elements in the order
+/// they were prepainted, so a cached view's claims can be made again.
+#[derive(Clone, Copy, Debug)]
+enum FocusClaim {
+    /// The node owns the focused handle; it takes over from a fallback.
+    Owner(NodeId),
+    /// The focused element has no node; its nearest focusable frame stands
+    /// in ([`A11y::focus_nearest_focusable_ancestor`]).
+    Fallback(NodeId),
+    /// The node is the focused container's active descendant.
+    ActiveDescendant(NodeId),
+}
+
+/// [`A11y`]'s per-node tables as the last frame filled them.
+#[derive(Default)]
+struct RenderedTables {
+    focus_ids: FxHashMap<NodeId, FocusId>,
+    node_bounds: FxHashMap<NodeId, Bounds<Pixels>>,
+    node_tags: FxHashMap<NodeId, SharedString>,
+    action_listeners: FxHashMap<NodeId, Vec<(Action, A11yActionListener)>>,
 }
 
 /// Builder API for synthetic children. See the docs for
@@ -378,11 +695,18 @@ pub(crate) struct A11yNodeBuilder {
     /// The node that GPUI considers focused. Note that this may be different to
     /// what is reported to accesskit - see [`Self::active_descendant`]
     focus: Option<NodeId>,
+    /// Whether [`Self::focus`] is a frame reported for a focused element
+    /// with no node of its own, which a node that owns the focus replaces.
+    focus_is_fallback: bool,
     /// If a node calls `.aria_active_descendant()`, AND an ancestor is focused,
     /// override it as the focused node. This supports the "active descendant"
     /// pattern, which allows a focused container to act as if a descendant is
     /// focused.
     active_descendant: Option<NodeId>,
+    /// The focus claims of the frame being built, in order.
+    claims: Vec<FocusClaim>,
+    /// The last frame's claims, for [`A11y::replay`].
+    rendered_claims: Vec<FocusClaim>,
     #[cfg(debug_assertions)]
     node_info: FxHashMap<NodeId, debug::NodeDebugInfo>,
 }
@@ -395,9 +719,51 @@ impl A11yNodeBuilder {
             all_nodes: Vec::new(),
             seen_ids: FxHashSet::default(),
             focus: None,
+            focus_is_fallback: false,
             active_descendant: None,
+            claims: Vec::new(),
+            rendered_claims: Vec::new(),
             #[cfg(debug_assertions)]
             node_info: FxHashMap::default(),
+        }
+    }
+
+    fn index(&self) -> A11yIndex {
+        A11yIndex {
+            nodes: self.all_nodes.len(),
+            claims: self.claims.len(),
+        }
+    }
+
+    /// Adds a finished node the last frame built, as a child of the node
+    /// on top of the stack when `top_level`. The caller checked that the
+    /// frame has no node with this id yet.
+    fn replay(&mut self, id: NodeId, node: accesskit::Node, top_level: bool) {
+        self.seen_ids.insert(id);
+        if top_level && let Some(parent) = self.nodes_stack.last_mut() {
+            parent.push_child(id);
+        }
+        self.all_nodes.push((id, node));
+    }
+
+    /// Makes the last frame's claims in `range` again.
+    fn replay_claims(&mut self, range: Range<usize>) {
+        let claims = mem::take(&mut self.rendered_claims);
+        for claim in claims.get(range).unwrap_or_default() {
+            self.claim(*claim);
+        }
+        self.rendered_claims = claims;
+    }
+
+    fn claim(&mut self, claim: FocusClaim) {
+        self.claims.push(claim);
+        match claim {
+            FocusClaim::Owner(id) => {
+                self.clear_fallback_focus();
+                self.set_focus(id);
+            }
+            FocusClaim::Fallback(id) => self.set_fallback_focus(id),
+            FocusClaim::ActiveDescendant(id) => self.set_active_descendant(id),
         }
     }
 
@@ -486,7 +852,10 @@ impl A11yNodeBuilder {
         self.ids_stack.push(ROOT_NODE_ID);
         self.nodes_stack.push(root_node);
         self.focus = None;
+        self.focus_is_fallback = false;
         self.active_descendant = None;
+        mem::swap(&mut self.claims, &mut self.rendered_claims);
+        self.claims.clear();
     }
 
     /// Returns whether a node with the given ID has been pushed in this frame.
@@ -527,6 +896,22 @@ impl A11yNodeBuilder {
         self.active_descendant = Some(id);
     }
 
+    /// Report `id`, an enclosing frame, for a focused element that has no
+    /// node; a later [`Self::set_focus`] replaces it without counting as a
+    /// second focus.
+    pub(crate) fn set_fallback_focus(&mut self, id: NodeId) {
+        self.set_focus(id);
+        self.focus_is_fallback = true;
+    }
+
+    /// Drop a fallback focus so the node that owns the focus can report it.
+    pub(crate) fn clear_fallback_focus(&mut self) {
+        if self.focus_is_fallback {
+            self.focus = None;
+            self.focus_is_fallback = false;
+        }
+    }
+
     pub(crate) fn set_focus(&mut self, id: NodeId) {
         if self.focus.is_some() {
             if cfg!(debug_assertions) {
@@ -539,6 +924,7 @@ impl A11yNodeBuilder {
             }
         }
         self.focus = Some(id);
+        self.focus_is_fallback = false;
     }
 
     fn finalize(&mut self) -> TreeUpdate {
@@ -877,6 +1263,29 @@ mod tests {
         a11y.nodes.pop(); // second
 
         a11y.nodes.pop(); // container
+    }
+
+    // A focused element with no node reports its focusable frame; a node
+    // painted later that owns the focused handle takes over without the
+    // "set_focus called more than once" assertion.
+    #[test]
+    fn a_node_that_owns_the_focus_replaces_the_fallback() {
+        let mut a11y = new_a11y();
+        let frame = NodeId(1);
+        let owner = NodeId(2);
+
+        assert!(a11y.nodes.push(frame, test_node()));
+        a11y.set_focusable(frame, FocusId::default());
+        assert!(a11y.focus_nearest_focusable_ancestor());
+        a11y.nodes.pop(); // frame
+
+        assert!(a11y.nodes.push(owner, test_node()));
+        a11y.set_focusable(owner, FocusId::default());
+        a11y.set_focus(owner);
+        a11y.nodes.pop(); // owner
+
+        let update = a11y.end_frame(Default::default());
+        assert_eq!(update.focus, owner);
     }
 
     // Node A is focused; node C (a child of the unfocused node B) claims the

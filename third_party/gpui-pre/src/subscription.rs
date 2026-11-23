@@ -50,6 +50,20 @@ where
         })))
     }
 
+    /// How many subscribers the set holds over every emitter, leaving out
+    /// those whose subscription was dropped while their emitter was being
+    /// notified (they stay in the set until it notifies again).
+    #[cfg(feature = "test-support")]
+    pub fn subscriber_count(&self) -> usize {
+        let set = self.0.borrow();
+        set
+            .subscribers
+            .values()
+            .flat_map(BTreeMap::values)
+            .filter(|subscriber| subscriber.state.get() != SubscriberState::Dropped)
+            .count()
+    }
+
     /// Inserts an immediately active subscription for the given emitter.
     pub fn insert(&self, emitter_key: EmitterKey, callback: Callback) -> Subscription {
         let (subscription, activate) = self.insert_pending(emitter_key, callback);
@@ -179,6 +193,17 @@ impl<Callback: 'static> SingleSubscriberSet<Callback> {
             subscribers: BTreeMap::new(),
             next_subscriber_id: 0,
         })))
+    }
+
+    /// How many subscribers the set holds, leaving out those whose subscription
+    /// was dropped while the set was being notified.
+    #[cfg(feature = "test-support")]
+    pub fn subscriber_count(&self) -> usize {
+        let set = self.0.borrow();
+        set.subscribers
+            .values()
+            .filter(|subscriber| subscriber.state.get() != SubscriberState::Dropped)
+            .count()
     }
 
     /// Inserts an immediately active subscription.

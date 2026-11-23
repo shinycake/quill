@@ -57,11 +57,30 @@ pub struct ShapedGlyph {
     pub is_emoji: bool,
 }
 
+/// QUILL: one character cluster of a line, for hit testing right-to-left text.
+struct GlyphCluster {
+    /// Byte index of the character that starts the cluster.
+    index: usize,
+    /// Byte index of the next character in the text, or the line's length.
+    end: usize,
+    left: Pixels,
+    right: Pixels,
+    rtl: bool,
+}
+
 impl LineLayout {
     /// The index for the character at the given x coordinate
     pub fn index_for_x(&self, x: Pixels) -> Option<usize> {
         if x >= self.width {
             None
+        } else if let Some(clusters) = self.unordered_clusters() {
+            // QUILL: right-to-left glyphs (see `unordered_clusters`).
+            clusters
+                .iter()
+                .rev()
+                .find(|cluster| cluster.left <= x)
+                .or(clusters.first())
+                .map(|cluster| cluster.index)
         } else {
             for run in self.runs.iter().rev() {
                 for glyph in run.glyphs.iter().rev() {
@@ -77,6 +96,25 @@ impl LineLayout {
     /// closest_index_for_x returns the character boundary closest to the given x coordinate
     /// (e.g. to handle aligning up/down arrow keys)
     pub fn closest_index_for_x(&self, x: Pixels) -> usize {
+        if let Some(clusters) = self.unordered_clusters() {
+            // QUILL: the caret stop nearest to x, each cluster's leading edge being its
+            // start and its trailing edge the start of the character after it.
+            let mut best = (Pixels::MAX, self.len);
+            for cluster in &clusters {
+                let (leading, trailing) = if cluster.rtl {
+                    (cluster.right, cluster.left)
+                } else {
+                    (cluster.left, cluster.right)
+                };
+                for (edge, index) in [(leading, cluster.index), (trailing, cluster.end)] {
+                    let distance = (edge - x).abs();
+                    if distance < best.0 {
+                        best = (distance, index);
+                    }
+                }
+            }
+            return best.1;
+        }
         let mut prev_index = 0;
         let mut prev_x = px(0.);
 
@@ -107,6 +145,31 @@ impl LineLayout {
 
     /// The x position of the character at the given index
     pub fn x_for_index(&self, index: usize) -> Pixels {
+        if let Some(clusters) = self.unordered_clusters() {
+            // QUILL: the leading edge of the character at `index`, which is the right edge
+            // in right-to-left text; past the end, the trailing edge of the last character.
+            let containing = clusters
+                .iter()
+                .filter(|cluster| cluster.index <= index)
+                .max_by_key(|cluster| cluster.index);
+            return match containing {
+                Some(cluster) if index < cluster.end => {
+                    if cluster.rtl {
+                        cluster.right
+                    } else {
+                        cluster.left
+                    }
+                }
+                Some(cluster) => {
+                    if cluster.rtl {
+                        cluster.left
+                    } else {
+                        cluster.right
+                    }
+                }
+                None => self.width,
+            };
+        }
         for run in &self.runs {
             for glyph in &run.glyphs {
                 if glyph.index >= index {
@@ -115,6 +178,106 @@ impl LineLayout {
             }
         }
         self.width
+    }
+
+    /// QUILL: the line's character clusters left to right, when its glyphs are not in byte
+    /// order (right-to-left text), so the hit tests above can tell a character's leading
+    /// edge from its trailing one; `None` for byte-ordered lines, which keep the upstream
+    /// walks. A cluster reads right to left when the cluster after it on screen starts
+    /// earlier in the text (or, last on the line, the one before it starts later).
+    fn unordered_clusters(&self) -> Option<Vec<GlyphCluster>> {
+        if super::glyphs_in_byte_order(self) {
+            return None;
+        }
+        let mut starts: Vec<(Pixels, usize)> = self
+            .runs
+            .iter()
+            .flat_map(|run| &run.glyphs)
+            .map(|glyph| (glyph.position.x, glyph.index))
+            .collect();
+        starts.sort_by(|a, b| a.1.cmp(&b.1).then(f32::from(a.0).total_cmp(&f32::from(b.0))));
+        // One entry per character start, at its leftmost glyph.
+        starts.dedup_by_key(|(_, index)| *index);
+        let mut by_index: Vec<usize> = starts.iter().map(|(_, index)| *index).collect();
+        by_index.sort_unstable();
+        starts.sort_by(|a, b| f32::from(a.0).total_cmp(&f32::from(b.0)));
+        let mut clusters: Vec<GlyphCluster> = Vec::with_capacity(starts.len());
+        for (ix, &(left, index)) in starts.iter().enumerate() {
+            let right = starts
+                .get(ix + 1)
+                .map_or(self.width, |(next, _)| *next)
+                .max(left);
+            let next_start = by_index.partition_point(|&start| start <= index);
+            let end = by_index.get(next_start).copied().unwrap_or(self.len);
+            let rtl = match (starts.get(ix + 1), ix.checked_sub(1).and_then(|p| starts.get(p))) {
+                (Some((_, next)), _) => *next < index,
+                (None, Some((_, previous))) => *previous > index,
+                (None, None) => false,
+            };
+            clusters.push(GlyphCluster {
+                index,
+                end,
+                left,
+                right,
+                rtl,
+            });
+        }
+        Some(clusters)
+    }
+
+    /// QUILL: where a line whose glyphs are not in byte order (it holds right-to-left
+    /// text) breaks into rows of at most `wrap_width`: the byte offsets at which the rows
+    /// after the first start. Rows follow the text, not the screen, so the first row holds
+    /// the start of a right-to-left paragraph; upstream's walk over the glyphs on screen
+    /// put its end there. Breaks fall where UAX #14 allows them, a word too long for a row
+    /// is cut where it overflows, and spaces may hang past the row's end.
+    fn logical_row_starts(
+        &self,
+        text: &str,
+        wrap_width: Pixels,
+        max_lines: Option<usize>,
+    ) -> Vec<usize> {
+        let Some(mut clusters) = self.unordered_clusters() else {
+            return Vec::new();
+        };
+        clusters.sort_by_key(|cluster| cluster.index);
+        let breaks: Vec<usize> = LineWrapper::break_indices(text).collect();
+        let mut widths = Vec::with_capacity(clusters.len() + 1);
+        let mut total = px(0.);
+        widths.push(total);
+        for cluster in &clusters {
+            total += cluster.right - cluster.left;
+            widths.push(total);
+        }
+        let width_of = |from: usize, through: usize| {
+            widths.get(through + 1).copied().unwrap_or(total)
+                - widths.get(from).copied().unwrap_or(px(0.))
+        };
+        let mut starts = Vec::new();
+        let mut row_first = 0;
+        let mut candidate = None;
+        for (ix, cluster) in clusters.iter().enumerate() {
+            if ix > row_first && breaks.binary_search(&cluster.index).is_ok() {
+                candidate = Some(ix);
+            }
+            let blank = text
+                .get(cluster.index..)
+                .and_then(|rest| rest.chars().next())
+                .is_none_or(char::is_whitespace);
+            if blank || ix == row_first || width_of(row_first, ix) <= wrap_width {
+                continue;
+            }
+            if max_lines.is_some_and(|max| starts.len() + 1 >= max) {
+                break;
+            }
+            let cut = candidate.take().unwrap_or(ix);
+            let Some(start) = clusters.get(cut).map(|cluster| cluster.index) else {
+                break;
+            };
+            starts.push(start);
+            row_first = cut;
+        }
+        starts
     }
 
     /// The corresponding Font at the given index
@@ -391,6 +554,9 @@ impl WrappedLineLayout {
         line_height: Pixels,
         closest: bool,
     ) -> Result<usize, usize> {
+        if self.has_unordered_rows() {
+            return self.row_index_for_position(position, line_height, closest);
+        }
         let wrapped_line_ix = (position.y / line_height) as usize;
 
         let wrapped_line_start_index;
@@ -443,8 +609,52 @@ impl WrappedLineLayout {
         }
     }
 
+    /// QUILL: whether this is a wrapped line holding right-to-left text, whose rows
+    /// follow the text rather than the screen (`LineLayoutCache::layout_rows`), so the hit
+    /// tests below go row by row.
+    fn has_unordered_rows(&self) -> bool {
+        !self.wrap_boundaries.is_empty() && !super::glyphs_in_byte_order(&self.unwrapped_layout)
+    }
+
+    /// QUILL: `_index_for_position` for a line with [`Self::has_unordered_rows`].
+    fn row_index_for_position(
+        &self,
+        position: Point<Pixels>,
+        line_height: Pixels,
+        closest: bool,
+    ) -> Result<usize, usize> {
+        let rows = super::wrapped_rows(&self.unwrapped_layout, &self.wrap_boundaries);
+        let row_ix = (position.y / line_height).max(0.) as usize;
+        let Some(row) = rows.get(row_ix) else {
+            return Err(0);
+        };
+        if position.x < px(0.) {
+            Err(row.closest_index_for_x(px(0.)))
+        } else if position.x >= row.width {
+            Err(row.closest_index_for_x(row.width))
+        } else if closest {
+            Ok(row.closest_index_for_x(position.x))
+        } else {
+            row.index_for_x(position.x).ok_or(row.len)
+        }
+    }
+
     /// Returns the pixel position for the given byte index.
     pub fn position_for_index(&self, index: usize, line_height: Pixels) -> Option<Point<Pixels>> {
+        if self.has_unordered_rows() {
+            let rows = super::wrapped_rows(&self.unwrapped_layout, &self.wrap_boundaries);
+            let last = rows.len().saturating_sub(1);
+            let mut row_start = 0;
+            for (row_ix, row) in rows.iter().enumerate() {
+                if index >= row_start && (index < row.len || row_ix == last) {
+                    return (index <= self.len()).then(|| {
+                        point(row.x_for_index(index), line_height * row_ix as f32)
+                    });
+                }
+                row_start = row.len;
+            }
+            return None;
+        }
         let mut line_start_ix = 0;
         let line_end_indices = self
             .wrap_boundaries
@@ -633,15 +843,28 @@ impl LineLayoutCache {
             drop(state);
             let text = SharedString::from(text);
             let unwrapped_layout = self.layout_line::<&SharedString>(&text, font_size, runs, None);
-            let wrap_boundaries = if let Some(wrap_width) = wrap_width {
-                unwrapped_layout.compute_wrap_boundaries(
-                    text.as_ref(),
-                    wrap_width,
-                    max_lines,
-                    &mut self.wrap_scratch.borrow_mut(),
-                )
-            } else {
-                SmallVec::new()
+            let (unwrapped_layout, wrap_boundaries) = match wrap_width {
+                // QUILL: a line holding right-to-left text wraps in text order, each row
+                // laid out on its own (`logical_row_starts`, `layout_rows`).
+                Some(wrap_width) if !super::glyphs_in_byte_order(&unwrapped_layout) => {
+                    let starts =
+                        unwrapped_layout.logical_row_starts(text.as_ref(), wrap_width, max_lines);
+                    if starts.is_empty() {
+                        (unwrapped_layout, SmallVec::new())
+                    } else {
+                        self.layout_rows(text.as_ref(), font_size, runs, &starts)
+                    }
+                }
+                Some(wrap_width) => {
+                    let boundaries = unwrapped_layout.compute_wrap_boundaries(
+                        text.as_ref(),
+                        wrap_width,
+                        max_lines,
+                        &mut self.wrap_scratch.borrow_mut(),
+                    );
+                    (unwrapped_layout, boundaries)
+                }
+                None => (unwrapped_layout, SmallVec::new()),
             };
             let layout = Arc::new(WrappedLineLayout {
                 unwrapped_layout,
@@ -665,6 +888,103 @@ impl LineLayoutCache {
 
             layout
         }
+    }
+
+    /// QUILL: lays the rows of a wrapped line holding right-to-left text out one by one,
+    /// each in the paragraph's direction, and joins them into one line whose rows follow
+    /// each other left to right, with a wrap boundary at the first glyph of each row after
+    /// the first. `starts` are the byte offsets the rows after the first start at.
+    fn layout_rows(
+        &self,
+        text: &str,
+        font_size: Pixels,
+        runs: &[FontRun],
+        starts: &[usize],
+    ) -> (Arc<LineLayout>, SmallVec<[WrapBoundary; 1]>) {
+        let rtl = unicode_bidi::get_base_direction_full(text) == unicode_bidi::Direction::Rtl;
+        let mut line = LineLayout {
+            font_size,
+            len: text.len(),
+            ..Default::default()
+        };
+        let mut boundaries = SmallVec::new();
+        let mut x = px(0.);
+        let mut start = 0;
+        for end in starts.iter().copied().chain([text.len()]) {
+            let row = self.layout_row(text, start..end, font_size, runs, rtl);
+            let first_run = line.runs.len();
+            for mut run in row.runs {
+                for glyph in &mut run.glyphs {
+                    glyph.position.x += x;
+                    glyph.index += start;
+                }
+                if !run.glyphs.is_empty() {
+                    line.runs.push(run);
+                }
+            }
+            if start > 0 && line.runs.len() > first_run {
+                boundaries.push(WrapBoundary {
+                    run_ix: first_run,
+                    glyph_ix: 0,
+                });
+            }
+            if row.ascent > line.ascent {
+                line.ascent = row.ascent;
+            }
+            if row.descent > line.descent {
+                line.descent = row.descent;
+            }
+            x += row.width;
+            start = end;
+        }
+        line.width = x;
+        (Arc::new(line), boundaries)
+    }
+
+    /// One row of a wrapped line: the bytes `range` of `text` laid out in the paragraph's
+    /// direction (`rtl`) whatever character the row starts with, glyph indices relative
+    /// to the row. A row whose own first strong character reads the other way is shaped
+    /// behind a direction mark, which is then taken out again.
+    fn layout_row(
+        &self,
+        text: &str,
+        range: Range<usize>,
+        font_size: Pixels,
+        runs: &[FontRun],
+        rtl: bool,
+    ) -> LineLayout {
+        let row_text = text.get(range.clone()).unwrap_or_default();
+        let row_runs = font_runs_in(runs, range);
+        let plain = self.layout_line(row_text.to_string(), font_size, &row_runs, None);
+        let row_rtl =
+            unicode_bidi::get_base_direction_full(row_text) == unicode_bidi::Direction::Rtl;
+        if row_rtl == rtl || row_text.is_empty() {
+            return copy_layout(&plain);
+        }
+        let mark = if rtl { '\u{200F}' } else { '\u{200E}' };
+        let mark_len = mark.len_utf8();
+        let mut marked_runs = row_runs;
+        if let Some(first) = marked_runs.first_mut() {
+            first.len += mark_len;
+        }
+        let marked = self.layout_line(format!("{mark}{row_text}"), font_size, &marked_runs, None);
+        // The mark sits at the row's start edge: the right end of a right-to-left row,
+        // the left end of a left-to-right one. Whatever room it took goes.
+        let advance = (marked.width - plain.width).max(px(0.));
+        let mut row = copy_layout(&marked);
+        for run in &mut row.runs {
+            run.glyphs.retain(|glyph| glyph.index >= mark_len);
+            for glyph in &mut run.glyphs {
+                glyph.index -= mark_len;
+                if !rtl {
+                    glyph.position.x -= advance;
+                }
+            }
+        }
+        row.runs.retain(|run| !run.glyphs.is_empty());
+        row.width = marked.width - advance;
+        row.len = row_text.len();
+        row
     }
 
     pub fn layout_line<Text>(
@@ -852,6 +1172,37 @@ impl AsCacheKeyRef for CacheKeyRef<'_> {
     fn as_cache_key_ref(&self) -> CacheKeyRef<'_> {
         *self
     }
+}
+
+/// QUILL: a copy of a line layout (it is not `Clone` upstream).
+fn copy_layout(layout: &LineLayout) -> LineLayout {
+    LineLayout {
+        font_size: layout.font_size,
+        width: layout.width,
+        ascent: layout.ascent,
+        descent: layout.descent,
+        runs: layout.runs.clone(),
+        len: layout.len,
+    }
+}
+
+/// QUILL: the font runs that cover the bytes `range` of a line, cut to it.
+fn font_runs_in(runs: &[FontRun], range: Range<usize>) -> Vec<FontRun> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for run in runs {
+        let end = start + run.len;
+        let from = start.max(range.start);
+        let to = end.min(range.end);
+        if from < to {
+            out.push(FontRun {
+                len: to - from,
+                font_id: run.font_id,
+            });
+        }
+        start = end;
+    }
+    out
 }
 
 #[cfg(test)]
