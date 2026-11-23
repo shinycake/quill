@@ -7,9 +7,7 @@ name: pages
 on:
   push:
     branches: [main]
-    paths: ["site/**", "scripts/site-release-data.py", ".github/workflows/pages.yml"]
-  release:
-    types: [published, edited, deleted]
+    paths: ["site/**", "scripts/site-release-data.py", "scripts/release_verify.py", "scripts/site-flatpak-repo.sh", ".github/workflows/pages.yml"]
   repository_dispatch:
     types: [site-refresh]
   workflow_dispatch:

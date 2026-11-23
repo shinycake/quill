@@ -33,3 +33,14 @@ jobs:
             -f "client_payload[release_url]=$URL" \
             -f "client_payload[manifest]=https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json"
           echo "site-refresh sent for ${TAG:-manual dispatch}"
+      # Chocolatey and AUR publish from main's workflows (aur.yml,
+      # chocolatey.yml), which check the release's signatures first.
+      - name: emit release-published
+        if: github.event_name == 'release'
+        env:
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" \
+            -f event_type=release-published \
+            -f "client_payload[tag]=$TAG" \
+            -F "client_payload[prerelease]=$PRERELEASE"

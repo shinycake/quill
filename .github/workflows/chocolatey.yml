@@ -5,8 +5,10 @@ name: chocolatey
 # stable release, or a manual run with push=true). Chocolatey moderates each
 # version before it is listed. docs/decisions/distribution-channels.md
 on:
-  release:
-    types: [published]
+  # Sent by release-published.yml, so this runs main's code, never an old
+  # tag's (the `publish` environment takes main only).
+  repository_dispatch:
+    types: [release-published]
   workflow_dispatch:
     inputs:
       tag:
@@ -22,11 +24,30 @@ permissions:
   contents: read
 
 jobs:
+  # Publishing trusts only the newest release whose files all match their
+  # signatures (scripts/release_verify.py): anyone with write access can
+  # replace an unsigned release's files or recreate an old release.
+  verify:
+    if: ${{ (github.event_name == 'repository_dispatch' && !github.event.client_payload.prerelease) || inputs.push }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: the release is the newest signed one
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.client_payload.tag || inputs.tag }}
+        run: |
+          newest="$(python3 scripts/release_verify.py pick | python3 -c 'import json, sys; r = json.load(sys.stdin); print(r["tag_name"] if r else "")')"
+          [ -n "$TAG" ] || { echo "::error::name the release tag to publish"; exit 1; }
+          [ -n "$newest" ] && [ "$newest" = "$TAG" ] || { echo "::error::$TAG is not the newest signed release (${newest:-none}); not publishing"; exit 1; }
+          echo "publishing $TAG"
+
   chocolatey:
-    if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
+    needs: verify
+    if: ${{ !failure() && !cancelled() && (github.event_name != 'repository_dispatch' || !github.event.client_payload.prerelease) }}
     # Pushing uses CHOCO_API_KEY, which lives in the `publish` environment (main
     # and v* tags only); test runs get no environment and push nothing.
-    environment: ${{ (github.event_name == 'release' || inputs.push) && 'publish' || '' }}
+    environment: ${{ (github.event_name == 'repository_dispatch' || inputs.push) && 'publish' || '' }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -36,7 +57,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          TAG: ${{ github.event.client_payload.tag || inputs.tag }}
         run: |
           [ -n "$TAG" ] || TAG="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
@@ -63,7 +84,7 @@ jobs:
           for ($i = 0; $i -lt 20 -and (Test-Path $exe); $i++) { Start-Sleep -Milliseconds 500 }
           if (Test-Path $exe) { throw 'uninstall left quill.exe' }
       - name: push
-        if: ${{ github.event_name == 'release' || inputs.push }}
+        if: ${{ github.event_name == 'repository_dispatch' || inputs.push }}
         shell: pwsh
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}

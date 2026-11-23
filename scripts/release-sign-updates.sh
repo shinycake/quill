@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
-# Signs the in-app update packages in <dir> for <version>: writes
-# <package>.sig beside each one (one line of base64 Ed25519 signature) and
-# checks it against the public key Quill verifies with
+# Signs release files in <dir> for <version>: writes <file>.sig beside each
+# one (one line of base64 Ed25519 signature) and checks it against the
+# public key Quill and scripts/release_verify.py verify with
 # (src/update_install/signature.rs, docs/decisions/release-secrets.md).
 #
 # The signed text is "quill-update-v1\n<version>\n<file name>\n<sha256>\n".
 #
 #   UPDATE_SIGNING_KEY=<PEM private key> scripts/release-sign-updates.sh <dir> <version> [package ...]
 #
-# Without package names it signs the four packages the updater downloads.
+# Without file names it signs every file in <dir> (not the .sig files).
 # UPDATE_PUBLIC_KEY overrides the expected public key (tests only).
 set -euo pipefail
 dir=${1:?usage: release-sign-updates.sh <dir> <version> [package ...]}
 version=${2:?usage: release-sign-updates.sh <dir> <version> [package ...]}
 shift 2
-[ $# -gt 0 ] || set -- quill-macos-aarch64.zip quill-linux-x86_64-bundle.tar.gz \
-  quill-linux-aarch64-bundle.tar.gz quill-windows-x86_64.zip
+if [ $# -eq 0 ]; then
+  for f in "$dir"/*; do
+    [ -f "$f" ] && [[ "$f" != *.sig ]] && set -- "$@" "$(basename "$f")"
+  done
+fi
 : "${UPDATE_SIGNING_KEY:?UPDATE_SIGNING_KEY is not set}"
 expected=${UPDATE_PUBLIC_KEY:-$(sed -n 's/^const RELEASE_KEY: &str = "\(.*\)";$/\1/p' "$(dirname "$0")/../src/update_install/signature.rs")}
 

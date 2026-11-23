@@ -27,10 +27,25 @@ fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-tag="$(gh api "repos/$REPO_SLUG/releases/latest" -q .tag_name)"
-gh release download "$tag" -R "$REPO_SLUG" -p 'quill-linux-*.flatpak' -D "$work/bundles" || true
+# The release the page shows (site-release-data.py runs first): the newest
+# verified one, whose bundles must match their signatures.
+DATA_DIR="$(dirname "$OUT")/data"
+if [[ -f "$DATA_DIR/release-tag.txt" ]]; then
+  tag="$(cat "$DATA_DIR/release-tag.txt")"
+  verify=true
+else
+  tag="$(gh api "repos/$REPO_SLUG/releases/latest" -q .tag_name)"
+  verify=false
+fi
+gh release download "$tag" -R "$REPO_SLUG" -p 'quill-linux-*.flatpak' -p 'quill-linux-*.flatpak.sig' -D "$work/bundles" || true
 shopt -s nullglob
 bundles=("$work"/bundles/*.flatpak)
+if [[ "$verify" == true ]]; then
+  for bundle in "${bundles[@]}"; do
+    python3 -I "$(dirname "$0")/release_verify.py" file "${tag#v}" "$bundle" \
+      || { echo "::error::$(basename "$bundle") in $tag does not match its signature"; exit 1; }
+  done
+fi
 if (( ${#bundles[@]} == 0 )); then
   echo "::notice::$tag has no Flatpak bundles; the site has no Flatpak repo"
   exit 0

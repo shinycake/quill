@@ -7,8 +7,9 @@
 # Anyone with write access can replace a draft's files, and published
 # releases are immutable, so a swap made before publishing would stay. The
 # check: the draft's files must be exactly the workflow's `quill-release-<tag>`
-# artifact plus the two Flatpak bundles, from a release.yml run on main, each
-# with the same SHA-256, each uploaded by github-actions. Run it as the owner:
+# artifact plus the two Flatpak bundles and their signatures, from a
+# release.yml run on main, each with the same SHA-256, each uploaded by
+# github-actions; then every file's signature must verify. Run it as the owner:
 # publishing creates the tag, which only admins may create.
 set -euo pipefail
 TAG=${1:?usage: release-publish.sh <tag> [--check-only]}
@@ -30,8 +31,8 @@ path=$(gh api "repos/$REPO/actions/runs/$run" --jq '.path')
 [ "$path" = .github/workflows/release.yml ] || die "run $run is $path, not release.yml"
 
 gh run download "$run" -R "$REPO" -n "quill-release-$TAG" -D "$work/release"
-for arch in x86_64 aarch64; do
-  gh run download "$run" -R "$REPO" -n "quill-flatpak-$arch" -D "$work/release/release-out"
+for name in quill-flatpak-x86_64 quill-flatpak-aarch64 quill-flatpak-signatures; do
+  gh run download "$run" -R "$REPO" -n "$name" -D "$work/release/release-out"
 done
 
 expected="$work/expected.txt"
@@ -46,6 +47,11 @@ if ! diff -u "$expected" "$work/actual.txt"; then
   die "the draft's files differ from what run $run built (lines above: - built, + on the draft). Do not publish."
 fi
 echo "release-publish: $(wc -l < "$expected" | tr -d ' ') files match run $run"
+# Drafts' files are not public, so check the signatures on the local copies.
+for f in "$work"/release/release-out/*; do
+  case "$f" in *.sig) continue ;; esac
+  python3 -I "$(dirname "$0")/release_verify.py" file "${TAG#v}" "$f" || die "$(basename "$f") does not match its signature"
+done
 
 [ "$MODE" = --check-only ] && exit 0
 gh release edit "$TAG" -R "$REPO" --draft=false

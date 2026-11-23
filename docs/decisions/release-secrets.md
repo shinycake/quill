@@ -11,8 +11,9 @@
 | `UPDATE_SIGNING_KEY` | `update-signing` environment | `release.yml` assemble job (`scripts/release-sign-updates.sh`) |
 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | repository | release packaging; these are compiled into every shipped binary, so they are not treated as signing secrets |
 
-Both environments accept only `main` and `v*` tags, so a workflow pushed on any
-other branch never sees these secrets. `release` also needs the owner
+All three environments accept only `main` (not tags: a release recreated on
+an old tag would run that old commit's workflows), so a workflow pushed on any
+other branch or tag never sees these secrets. `release` also needs the owner
 (shinycake) to approve each run: every release, dry runs included, waits at
 the macOS package job until he clicks **Review deployments → Approve** on the
 run page. Release threads must not approve on his behalf.
@@ -52,6 +53,27 @@ only when it verifies against the public key in
 owner's `~/.quill-signing/update-ed25519.pem`. Releases made before this
 change are not signed, so the first signed release still reaches older
 installs through their old, digest-only check.
+
+## Nothing trusts a release by itself
+
+Write access can also delete a release and recreate it on an old tag, mark
+any release "latest", and replace files on releases published before
+immutable releases were turned on. So since signing began every release
+file has `<file>.sig`, and every consumer checks it:
+
+- the updater (`src/update_install/signature.rs`);
+- the site: `scripts/site-release-data.py` shows the newest published
+  release whose files all verify (`scripts/release_verify.py pick`), not
+  GitHub's "latest", and writes `data/SHA256SUMS.txt` and
+  `data/release-tag.txt` for the install scripts; its Flatpak repo imports
+  only bundles that match their signatures;
+- Chocolatey and AUR publish only the newest verified release. They run
+  from `main` on a `release-published` dispatch (sent by
+  `release-published.yml`), never on an old tag's `release` event.
+
+`release-guard.yml` audits every signed release hourly and on each publish,
+and opens an issue for the owner if a file no longer matches its signature
+or "latest" is not the newest verified release.
 
 ## Immutable releases and checked drafts
 

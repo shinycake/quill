@@ -22,6 +22,9 @@ on:
         required: false
         default: ""
   workflow_call:
+    secrets:
+      UPDATE_SIGNING_KEY:
+        required: false
     inputs:
       tag:
         description: The draft release to build and attach the bundles to
@@ -131,22 +134,36 @@ jobs:
           run --command=sh "$APP_ID" -c 'readlink -f /app/bin/quill' | grep -qx /app/lib/quill/quill
 
   publish:
-    name: attach the bundles to the draft release
+    name: sign and attach the bundles to the draft release
     needs: flatpak
     if: inputs.artifact != ''
     runs-on: ubuntu-latest
+    # UPDATE_SIGNING_KEY; the caller passes `secrets: inherit`.
+    environment: update-signing
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ inputs.tag }}
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: quill-flatpak-*
           merge-multiple: true
+          path: bundles
+      - name: Sign the bundles
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: bash scripts/release-sign-updates.sh bundles "${TAG#v}" quill-linux-x86_64.flatpak quill-linux-aarch64.flatpak
+      - uses: actions/upload-artifact@v7
+        with:
+          name: quill-flatpak-signatures
+          path: bundles/*.sig
+          if-no-files-found: error
       - name: Attach the bundles to the draft
         run: |
           [ "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true ] \
             || { echo "::error::$TAG is not a draft"; exit 1; }
-          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" quill-linux-x86_64.flatpak quill-linux-aarch64.flatpak --clobber
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber bundles/quill-linux-x86_64.flatpak bundles/quill-linux-aarch64.flatpak \
+            bundles/quill-linux-x86_64.flatpak.sig bundles/quill-linux-aarch64.flatpak.sig

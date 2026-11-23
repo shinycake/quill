@@ -1,0 +1,43 @@
+name: release-guard
+# Anyone with write access can replace, add or delete release files, recreate
+# an old release or move the "latest" flag. This checks, from main's code,
+# that every signed release still matches its signatures and that "latest"
+# is the newest verified release (scripts/release_verify.py), and opens an
+# issue for the owner when not (docs/decisions/release-secrets.md).
+on:
+  schedule:
+    - cron: '17 * * * *'
+  repository_dispatch:
+    types: [release-published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: release-guard
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: audit the releases
+        run: python3 scripts/release_verify.py audit 2>&1 | tee audit.txt; exit "${PIPESTATUS[0]}"
+      - name: tell the owner
+        if: failure()
+        run: |
+          title='Release files changed: check the releases'
+          open="$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          body="$(printf '@shinycake the release guard found a problem (run %s):\n\n```\n%s\n```\n' \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" "$(grep '::error::' audit.txt | sed 's/::error:://')")"
+          if [ -n "$open" ]; then
+            gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
