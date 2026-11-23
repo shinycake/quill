@@ -934,10 +934,20 @@ impl MetalRenderer {
         if let Some(glass) = &glass {
             glass.commit_renders();
         }
+        // QUILL (glass effects): `QUILL_GPU_PROBE=1` prints each frame's GPU
+        // time and its lens count to stderr ("GLASSGPU main <ms> <lenses>"),
+        // for the budget table in docs/decisions/glass-effects.md.
+        let probe_lenses = gpu_probe_on().then_some(scene.lenses.len());
         let block = RcBlock::new(
-            move |_: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+            move |buffer: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
                 if let Some((instance_buffer, _surface_textures)) = frame_resources.take() {
                     instance_buffer_pool.lock().release(instance_buffer);
+                }
+                if let Some(lenses) = probe_lenses {
+                    // SAFETY: Metal passes the completed, live command buffer.
+                    let buffer = unsafe { buffer.as_ref() };
+                    let ms = (buffer.GPUEndTime() - buffer.GPUStartTime()) * 1000.0;
+                    eprintln!("GLASSGPU main {ms:.4} {lenses}");
                 }
             },
         );
@@ -2846,4 +2856,11 @@ mod tests {
         assert_eq!(command_buffer.status(), MTLCommandBufferStatus::Completed);
         assert_eq!(read_texture_to_image(&target_texture).unwrap(), image);
     }
+}
+
+/// QUILL (glass effects): whether `QUILL_GPU_PROBE` asks for per-frame GPU
+/// times. Read once.
+fn gpu_probe_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("QUILL_GPU_PROBE").is_ok_and(|value| value == "1"))
 }

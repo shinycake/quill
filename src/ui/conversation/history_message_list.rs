@@ -531,7 +531,9 @@ impl QuillApp {
                 .jump_button_always(has_newer)
                 .with_jump_button_renderer({
                     let jump = cx.weak_entity();
+                    let glass = crate::ui::glass::lens(crate::ui::glass::GlassRole::Control, cx);
                     move |button| {
+                        let button = crate::ui::glass::glass_button(button, glass);
                         // tdesktop `lng_jump_to_bottom`; the badge's count
                         // follows the name, as on the other jump buttons.
                         let name = if unread_count > 0 {

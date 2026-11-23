@@ -263,3 +263,11 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
   `src/metal_atlas.rs`: `MetalAtlas::removals`. `build.rs` and
   `vendor/gpui/src/scene.rs`: the new fields and `LensInkInstance` for the
   shader header.
+
+## GPU time probe for glass budgets
+
+Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`).
+`src/metal_renderer.rs`: with `QUILL_GPU_PROBE=1` in the environment (read
+once), each frame's completion handler prints the command buffer's GPU time
+and the frame's lens count to stderr as `GLASSGPU main <ms> <lenses>`.
+Without it nothing is read or printed.

@@ -22,7 +22,7 @@ use gpui_kit::*;
 use quill::glass::{GlassLook, GlassOverride, Material, Readings, SolidReason, resolve};
 
 pub(crate) use recipes::GlassRole;
-pub(crate) use surface::GlassSurface;
+pub(crate) use surface::{GlassFill, GlassSurface, glass_button, media_glass_button};
 
 /// Everything the look is made of, and the look.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -64,16 +64,14 @@ pub(crate) fn lens(role: GlassRole, cx: &App) -> Option<LensStyle> {
         .then(|| recipes::recipe(role, &cx.theme().colors))
 }
 
-/// Whether glass may move (rim light leaning to the pointer).
-pub(crate) fn moves(cx: &App) -> bool {
-    look(cx) == GlassLook::Glass(quill::glass::Motion::Full)
-}
-
 /// The kit's popovers and toasts ask through this.
 fn kit_glass(surface: PopoverGlassSurface, cx: &App) -> Option<LensStyle> {
     match surface {
         PopoverGlassSurface::Popover => lens(GlassRole::Menu, cx),
         PopoverGlassSurface::Toast => lens(GlassRole::Panel, cx),
+        PopoverGlassSurface::TabSelection { travel } => {
+            lens(GlassRole::Selection, cx).map(|style| recipes::sliding(style, travel))
+        }
     }
 }
 

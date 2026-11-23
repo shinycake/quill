@@ -149,4 +149,8 @@ optional `LensStyle`; Quill installs it. While it answers `Some`,
 input completions) and the notification card draw that glass through
 gpui-pre's `Styled::backdrop_glass` instead of their fill, edge ring and
 shadow; while it answers `None`, or with no global, they draw exactly as
-before. Re-apply when re-vendoring.
+before. `src/tab/tab_bar.rs` asks it too, with
+`PopoverGlassSurface::TabSelection { travel }` (how far the sliding
+indicator still has to go, in tab widths), for the segmented variant's
+selection pill of a bar built with `TabBar::glass_selection()`. Re-apply
+when re-vendoring.

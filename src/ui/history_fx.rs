@@ -9,6 +9,8 @@
 
 use super::app::QuillApp;
 use super::motion::MotionState;
+use gpui_kit::component::theme::ActiveTheme as _;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -486,7 +488,17 @@ impl QuillApp {
                 .child(super::anim_layer::occluder(
                     // Floats over the history: its click opens the
                     // calendar only, never the media under it.
-                    super::conversation::date_pill_button(&label, cx).block_mouse_except_scroll(),
+                    super::conversation::date_pill_button(&label, cx)
+                        .block_mouse_except_scroll()
+                        .map(|pill| {
+                            match super::glass::lens(super::glass::GlassRole::Control, cx) {
+                                Some(glass) => pill
+                                    .bg(gpui_kit::transparent_black())
+                                    .text_color(cx.theme().foreground)
+                                    .backdrop_glass(Some(glass)),
+                                None => pill,
+                            }
+                        }),
                 ))
                 .into_any_element(),
         )

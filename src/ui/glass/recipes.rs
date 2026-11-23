@@ -34,7 +34,8 @@ pub(crate) enum GlassRole {
     MediaText,
     /// Bars over the chat list (the sidebar header, folder strip).
     Bar,
-    /// The selected tab's capsule.
+    /// The selected tab's capsule (segmented tabs): frosted at rest,
+    /// clearing while it slides ([`sliding`]).
     Selection,
     /// The one accent-tinted control of a view (send).
     Prominent,
@@ -90,11 +91,7 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
             shadow: 0.0,
             ..slab(black(), MEDIA_TEXT_FROST, 10.0, 8.0, 0.0)
         },
-        GlassRole::Selection => LensStyle {
-            material: LensMaterial::Tinted { edge_clear: 0.25 },
-            shadow: 0.05,
-            ..button(colors.primary, 0.0, 0.0)
-        },
+        GlassRole::Selection => button(colors.background, CONTROL_FROST, 4.0),
         GlassRole::Prominent => LensStyle {
             material: LensMaterial::Tinted { edge_clear: 0.2 },
             ..button(colors.primary, 0.0, 0.0)
@@ -128,7 +125,11 @@ pub(crate) fn labels(role: GlassRole, colors: &ThemeColor) -> Labels {
                 ..gpui_kit::white()
             },
         },
-        GlassRole::Selection | GlassRole::Prominent => Labels {
+        GlassRole::Selection => Labels {
+            primary: colors.foreground,
+            secondary: colors.muted_foreground,
+        },
+        GlassRole::Prominent => Labels {
             primary: colors.primary_foreground,
             secondary: colors.primary_foreground,
         },
@@ -225,24 +226,26 @@ fn button(tint: Hsla, frost: f32, blur: f32) -> LensStyle {
     }
 }
 
-/// A control's rim light leaning towards the pointer (`toward`, from the
-/// control's centre, any length) while it is hovered.
-pub(crate) fn lean_light(style: LensStyle, toward: gpui_kit::Point<f32>) -> LensStyle {
-    LensStyle {
-        light: toward,
-        light_mix: 0.6,
-        ..style
-    }
-}
-
-/// A pressed control sinks slightly: a deeper bevel and a tighter shadow.
-pub(crate) fn pressed(style: LensStyle) -> LensStyle {
-    LensStyle {
-        bevel: style.bevel * 1.25,
-        shadow: style.shadow * 0.6,
-        shadow_offset: style.shadow_offset * 0.5,
-        ..style
-    }
+/// The selection while it slides: `travel` (0 at rest, 1 a whole tab
+/// away) takes the frost away and deepens the bend, so the backdrop shows
+/// through the moving lens; at rest it is the recipe as is.
+pub(crate) fn sliding(style: LensStyle, travel: f32) -> LensStyle {
+    let travel = travel.clamp(0.0, 1.0);
+    let material = match style.material {
+        LensMaterial::Clear {
+            bend,
+            frost,
+            blur,
+            blur_mix,
+        } => LensMaterial::Clear {
+            bend,
+            frost: frost * (1.0 - travel),
+            blur,
+            blur_mix: blur_mix * (1.0 - travel),
+        },
+        tinted => tinted,
+    };
+    LensStyle { material, ..style }
 }
 
 /// The colour the middle of the glass settles to over a flat `backdrop`:

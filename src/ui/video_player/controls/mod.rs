@@ -45,6 +45,7 @@ pub(crate) use overlay::{LiveOverlayParts, PictureOverlay, PictureState, stream_
 pub(crate) use scrubber::{HoverHandler, VideoScrubber, elapsed_label, remaining_label};
 pub(crate) use speed::{SpeedMenu, speed_trigger};
 
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::Transport;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
@@ -524,7 +525,9 @@ impl RenderOnce for VideoController {
             .max_w_full()
             .h(PANEL_HEIGHT)
             .when(!self.bare, |panel| {
-                panel.rounded(cx.theme().radius_lg).bg(panel_background())
+                panel
+                    .rounded(cx.theme().radius_lg)
+                    .glass_or(GlassRole::MediaText, cx, |panel| panel.bg(panel_background()))
             })
             .when(self.grabbed, |panel| panel.cursor_grabbing())
             .when_some(self.press, |panel, press| {

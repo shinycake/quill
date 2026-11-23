@@ -4,6 +4,7 @@
 //! idle timer (tdesktop `_fullScreenVideo`).
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::geometry::{BAR_BOTTOM_GAP, BAR_SIDE_GAP, CAPTION_GAP, GROUP_STRIP_ROOM, lane_width};
 use super::layer::ViewerGeometry;
 use super::*;
@@ -365,7 +366,7 @@ impl QuillApp {
                          label: &'static str,
                          step: i32,
                          cx: &mut Context<Self>| {
-            Button::new(id)
+            let button = Button::new(id)
                 .icon(icon)
                 .large()
                 .rounded_full()
@@ -374,7 +375,8 @@ impl QuillApp {
                         .color(gpui_kit::black().opacity(0.4))
                         .foreground(gpui_kit::white())
                         .hover(gpui_kit::black().opacity(0.6)),
-                )
+                );
+            crate::ui::glass::media_glass_button(button, cx)
                 .tooltip(label)
                 .accessibility_label(label)
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -515,7 +517,7 @@ impl QuillApp {
                     .flex()
                     .flex_col()
                     .rounded(cx.theme().radius_lg)
-                    .bg(panel_background())
+                    .glass_or(GlassRole::MediaText, cx, |bar| bar.bg(panel_background()))
                     .when(self.viewer.controller.is_held(), |bar| {
                         bar.cursor_grabbing()
                     })

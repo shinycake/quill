@@ -102,6 +102,7 @@ impl QuillApp {
             return None;
         }
         let weak = cx.weak_entity();
+        let glass = crate::ui::glass::lens(crate::ui::glass::GlassRole::Control, cx);
         Some(
             div()
                 .absolute()
@@ -119,7 +120,7 @@ impl QuillApp {
                         // stack keeps its height while a button moves.
                         .mt(px(rise))
                         .mb(px(-rise))
-                        .child(corner_button(kind, button.value, weak.clone()))
+                        .child(corner_button(kind, button.value, weak.clone(), glass))
                 }))
                 .into_any_element(),
         )
@@ -171,7 +172,12 @@ impl QuillApp {
     }
 }
 
-fn corner_button(kind: UnreadJumpKind, count: i32, owner: WeakEntity<QuillApp>) -> AnyElement {
+fn corner_button(
+    kind: UnreadJumpKind,
+    count: i32,
+    owner: WeakEntity<QuillApp>,
+    glass: Option<LensStyle>,
+) -> AnyElement {
     let (id, icon, label, tooltip) = match kind {
         UnreadJumpKind::Mention => (
             "jump-mention",
@@ -214,7 +220,7 @@ fn corner_button(kind: UnreadJumpKind, count: i32, owner: WeakEntity<QuillApp>) 
                 }),
             )
         })
-        .child(
+        .child(crate::ui::glass::glass_button(
             Button::new(id)
                 .secondary()
                 .icon(icon)
@@ -225,7 +231,8 @@ fn corner_button(kind: UnreadJumpKind, count: i32, owner: WeakEntity<QuillApp>) 
                 .on_click(move |_, _, cx| {
                     let _ = jump_owner.update(cx, |this, cx| this.jump_to_unread_marker(kind, cx));
                 }),
-        )
+            glass,
+        ))
         .child(
             div()
                 .absolute()
