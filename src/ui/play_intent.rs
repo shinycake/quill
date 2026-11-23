@@ -82,6 +82,16 @@ impl PlayTarget {
         }
     }
 
+    /// The viewer's clip stays parked when its download stops: it waits
+    /// while its item is on show (a step, the close, a cancel or another
+    /// press ends it), so a transfer TDLib reports idle for a moment and
+    /// then finishes still plays, and the viewer's Download asks again. A
+    /// voice note, song or chat clip drops with its download
+    /// (`discard_stopped_media_playback`).
+    pub(super) const fn outlives_a_stopped_download(&self) -> bool {
+        matches!(self, Self::Viewer { .. })
+    }
+
     pub(super) const fn kind(&self) -> PlayKind {
         match self {
             Self::Voice { .. } => PlayKind::Voice,
@@ -128,8 +138,9 @@ impl QuillApp {
         })
     }
 
-    /// Download `file` (unless it already downloads) and play `target` once
-    /// it lands.
+    /// Download `file` and play `target` once it lands. A file only an
+    /// automatic download fetches (a chat clip's background prefetch, at
+    /// the lowest priority) is asked for again as the user's download.
     pub(super) fn play_when_ready(
         &mut self,
         file: FileId,
@@ -137,9 +148,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.playback.intent = Some(PlayIntent { file, target });
-        if !self.file_is_fetching(file) {
-            self.request_media_download(file, None, cx);
-        }
+        self.request_play_download(file, cx);
         cx.notify();
     }
 

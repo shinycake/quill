@@ -296,6 +296,27 @@ impl<S: JsonSender> ConnectDriver<S> {
         file_id: FileId,
         origin: Option<(ChatId, i64)>,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_user_download(file_id, origin, false)
+    }
+
+    /// [`Self::download_user_file`] for a press on Play: a file only an
+    /// automatic download fetches (a chat clip's prefetch, at the lowest
+    /// priority) is asked for again as the user's download, which TDLib
+    /// runs at the user's priority, as tdesktop raises the load of a
+    /// clicked file. Other user downloads leave a running automatic one be.
+    pub fn download_file_to_play(
+        &mut self,
+        file_id: FileId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_user_download(file_id, None, true)
+    }
+
+    fn send_user_download(
+        &mut self,
+        file_id: FileId,
+        origin: Option<(ChatId, i64)>,
+        to_play: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -319,7 +340,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .files
                 .get(&file_id.0)
                 .is_none_or(|file| file.needs_download());
-        if !preloaded && !undoes_cancel && !self.session.should_download(file_id) {
+        let wanted = if to_play {
+            self.session.wants_play_download(file_id)
+        } else {
+            self.session.should_download(file_id)
+        };
+        if !preloaded && !undoes_cancel && !wanted {
             return Ok(None);
         }
         let origin = origin

@@ -32,6 +32,29 @@ impl QuillApp {
         self.request_media_download_to(file_id, sponsored, None, cx);
     }
 
+    /// A press on Play downloads `file_id` as the user's, taking over an
+    /// automatic download that fetches it (`ConnectDriver::download_file_to_play`).
+    pub(super) fn request_play_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            match live.driver.download_file_to_play(file_id) {
+                Ok(Some(_)) => self.set_note(StatusNote::silent(tr(keys::Q_OPS_DOWNLOADING))),
+                Ok(None) => {}
+                Err(_) => {
+                    self.drop_play_intent_for(file_id);
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
+                    )));
+                }
+            }
+        } else if let Some(session) = self.demo_session.as_mut()
+            && session.wants_play_download(file_id)
+        {
+            // The transfer starts as the driver records one; no bytes arrive.
+            session.begin_user_download(file_id);
+        }
+        cx.notify();
+    }
+
     /// [`Self::request_media_download`], copying the file to `target` once
     /// it finishes (`ui::folder_saves`).
     pub(super) fn request_media_download_to(
@@ -76,7 +99,13 @@ impl QuillApp {
     }
 
     pub(super) fn discard_stopped_media_playback(&mut self, cx: &mut Context<Self>) {
-        let Some(file_id) = self.playback.intent.as_ref().map(|intent| intent.file) else {
+        let Some(file_id) = self
+            .playback
+            .intent
+            .as_ref()
+            .filter(|intent| !intent.target.outlives_a_stopped_download())
+            .map(|intent| intent.file)
+        else {
             return;
         };
         let stopped = self.session().is_some_and(|s| {
