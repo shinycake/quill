@@ -13,8 +13,8 @@
 
 use gpui_kit::component::theme::ThemeColor;
 use gpui_kit::{
-    Hsla, LENS_DESIGN_HEIGHT, LensBend, LensDetail, LensMaterial, LensStyle, LensTune, Rgba, point,
-    px,
+    Hsla, LENS_DESIGN_HEIGHT, LensBend, LensBorder, LensDetail, LensMaterial, LensStyle, LensTune,
+    Rgba, point, px,
 };
 
 /// What a surface is, which decides its look. The list is closed: a new
@@ -51,8 +51,8 @@ const BAR_FROST: f32 = 0.84;
 /// The look of `role` in a theme.
 pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
     match role {
-        GlassRole::Menu => slab(colors.popover, MENU_FROST, 18.0, 10.0, 0.22),
-        GlassRole::Panel => slab(colors.popover, PANEL_FROST, 22.0, 14.0, 0.26),
+        GlassRole::Menu => floating(slab(colors.popover, MENU_FROST, 18.0, 4.0, 0.12), colors),
+        GlassRole::Panel => floating(slab(colors.popover, PANEL_FROST, 22.0, 6.0, 0.14), colors),
         GlassRole::Bar => LensStyle {
             shadow: 0.0,
             ..slab(colors.sidebar, BAR_FROST, 18.0, 8.0, 0.0)
@@ -64,6 +64,21 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
             ..slab(black(), MEDIA_TEXT_FROST, 10.0, 8.0, 0.0)
         },
         GlassRole::Selection => button(colors.background, CONTROL_FROST, 4.0),
+    }
+}
+
+/// A menu or panel floating over the window: a tight shadow and the
+/// theme's hairline edge, like the solid popover, so the glass reads as a
+/// crisp card instead of a haze.
+fn floating(style: LensStyle, colors: &ThemeColor) -> LensStyle {
+    LensStyle {
+        shadow_softness: 10.0,
+        shadow_offset: 3.0,
+        border: Some(LensBorder {
+            color: colors.border,
+            width: px(1.0),
+        }),
+        ..style
     }
 }
 
