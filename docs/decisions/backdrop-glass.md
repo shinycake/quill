@@ -271,6 +271,18 @@ use it.
   tools): the whole app for Linux, and gpui-pre and gpui-pre-windows for
   Windows (the app itself has unrelated Windows-only clippy findings in
   files this change does not touch).
+- GitHub Actions run 45092444350 (2026-11-22), both jobs green, on a
+  scratch branch since deleted:
+  - Linux (`ubuntu-latest`, Xvfb, Mesa): `ready-glass` on Vulkan
+    (lavapipe) in light, dark and glass off, and on OpenGL (llvmpipe) in
+    light and glass off. The select's neck, the action button's droplet
+    and both loupes draw on both paths; the sharp loupe copies, as
+    designed.
+  - Windows (`windows-latest`, WARP): the glass shaders compile through
+    D3DCompileFromFile in a debug build and through fxc in a release build,
+    and `ready-glass` draws the neck, the droplet and the copied loupe in
+    light and dark. The runner's screen is 1028 px wide, so the sharp loupe
+    at x = 1030 falls outside the window there.
 
 ## Not done here
 
