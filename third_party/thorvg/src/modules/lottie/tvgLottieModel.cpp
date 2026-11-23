@@ -183,10 +183,10 @@ void LottieSlot::reset()
 {
     if (!overridden) return;
 
-    ARRAY_FOREACH(pair, pairs) {
-        pair->obj->override(pair->prop, true);
-        delete(pair->prop);
-        pair->prop = nullptr;
+    for (auto& pair : pairs) {
+        pair.obj->override(pair.prop, true);
+        delete (pair.prop);
+        pair.prop = nullptr;
     }
     overridden = false;
 }
@@ -197,9 +197,9 @@ void LottieSlot::apply(LottieProperty* prop, bool byDefault)
     auto release = overridden || byDefault;
 
     //apply slot object to all targets
-    ARRAY_FOREACH(pair, pairs) {
-        auto backup = pair->obj->override(prop, release);
-        if (!release) pair->prop = backup;
+    for (auto& pair : pairs) {
+        auto backup = pair.obj->override(prop, release);
+        if (!release) pair.prop = backup;
     }
 
     if (!byDefault) overridden = true;
@@ -218,8 +218,11 @@ float LottieTextRange::factor(float frameNo, float totalLen, float idx)
     if (random > 0) {
         auto range = end - start;
         auto len = (rangeUnit == Unit::Percent) ? 100.0f : totalLen;
-        start = static_cast<float>(random % int(len - range));
-        end = start + range;
+        auto span = int(len - range);
+        if (span != 0) {
+            start = static_cast<float>(random % span);
+            end = start + range;
+        }
     }
 
     auto divisor = (rangeUnit == Unit::Percent) ? (100.0f / totalLen) : 1.0f;
@@ -282,8 +285,9 @@ float LottieTextRange::factor(float frameNo, float totalLen, float idx)
         if (minEase > 0.0f) out.x = minEase * 0.01f;
         else out.y = -minEase * 0.01f;
 
-        interpolator->set(nullptr, in, out);
-        f = interpolator->progress(f);
+        LottieInterpolator interpolator;
+        interpolator.set(nullptr, in, out);
+        f = interpolator.progress(f);
     }
     f = tvg::clamp(f, 0.0f, 1.0f);
 
@@ -294,7 +298,7 @@ float LottieTextRange::factor(float frameNo, float totalLen, float idx)
 /* LottieImage                                                          */
 /************************************************************************/
 
-Picture* LottieImage::get()
+Picture* LottieImage::get(const AssetResolver* resolver)
 {
     if (picture) return picture;
 
@@ -305,11 +309,16 @@ Picture* LottieImage::get()
     picture = Picture::gen();
     picture->ref();
 #endif
-    auto result = Result::Unknown;
-    if (asset.size > 0) result = picture->load(asset.data, asset.size, asset.mimeType);
-    else if (asset.external) result = picture->load(asset.path);
+    if (asset.size > 0) {
+        valid = (picture->load(asset.data, asset.size, asset.mimeType) == Result::Success);
+    } else if (asset.path) {
+        valid = resolver && !resolver->fallback && resolver->func(picture, asset.path, resolver->data);
+        if (!valid) {
+            if (asset.external) valid = (picture->load(asset.path) == Result::Success);
+            if (!valid && resolver && resolver->fallback) valid = resolver->func(picture, asset.path, resolver->data);
+        }
+    }
     picture->size(asset.width, asset.height);
-    valid = (result == Result::Success);
 
     return picture;
 }
@@ -496,7 +505,7 @@ Fill* LottieGradient::fill(float frameNo, uint8_t opacity, LottieTween& tween, L
 LottieGroup::LottieGroup(LottieObject::Type type) : LottieObject(type)
 {
     reqFragment = false;
-    buildDone = false;
+    builded = false;
     building = false;
     trimpath = false;
     visible = false;
@@ -505,14 +514,14 @@ LottieGroup::LottieGroup(LottieObject::Type type) : LottieObject(type)
 
 void LottieGroup::clear()
 {
-    ARRAY_FOREACH(p, children) delete (*p);
+    for (auto& p : children) delete (p);
     children.reset();
 }
 
 LottieProperty* LottieGroup::property(uint16_t ix)
 {
-    ARRAY_FOREACH(p, children) {
-        auto child = static_cast<LottieObject*>(*p);
+    for (auto& p : children) {
+        auto child = static_cast<LottieObject*>(p);
         if (auto property = child->property(ix)) return property;
     }
 
@@ -522,7 +531,7 @@ LottieProperty* LottieGroup::property(uint16_t ix)
 
 void LottieGroup::prepare()
 {
-    if (children.count == 0) return;
+    if (children.empty()) return;
 
     size_t strokeCnt = 0;
     size_t fillCnt = 0;
@@ -602,9 +611,9 @@ float LottieRootLayer::remap(LottieComposition* comp, float frameNo, LottieExpre
 
 LottieLayer* LottieRootLayer::layerById(unsigned long id)
 {
-    ARRAY_FOREACH(p, children) {
-        if ((*p)->type != LottieObject::Type::Layer) continue;
-        auto layer = static_cast<LottieLayer*>(*p);
+    for (auto& p : children) {
+        if (p->type != LottieObject::Type::Layer) continue;
+        auto layer = static_cast<LottieLayer*>(p);
         if (layer->id == id) return layer;
     }
     return nullptr;
@@ -612,9 +621,9 @@ LottieLayer* LottieRootLayer::layerById(unsigned long id)
 
 LottieLayer* LottieRootLayer::layerByIdx(int16_t ix)
 {
-    ARRAY_FOREACH(p, children) {
-        if ((*p)->type != LottieObject::Type::Layer) continue;
-        auto layer = static_cast<LottieLayer*>(*p);
+    for (auto& p : children) {
+        if (p->type != LottieObject::Type::Layer) continue;
+        auto layer = static_cast<LottieLayer*>(p);
         if (layer->ix == ix) return layer;
     }
     return nullptr;
@@ -635,8 +644,8 @@ LottieLayer::~LottieLayer()
     //No need to free assets children because the Composition owns them.
     if (rid) children.clear();
 
-    ARRAY_FOREACH(p, masks) delete(*p);
-    ARRAY_FOREACH(p, effects) delete(*p);
+    for (auto& p : masks) delete (p);
+    for (auto& p : effects) delete (p);
 
     delete(transform);
     delete(audioCtrl);
@@ -696,16 +705,15 @@ LottieComposition::~LottieComposition()
     if (!initiated && root) Paint::rel(root->scene);
 
     delete (root);
-    tvg::free(version);
     tvg::free(name);
 
-    ARRAY_FOREACH(p, interpolators) {
-        tvg::free((*p)->key);
-        tvg::free(*p);
+    for (auto& p : interpolators) {
+        tvg::free(p->key);
+        tvg::free(p);
     }
 
-    ARRAY_FOREACH(p, assets) delete (*p);
-    ARRAY_FOREACH(p, fonts) delete (*p);
-    ARRAY_FOREACH(p, slots) delete (*p);
-    ARRAY_FOREACH(p, markers) delete (*p);
+    for (auto& p : assets) delete (p);
+    for (auto& p : fonts) delete (p);
+    for (auto& p : slots) delete (p);
+    for (auto& p : markers) delete (p);
 }

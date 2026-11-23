@@ -18,20 +18,20 @@ below no longer reads.
 
 The patch holds the detail of each change. This list says what it touches.
 
-`src/loaders/lottie/tvgLottieParser.cpp`: reading of keyframes, properties, layers
+`src/modules/lottie/tvgLottieParser.cpp`: reading of keyframes, properties, layers
 and metadata. Slots, text, fonts and glyphs are not read, since Quill overrides no
 slot and rlottie draws no text, so tdesktop shows none. Metadata Quill never uses is
 skipped, as rlottie does.
 
-`src/loaders/lottie/tvgLottieParserHandler.cpp`, `tvgLottieParserHandler.h`: number
+`src/modules/lottie/tvgLottieParserHandler.cpp`, `tvgLottieParserHandler.h`: number
 reading and the way a parse ends.
 
-`src/loaders/lottie/tvgLottieBuilder.cpp`: scene building, with limits on counts that
+`src/modules/lottie/tvgLottieBuilder.cpp`: scene building, with limits on counts that
 size a loop.
 
-`src/loaders/lottie/tvgLottieModifier.cpp`, `tvgLottieModifier.h`: the path modifiers.
+`src/modules/lottie/tvgLottieModifier.cpp`, `tvgLottieModifier.h`: the path modifiers.
 
-`src/loaders/lottie/tvgLottieModel.cpp`, `tvgLottieModel.h`, `tvgLottieCommon.h`: the
+`src/modules/lottie/tvgLottieModel.cpp`, `tvgLottieModel.h`, `tvgLottieCommon.h`: the
 model's handling of layers, groups, gradients and masks, and its integer widths.
 
 `src/renderer/cpu_engine/tvgSwUtil.cpp`, `tvgSwRle.cpp`, `tvgSwStroke.cpp`,
@@ -50,3 +50,11 @@ the global `operator new`, `new[]`, `delete` and `delete[]` are gone. They calle
 them makes dyld rebind every system library's uses before `main`, about 300 ms of a
 cold launch (`docs/decisions/launch-cold-floor.md`). Upstream PR thorvg/thorvg#4872
 scopes them to ThorVG's classes; once that is in a release, this change can go.
+
+## Dropped at v1.1.4
+
+Two changes went upstream and left the patch: the guard against precomps that
+reference each other in a cycle (`building` in `tvgLottieModel.h`, checked in
+`_buildComposition`), and a gradient's shared stop count taking the smallest count
+over its keyframes. The repeater copy limit now checks the whole chain before the
+first copy, since v1.1.4 draws only the last stage.

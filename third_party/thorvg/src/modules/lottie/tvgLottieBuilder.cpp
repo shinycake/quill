@@ -406,56 +406,60 @@ static bool _draw(LottieGroup* parent, LottieShape* shape, RenderContext* ctx)
 
 static void _repeat(LottieGroup* parent, Shape* path, LottieRenderPooler<Shape>* pooler, RenderContext* ctx)
 {
+    //QUILL: only the last stage draws, so refuse the whole chain up front
+    constexpr uint64_t MAX_COPIES = 4096;
+    uint64_t copies = 1;
+    for (auto& r : ctx->repeaters) {
+        copies *= (r.cnt > 0) ? (uint64_t)r.cnt : 0;
+        if (copies > MAX_COPIES) return;
+    }
+
     Array<Shape*> propagators;
     propagators.push(ctx->propagator);
     Array<Shape*> shapes;
 
     ARRAY_REVERSE_FOREACH(repeater, ctx->repeaters) {
-        //QUILL
-        constexpr uint64_t MAX_COPIES = 4096;
-        if ((uint64_t)propagators.count * repeater->cnt > MAX_COPIES) break;
-
+        auto last = (repeater == ctx->repeaters.begin());
         shapes.reserve(repeater->cnt);
 
+        Matrix inv;
+        inverse(&repeater->transform, &inv);
         for (int i = 0; i < repeater->cnt; ++i) {
             auto multiplier = repeater->offset + static_cast<float>(i);
-            ARRAY_FOREACH(p, propagators) {
+            auto opacity = tvg::lerp<uint8_t>(repeater->startOpacity, repeater->endOpacity, static_cast<float>(i + 1) / repeater->cnt);
+
+            auto m = tvg::identity();
+            translate(&m, repeater->position * multiplier + repeater->anchor);
+            scale(&m, {powf(repeater->scale.x * 0.01f, multiplier), powf(repeater->scale.y * 0.01f, multiplier)});
+            rotate(&m, repeater->rotation * multiplier);
+            translateR(&m, -repeater->anchor);
+            auto transform = repeater->transform * m;
+
+            for (auto& p : propagators) {
                 auto shape = pooler->pooling();
                 shape->ref();   //prevent pooler returns the same shape
-                PAINT((*p))->duplicate(shape);
+                PAINT(p)->duplicate(shape);
                 to<ShapeImpl>(shape)->rs.path = to<ShapeImpl>(path)->rs.path;
-                auto opacity = tvg::lerp<uint8_t>(repeater->startOpacity, repeater->endOpacity, static_cast<float>(i + 1) / repeater->cnt);
                 shape->opacity(MULTIPLY(shape->opacity(), opacity));
-
-                auto m = tvg::identity();
-                translate(&m, repeater->position * multiplier + repeater->anchor);
-                scale(&m, {powf(repeater->scale.x * 0.01f, multiplier), powf(repeater->scale.y * 0.01f, multiplier)});
-                rotate(&m, repeater->rotation * multiplier);
-                translateR(&m, -repeater->anchor);
-
-                Matrix inv;
-                inverse(&repeater->transform, &inv);
-                shape->transform((repeater->transform * m) * (inv * shape->transform()));
+                shape->transform(transform * (inv * shape->transform()));
                 shapes.push(shape);
             }
         }
 
+        //release the previous stage's copies, the templates of this stage
+        if (repeater != ctx->repeaters.end() - 1) {
+            for (auto& p : propagators) p->unref();
+        }
         propagators.clear();
-        propagators.reserve(shapes.count);
+        if (!last) propagators.reserve(shapes.count);
 
-        //push repeat shapes in order.
-        if (repeater->inorder) {
-            ARRAY_FOREACH(p, shapes) {
-                parent->scene->add(*p);
-                (*p)->unref();
-                propagators.push(*p);
-            }
-        } else if (!shapes.empty()) {
-            ARRAY_REVERSE_FOREACH(p, shapes) {
-                parent->scene->add(*p);
-                (*p)->unref();
-                propagators.push(*p);
-            }
+        //only the last stage draws the copies
+        for (uint32_t i = 0; i < shapes.count; ++i) {
+            auto p = shapes[repeater->inorder ? i : shapes.count - 1 - i];
+            if (last) {
+                parent->scene->add(p);
+                p->unref();
+            } else propagators.push(p);
         }
         shapes.clear();
     }
@@ -991,15 +995,8 @@ void LottieBuilder::updateImage(LottieLayer* layer, float frameNo)
         return;
     }
 
-    auto picture = image->get();
+    auto picture = image->get(resolver);
     if (!picture) return;
-
-    //resolve an image asset if need
-    if (resolver && !image->valid) {
-        resolver->func(picture, image->asset.path, resolver->data);
-        picture->size(image->asset.width, image->asset.height);
-        image->valid = true;
-    }
 
     layer->scene->add(picture->refCnt() == 1 ? picture : picture->duplicate());
     image->volume(volume);
@@ -1012,19 +1009,28 @@ void LottieBuilder::updateURLFont(LottieLayer* layer, float frameNo, LottieText*
     //text load
     //TODO: cache the text instance, don't need to reload every frame.
     auto paint = Text::gen();
-    if (paint->font(doc.name) != Result::Success) {
-        char* src = nullptr;
-        if (text->font && text->font->path) {
-            src = text->font->b64src;
-        } else {
-            auto len = (strlen(doc.name) + 6);
-            src = tvg::malloc<char>(sizeof(char) * len);
-            snprintf(src, len, "name:%s", doc.name);
-        }
-        if (!resolver || !resolver->func(paint, src, resolver->data)) {
-            paint->font(nullptr);  // fallback to any available font
-        }
-        if (!text->font || !text->font->path) tvg::free(src);
+    auto resolver = (text->font && !text->font->path && text->font->b64src) ? nullptr : this->resolver;
+    auto resolve = [&]() {
+        if (text->font && text->font->path) return resolver->func(paint, text->font->b64src, resolver->data);
+        auto len = strlen(doc.name) + 6;
+        auto src = tvg::malloc<char>(len);
+        snprintf(src, len, "name:%s", doc.name);
+        auto resolved = resolver->func(paint, src, resolver->data);
+        tvg::free(src);
+        return resolved;
+    };
+
+    auto resolved = resolver && !resolver->fallback && resolve();
+    if (!resolved) {
+        if (text->font) text->font->prepare();
+        resolved = (paint->font(doc.name) == Result::Success);
+    }
+    if (!resolved && resolver && resolver->fallback) resolved = resolve();
+
+    // fallback to any available font
+    if (!resolved && paint->font(nullptr) != Result::Success) {
+        Paint::rel(paint);
+        return;
     }
 
     //text build
@@ -1058,7 +1064,8 @@ void LottieBuilder::updateURLFont(LottieLayer* layer, float frameNo, LottieText*
     //align the text to the base line, or top within the box
     TextMetrics metrics;
     paint->metrics(metrics);
-    auto vpos = doc.bbox.pos.y - (doc.bbox.size.y > 0.0f ? 0.0f : metrics.ascent);
+    auto ascent = (doc.bbox.size.y > 0.0f) ? ((text->font && text->font->ascent > 0.0f) ? metrics.ascent - text->font->ascent * doc.size : 0.0f) : metrics.ascent;
+    auto vpos = (doc.bbox.size.y > 0.0f && !doc.bbox.positioned) ? -metrics.ascent : doc.bbox.pos.y - ascent;
     paint->translate(doc.bbox.pos.x, vpos);
     paint->align(doc.justify, 0.0f);
 
@@ -1082,8 +1089,7 @@ void LottieBuilder::updateURLFont(LottieLayer* layer, float frameNo, LottieText*
     if (text->ranges.empty()) return;
 
     //FIXME: it only considers a single text-range.
-    ARRAY_FOREACH(p, text->ranges) {
-        auto range = *p;
+    for (auto range : text->ranges) {
         auto f = range->factor(frameNo, float(len), 0.0f);
         if (tvg::zero(f)) continue;
 
@@ -1106,10 +1112,10 @@ Shape* LottieBuilder::textShape(LottieText* text, float frameNo, const TextDocum
     auto shape = text->pooling();
     shape->reset();
 
-    ARRAY_FOREACH(p, glyph->children) {
-        auto group = static_cast<LottieGroup*>(*p);
-        ARRAY_FOREACH(p, group->children) {
-            static_cast<LottiePath*>(*p)->pathset(frameNo, to<ShapeImpl>(shape)->rs.path, nullptr, tween, exps);
+    for (auto& p : glyph->children) {
+        auto group = static_cast<LottieGroup*>(p);
+        for (auto& p : group->children) {
+            static_cast<LottiePath*>(p)->pathset(frameNo, to<ShapeImpl>(shape)->rs.path, nullptr, tween, exps);
             PAINT(shape)->mark(RenderUpdateFlag::Path);
         }
     }
@@ -1140,8 +1146,7 @@ bool LottieBuilder::updateTextRange(LottieText* text, float frameNo, Shape* shap
     uint8_t opacity = 255, fillOpacity = 255, strokeOpacity = 255;
     auto needGroup = false;
 
-    ARRAY_FOREACH(p, text->ranges) {
-        auto range = *p;
+    for (auto range : text->ranges) {
         auto basedIdx = ctx.idx;
 
         if (range->based == LottieTextRange::Based::CharsExcludingSpaces) basedIdx = ctx.idx - ctx.space;
@@ -1221,6 +1226,7 @@ static void _commit(LottieGlyph* glyph, Shape* shape, const RenderText& ctx)
         auto width = glyph->width * 0.5f;
         auto pos = ctx.follow->position(ctx.cursor.x + width + ctx.firstMargin, angle);
         matrix.e11 = matrix.e22 = ctx.capScale;
+        if (ctx.perpendicular) rotate(&matrix, rad2deg(angle));
         matrix.e13 = pos.x - width * matrix.e11;
         matrix.e23 = pos.y - width * matrix.e21;
     } else {
@@ -1235,22 +1241,20 @@ static void _commit(LottieGlyph* glyph, Shape* shape, const RenderText& ctx)
 static LottieGlyph* _searchGlyph(const LottieFont* font, const char* p, const TextDocument& doc, float& capScale)
 {
     capScale = 1.0f;
-    auto outCode = p;
+    char capCode[2] = {0, 0};  //outlives the search below, which reads it through p
 
     // SmallCaps: lowercase letters are converted to uppercase with 70% scale
     if ((unsigned char)*p < 0x80 && doc.caps) {
         if (*p >= 'a' && *p <= 'z') {
-            char capCode = *p + 'A' - 'a';
-            outCode = &capCode;
+            capCode[0] = *p + 'A' - 'a';
+            p = capCode;
             if (doc.caps == 2) capScale = 0.7f;
         }
     }
 
     // search for matching glyph in font
-    ARRAY_FOREACH(g, font->chars)
-    {
-        auto glyph = *g;
-        if (!strncmp(glyph->code, outCode, glyph->len)) return glyph;
+    for (auto glyph : font->chars) {
+        if (!strncmp(glyph->code, p, glyph->len)) return glyph;
     }
     return nullptr;
 }
@@ -1275,6 +1279,7 @@ void LottieBuilder::updateLocalFont(LottieLayer* layer, float frameNo, LottieTex
     RenderText ctx(text, doc);
     ctx.follow = (text->follow && ((uint32_t)text->follow->maskIdx < layer->masks.count)) ? text->follow : nullptr;
     ctx.firstMargin = ctx.follow ? ctx.follow->prepare(layer->masks[ctx.follow->maskIdx], frameNo, ctx.scale, tween, exps) : 0.0f;
+    ctx.perpendicular = ctx.follow && ctx.follow->perpendicular(frameNo, tween, exps);
     auto lineWrapped = false;
 
     //text string
@@ -1388,8 +1393,7 @@ void LottieBuilder::updateMasks(LottieLayer* layer, float frameNo)
     MaskMethod pMethod;
     uint8_t pOpacity;
 
-    ARRAY_FOREACH(p, layer->masks) {
-        auto mask = *p;
+    for (auto mask : layer->masks) {
         if (mask->method == MaskMethod::None) continue;
 
         auto method = mask->method;
@@ -1449,6 +1453,7 @@ bool LottieBuilder::updateMatte(LottieComposition* comp, float frameNo, LottieLa
         layer->scene = nullptr;
         return false;
     }
+
     return true;
 }
 
@@ -1462,8 +1467,8 @@ void LottieBuilder::updateStrokeEffect(LottieLayer* layer, LottieFxStroke* effec
 
     //FIXME: all mask
     if (effect->allMask(frameNo)) {
-        ARRAY_FOREACH(p, layer->masks) {
-            (*p)->pathset(frameNo, to<ShapeImpl>(shape)->rs.path, nullptr, tween, exps);
+        for (auto& p : layer->masks) {
+            p->pathset(frameNo, to<ShapeImpl>(shape)->rs.path, nullptr, tween, exps);
         }
     //A specific mask
     } else {
@@ -1512,29 +1517,29 @@ void LottieBuilder::updateEffect(LottieLayer* layer, float frameNo, uint8_t qual
 
     if (layer->effects.count == 0) return;
 
-    ARRAY_FOREACH(p, layer->effects) {
-        if (!(*p)->enable) continue;
-        switch ((*p)->type) {
+    for (auto& p : layer->effects) {
+        if (!p->enable) continue;
+        switch (p->type) {
             case LottieEffect::Tint: {
-                auto effect = static_cast<LottieFxTint*>(*p);
+                auto effect = static_cast<LottieFxTint*>(p);
                 auto black = effect->black(frameNo);
                 auto white = effect->white(frameNo);
                 layer->scene->add(SceneEffect::Tint, black.r, black.g, black.b, white.r, white.g, white.b, (double)effect->intensity(frameNo));
                 break;
             }
             case LottieEffect::Fill: {
-                auto effect = static_cast<LottieFxFill*>(*p);
+                auto effect = static_cast<LottieFxFill*>(p);
                 auto color = effect->color(frameNo);
                 layer->scene->add(SceneEffect::Fill, color.r, color.g, color.b, (int)(255.0f * effect->opacity(frameNo)));
                 break;
             }
             case LottieEffect::Stroke: {
-                auto effect = static_cast<LottieFxStroke*>(*p);
+                auto effect = static_cast<LottieFxStroke*>(p);
                 updateStrokeEffect(layer, effect, frameNo);
                 break;
             }
             case LottieEffect::Tritone: {
-                auto effect = static_cast<LottieFxTritone*>(*p);
+                auto effect = static_cast<LottieFxTritone*>(p);
                 auto dark = effect->dark(frameNo);
                 auto midtone = effect->midtone(frameNo);
                 auto bright = effect->bright(frameNo);
@@ -1542,14 +1547,14 @@ void LottieBuilder::updateEffect(LottieLayer* layer, float frameNo, uint8_t qual
                 break;
             }
             case LottieEffect::DropShadow: {
-                auto effect = static_cast<LottieFxDropShadow*>(*p);
+                auto effect = static_cast<LottieFxDropShadow*>(p);
                 auto color = effect->color(frameNo);
                 //seems the opacity range in dropshadow is 0 ~ 256
                 layer->scene->add(SceneEffect::DropShadow, color.r, color.g, color.b, std::min(255, (int)effect->opacity(frameNo)), (double)effect->angle(frameNo), double(effect->distance(frameNo)), (double)(effect->blurness(frameNo) * BLUR_TO_SIGMA), quality);
                 break;
             }
             case LottieEffect::GaussianBlur: {
-                auto effect = static_cast<LottieFxGaussianBlur*>(*p);
+                auto effect = static_cast<LottieFxGaussianBlur*>(p);
                 layer->scene->add(SceneEffect::GaussianBlur, (double)(effect->blurness(frameNo) * BLUR_TO_SIGMA), effect->direction(frameNo) - 1, effect->wrap(frameNo), quality);
                 break;
             }
@@ -1632,18 +1637,21 @@ void LottieBuilder::updateLayer(LottieComposition* comp, Scene* scene, LottieLay
 
 static void _buildReference(LottieComposition* comp, LottieLayer* layer)
 {
-    ARRAY_FOREACH(p, comp->assets) {
-        if (layer->rid != (*p)->id) continue;
+    for (auto& p : comp->assets) {
+        if (layer->rid != p->id) continue;
         if (layer->type == LottieLayer::Precomp) {
-            if ((*p)->type != LottieObject::Composition) break;  //QUILL
-            auto asset = static_cast<LottieRootLayer*>(*p);
+            if (p->type != LottieObject::Composition) {
+                TVGERR("LOTTIE", "Precomp layer references a non-composition asset.");
+                break;
+            }
+            auto asset = static_cast<LottieRootLayer*>(p);
             if (_buildComposition(comp, asset)) {
                 layer->children = asset->children;
                 layer->reqFragment = asset->reqFragment;
                 layer->effect |= asset->effect;
             }
         } else if (layer->type == LottieLayer::Image || layer->type == LottieLayer::Audio) {
-            layer->children.push(*p);
+            layer->children.push(p);
         }
         break;
     }
@@ -1659,8 +1667,8 @@ static void _buildHierarchy(LottieGroup* parent, LottieLayer* child)
         return;
     }
 
-    ARRAY_FOREACH(p, parent->children) {
-        auto parent = static_cast<LottieLayer*>(*p);
+    for (auto& p : parent->children) {
+        auto parent = static_cast<LottieLayer*>(p);
         if (child == parent) continue;
         if (child->pix == parent->ix) {
             child->parent = parent;
@@ -1702,11 +1710,18 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
 static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
 {
     if (parent->children.count == 0) return false;
-    if (parent->buildDone) return !parent->building;  //QUILL
-    parent->buildDone = true;
+    if (parent->builded) return true;
+
+    // the composition is referenced again while still being built: the precomp
+    // references form a cycle (e.g. A -> A or A -> B -> A). Skip the reference
+    // instead of linking a cyclic layer graph that recurses forever at update.
+    if (parent->building) {
+        TVGERR("LOTTIE", "Cyclic precomp reference detected. Skipping to prevent infinite recursion.");
+        return false;
+    }
     parent->building = true;
 
-    ARRAY_FOREACH(p, parent->children) {
+    for (auto p = (parent->children).begin(); p < (parent->children).end(); ++p) {
         auto child = static_cast<LottieLayer*>(*p);
 
         //attach the precomp layer.
@@ -1735,14 +1750,15 @@ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
     }
 
     //QUILL
-    ARRAY_FOREACH(p, parent->children) {
-        auto child = static_cast<LottieLayer*>(*p);
+    for (auto& p : parent->children) {
+        auto child = static_cast<LottieLayer*>(p);
         auto target = child->matteTarget;
         for (auto i = 0; target && i < 16; ++i) target = target->matteTarget;
         if (target) child->matteTarget = nullptr;
     }
 
     parent->building = false;
+    parent->builded = true;
     return true;
 }
 

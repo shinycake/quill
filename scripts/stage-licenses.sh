@@ -17,7 +17,7 @@ cp "$ROOT/LICENSE" "$ROOT/THIRD_PARTY.md" "$ROOT/THIRD_PARTY_LICENSES.md" "$DEST
 cp "$ROOT"/licenses/*.txt "$DEST/licenses/"
 # ThorVG is compiled into the binary; its texts come from the vendored tree.
 cp "$ROOT/third_party/thorvg/LICENSE" "$DEST/licenses/thorvg/LICENSE"
-cp "$ROOT/third_party/thorvg/src/loaders/lottie/rapidjson/LICENSE" "$DEST/licenses/thorvg/rapidjson-LICENSE"
+cp "$ROOT/third_party/thorvg/src/modules/lottie/rapidjson/LICENSE" "$DEST/licenses/thorvg/rapidjson-LICENSE"
 cp "$ROOT/assets/emoji/LICENSE.txt" "$DEST/licenses/unicode-emoji/LICENSE.txt"
 chmod 644 "$DEST/LICENSE" "$DEST/THIRD_PARTY.md" "$DEST/THIRD_PARTY_LICENSES.md" \
   "$DEST"/licenses/*.txt "$DEST"/licenses/thorvg/* "$DEST/licenses/unicode-emoji/LICENSE.txt"

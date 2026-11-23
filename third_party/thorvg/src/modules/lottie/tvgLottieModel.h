@@ -23,6 +23,7 @@
 #ifndef _TVG_LOTTIE_MODEL_H_
 #define _TVG_LOTTIE_MODEL_H_
 
+#include <algorithm>
 #include "tvgCommon.h"
 #include "tvgStr.h"
 #include "tvgText.h"
@@ -117,7 +118,7 @@ struct LottieFxCustom : LottieEffect
 
     ~LottieFxCustom()
     {
-        ARRAY_FOREACH(p, props) delete(p->property);
+        for (auto& p : props) delete (p.property);
     }
 
     Property* property(int type)
@@ -147,8 +148,8 @@ struct LottieFxCustom : LottieEffect
     LottieProperty* property(const char* name)
     {
         auto id = djb2Encode(name);
-        ARRAY_FOREACH(p, props) {
-            if (p->mn == id || p->nm == id) return p->property;
+        for (auto& p : props) {
+            if (p.mn == id || p.nm == id) return p.property;
         }
         return nullptr;
     }
@@ -316,7 +317,7 @@ struct LottieGlyph
 
     ~LottieGlyph()
     {
-        ARRAY_FOREACH(p, children) delete(*p);
+        for (auto& p : children) delete (p);
         tvg::free(code);
         tvg::free(family);
         tvg::free(style);
@@ -335,11 +336,6 @@ struct LottieTextRange : LottieObject
         style.flags.fillColor = 0;
         style.flags.strokeColor = 0;
         style.flags.strokeWidth = 0;
-    }
-
-    ~LottieTextRange()
-    {
-        tvg::free(interpolator);
     }
 
     struct {
@@ -368,7 +364,6 @@ struct LottieTextRange : LottieObject
     LottieFloat smoothness = 100.0f;
     LottieFloat start = 0.0f;
     LottieFloat end = 100.0f;
-    LottieInterpolator* interpolator = nullptr;
     Based based = Chars;
     Shape shape = Square;
     Unit rangeUnit = Percent;
@@ -404,14 +399,14 @@ struct LottieFont
 
     ~LottieFont()
     {
-        if (path) {
-            Text::unload(name);
-            tvg::free(b64src);
-        } else {
-            Text::load(name, nullptr, size, mime, false);
+        if (prepared) {
+            if (path) Text::unload(name);
+            else Text::load(name, nullptr, size, mime, false);
         }
+        // Prepared embedded data is owned by the font loader.
+        if (path || !prepared) tvg::free(b64src);
 
-        ARRAY_FOREACH(p, chars) delete(*p);
+        for (auto& p : chars) delete (p);
         tvg::free(style);
         tvg::free(family);
         tvg::free(name);
@@ -428,11 +423,13 @@ struct LottieFont
     float ascent = 0.0f;
     Origin origin = Local;
     bool path = false;  // true if the b64src is path
+    bool prepared = false;
 
     void prepare()
     {
-        if (path) Text::load(b64src);
-        else TextImpl::load(name, b64src, size, mime, Ownership::Transfer);
+        if (prepared) return;
+        if (path) prepared = (Text::load(b64src) == Result::Success);
+        else prepared = (TextImpl::load(name, b64src, size, mime, Ownership::Transfer) == Result::Success);
     }
 };
 
@@ -464,6 +461,7 @@ private:
 
 public:
     LottieFloat firstMargin = 0.0f;
+    LottieInteger perpendicular = 0;
     LottieMask* mask;
     int8_t maskIdx = -1;
 
@@ -478,7 +476,7 @@ struct LottieText : LottieObject, LottieRenderPooler<tvg::Shape>
     {
         enum Group : uint8_t { Chars = 1, Word = 2, Line = 3, All = 4 };
         Group group = Chars;
-        LottieScalar anchor{};
+        LottieScalar anchor = Point{0.0f, 0.0f};
     } alignOp;
 
     LottieText() : LottieObject(LottieObject::Text) {}
@@ -503,7 +501,7 @@ struct LottieText : LottieObject, LottieRenderPooler<tvg::Shape>
 
     ~LottieText()
     {
-        ARRAY_FOREACH(p, ranges) delete(*p);
+        for (auto& p : ranges) delete (p);
         delete(follow);
     }
 };
@@ -817,13 +815,11 @@ struct LottieGradient : LottieObject
         if (!colorStops.populated) {
             auto count = colorStops.count;  //colorstop count can be modified after population
             if (colorStops.frames) {
-                //QUILL
-                auto least = UINT32_MAX;
-                ARRAY_FOREACH(v, *colorStops.frames) {
-                    auto stops = populate(v->value, count);
-                    if (stops < least) least = stops;
+                // every keyframe must have enough stops for the shared count.
+                colorStops.count = UINT16_MAX;
+                for (auto& v : *colorStops.frames) {
+                    colorStops.count = std::min<uint32_t>(colorStops.count, populate(v.value, count));
                 }
-                colorStops.count = least;
             } else {
                 colorStops.count = populate(colorStops.value, count);
             }
@@ -969,7 +965,7 @@ struct LottieImage : LottieObject
 #endif
     }
 
-    Picture* get();
+    Picture* get(const AssetResolver* resolver);
 };
 
 struct LottieAudio : LottieObject
@@ -1083,8 +1079,7 @@ struct LottieGroup : LottieObject, LottieRenderPooler<tvg::Shape>
         if (this->id == id) return this;
 
         //source has children, find recursively.
-        ARRAY_FOREACH(p, children) {
-            auto child = *p;
+        for (auto child : children) {
             if (child->type == LottieObject::Type::Group || child->type == LottieObject::Type::Layer) {
                 if (auto ret = static_cast<LottieGroup*>(child)->content(id)) return ret;
             } else if (child->id == id) return child;
@@ -1096,12 +1091,12 @@ struct LottieGroup : LottieObject, LottieRenderPooler<tvg::Shape>
     Array<LottieObject*> children;
     BlendMethod blendMethod = BlendMethod::Normal;
 
-    bool reqFragment : 1;   //requirement to fragment the render context
-    bool buildDone : 1;     //completed in building the composition.
-    bool building : 1;      //QUILL
-    bool trimpath : 1;      //this group has a trimpath.
-    bool visible : 1;       //this group has visible contents.
-    bool allowMerge : 1;    //if this group is consisted of simple (transformed) shapes.
+    bool reqFragment : 1;   // requirement to fragment the render context
+    bool builded : 1;       // completed in building the composition.
+    bool building : 1;      // currently building the composition (cyclic reference guard).
+    bool trimpath : 1;      // this group has a trimpath.
+    bool visible : 1;       // this group has visible contents.
+    bool allowMerge : 1;    // if this group is consisted of simple (transformed) shapes.
 };
 
 struct LottieRootLayer : LottieGroup
@@ -1182,16 +1177,16 @@ struct LottieLayer : LottieRootLayer
 
     LottieEffect* effectById(unsigned long id)
     {
-        ARRAY_FOREACH(p, effects) {
-            if (id == (*p)->nm || id == (*p)->mn) return *p;
+        for (auto& p : effects) {
+            if (id == p->nm || id == p->mn) return p;
         }
         return nullptr;
     }
 
     LottieEffect* effectByIdx(int16_t ix)
     {
-        ARRAY_FOREACH(p, effects) {
-            if (ix == (*p)->ix) return *p;
+        for (auto& p : effects) {
+            if (ix == p->ix) return p;
         }
         return nullptr;
     }
@@ -1219,7 +1214,7 @@ struct LottieSlot
     ~LottieSlot()
     {
         if (!overridden) return;
-        ARRAY_FOREACH(pair, pairs) delete(pair->prop);
+        for (auto& pair : pairs) delete (pair.prop);
     }
 
     struct {
@@ -1268,8 +1263,7 @@ struct LottieComposition
 
     LottieLayer* asset(unsigned long id)
     {
-        ARRAY_FOREACH(p, assets) {
-            auto obj = *p;
+        for (auto obj : assets) {
             if (obj->id == id && obj->type == LottieObject::Layer) return static_cast<LottieLayer*>(obj);
         }
         return nullptr;
@@ -1283,7 +1277,6 @@ struct LottieComposition
     }
 
     LottieRootLayer* root = nullptr;
-    char* version = nullptr;
     char* name = nullptr;
     float w, h;
     float frameRate;

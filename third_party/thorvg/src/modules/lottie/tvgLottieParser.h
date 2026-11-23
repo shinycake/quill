@@ -36,6 +36,11 @@ public:
         this->expressions = expressions;
     }
 
+    ~LottieParser()
+    {
+        tvg::free(slots);
+    }
+
     bool parse();
     const char* sid(bool first = false);
     LottieProperty* parse(LottieSlot* slot);
@@ -143,6 +148,8 @@ private:
         LottieLayer* layer = nullptr;
         LottieObject* parent = nullptr;
     } context;
+
+    bool violated = false;  // violated asset
 };
 
 #endif //_TVG_LOTTIE_PARSER_H_

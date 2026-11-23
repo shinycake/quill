@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Copy the part of ThorVG that Quill builds (CPU engine, Lottie loader without
-# expressions, raw loader, C API) into third_party/thorvg/, apply Quill's patch,
+# expressions, raw loader, C API; loaders live under src/modules since v1.1.4) into third_party/thorvg/, apply Quill's patch,
 # and record the tag and commit in third_party/thorvg/VERSION. build.rs compiles
 # it with `cc`.
 #
@@ -54,11 +54,11 @@ copy inc -maxdepth 1 -name '*.h'
 copy src/common -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \)
 copy src/renderer -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \)
 copy src/renderer/cpu_engine -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \)
-copy src/loaders/raw -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \)
+copy src/modules/raw -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \)
 # The expressions header stays: with THORVG_LOTTIE_EXPRESSIONS_SUPPORT unset it
 # holds the no-op stubs the parser and builder call. Its .cpp and jerryscript go.
-copy src/loaders/lottie -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \) ! -name 'tvgLottieExpressions.cpp'
-copy src/loaders/lottie/rapidjson
+copy src/modules/lottie -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \) ! -name 'tvgLottieExpressions.cpp'
+copy src/modules/lottie/rapidjson
 copy src/bindings/capi -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \)
 
 [ -n "${THORVG_NO_PATCH:-}" ] || patch --quiet --fuzz=0 --no-backup-if-mismatch -p1 -d "$DEST" <"$PATCH"

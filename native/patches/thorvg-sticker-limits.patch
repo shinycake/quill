@@ -1,5 +1,5 @@
 diff --git a/src/common/tvgCommon.h b/src/common/tvgCommon.h
-index e07c87924..ba13b0e4c 100644
+index e07c879..ba13b0e 100644
 --- a/src/common/tvgCommon.h
 +++ b/src/common/tvgCommon.h
 @@ -63,8 +63,7 @@ using namespace tvg;
@@ -13,10 +13,10 @@ index e07c87924..ba13b0e4c 100644
  namespace tvg
  {
 diff --git a/src/common/tvgMath.cpp b/src/common/tvgMath.cpp
-index 920a5f2a5..f8bb1e10b 100644
+index aba75d7..282431f 100644
 --- a/src/common/tvgMath.cpp
 +++ b/src/common/tvgMath.cpp
-@@ -42,16 +42,17 @@ static float _length(const Point& pt1, const Point& pt2)
+@@ -41,16 +41,17 @@ static float _length(const Point& pt1, const Point& pt2)
  }
  
  
@@ -38,7 +38,7 @@ index 920a5f2a5..f8bb1e10b 100644
      return len;
  }
 diff --git a/src/common/tvgMath.h b/src/common/tvgMath.h
-index f09ca98eb..925e2c902 100644
+index 5cc99c1..77f676a 100644
 --- a/src/common/tvgMath.h
 +++ b/src/common/tvgMath.h
 @@ -85,7 +85,7 @@ static inline constexpr const T& clamp(const T& v, const T& min, const T& max)
@@ -64,10 +64,10 @@ index f09ca98eb..925e2c902 100644
  }
  
  static inline Fill::ColorStop lerp(const Fill::ColorStop& from, const Fill::ColorStop& to, float t)
-diff --git a/src/loaders/lottie/tvgLottieBuilder.cpp b/src/loaders/lottie/tvgLottieBuilder.cpp
-index d4f7c385c..2a16c79e8 100644
---- a/src/loaders/lottie/tvgLottieBuilder.cpp
-+++ b/src/loaders/lottie/tvgLottieBuilder.cpp
+diff --git a/src/modules/lottie/tvgLottieBuilder.cpp b/src/modules/lottie/tvgLottieBuilder.cpp
+index 1feab1b..96796ef 100644
+--- a/src/modules/lottie/tvgLottieBuilder.cpp
++++ b/src/modules/lottie/tvgLottieBuilder.cpp
 @@ -178,25 +178,27 @@ static bool _update(LottieTransform* transform, float frameNo, Matrix& matrix, u
  
  void LottieBuilder::updateTransform(LottieLayer* layer, float frameNo)
@@ -111,18 +111,22 @@ index d4f7c385c..2a16c79e8 100644
  }
  
  
-@@ -409,6 +411,10 @@ static void _repeat(LottieGroup* parent, Shape* path, LottieRenderPooler<Shape>*
-     Array<Shape*> shapes;
+@@ -404,6 +406,14 @@ static bool _draw(LottieGroup* parent, LottieShape* shape, RenderContext* ctx)
  
-     ARRAY_REVERSE_FOREACH(repeater, ctx->repeaters) {
-+        //QUILL
-+        constexpr uint64_t MAX_COPIES = 4096;
-+        if ((uint64_t)propagators.count * repeater->cnt > MAX_COPIES) break;
+ static void _repeat(LottieGroup* parent, Shape* path, LottieRenderPooler<Shape>* pooler, RenderContext* ctx)
+ {
++    //QUILL: only the last stage draws, so refuse the whole chain up front
++    constexpr uint64_t MAX_COPIES = 4096;
++    uint64_t copies = 1;
++    for (auto& r : ctx->repeaters) {
++        copies *= (r.cnt > 0) ? (uint64_t)r.cnt : 0;
++        if (copies > MAX_COPIES) return;
++    }
 +
-         shapes.reserve(repeater->cnt);
- 
-         for (int i = 0; i < repeater->cnt; ++i) {
-@@ -554,6 +560,14 @@ void LottieBuilder::updatePath(LottieGroup* parent, LottieObject** child, float
+     Array<Shape*> propagators;
+     propagators.push(ctx->propagator);
+     Array<Shape*> shapes;
+@@ -554,6 +564,14 @@ void LottieBuilder::updatePath(LottieGroup* parent, LottieObject** child, float
  }
  
  
@@ -137,7 +141,7 @@ index d4f7c385c..2a16c79e8 100644
  static void _close(Array<Point>& pts, const Point& p, bool round)
  {
      if (round && tvg::zero(pts.last() - pts[pts.count - 2])) pts[pts.count - 2] = p;
-@@ -564,7 +578,7 @@ void LottieBuilder::updateStar(LottiePolyStar* star, float frameNo, Matrix* tran
+@@ -564,7 +582,7 @@ void LottieBuilder::updateStar(LottiePolyStar* star, float frameNo, Matrix* tran
  {
      static constexpr auto POLYSTAR_MAGIC_NUMBER = 0.47829f / 0.28f;
  
@@ -146,7 +150,7 @@ index d4f7c385c..2a16c79e8 100644
      if (ptsCnt < 1.0f) return;
  
      auto innerRadius = star->innerRadius(frameNo, tween, exps);
-@@ -679,7 +693,7 @@ void LottieBuilder::updatePolygon(LottiePolyStar* star, float frameNo, Matrix* t
+@@ -679,7 +697,7 @@ void LottieBuilder::updatePolygon(LottiePolyStar* star, float frameNo, Matrix* t
  {
      static constexpr auto POLYGON_MAGIC_NUMBER = 0.25f;
  
@@ -155,7 +159,7 @@ index d4f7c385c..2a16c79e8 100644
      if (ptsCnt < 1) return;
  
      auto radius = star->outerRadius(frameNo, tween, exps);
-@@ -802,7 +816,7 @@ void LottieBuilder::updateZigZag(TVG_UNUSED LottieGroup* parent, LottieObject**
+@@ -802,7 +820,7 @@ void LottieBuilder::updateZigZag(TVG_UNUSED LottieGroup* parent, LottieObject**
      auto zigzag = static_cast<LottieZigZag*>(*child);
      auto amplitude = zigzag->amplitude(frameNo, tween, exps);
      if (tvg::zero(amplitude)) return;
@@ -164,7 +168,7 @@ index d4f7c385c..2a16c79e8 100644
      auto point = (LottieZigZagModifier::PointType)zigzag->point(frameNo, tween, exps);
      ctx->update(new LottieZigZagModifier(amplitude, frequency, point));
  }
-@@ -812,7 +826,7 @@ void LottieBuilder::updateRepeater(TVG_UNUSED LottieGroup* parent, LottieObject*
+@@ -812,7 +830,7 @@ void LottieBuilder::updateRepeater(TVG_UNUSED LottieGroup* parent, LottieObject*
      auto repeater = static_cast<LottieRepeater*>(*child);
  
      RenderRepeater r;
@@ -173,46 +177,33 @@ index d4f7c385c..2a16c79e8 100644
      r.transform = ctx->propagator->transform();
      r.offset = repeater->offset(frameNo, tween, exps);
      r.position = repeater->position(frameNo, tween, exps);
-@@ -1621,6 +1635,7 @@ static void _buildReference(LottieComposition* comp, LottieLayer* layer)
-     ARRAY_FOREACH(p, comp->assets) {
-         if (layer->rid != (*p)->id) continue;
-         if (layer->type == LottieLayer::Precomp) {
-+            if ((*p)->type != LottieObject::Composition) break;  //QUILL
-             auto asset = static_cast<LottieRootLayer*>(*p);
-             if (_buildComposition(comp, asset)) {
-                 layer->children = asset->children;
-@@ -1687,8 +1702,9 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
- static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
- {
-     if (parent->children.count == 0) return false;
--    if (parent->buildDone) return true;
-+    if (parent->buildDone) return !parent->building;  //QUILL
-     parent->buildDone = true;
-+    parent->building = true;
- 
-     ARRAY_FOREACH(p, parent->children) {
-         auto child = static_cast<LottieLayer*>(*p);
-@@ -1717,6 +1733,16 @@ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
-         //attach the necessary font data
-         if (child->type == LottieLayer::Text) _attachFont(comp, child);
+@@ -1435,6 +1453,7 @@ bool LottieBuilder::updateMatte(LottieComposition* comp, float frameNo, LottieLa
+         layer->scene = nullptr;
+         return false;
      }
 +
+     return true;
+ }
+ 
+@@ -1730,6 +1749,14 @@ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
+         if (child->type == LottieLayer::Text) _attachFont(comp, child);
+     }
+ 
 +    //QUILL
-+    ARRAY_FOREACH(p, parent->children) {
-+        auto child = static_cast<LottieLayer*>(*p);
++    for (auto& p : parent->children) {
++        auto child = static_cast<LottieLayer*>(p);
 +        auto target = child->matteTarget;
 +        for (auto i = 0; target && i < 16; ++i) target = target->matteTarget;
 +        if (target) child->matteTarget = nullptr;
 +    }
 +
-+    parent->building = false;
+     parent->building = false;
+     parent->builded = true;
      return true;
- }
- 
-diff --git a/src/loaders/lottie/tvgLottieCommon.h b/src/loaders/lottie/tvgLottieCommon.h
-index f91e6d8f8..55087370b 100644
---- a/src/loaders/lottie/tvgLottieCommon.h
-+++ b/src/loaders/lottie/tvgLottieCommon.h
+diff --git a/src/modules/lottie/tvgLottieCommon.h b/src/modules/lottie/tvgLottieCommon.h
+index ae077bc..aebc62c 100644
+--- a/src/modules/lottie/tvgLottieCommon.h
++++ b/src/modules/lottie/tvgLottieCommon.h
 @@ -33,8 +33,8 @@ struct PathSet
  {
      Point* pts = nullptr;
@@ -224,7 +215,7 @@ index f91e6d8f8..55087370b 100644
  
      void convert(RenderPath& to)
      {
-@@ -135,10 +135,11 @@ struct AssetSrc
+@@ -136,10 +136,11 @@ struct AssetSrc
  
  static inline RGB32 lerp(const RGB32& s, const RGB32& e, float t)
  {
@@ -239,19 +230,11 @@ index f91e6d8f8..55087370b 100644
      };
  }
  
-diff --git a/src/loaders/lottie/tvgLottieModel.cpp b/src/loaders/lottie/tvgLottieModel.cpp
-index e0cc2a647..5aa5b857c 100644
---- a/src/loaders/lottie/tvgLottieModel.cpp
-+++ b/src/loaders/lottie/tvgLottieModel.cpp
-@@ -497,6 +497,7 @@ LottieGroup::LottieGroup(LottieObject::Type type) : LottieObject(type)
- {
-     reqFragment = false;
-     buildDone = false;
-+    building = false;
-     trimpath = false;
-     visible = false;
-     allowMerge = true;
-@@ -671,6 +672,9 @@ void LottieLayer::prepare(RGB32* color)
+diff --git a/src/modules/lottie/tvgLottieModel.cpp b/src/modules/lottie/tvgLottieModel.cpp
+index b5029b0..c910af5 100644
+--- a/src/modules/lottie/tvgLottieModel.cpp
++++ b/src/modules/lottie/tvgLottieModel.cpp
+@@ -681,6 +681,9 @@ void LottieLayer::prepare(RGB32* color)
          return;
      }
  
@@ -261,11 +244,11 @@ index e0cc2a647..5aa5b857c 100644
      // prepare the viewport clipper or a solid fill in advance if it is a layer type.
      if (type == LottieLayer::Precomp || (color && type == LottieLayer::Solid)) {
          auto obj = Shape::gen();
-diff --git a/src/loaders/lottie/tvgLottieModel.h b/src/loaders/lottie/tvgLottieModel.h
-index e9beabec6..665aaec63 100644
---- a/src/loaders/lottie/tvgLottieModel.h
-+++ b/src/loaders/lottie/tvgLottieModel.h
-@@ -229,7 +229,7 @@ struct LottieMask
+diff --git a/src/modules/lottie/tvgLottieModel.h b/src/modules/lottie/tvgLottieModel.h
+index 6535fbb..befca37 100644
+--- a/src/modules/lottie/tvgLottieModel.h
++++ b/src/modules/lottie/tvgLottieModel.h
+@@ -230,7 +230,7 @@ struct LottieMask
      LottiePathSet pathset;
      LottieFloat expand = 0.0f;
      LottieOpacity opacity = 255;
@@ -274,33 +257,10 @@ index e9beabec6..665aaec63 100644
      bool inverse = false;
  };
  
-@@ -817,9 +817,13 @@ struct LottieGradient : LottieObject
-         if (!colorStops.populated) {
-             auto count = colorStops.count;  //colorstop count can be modified after population
-             if (colorStops.frames) {
-+                //QUILL
-+                auto least = UINT32_MAX;
-                 ARRAY_FOREACH(v, *colorStops.frames) {
--                    colorStops.count = populate(v->value, count);
-+                    auto stops = populate(v->value, count);
-+                    if (stops < least) least = stops;
-                 }
-+                colorStops.count = least;
-             } else {
-                 colorStops.count = populate(colorStops.value, count);
-             }
-@@ -1094,6 +1098,7 @@ struct LottieGroup : LottieObject, LottieRenderPooler<tvg::Shape>
- 
-     bool reqFragment : 1;   //requirement to fragment the render context
-     bool buildDone : 1;     //completed in building the composition.
-+    bool building : 1;      //QUILL
-     bool trimpath : 1;      //this group has a trimpath.
-     bool visible : 1;       //this group has visible contents.
-     bool allowMerge : 1;    //if this group is consisted of simple (transformed) shapes.
-diff --git a/src/loaders/lottie/tvgLottieModifier.cpp b/src/loaders/lottie/tvgLottieModifier.cpp
-index e94d4dc03..47532581e 100644
---- a/src/loaders/lottie/tvgLottieModifier.cpp
-+++ b/src/loaders/lottie/tvgLottieModifier.cpp
+diff --git a/src/modules/lottie/tvgLottieModifier.cpp b/src/modules/lottie/tvgLottieModifier.cpp
+index e94d4dc..4753258 100644
+--- a/src/modules/lottie/tvgLottieModifier.cpp
++++ b/src/modules/lottie/tvgLottieModifier.cpp
 @@ -167,6 +167,14 @@ void LottieRoundnessModifier::polystar(const RenderPath& in, RenderPath& out, fl
  {
      constexpr auto ROUNDED_POLYSTAR_MAGIC_NUMBER = 0.47829f;
@@ -376,10 +336,10 @@ index e94d4dc03..47532581e 100644
                  if (!tvg::zero(in.pts[iPt - 1] - in.pts[state.movetoInIndex])) {
                      corner(path, state.line, state.firstLine, state.movetoOutIndex, true);
                  }
-diff --git a/src/loaders/lottie/tvgLottieModifier.h b/src/loaders/lottie/tvgLottieModifier.h
-index 0ab0d875c..a9641ee02 100644
---- a/src/loaders/lottie/tvgLottieModifier.h
-+++ b/src/loaders/lottie/tvgLottieModifier.h
+diff --git a/src/modules/lottie/tvgLottieModifier.h b/src/modules/lottie/tvgLottieModifier.h
+index 0ab0d87..a9641ee 100644
+--- a/src/modules/lottie/tvgLottieModifier.h
++++ b/src/modules/lottie/tvgLottieModifier.h
 @@ -97,7 +97,7 @@ private:
      };
  
@@ -389,10 +349,10 @@ index 0ab0d875c..a9641ee02 100644
      bool intersected(Line& line1, Line& line2, Point& intersection, bool& inside);
      Line shift(Point& p1, Point& p2, float offset);
      void line(RenderPath& out, PathCommand* inCmds, uint32_t inCmdsCnt, Point* inPts, uint32_t& curPt, uint32_t curCmd, State& state, float offset, bool degenerated);
-diff --git a/src/loaders/lottie/tvgLottieParser.cpp b/src/loaders/lottie/tvgLottieParser.cpp
-index 242d52a98..1ccec8f66 100644
---- a/src/loaders/lottie/tvgLottieParser.cpp
-+++ b/src/loaders/lottie/tvgLottieParser.cpp
+diff --git a/src/modules/lottie/tvgLottieParser.cpp b/src/modules/lottie/tvgLottieParser.cpp
+index 9c10ed4..a418773 100644
+--- a/src/modules/lottie/tvgLottieParser.cpp
++++ b/src/modules/lottie/tvgLottieParser.cpp
 @@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
          //discard rest
          while (nextArrayValue()) getInt();
@@ -416,7 +376,7 @@ index 242d52a98..1ccec8f66 100644
      }
      return false;
  }
-@@ -337,6 +337,7 @@ void LottieParser::getInterpolatorPoint(Point& pt)
+@@ -344,6 +344,7 @@ void LottieParser::getInterpolatorPoint(Point& pt)
      while (auto key = nextObjectKey()) {
          if (KEY_AS("x")) getValue(pt.x);
          else if (KEY_AS("y")) getValue(pt.y);
@@ -424,15 +384,16 @@ index 242d52a98..1ccec8f66 100644
      }
  }
  
-@@ -354,11 +355,11 @@ void LottieParser::parseSlotProperty(T& prop)
+@@ -361,12 +362,11 @@ void LottieParser::parseSlotProperty(T& prop)
  template<typename T>
  bool LottieParser::parseTangent(const char *key, LottieVectorFrame<T>& value)
  {
--    if (KEY_AS("ti") && getValue(value.inTangent)) ;
--    else if (KEY_AS("to") && getValue(value.outTangent)) ;       
--    else return false;
+-    if (KEY_AS("ti")) {
+-        if (getValue(value.inTangent)) value.hasTangent = true;
+-    } else if (KEY_AS("to")) {
+-        if (getValue(value.outTangent)) value.hasTangent = true;
+-    } else return false;
 -
--    value.hasTangent = true;
 +    //QUILL
 +    auto in = KEY_AS("ti");
 +    if (!in && !KEY_AS("to")) return false;
@@ -441,12 +402,12 @@ index 242d52a98..1ccec8f66 100644
      return true;
  }
  
-@@ -382,8 +383,15 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
+@@ -390,8 +390,15 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
      LottieInterpolator* interpolator = nullptr;
  
      //get a cached interpolator if it has any.
--    ARRAY_FOREACH(p, comp->interpolators) {
--        if (!strncmp((*p)->key, key, sizeof(buf))) interpolator = *p;
+-    for (auto& p : comp->interpolators) {
+-        if (!strncmp(p->key, key, sizeof(buf))) interpolator = p;
 +    //QUILL
 +    constexpr uint32_t MAX_SEARCH = 1024;
 +    auto cached = comp->interpolators.count;
@@ -459,7 +420,7 @@ index 242d52a98..1ccec8f66 100644
      }
  
      //new interpolator
-@@ -400,7 +408,7 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
+@@ -408,7 +415,7 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
  template<typename T>
  void LottieParser::parseKeyFrame(T& prop)
  {
@@ -468,7 +429,7 @@ index 242d52a98..1ccec8f66 100644
      const char* interpolatorKey = nullptr;
      auto& frame = prop.newFrame();
      auto interpolator = false;
-@@ -455,6 +463,7 @@ void LottieParser::parsePropertyInternal(T& prop)
+@@ -463,6 +470,7 @@ void LottieParser::parsePropertyInternal(T& prop)
          enterArray();
          while (nextArrayValue()) {
              if (peekType() == kObjectType) parseKeyFrame(prop);  //keyframes value
@@ -476,7 +437,7 @@ index 242d52a98..1ccec8f66 100644
              else if (getValue(prop.value)) break; //multi value property with no keyframes
          }
          prop.prepare();
-@@ -503,12 +512,10 @@ bool LottieParser::parseCommon(LottieObject* obj, const char* key)
+@@ -511,12 +519,10 @@ bool LottieParser::parseCommon(LottieObject* obj, const char* key)
  
  bool LottieParser::parseCommon(LottieObject* obj, LottieProperty& prop, const char* key)
  {
@@ -492,7 +453,7 @@ index 242d52a98..1ccec8f66 100644
      } else return false;
      return true;
  }
-@@ -633,7 +640,8 @@ void LottieParser::parseStrokeDash(LottieStroke* stroke)
+@@ -641,7 +647,8 @@ void LottieParser::parseStrokeDash(LottieStroke* stroke)
              if (KEY_AS("n")) style = getString();
              else if (KEY_AS("v")) {
                  if (style && !strcmp("o", style)) parseProperty(stroke->dashOffset());
@@ -502,11 +463,11 @@ index 242d52a98..1ccec8f66 100644
              } else skip();
          }
      }
-@@ -918,25 +926,34 @@ LottieObject* LottieParser::parseObject(const char* type)
- //capture the type name if the upcoming type is irregularly addressed after the actual properties.
+@@ -924,25 +931,34 @@ LottieObject* LottieParser::parseObject(const char* type)
+ // capture the type name if the upcoming type is irregularly addressed after the actual properties.
  char* LottieParser::captureType()
  {
--    if (!isPrimitive() || !strcmp(val.GetString(), "ty")) return nullptr;
+-    if (state != kHasKey || !strcmp(val.GetString(), "ty")) return nullptr;
 +    if (state != kHasKey || !strcmp(val.GetString(), "ty")) return nullptr;  //QUILL
  
      auto level = 0;
@@ -530,7 +491,7 @@ index 242d52a98..1ccec8f66 100644
 +            auto name = p + 1;
 +            for (++p; *p != '\0' && *p != '\"'; ++p) {
 +                if (*p == '\\' && p[1] != '\0') ++p;
-             }
++            }
 +            if (*p == '\0') return nullptr;
 +            if (level != 0 || p - name != 2 || strncmp(name, "ty", 2)) continue;
 +            ++p;
@@ -538,7 +499,7 @@ index 242d52a98..1ccec8f66 100644
 +            if (*p != ':') {
 +                --p;
 +                continue;
-+            }
+             }
 +            ++p;
 +            while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
 +            if (*p++ != '\"') return nullptr;
@@ -549,16 +510,16 @@ index 242d52a98..1ccec8f66 100644
          }
      }
      return nullptr;
-@@ -1557,7 +1574,7 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
-     context.layer = layer;
+@@ -1559,7 +1575,7 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
  
+     auto shapes = false;
      auto ddd = false;
 -    RGB32 color;
 +    RGB32 color{};  //QUILL
  
      enterObject();
  
-@@ -1593,10 +1610,9 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
+@@ -1599,10 +1615,9 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
          else if (KEY_AS("hd")) layer->hidden = getBool();
          else if (KEY_AS("refId")) layer->rid = djb2Encode(getString());
          else if (KEY_AS("td")) layer->matteSrc = getInt();      //used for matte layer
@@ -569,8 +530,8 @@ index 242d52a98..1ccec8f66 100644
 +        else skip();  //QUILL
      }
  
-     layer->prepare(&color);
-@@ -1787,14 +1803,9 @@ bool LottieParser::parse()
+     if (shapes && layer->type != LottieLayer::Shape) violated = true;
+@@ -1795,14 +1810,9 @@ bool LottieParser::parse()
          else if (KEY_AS("op")) outPoint = getFloat();
          else if (KEY_AS("w")) comp->w = getFloat();
          else if (KEY_AS("h")) comp->h = getFloat();
@@ -585,11 +546,11 @@ index 242d52a98..1ccec8f66 100644
 +        else skip();  //QUILL
      }
  
-     if (Invalid() || !comp->root) {
-diff --git a/src/loaders/lottie/tvgLottieParserHandler.cpp b/src/loaders/lottie/tvgLottieParserHandler.cpp
-index e0933642f..41a9c7670 100644
---- a/src/loaders/lottie/tvgLottieParserHandler.cpp
-+++ b/src/loaders/lottie/tvgLottieParserHandler.cpp
+     if (violated || !comp->root || Invalid()) {
+diff --git a/src/modules/lottie/tvgLottieParserHandler.cpp b/src/modules/lottie/tvgLottieParserHandler.cpp
+index e093364..41a9c76 100644
+--- a/src/modules/lottie/tvgLottieParserHandler.cpp
++++ b/src/modules/lottie/tvgLottieParserHandler.cpp
 @@ -20,6 +20,7 @@
   * SOFTWARE.
   */
@@ -609,10 +570,10 @@ index e0933642f..41a9c7670 100644
          parseNext();
          return result;
      }
-diff --git a/src/loaders/lottie/tvgLottieParserHandler.h b/src/loaders/lottie/tvgLottieParserHandler.h
-index 348f3ec81..1e3a21430 100644
---- a/src/loaders/lottie/tvgLottieParserHandler.h
-+++ b/src/loaders/lottie/tvgLottieParserHandler.h
+diff --git a/src/modules/lottie/tvgLottieParserHandler.h b/src/modules/lottie/tvgLottieParserHandler.h
+index 348f3ec..1e3a214 100644
+--- a/src/modules/lottie/tvgLottieParserHandler.h
++++ b/src/modules/lottie/tvgLottieParserHandler.h
 @@ -152,13 +152,12 @@ struct LookaheadParserHandler
      void Error()
      {
@@ -630,7 +591,7 @@ index 348f3ec81..1e3a21430 100644
  
      bool enterObject();
 diff --git a/src/renderer/cpu_engine/tvgSwCommon.h b/src/renderer/cpu_engine/tvgSwCommon.h
-index 4cd4d9934..601bee93d 100644
+index 3ebe58f..ba5e26d 100644
 --- a/src/renderer/cpu_engine/tvgSwCommon.h
 +++ b/src/renderer/cpu_engine/tvgSwCommon.h
 @@ -249,6 +249,7 @@ struct SwStroke
@@ -642,7 +603,7 @@ index 4cd4d9934..601bee93d 100644
      float curLen = 0;
      int32_t curIdx = 0;
 diff --git a/src/renderer/cpu_engine/tvgSwPostEffect.cpp b/src/renderer/cpu_engine/tvgSwPostEffect.cpp
-index 513e497f1..85b4727cf 100644
+index 513e497..85b4727 100644
 --- a/src/renderer/cpu_engine/tvgSwPostEffect.cpp
 +++ b/src/renderer/cpu_engine/tvgSwPostEffect.cpp
 @@ -106,6 +106,10 @@ static int _gaussianInit(SwGaussianBlur* data, float sigma, int quality)
@@ -657,7 +618,7 @@ index 513e497f1..85b4727cf 100644
  
      //compute box kernel sizes
 diff --git a/src/renderer/cpu_engine/tvgSwRle.cpp b/src/renderer/cpu_engine/tvgSwRle.cpp
-index 3bc4b241c..0ccdc6536 100644
+index 484828b..ef2fd67 100644
 --- a/src/renderer/cpu_engine/tvgSwRle.cpp
 +++ b/src/renderer/cpu_engine/tvgSwRle.cpp
 @@ -198,6 +198,10 @@
@@ -740,7 +701,7 @@ index 3bc4b241c..0ccdc6536 100644
  
  
 +//QUILL
-+constexpr uint32_t KEPT_POOL_SIZE = DEFAULT_POOL_SIZE * 256;  //QUILL
++constexpr uint32_t KEPT_POOL_SIZE = SwCellPool::DEFAULT_POOL_SIZE * 64;  //QUILL: about 4 MiB
 +
 +static bool _growCells(RleWorker& rw, SwCellPool* pool)
 +{
@@ -923,7 +884,7 @@ index 3bc4b241c..0ccdc6536 100644
  }
  
 diff --git a/src/renderer/cpu_engine/tvgSwShape.cpp b/src/renderer/cpu_engine/tvgSwShape.cpp
-index 974d7e524..0cf1edf39 100644
+index c224ac9..1e0cb6a 100644
 --- a/src/renderer/cpu_engine/tvgSwShape.cpp
 +++ b/src/renderer/cpu_engine/tvgSwShape.cpp
 @@ -55,7 +55,8 @@ static void _dashLineTo(SwDashStroke& dash, const Point& to, bool validPoint)
@@ -945,9 +906,9 @@ index 974d7e524..0cf1edf39 100644
 +            --dash.steps;
              Bezier left, right;
              if (dash.curLen > 0) {
-                 len -= dash.curLen;
+                 auto remaining = len - dash.curLen;
 diff --git a/src/renderer/cpu_engine/tvgSwStroke.cpp b/src/renderer/cpu_engine/tvgSwStroke.cpp
-index b0d6b6bfa..8081c4110 100644
+index 4736cf4..5821f83 100644
 --- a/src/renderer/cpu_engine/tvgSwStroke.cpp
 +++ b/src/renderer/cpu_engine/tvgSwStroke.cpp
 @@ -36,10 +36,11 @@ static inline float _sideToRotate(int32_t s)
@@ -974,7 +935,7 @@ index b0d6b6bfa..8081c4110 100644
      border->tags = tvg::realloc<uint8_t>(border->tags, border->pts.reserved);      //align the pts / tags memory size
  }
  
-@@ -363,22 +364,32 @@ static void _lineTo(SwStroke& stroke, const Point& to)
+@@ -364,22 +365,32 @@ static void _lineTo(SwStroke& stroke, const Point& to)
      stroke.length = length;
  }
  
@@ -1012,7 +973,7 @@ index b0d6b6bfa..8081c4110 100644
                  angleIn = angleMid = angleOut = tvg::atan(d2);
              } else {
                  angleIn = angleMid = tvg::atan(d2);
-@@ -386,8 +397,8 @@ static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float
+@@ -387,8 +398,8 @@ static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float
              }
          }
      } else {
@@ -1023,7 +984,7 @@ index b0d6b6bfa..8081c4110 100644
                  angleIn = angleMid = angleOut = tvg::atan(d1);
              } else {
                  angleIn = tvg::atan(d1);
-@@ -395,7 +406,7 @@ static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float
+@@ -396,7 +407,7 @@ static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float
                  angleMid = _mean(angleIn, angleOut);
              }
          } else {
@@ -1032,7 +993,7 @@ index b0d6b6bfa..8081c4110 100644
                  angleIn = tvg::atan(d1);
                  angleMid = angleOut = tvg::atan(d2);
              } else {
-@@ -442,13 +453,14 @@ static void _cubicTo(SwStroke& stroke, const Point& ctrl1, const Point& ctrl2, c
+@@ -443,13 +454,14 @@ static void _cubicTo(SwStroke& stroke, const Point& ctrl1, const Point& ctrl2, c
      arc[3] = stroke.center;
  
      auto join = stroke.join; // backup
@@ -1049,7 +1010,7 @@ index b0d6b6bfa..8081c4110 100644
          //valid size
          if (valid > 0 && arc < limit) {
 diff --git a/src/renderer/cpu_engine/tvgSwUtil.cpp b/src/renderer/cpu_engine/tvgSwUtil.cpp
-index f7723a889..7f59bdf05 100644
+index 46eee32..0c78ab7 100644
 --- a/src/renderer/cpu_engine/tvgSwUtil.cpp
 +++ b/src/renderer/cpu_engine/tvgSwUtil.cpp
 @@ -27,6 +27,14 @@
@@ -1069,14 +1030,14 @@ index f7723a889..7f59bdf05 100644
      outline->out.reserve(outline->path->pts.count);
 @@ -35,6 +43,7 @@ void utilExport(SwOutline* outline, const Matrix& transform, BBox& bbox)
  
-     ARRAY_FOREACH(pt, outline->path->pts) {
-         auto t = *pt * transform;
+     for (auto& pt : outline->path->pts) {
+         auto t = pt * transform;
 +        t = {_rasterRange(t.x), _rasterRange(t.y)};
          if (bbox.min.x > t.x) bbox.min.x = t.x;
          if (bbox.max.x < t.x) bbox.max.x = t.x;
          if (bbox.min.y > t.y) bbox.min.y = t.y;
 diff --git a/src/renderer/tvgInitializer.cpp b/src/renderer/tvgInitializer.cpp
-index e52971a67..8a7825e66 100644
+index e52971a..8a7825e 100644
 --- a/src/renderer/tvgInitializer.cpp
 +++ b/src/renderer/tvgInitializer.cpp
 @@ -138,25 +138,7 @@ uint16_t THORVG_VERSION_NUMBER()
@@ -1110,7 +1071,7 @@ index e52971a67..8a7825e66 100644
 +//defines them makes dyld rebind every system library's use of them before
 +//main runs, which costs a cold launch about 300 ms.
 diff --git a/src/renderer/tvgPaint.cpp b/src/renderer/tvgPaint.cpp
-index 44e8f724f..a3bf5fb4f 100644
+index f04df89..8590605 100644
 --- a/src/renderer/tvgPaint.cpp
 +++ b/src/renderer/tvgPaint.cpp
 @@ -31,6 +31,15 @@

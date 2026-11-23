@@ -33,28 +33,28 @@
 
 LottieCustomSlot::~LottieCustomSlot()
 {
-    ARRAY_FOREACH(p, props) {
-        delete(p->prop);
+    for (auto& p : props) {
+        delete (p.prop);
     }
 }
 
 
 bool LottieLoader::prepare()
 {
-    LottieParser parser(content, dirName, builder->expressions());
+    LottieParser parser(content, dirName, builder.expressions());
     if (!parser.parse()) return false;
     {
         ScopedLock lock(key);
         comp = parser.comp;
     }
-    if (!comp) return false;
     if (parser.slots) {
         auto slotcode = gen(parser.slots, true);
         apply(slotcode, true);
         del(slotcode, true);
+        tvg::free(parser.slots);
         parser.slots = nullptr;
     }
-    builder->build(comp);
+    builder.build(comp);
     release();
     return true;
 }
@@ -62,8 +62,8 @@ bool LottieLoader::prepare()
 
 void LottieLoader::run(unsigned tid)
 {
-    if (comp) builder->update(comp, frameNo);      //update frame
-    else if (prepare()) builder->update(comp, 0);  //initial loading
+    if (comp) builder.update(comp, frameNo);      // update frame
+    else if (prepare()) builder.update(comp, 0);  // initial loading
     build = false;
 }
 
@@ -82,7 +82,7 @@ void LottieLoader::release()
 /************************************************************************/
 
 LottieLoader::LottieLoader() :
-    AnimLoader(FileType::Lot), builder(new LottieBuilder)
+    AnimLoader(FileType::Lot)
 {
 
 }
@@ -96,7 +96,6 @@ LottieLoader::~LottieLoader()
 
     //TODO: correct position?
     delete(comp);
-    delete(builder);
 
     tvg::free(dirName);
 }
@@ -134,66 +133,40 @@ Result LottieLoader::header()
             ++p;
             continue;
         }
-        if (depth != 1) {
+        if (*p != '"') {
             ++p;
             continue;
         }
-        //version
-        if (!strncmp(p, "\"v\":", 4)) {
-            p += 4;
-            continue;
+        auto key = ++p;
+        while (*p != '\0' && *p != '"') {
+            if (*p == '\\' && *(p + 1) != '\0') ++p;
+            ++p;
         }
-
-        //framerate
-        if (!strncmp(p, "\"fr\":", 5)) {
-            p += 5;
-            auto e = strstr(p, ",");
-            if (!e) e = strstr(p, "}");
-            frameRate = toFloat(p, nullptr);
-            p = e;
-            continue;
-        }
-
-        //start frame
-        if (!strncmp(p, "\"ip\":", 5)) {
-            p += 5;
-            auto e = strstr(p, ",");
-            if (!e) e = strstr(p, "}");
-            startFrame = toFloat(p, nullptr);
-            p = e;
-            continue;
-        }
-
-        //end frame
-        if (!strncmp(p, "\"op\":", 5)) {
-            p += 5;
-            auto e = strstr(p, ",");
-            if (!e) e = strstr(p, "}");
-            endFrame = toFloat(p, nullptr);
-            p = e;
-            continue;
-        }
-
-        //width
-        if (!strncmp(p, "\"w\":", 4)) {
-            p += 4;
-            auto e = strstr(p, ",");
-            if (!e) e = strstr(p, "}");
-            w = toFloat(p, nullptr);
-            p = e;
-            continue;
-        }
-        //height
-        if (!strncmp(p, "\"h\":", 4)) {
-            p += 4;
-            auto e = strstr(p, ",");
-            if (!e) e = strstr(p, "}");
-            h = toFloat(p, nullptr);
-            p = e;
-            continue;
-        }
+        if (*p == '\0') break;
+        auto len = p - key;
         ++p;
+        if (depth != 1) continue;
+
+        auto v = p;
+        while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r')
+            ++v;
+        if (*v != ':') continue;
+        ++v;
+
+        float* field = nullptr;
+        if (len == 2 && !strncmp(key, "fr", 2)) field = &frameRate;
+        else if (len == 2 && !strncmp(key, "ip", 2)) field = &startFrame;
+        else if (len == 2 && !strncmp(key, "op", 2)) field = &endFrame;
+        else if (len == 1 && *key == 'w') field = &w;
+        else if (len == 1 && *key == 'h') field = &h;
+        if (!field) continue;
+
+        char* e;
+        *field = toFloat(v, &e);
+        p = e;
     }
+
+    if (depth != 0) return Result::InvalidArguments;
 
     if (frameRate < FLOAT_EPSILON) {
         TVGLOG("LOTTIE", "Not a Lottie file? Frame rate is 0!");
@@ -221,7 +194,7 @@ Result LottieLoader::open(const char* data, uint32_t size, const LoaderOps& _ops
     this->size = size;
     owner = ops->owner;
     dirName = ops->rpath ? duplicate(ops->rpath) : duplicate(".");
-    builder->resolver = ops->resolver;
+    builder.resolver = ops->resolver;
 
     return header();
 }
@@ -234,7 +207,7 @@ Result LottieLoader::open(const char* path, const LoaderOps& ops)
     if ((content = Loader::open(path, size, true))) {
         dirName = tvg::dirname(path);
         owner = Ownership::Transfer;
-        builder->resolver = static_cast<const PictureOps*>(&ops)->resolver;
+        builder.resolver = static_cast<const PictureOps*>(&ops)->resolver;
         return header();
     }
     return Result::InvalidArguments;
@@ -288,21 +261,21 @@ bool LottieLoader::apply(uint32_t slotcode, bool byDefault)
 {
     if (curSlot == slotcode) return true;
 
-    if (!ready() || comp->slots.count == 0) return false;
+    if (!ready() || comp->slots.empty()) return false;
 
     auto applied = false;
 
     // Reset all slots if slotcode is 0
     if (slotcode == 0) {
-        ARRAY_FOREACH(p, comp->slots) (*p)->reset();
+        for (auto& p : comp->slots) p->reset();
         applied = true;
     } else {
         //Find the custom slot with the slotcode
         INLIST_FOREACH(this->slots, slot) {
             if (slot->code != slotcode) continue;
             //apply the custom slot property to the targets.
-            ARRAY_FOREACH(p, slot->props) {
-                p->target->apply(p->prop, byDefault);
+            for (auto& p : slot->props) {
+                p.target->apply(p.prop, byDefault);
             }
             applied = true;
             break;
@@ -322,8 +295,8 @@ bool LottieLoader::del(uint32_t slotcode, bool byDefault)
     INLIST_SAFE_FOREACH(this->slots, slot) {
         if (slot->code != slotcode) continue;
         if (!byDefault) {
-            ARRAY_FOREACH(p, slot->props) {
-                p->target->reset();
+            for (auto& p : slot->props) {
+                p.target->reset();
             }
             build = true;
         }
@@ -342,7 +315,7 @@ uint32_t LottieLoader::gen(const char* slots, bool byDefault)
 
     //parsing slot json
     auto temp = byDefault ? slots : duplicate(slots);
-    LottieParser parser(temp, dirName, builder->expressions());
+    LottieParser parser(temp, dirName, builder.expressions());
     parser.comp = comp;
     
     auto idx = 0;
@@ -352,9 +325,9 @@ uint32_t LottieLoader::gen(const char* slots, bool byDefault)
     while (auto sid = djb2Encode(parser.sid(idx == 0))) {
         //Associates the overrding target to apply for the current custom slot
         auto found = false;
-        ARRAY_FOREACH(p, comp->slots) {
-            if ((*p)->sid != sid) continue;  //find target
-            if (auto prop = parser.parse(*p)) custom->props.push({prop, *p});
+        for (auto& p : comp->slots) {
+            if (p->sid != sid) continue;  // find target
+            if (auto prop = parser.parse(p)) custom->props.push({prop, p});
             found = true;
             break;
         }
@@ -363,7 +336,7 @@ uint32_t LottieLoader::gen(const char* slots, bool byDefault)
         ++idx;
     }
 
-    tvg::free((char*)temp);
+    if (!byDefault) tvg::free((char*)temp);
 
     //Success, valid custom slot.
     if (custom->props.count > 0) {
@@ -388,13 +361,13 @@ bool LottieLoader::frame(float no)
     no = shorten(no);
 
     //Skip update if frame diff is too small.
-    if (!builder->tween.active && fabsf(this->frameNo - no) <= 0.0009f) return false;
+    if (!builder.tween.active && fabsf(this->frameNo - no) <= 0.0009f) return false;
 
     this->done();
 
     this->frameNo = no;
 
-    builder->tween.off();
+    builder.tween.off();
 
     if (comp) comp->clear();     //clear synchronously
 
@@ -408,13 +381,6 @@ float LottieLoader::startFrame()
 {
     return segmentBegin;
 }
-
-
-float LottieLoader::totalFrame()
-{
-    return segmentEnd - segmentBegin;
-}
-
 
 float LottieLoader::curFrame()
 {
@@ -471,10 +437,10 @@ bool LottieLoader::segment(const char* marker, float& begin, float& end)
 {
     if (!ready() || comp->markers.count == 0) return false;
 
-    ARRAY_FOREACH(p, comp->markers) {
-        if (!strcmp(marker, (*p)->name)) {
-            begin = (*p)->time;
-            end = (*p)->time + (*p)->duration;
+    for (auto& p : comp->markers) {
+        if (!strcmp(marker, p->name)) {
+            begin = p->time;
+            end = p->time + p->duration;
             return true;
         }
     }
@@ -496,23 +462,23 @@ bool LottieLoader::tweenTo(float to)
 {
     done();
 
-    builder->tween.on(shorten(to));
+    builder.tween.on(shorten(to));
 
     return true;
 }
 
 bool LottieLoader::tween(float progress)
 {
-    if (!builder->tween.active || builder->tween.legacy) return false;
+    if (!builder.tween.active || builder.tween.legacy) return false;
 
     // Skip update if frame diff is too small.
     progress = shorten(progress);
-    if (tvg::equal(progress, builder->tween.progress)) return true;
+    if (tvg::equal(progress, builder.tween.progress)) return true;
 
     done();
 
-    if (tvg::equal(progress, 1.0f)) frameNo = builder->tween.to;
-    builder->tween.progress = progress;
+    if (tvg::equal(progress, 1.0f)) frameNo = builder.tween.to;
+    builder.tween.progress = progress;
     if (comp) comp->clear();  // clear synchronously
 
     TaskScheduler::request(this);
@@ -522,7 +488,7 @@ bool LottieLoader::tween(float progress)
 
 bool LottieLoader::tween(float from, float to, float progress)
 {
-    builder->tween.off();  // Not allowed dynamic tweening during the new tween mode
+    builder.tween.off();  // Not allowed dynamic tweening during the new tween mode
 
     //tweening is not necessary
     if (tvg::zero(progress)) return frame(from);
@@ -532,7 +498,7 @@ bool LottieLoader::tween(float from, float to, float progress)
 
     progress = shorten(progress);
     frameNo = shorten(from);
-    builder->tween.on(shorten(to), progress);
+    builder.tween.on(shorten(to), progress);
     if (comp) comp->clear();     //clear synchronously
 
     TaskScheduler::request(this);
@@ -550,15 +516,18 @@ bool LottieLoader::quality(uint8_t value)
     return true;
 }
 
-
 void LottieLoader::resolver(std::function<void(const tvg::LottieAudioResolver&, void*)> func, void* data)
 {
-    builder->audioResolver = {std::move(func), data};
+    builder.audioResolver = {std::move(func), data};
 }
-
 
 void LottieLoader::volume(float value)
 {
     done();
-    builder->volume = value;
+    builder.volume = value;
+}
+
+float LottieLoader::volume()
+{
+    return builder.volume;
 }
