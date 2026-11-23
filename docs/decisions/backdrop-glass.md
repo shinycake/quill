@@ -1,4 +1,4 @@
-# Backdrop glass: the primitive, Metal (stage 1), wgpu (stage 2) and DirectX (stage 3)
+# Backdrop glass: the primitive, Metal (stage 1), wgpu (stage 2), DirectX (stage 3) and the extras (stage 5)
 
 Liquid glass that bends, frosts and lights what the window drew under it,
 drawn by the GPU. The design is quill-tools/gpui-liquid-glass/GPU-PLAN.md;
@@ -80,6 +80,52 @@ bilalgursen/liquid-glass, MIT). No product UI uses the glass yet.
   pack the same way, and its tests run in Quill's
   `src/ui/backdrop_lens_tests.rs`.
 
+## What stage 5 adds (the extras)
+
+Ported from quill-tools/gpui-liquid-glass 0.3.0, which carries the same
+GPUI change as `gpui-patches/` (patch version 2) and the components that
+use it.
+
+- **Gooey shapes.** `LensStyle::droplet` (`LensDroplet`) melts a round
+  droplet onto the body, and `LensStyle::blob` (`LensBlob`, with an optional
+  `LensNeck`) melts a second rounded box into it, both with the source
+  kit's smooth union. One lens draws the whole shape, so the bridge between
+  the parts bends and frosts like the rest of the glass. The kit's action
+  button (the arrow as a droplet melting off the body) and its select (the
+  list swelling out of the button on a neck that thins and snaps) are built
+  on them. All three backends draw them.
+- **Reused backdrops.** Each frame is planned before its first batch
+  (`LensReuse`, `scene/backdrop_frame.rs`). A lens over the same content as
+  last frame, inside the region it copied then, keeps its atlas slot and
+  skips the copy and the blur; only lenses whose backdrop changed pay for
+  them. The check is exact: the plan hashes every primitive under the
+  copied region (not their draw order), a freed sprite-atlas tile, a new
+  atlas and a new target size, and glass under glass hashes the lens below
+  and what it read. A frame that did not draw every batch as planned (flat
+  fallback, a failed submit) forgets the plan. All three backends.
+- **Inked labels.** `Window::with_lens_ink(LensInk { on_light, on_dark },
+  ..)` paints text and icons whose colour the renderer picks per glyph from
+  the glass under it, in the same frame, with no read-back to the CPU.
+  Metal does it in the monochrome sprite shader, which samples the lens
+  atlas under each glyph's centre. wgpu and DirectX draw the label in its
+  own colour (the kit passes the theme's label colour), since their sprite
+  shaders are upstream code shared with every glyph and a per-glyph atlas
+  read there was not worth the risk in this stage.
+- **Sharp magnifier.** `LensDetail::Rendered { density }` (2 to 4) draws
+  what lies under the lens again at that many texels per device pixel, with
+  glyphs and icons rasterized again at that scale, so an enlarging loupe
+  stays crisp. Metal only: the sub-scene draws on its own command buffer
+  into a pooled canvas that is blitted into the slot. wgpu and DirectX copy
+  the frame as for any lens (the magnifier still reads its slot finer where
+  it enlarges, which helps a little). A lens over a path or a video surface
+  copies on Metal too.
+- **Frost towards the rim.** `LensTune::frost_edge` scales the frost's blur
+  at the rim against the middle. All three backends.
+- **The demo.** `ready-glass` now also shows the select with its list
+  hanging off the button by a neck, the action button with its arrow
+  halfway off as a droplet (labels inked), and two loupes over the same
+  bubble: one copying the frame, one drawing it again three times finer.
+
 ## Decisions
 
 - `Primitive::Lens` holds a `Box<BackdropLens>`. The lens is about 240
@@ -111,6 +157,20 @@ bilalgursen/liquid-glass, MIT). No product UI uses the glass yet.
   the way the HDR stills do. The four downsample passes read one upload of
   all levels' slots, each from its own start (`batch_start_index`).
 - DirectX frees the atlas after the first frame without glass, as wgpu does.
+- Reuse keys on what was drawn, not on what changed: there is no damage
+  tracking in GPUI to lean on, and a hash of the primitives under a
+  region is exact where damage rects would be approximate. The whole padded
+  copy region is hashed, not only the body, because the bend reads to the
+  edge of the copy.
+- Each lens keeps one slot for the whole frame (until now each batch
+  packed its own footprints from the atlas's corner). That costs atlas room when glass sits over glass,
+  but it is what lets a slot outlive the frame.
+- The ink is picked in the sprite shader from the slot the frame already
+  copied, so it is exact for this frame and needs no extra pass; a CPU pick
+  would be a frame late (the kit's CPU path does that, with hysteresis).
+- Glyph sources for the sharp magnifier are recorded only while a frame has
+  a `Rendered` lens. The first such frame enlarges the recorded glyphs and
+  asks for the next frame, which records them.
 - The ordering tests live in `src/ui/backdrop_lens_tests.rs`: gpui-pre's own
   unit tests do not build in this repository (missing `util_macros` and
   font assets).
@@ -182,10 +242,40 @@ bilalgursen/liquid-glass, MIT). No product UI uses the glass yet.
 - Not run: a real GPU, HDR, device loss on a live window, feature level 10,
   and frame cost on Windows.
 
-## Not done here (later stages)
+## Verification, stage 5
 
-- Moving gpui-liquid-glass onto the primitive (stage 4) and the stage 5
-  ideas (merging lens groups, skipping the copy when the backdrop did not
-  change, label contrast, a sharp magnifier).
+- macOS (Metal), 2026-11-22: `ready-glass` captured in light and dark with
+  the demo-capture build. The select's list hangs off its button by a neck,
+  the action button's droplet is still bridged to the body, the action
+  labels are inked (dark over the light rows in light, white in dark), and
+  of the two loupes over the same bubble the re-rendered one shows crisp
+  text where the copied one shows enlarged pixels.
+- Tests: `src/ui/backdrop_lens_tests.rs` adds reuse (a still frame reuses,
+  a change under the lens copies, a forgotten frame copies), inks (a glyph
+  over glass reads that lens, one beside it none), the droplet's glass
+  bounds and the loupe's density. gpui-liquid-glass runs nine more reuse
+  cases (`tests/reuse.rs`) and the components' UI tests.
+  `src/ui/scene_replay_tests.rs` now tags monochrome sprites by tile id,
+  since `MonochromeSprite::pad` carries a label's ink.
+- Cost, measured in gpui-liquid-glass's gallery (release build, 1120x1080
+  at 2x, 20 lenses, only a spinner moving; M-series Mac on AC power; median
+  GPU time from the command buffer's start and end, three runs each,
+  alternating), 2026-11-22: with reuse, 1 lens copied, 18 reused and 1
+  re-rendered per frame, 5.3 ms of GPU time against 7.1 ms with every lens
+  copied (19 copies), and 0.5 to 0.7 ms of CPU encoding against 0.86 to
+  0.9 ms. The sharp loupe costs about 1.2 ms of GPU time (0.48 ms for its
+  own command buffer, the rest filling and blurring its slot, which is
+  never reused) and about 0.2 ms of CPU. The probe was a temporary patch
+  and is not committed.
+- Linux and Windows were cross-checked from macOS with clippy (stub C
+  tools): the whole app for Linux, and gpui-pre and gpui-pre-windows for
+  Windows (the app itself has unrelated Windows-only clippy findings in
+  files this change does not touch).
+
+## Not done here
+
+- Inked labels and the sharp magnifier on wgpu and DirectX (they fall back
+  as described above).
+- A sharp magnifier over paths or video surfaces (it copies there).
 - The presentation cost of readable drawables was not measured: the
   demo-capture build keeps drawables readable in both runs.

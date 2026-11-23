@@ -11,7 +11,7 @@
 
 use crate::{
     Background, Bounds, ContentMask, Corners, DrawOrder, Edges, Hsla, Pixels, Point, Quad,
-    ScaledPixels, point, px,
+    ScaledPixels, Size, point, px,
 };
 
 /// Lens orders sit on multiples of `1 << LENS_BAND_BITS`: a lens takes the
@@ -78,7 +78,9 @@ pub struct LensBorder {
 }
 
 /// Multipliers on the default look; 1.0 everywhere is the default, except
-/// `bend_curve` (1.6).
+/// `bend_curve` (1.6). `frost_edge` multiplies the frost's blur at the rim
+/// (the source shader's `uFrostEdge`): above 1 the frost thickens towards
+/// the edge, below 1 it clears.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[allow(missing_docs)]
 pub struct LensTune {
@@ -91,6 +93,7 @@ pub struct LensTune {
     pub bend_curve: f32,
     pub bend_depth: f32,
     pub saturation: f32,
+    pub frost_edge: f32,
 }
 
 impl Default for LensTune {
@@ -105,8 +108,64 @@ impl Default for LensTune {
             bend_curve: 1.6,
             bend_depth: 1.0,
             saturation: 1.0,
+            frost_edge: 1.0,
         }
     }
+}
+
+/// QUILL (glass stage 5): a round droplet melted onto the body, on its
+/// horizontal axis (the source kit's `droplet`): the arrow of an action
+/// button pulling away from it. Logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LensDroplet {
+    /// The droplet's centre, from the body's centre along x.
+    pub offset_x: Pixels,
+    /// Its radius.
+    pub radius: Pixels,
+    /// How wide the gooey bridge to the body is (0 = two separate shapes).
+    pub softness: Pixels,
+}
+
+/// QUILL (glass stage 5): where a blob's bridge gathers into a neck. Logical
+/// pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LensNeck {
+    /// The neck's x, from the body's centre.
+    pub x: Pixels,
+    /// How far from it the bridge's softness falls off.
+    pub width: Pixels,
+}
+
+/// QUILL (glass stage 5): a second rounded box melted into the body with a
+/// smooth union, in any direction (the source kit's `blob`): a list
+/// swelling out of its button. Logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LensBlob {
+    /// Its centre, from the body's centre.
+    pub offset: Point<Pixels>,
+    /// Its half size.
+    pub half_size: Size<Pixels>,
+    /// Its corner radius.
+    pub corner_radius: Pixels,
+    /// How wide the gooey bridge to the body is (0 = two separate shapes).
+    pub softness: Pixels,
+    /// Gathers the bridge into a neck around one point.
+    pub neck: Option<LensNeck>,
+}
+
+/// QUILL (glass stage 5): where the glass gets the picture it bends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LensDetail {
+    /// The pixels the frame drew under the lens.
+    #[default]
+    Copied,
+    /// What lies under the lens drawn again at `density` texels per device
+    /// pixel (text rasterized at that scale), so a magnifying lens stays
+    /// sharp. Renderers that can't draw it this way copy the frame instead.
+    Rendered {
+        /// Texels per device pixel, 2 to 4.
+        density: u32,
+    },
 }
 
 /// The look of one lens, everything but where it is.
@@ -141,6 +200,12 @@ pub struct LensStyle {
     pub light: Point<f32>,
     /// How far the rim light leans to `light` (0..1).
     pub light_mix: f32,
+    /// QUILL (glass stage 5): a droplet melted onto the body.
+    pub droplet: Option<LensDroplet>,
+    /// QUILL (glass stage 5): a box melted into the body.
+    pub blob: Option<LensBlob>,
+    /// QUILL (glass stage 5): copied or re-rendered backdrop.
+    pub detail: LensDetail,
 }
 
 /// A lens in the scene, as the renderers read it. Lengths are device
@@ -204,6 +269,29 @@ pub struct BackdropLens {
     pub light_x: f32,
     pub light_y: f32,
     pub light_mix: f32,
+    /// QUILL (glass stage 5): the order the lens was painted in this frame, for
+    /// labels and re-rendered backdrops that refer to it.
+    pub id: u32,
+    /// 0 = copied backdrop, else the density of a re-rendered one.
+    pub density: u32,
+    /// The droplet: centre x from the body's centre, radius and bridge
+    /// softness, logical pixels (radius 0 = none).
+    pub drop_x: f32,
+    pub drop_r: f32,
+    pub drop_k: f32,
+    /// The blob: centre from the body's centre, half size, corner radius
+    /// and bridge softness, logical pixels (softness 0 = none).
+    pub blob_x: f32,
+    pub blob_y: f32,
+    pub blob_hx: f32,
+    pub blob_hy: f32,
+    pub blob_r: f32,
+    pub blob_k: f32,
+    /// The neck: x from the body's centre and falloff width, logical
+    /// pixels (width 0 = none).
+    pub neck_x: f32,
+    pub neck_w: f32,
+    pub tune_frost_edge: f32,
 }
 
 /// Room around a body of `height` for the drop shadow below it and the
@@ -281,7 +369,44 @@ impl BackdropLens {
             light_x: style.light.x,
             light_y: style.light.y,
             light_mix: style.light_mix.clamp(0.0, 1.0),
+            id: 0,
+            density: match style.detail {
+                LensDetail::Copied => 0,
+                LensDetail::Rendered { density } => density.clamp(2, 4),
+            },
+            drop_x: 0.0,
+            drop_r: 0.0,
+            drop_k: 0.0,
+            blob_x: 0.0,
+            blob_y: 0.0,
+            blob_hx: 0.0,
+            blob_hy: 0.0,
+            blob_r: 0.0,
+            blob_k: 0.0,
+            neck_x: 0.0,
+            neck_w: 0.0,
+            tune_frost_edge: style.tune.frost_edge.max(0.0),
         };
+        if let Some(droplet) = style.droplet.filter(|d| d.radius.0 > 0.0) {
+            lens.drop_x = droplet.offset_x.0;
+            lens.drop_r = droplet.radius.0;
+            lens.drop_k = droplet.softness.0.max(0.0);
+        }
+        if let Some(blob) = style.blob.filter(|b| b.softness.0 > 0.0) {
+            lens.blob_x = blob.offset.x.0;
+            lens.blob_y = blob.offset.y.0;
+            lens.blob_hx = blob.half_size.width.0.max(0.0);
+            lens.blob_hy = blob.half_size.height.0.max(0.0);
+            lens.blob_r = blob
+                .corner_radius
+                .0
+                .clamp(0.0, lens.blob_hx.min(lens.blob_hy));
+            lens.blob_k = blob.softness.0;
+            if let Some(neck) = blob.neck.filter(|n| n.width.0 > 0.0) {
+                lens.neck_x = neck.x.0;
+                lens.neck_w = neck.width.0;
+            }
+        }
         match style.material {
             LensMaterial::Clear {
                 bend,
@@ -365,7 +490,8 @@ pub const LENS_ATLAS_ALIGN: u32 = 1 << (LENS_ATLAS_LEVELS - 1);
 pub const LENS_ATLAS_GUTTER: u32 = 16;
 
 /// One lens footprint a renderer copies: from the target at `from` to the
-/// atlas at `to`, `size` device pixels.
+/// atlas at `to`, `size` device pixels. A re-rendered backdrop
+/// (`density` > 1) fills `size` x `density` texels of the atlas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LensCopy {
     /// Where the footprint starts in the target.
@@ -374,6 +500,72 @@ pub struct LensCopy {
     pub to: (u32, u32),
     /// The footprint, clipped to the target.
     pub size: (u32, u32),
+    /// QUILL (glass stage 5): atlas texels per device pixel (1 for a copy).
+    pub density: u32,
+}
+
+impl LensCopy {
+    /// The slot's size in atlas texels.
+    pub fn texels(&self) -> (u32, u32) {
+        let density = self.density.max(1);
+        (
+            self.size.0.saturating_mul(density),
+            self.size.1.saturating_mul(density),
+        )
+    }
+}
+
+/// QUILL (glass stage 5): a part of the target a lens reads, and how densely its
+/// slot holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LensRegion {
+    /// Where it starts in the target, device pixels.
+    pub from: (u32, u32),
+    /// Its size, device pixels.
+    pub size: (u32, u32),
+    /// Atlas texels per device pixel.
+    pub density: u32,
+}
+
+impl LensRegion {
+    /// `bounds` rounded out to whole pixels and clipped to a `target` of
+    /// that size, one texel per pixel.
+    pub fn clipped(bounds: Bounds<ScaledPixels>, target: (u32, u32)) -> Self {
+        let clamp_x = |v: f32| v.clamp(0.0, target.0 as f32);
+        let clamp_y = |v: f32| v.clamp(0.0, target.1 as f32);
+        let x0 = clamp_x(bounds.origin.x.0.floor());
+        let y0 = clamp_y(bounds.origin.y.0.floor());
+        let x1 = clamp_x((bounds.origin.x.0 + bounds.size.width.0).ceil());
+        let y1 = clamp_y((bounds.origin.y.0 + bounds.size.height.0).ceil());
+        Self {
+            from: (x0 as u32, y0 as u32),
+            size: ((x1 - x0).max(0.0) as u32, (y1 - y0).max(0.0) as u32),
+            density: 1,
+        }
+    }
+
+    /// Whether `other` lies inside this region.
+    pub fn contains(&self, other: &LensRegion) -> bool {
+        let (x0, y0) = (u64::from(self.from.0), u64::from(self.from.1));
+        let (x1, y1) = (x0 + u64::from(self.size.0), y0 + u64::from(self.size.1));
+        let (ox0, oy0) = (u64::from(other.from.0), u64::from(other.from.1));
+        let (ox1, oy1) = (ox0 + u64::from(other.size.0), oy0 + u64::from(other.size.1));
+        ox0 >= x0 && oy0 >= y0 && ox1 <= x1 && oy1 <= y1
+    }
+
+    /// The region as device-pixel bounds.
+    pub fn bounds(&self) -> Bounds<ScaledPixels> {
+        Bounds {
+            origin: point(
+                ScaledPixels(self.from.0 as f32),
+                ScaledPixels(self.from.1 as f32),
+            ),
+            size: Size {
+                width: ScaledPixels(self.size.0 as f32),
+                height: ScaledPixels(self.size.1 as f32),
+            },
+        }
+    }
 }
 
 /// Where a lens batch's footprints go in the atlas, and the atlas size they
@@ -398,28 +590,36 @@ impl LensPacking {
     /// Shelves the footprints of `lenses`, clipped to a `target` of that
     /// size, into an atlas; `None` when they don't fit in `max_side`.
     pub fn pack(lenses: &[BackdropLens], target: (u32, u32), max_side: u32) -> Option<Self> {
-        let clipped: Vec<((u32, u32), (u32, u32))> = lenses
+        let regions: Vec<LensRegion> = lenses
             .iter()
-            .map(|lens| {
-                let bounds = lens.bounds;
-                let clamp_x = |v: f32| v.clamp(0.0, target.0 as f32);
-                let clamp_y = |v: f32| v.clamp(0.0, target.1 as f32);
-                let x0 = clamp_x(bounds.origin.x.0.floor());
-                let y0 = clamp_y(bounds.origin.y.0.floor());
-                let x1 = clamp_x((bounds.origin.x.0 + bounds.size.width.0).ceil());
-                let y1 = clamp_y((bounds.origin.y.0 + bounds.size.height.0).ceil());
-                let size = ((x1 - x0).max(0.0) as u32, (y1 - y0).max(0.0) as u32);
-                ((x0 as u32, y0 as u32), size)
-            })
+            .map(|lens| LensRegion::clipped(lens.bounds, target))
             .collect();
-        let widest = clipped
+        Self::pack_regions(&regions, target, max_side)
+    }
+
+    /// QUILL (glass stage 5): shelves `regions` into an atlas, in order; `None`
+    /// when they don't fit in `max_side`. The same regions always land in
+    /// the same slots.
+    pub fn pack_regions(
+        regions: &[LensRegion],
+        target: (u32, u32),
+        max_side: u32,
+    ) -> Option<Self> {
+        let texels = |region: &LensRegion| {
+            let density = region.density.max(1);
+            (
+                region.size.0.saturating_mul(density),
+                region.size.1.saturating_mul(density),
+            )
+        };
+        let widest = regions
             .iter()
-            .map(|(_, (w, _))| align_up(*w))
+            .map(|region| align_up(texels(region).0))
             .max()
             .unwrap_or(0);
-        let one_row: u32 = clipped
+        let one_row: u32 = regions
             .iter()
-            .map(|(_, (w, _))| align_up(*w).saturating_add(LENS_ATLAS_GUTTER))
+            .map(|region| align_up(texels(region).0).saturating_add(LENS_ATLAS_GUTTER))
             .fold(0, u32::saturating_add);
         let width = one_row
             .min(align_up(target.0).saturating_add(LENS_ATLAS_GUTTER))
@@ -429,21 +629,23 @@ impl LensPacking {
             return None;
         }
         let (mut x, mut y, mut row) = (0u32, 0u32, 0u32);
-        let mut copies = Vec::with_capacity(clipped.len());
-        for (from, size) in clipped {
-            let slot_w = align_up(size.0);
+        let mut copies = Vec::with_capacity(regions.len());
+        for region in regions {
+            let (w, h) = texels(region);
+            let slot_w = align_up(w);
             if x > 0 && x.saturating_add(slot_w) > width {
                 x = 0;
                 y = y.saturating_add(row).saturating_add(LENS_ATLAS_GUTTER);
                 row = 0;
             }
             copies.push(LensCopy {
-                from,
+                from: region.from,
                 to: (x, y),
-                size,
+                size: region.size,
+                density: region.density.max(1),
             });
             x = x.saturating_add(slot_w).saturating_add(LENS_ATLAS_GUTTER);
-            row = row.max(align_up(size.1));
+            row = row.max(align_up(h));
         }
         let height = y.saturating_add(row).max(LENS_ATLAS_ALIGN);
         (height <= max_side).then_some(Self {
@@ -455,14 +657,73 @@ impl LensPacking {
 }
 
 impl LensStyle {
-    /// Where a lens whose body fills `body` draws: the body and the room
+    /// QUILL (glass stage 5): the glass's extent around a body that fills `body`:
+    /// the body, its droplet and its blob, and the bulge of the gooey
+    /// bridges between them (a smooth union reaches a quarter of its
+    /// softness past the shapes it joins).
+    pub fn glass_bounds(&self, body: Bounds<Pixels>) -> Bounds<Pixels> {
+        let center = body.center();
+        let mut glass = body;
+        let mut bulge = 0.0f32;
+        if let Some(droplet) = self.droplet.filter(|d| d.radius.0 > 0.0) {
+            let at = point(center.x + droplet.offset_x, center.y);
+            let r = droplet.radius;
+            glass = glass.union(&Bounds::from_corners(
+                point(at.x - r, at.y - r),
+                point(at.x + r, at.y + r),
+            ));
+            bulge = bulge.max(droplet.softness.0);
+        }
+        if let Some(blob) = self.blob.filter(|b| b.softness.0 > 0.0) {
+            let at = center + blob.offset;
+            let half = blob.half_size;
+            glass = glass.union(&Bounds::from_corners(
+                point(at.x - half.width, at.y - half.height),
+                point(at.x + half.width, at.y + half.height),
+            ));
+            bulge = bulge.max(blob.softness.0);
+        }
+        glass.dilate(px(bulge.max(0.0) / 4.0))
+    }
+
+    /// Where a lens whose body fills `body` draws: the glass and the room
     /// its shadow and rim light take around it.
     pub fn footprint(&self, body: Bounds<Pixels>) -> Bounds<Pixels> {
         let casts_shadow = self.shadow * self.strength > 0.0;
         let (sides, top, bottom) = lens_pad(body.size.height.0, casts_shadow);
+        let glass = self.glass_bounds(body);
         Bounds::from_corners(
-            point(body.left() - px(sides), body.top() - px(top)),
-            point(body.right() + px(sides), body.bottom() + px(bottom)),
+            point(glass.left() - px(sides), glass.top() - px(top)),
+            point(glass.right() + px(sides), glass.bottom() + px(bottom)),
         )
+    }
+}
+
+impl BackdropLens {
+    /// QUILL (glass stage 5): the glass's extent in device pixels (the body, its
+    /// droplet and its blob), without the shadow's room.
+    pub fn glass_bounds(&self) -> Bounds<ScaledPixels> {
+        let s = self.scale_factor;
+        let center = self.body.center();
+        let mut glass = self.body;
+        let mut bulge = 0.0f32;
+        if self.drop_r > 0.0 {
+            let (x, r) = (center.x.0 + self.drop_x * s, self.drop_r * s);
+            glass = glass.union(&Bounds::from_corners(
+                point(ScaledPixels(x - r), ScaledPixels(center.y.0 - r)),
+                point(ScaledPixels(x + r), ScaledPixels(center.y.0 + r)),
+            ));
+            bulge = bulge.max(self.drop_k * s);
+        }
+        if self.blob_k > 0.0 {
+            let (x, y) = (center.x.0 + self.blob_x * s, center.y.0 + self.blob_y * s);
+            let (hx, hy) = (self.blob_hx * s, self.blob_hy * s);
+            glass = glass.union(&Bounds::from_corners(
+                point(ScaledPixels(x - hx), ScaledPixels(y - hy)),
+                point(ScaledPixels(x + hx), ScaledPixels(y + hy)),
+            ));
+            bulge = bulge.max(self.blob_k * s);
+        }
+        glass.dilate(ScaledPixels(bulge / 4.0))
     }
 }

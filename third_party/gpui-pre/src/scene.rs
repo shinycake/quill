@@ -2,7 +2,7 @@
 // `SurfaceFrame` (RGBA16F and NV12, `YuvColor`) and the non-Apple `PaintSurface::frame`;
 // primitives a window's paint filter refuses never enter the scene; a replayed
 // range enters the bounds tree once; backdrop glass (`BackdropLens`, banded
-// orders).
+// orders; stage 5: frame plans, label inks, re-rendered backdrops).
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
@@ -14,8 +14,14 @@ use crate::{
     AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels,
     Point, Radians, ScaledPixels, Size, bounds_tree::BoundsTree, point,
 };
+mod backdrop_frame;
 mod backdrop_lens;
+mod backdrop_sharp;
+pub use backdrop_frame::*;
+pub(crate) use backdrop_frame::{UnderItem, primitives_under_ranked};
 pub use backdrop_lens::*;
+pub use backdrop_sharp::SharpBackdrop;
+pub(crate) use backdrop_sharp::{GlyphKey, GlyphSource, SlotSpace};
 
 use std::{
     fmt::Debug,
@@ -62,6 +68,18 @@ pub struct Scene {
     pub surfaces: Vec<PaintSurface>,
     /// Quill: backdrop glass, drawn over what the frame holds under it.
     pub lenses: Vec<BackdropLens>,
+    /// QUILL (glass stage 5): the lens and colours of each inked label. After
+    /// `finish`, an inked `MonochromeSprite` has `pad` = its entry + 1.
+    pub inks: Vec<LensInkEntry>,
+    /// QUILL (glass stage 5): the inks labels were painted with; an inked
+    /// sprite's `pad` is its request + 1 until `finish`.
+    pub(crate) ink_requests: Vec<LensInk>,
+    /// QUILL (glass stage 5): what lies under each `LensDetail::Rendered` lens,
+    /// drawn again finer (`Window` builds them as the frame ends).
+    pub sharp_backdrops: Vec<SharpBackdrop>,
+    /// QUILL (glass stage 5): how to rasterize sprites again, recorded while a
+    /// window has re-rendered backdrops.
+    pub(crate) glyph_sources: collections::FxHashMap<GlyphKey, GlyphSource>,
     /// Quill: the sort keys of `finish`, kept so it allocates nothing once
     /// the scene has grown.
     sort_keys: Vec<(u64, u32)>,
@@ -89,6 +107,10 @@ impl Scene {
         self.polychrome_sprites.clear();
         self.surfaces.clear();
         self.lenses.clear();
+        self.inks.clear();
+        self.ink_requests.clear();
+        self.sharp_backdrops.clear();
+        self.glyph_sources.clear();
         self.sort_keys.clear();
         self.suppressed = false;
         self.filtered = false;
@@ -189,6 +211,7 @@ impl Scene {
             }
             Primitive::Lens(lens) => {
                 lens.order = order;
+                lens.id = u32::try_from(self.lenses.len()).unwrap_or(u32::MAX);
                 self.lenses.push(**lens);
             }
         }
@@ -207,15 +230,35 @@ impl Scene {
             .iter()
             .any(|operation| matches!(operation, PaintOperation::Primitive(Primitive::Lens(_))));
         if self.suppressed || !self.layer_stack.is_empty() || has_lens {
-            self.repaint_operations(operations);
+            self.repaint_operations(operations, prev_scene);
         } else {
-            self.replay_as_one(operations);
+            self.replay_as_one(operations, prev_scene);
         }
     }
 
-    fn repaint_operations(&mut self, operations: &[PaintOperation]) {
+    fn repaint_operations(&mut self, operations: &[PaintOperation], prev_scene: &Scene) {
         for operation in operations {
             match operation {
+                // QUILL (glass stage 5): an inked label keeps its ink, and a
+                // glyph keeps how to rasterize it again.
+                PaintOperation::Primitive(Primitive::MonochromeSprite(sprite)) => {
+                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
+                    let ink = sprite
+                        .pad
+                        .checked_sub(1)
+                        .and_then(|i| prev_scene.ink_requests.get(i as usize));
+                    match ink {
+                        Some(ink) => self.insert_inked_sprite(
+                            MonochromeSprite { pad: 0, ..*sprite },
+                            *ink,
+                        ),
+                        None => self.insert_primitive(MonochromeSprite { pad: 0, ..*sprite }),
+                    }
+                }
+                PaintOperation::Primitive(Primitive::PolychromeSprite(sprite)) => {
+                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
+                    self.insert_primitive(*sprite);
+                }
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
                 PaintOperation::EndLayer => self.pop_layer(),
@@ -223,7 +266,7 @@ impl Scene {
         }
     }
 
-    fn replay_as_one(&mut self, operations: &[PaintOperation]) {
+    fn replay_as_one(&mut self, operations: &[PaintOperation], prev_scene: &Scene) {
         let extent = operations
             .iter()
             .filter_map(|operation| match operation {
@@ -244,6 +287,27 @@ impl Scene {
         });
         for operation in operations {
             match operation {
+                // QUILL (glass stage 5): an inked label keeps its ink, and a
+                // glyph keeps how to rasterize it again.
+                PaintOperation::Primitive(Primitive::MonochromeSprite(sprite)) => {
+                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
+                    let pad = sprite
+                        .pad
+                        .checked_sub(1)
+                        .and_then(|i| prev_scene.ink_requests.get(i as usize))
+                        .map_or(0, |ink| self.ink_request(*ink));
+                    self.push_primitive(
+                        Primitive::MonochromeSprite(MonochromeSprite { pad, ..*sprite }),
+                        sprite.order.wrapping_add(shift),
+                    );
+                }
+                PaintOperation::Primitive(Primitive::PolychromeSprite(sprite)) => {
+                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
+                    self.push_primitive(
+                        Primitive::PolychromeSprite(*sprite),
+                        sprite.order.wrapping_add(shift),
+                    );
+                }
                 PaintOperation::Primitive(primitive) => {
                     self.push_primitive(primitive.clone(), primitive.order().wrapping_add(shift));
                 }
@@ -281,6 +345,121 @@ impl Scene {
         });
         sort_primitives(&mut self.surfaces, keys, |surface| u64::from(surface.order));
         sort_primitives(&mut self.lenses, keys, |lens| u64::from(lens.order));
+        self.resolve_inks();
+    }
+
+    /// QUILL (glass stage 5): paints a label sprite whose colour the renderer
+    /// picks from the glass under it (`ink`). Where there is no glass, or
+    /// the renderer can't ink it, it draws in its own colour.
+    pub fn insert_inked_sprite(&mut self, mut sprite: MonochromeSprite, ink: LensInk) {
+        if self.suppressed {
+            return;
+        }
+        sprite.pad = self.ink_request(ink);
+        self.insert_primitive(sprite);
+    }
+
+    /// The `pad` of a sprite inked with `ink`: its request + 1.
+    fn ink_request(&mut self, ink: LensInk) -> u32 {
+        let request = match self.ink_requests.last() {
+            Some(last) if *last == ink => self.ink_requests.len(),
+            _ => {
+                self.ink_requests.push(ink);
+                self.ink_requests.len()
+            }
+        };
+        u32::try_from(request).unwrap_or(0)
+    }
+
+    /// Each inked label's lens: the highest lens below it whose glass holds
+    /// its centre. Rewrites the sprites' `pad` from request to entry.
+    fn resolve_inks(&mut self) {
+        self.inks.clear();
+        if self.ink_requests.is_empty() {
+            return;
+        }
+        let glass: Vec<(DrawOrder, Bounds<ScaledPixels>)> = self
+            .lenses
+            .iter()
+            .map(|lens| (lens.order, lens.glass_bounds()))
+            .collect();
+        let mut entries: collections::FxHashMap<(u32, u32), u32> = Default::default();
+        for sprite in &mut self.monochrome_sprites {
+            let Some(request) = sprite.pad.checked_sub(1) else {
+                continue;
+            };
+            let Some(ink) = self.ink_requests.get(request as usize).copied() else {
+                sprite.pad = 0;
+                continue;
+            };
+            let center = sprite.bounds.center();
+            let lens = glass
+                .iter()
+                .rposition(|(order, bounds)| *order < sprite.order && bounds.contains(&center))
+                .and_then(|i| u32::try_from(i).ok())
+                .unwrap_or(LensInkEntry::NO_LENS);
+            let inks = &mut self.inks;
+            let entry = *entries.entry((request, lens)).or_insert_with(|| {
+                inks.push(LensInkEntry { lens, ink });
+                u32::try_from(inks.len()).unwrap_or(0)
+            });
+            sprite.pad = entry;
+        }
+    }
+
+    /// QUILL (glass stage 5): a hash of an inked sprite's colours (0 if it is not
+    /// inked), after `finish`.
+    pub(crate) fn ink_hash(&self, sprite: &MonochromeSprite) -> u64 {
+        use std::hash::{DefaultHasher, Hasher};
+        let Some(entry) = sprite
+            .pad
+            .checked_sub(1)
+            .and_then(|i| self.inks.get(i as usize))
+        else {
+            return 0;
+        };
+        let mut hasher = DefaultHasher::new();
+        for color in [entry.ink.on_light, entry.ink.on_dark] {
+            for v in [color.h, color.s, color.l, color.a] {
+                hasher.write_u32(v.to_bits());
+            }
+        }
+        hasher.write_u32(entry.lens);
+        hasher.finish()
+    }
+
+    /// QUILL (glass stage 5): records how to rasterize the sprite just painted at
+    /// `tile` and `bounds` again.
+    pub(crate) fn record_glyph_source(
+        &mut self,
+        tile: &AtlasTile,
+        bounds: &Bounds<ScaledPixels>,
+        source: GlyphSource,
+    ) {
+        self.glyph_sources
+            .insert(GlyphKey::new(tile, bounds), source);
+    }
+
+    pub(crate) fn glyph_source(
+        &self,
+        tile: &AtlasTile,
+        bounds: &Bounds<ScaledPixels>,
+    ) -> Option<&GlyphSource> {
+        self.glyph_sources.get(&GlyphKey::new(tile, bounds))
+    }
+
+    fn copy_glyph_source(
+        &mut self,
+        prev_scene: &Scene,
+        tile: &AtlasTile,
+        bounds: &Bounds<ScaledPixels>,
+    ) {
+        if prev_scene.glyph_sources.is_empty() {
+            return;
+        }
+        if let Some(source) = prev_scene.glyph_source(tile, bounds) {
+            self.record_glyph_source(tile, bounds, source.clone());
+        }
     }
 
     #[cfg_attr(

@@ -616,3 +616,11 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
     module from its own file); a WARP test that the glass shaders build.
   - `build.rs`: compiles `lens` and `lens_downsample` from
     `shaders_lens.hlsl` in release builds.
+- Stage 5: `src/backdrop_glass.rs` and `src/directx_renderer.rs` draw from
+  gpui-pre's frame plan: a lens batch copies and blurs only its fresh
+  slots, and the plan is kept only after a frame in which every batch drew
+  as planned (`GlassDrawn`). `src/shaders_lens.hlsl`: gooey shapes, frost
+  towards the rim and the magnifier's finer read, as in the WGSL; the HDR
+  read-back and `to_output` are unchanged. `src/directx_atlas.rs`:
+  `DirectXAtlas::removals`. Inked labels draw in their own colour here and
+  re-rendered backdrops copy the frame like any lens.

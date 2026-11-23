@@ -13,8 +13,8 @@
 
 const LENS_LEVELS: i32 = 5;
 
-// `gpui::BackdropLens`, field for field (240 bytes; `lens.rs` asserts the
-// offsets the vec2 alignment of `Bounds` could move).
+// `gpui::BackdropLens`, field for field (`lens.rs` asserts the size and
+// the offsets the vec2 alignment of `Bounds` could move).
 struct BackdropLens {
     order: u32,
     material: u32,
@@ -58,6 +58,21 @@ struct BackdropLens {
     light_x: f32,
     light_y: f32,
     light_mix: f32,
+    // QUILL (glass stage 5).
+    id: u32,
+    density: u32,
+    drop_x: f32,
+    drop_r: f32,
+    drop_k: f32,
+    blob_x: f32,
+    blob_y: f32,
+    blob_hx: f32,
+    blob_hy: f32,
+    blob_r: f32,
+    blob_k: f32,
+    neck_x: f32,
+    neck_w: f32,
+    tune_frost_edge: f32,
 }
 
 // Where one lens's backdrop lies in the frame and in the atlas, device
@@ -66,7 +81,9 @@ struct LensSlot {
     copy_origin: vec2<f32>,
     copy_size: vec2<f32>,
     slot_origin: vec2<f32>,
-    pad: vec2<f32>,
+    // Atlas texels per device pixel (1: copied from the frame).
+    density: f32,
+    pad: f32,
 }
 
 // Group 1's bindings 0 to 3 are the surfaces' in shaders.wgsl.
@@ -129,6 +146,13 @@ struct LensShape {
     band: f32,
     edge_band: f32,
     blur_shift: f32,
+    // QUILL (glass stage 5): gooey shapes, units from the body's centre (see
+    // `lens_sdf`), and the frost's multiplier at the rim.
+    drop: vec3<f32>,       // x, radius, bridge softness; radius 0 = none
+    blob: vec4<f32>,       // centre x, y, half width, half height; 0 = none
+    blob_shape: vec2<f32>, // corner radius, bridge softness
+    blob_neck: vec2<f32>,  // x, falloff width; 0 = no neck
+    frost_edge: f32,
 }
 
 fn lens_shape(lens: BackdropLens) -> LensShape {
@@ -149,15 +173,53 @@ fn lens_shape(lens: BackdropLens) -> LensShape {
     s.bevel = max(lens.bevel, 2.0);
     s.edge_band = 0.35 * max(lens.tune_bend_depth, 0.05);
     s.blur_shift = log2(max(s.unit_dev / 2.27, 1e-3));
+    s.drop = vec3<f32>(lens.drop_x, lens.drop_r, lens.drop_k) / unit;
+    s.blob = vec4<f32>(lens.blob_x, lens.blob_y, lens.blob_hx, lens.blob_hy) / unit;
+    s.blob_shape = vec2<f32>(lens.blob_r, lens.blob_k) / unit;
+    s.blob_neck = vec2<f32>(lens.neck_x, lens.neck_w) / unit;
+    s.frost_edge = max(lens.tune_frost_edge, 0.05);
     return s;
 }
 
-fn lens_sdf(s: LensShape, p: vec2<f32>) -> f32 {
-    return lens_round_rect(p, s.half_size, s.radius);
+// QUILL (glass stage 5): the source kit's smooth union (`melt`).
+fn lens_melt(a: f32, b: f32, k: f32) -> f32 {
+    let h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0);
+    return mix(a, b, h) - k * h * (1.0 - h);
 }
 
+// The blob's bridge softness at `p`: with a neck it peaks there and falls
+// off, so a thinning bridge narrows into a thread before it breaks.
+fn lens_blob_soft(s: LensShape, p: vec2<f32>) -> f32 {
+    var k = s.blob_shape.y;
+    if (s.blob_neck.y > 0.0) {
+        let n = (p.x - s.blob_neck.x) / s.blob_neck.y;
+        k *= exp(0.2 - sqrt(n * n + 0.04));
+    }
+    return max(k, 1e-3);
+}
+
+fn lens_with_blob(s: LensShape, p: vec2<f32>, body: f32) -> f32 {
+    if (s.blob.z <= 0.0 || s.blob.w <= 0.0) {
+        return body;
+    }
+    let blob = lens_round_rect(p - s.blob.xy, s.blob.zw, s.blob_shape.x);
+    return lens_melt(blob, body, lens_blob_soft(s, p));
+}
+
+// The glass: the body, melted with its droplet and its blob.
+fn lens_sdf(s: LensShape, p: vec2<f32>) -> f32 {
+    var body = lens_round_rect(p, s.half_size, s.radius);
+    if (s.drop.y > 0.0) {
+        let d = length(p - vec2<f32>(s.drop.x, 0.0)) - s.drop.y;
+        body = lens_melt(d, body, max(s.drop.z, 1e-3));
+    }
+    return lens_with_blob(s, p, body);
+}
+
+// The body with corners as round as the bend is deep, and its blob (the
+// droplet bends on its own rim only, as in the source kit).
 fn lens_field(s: LensShape, p: vec2<f32>) -> f32 {
-    return lens_round_rect(p, s.half_size, s.field_radius);
+    return lens_with_blob(s, p, lens_round_rect(p, s.half_size, s.field_radius));
 }
 
 fn lens_height(s: LensShape, p: vec2<f32>) -> f32 {
@@ -169,13 +231,20 @@ fn lens_height(s: LensShape, p: vec2<f32>) -> f32 {
 // mip level `lod`. Taps stay half a texel of that level inside the copied
 // footprint, so the gutter between slots never shows.
 fn lens_back(s: LensShape, slot: LensSlot, atlas_size: vec2<f32>, p: vec2<f32>, lod: f32) -> vec3<f32> {
-    let mip = clamp(lod, 0.0, f32(LENS_LEVELS - 1));
+    // A re-rendered slot holds `density` texels per device pixel: the same
+    // blur is that many levels further down, on whole levels (its levels
+    // below the sharpest are blurred, not just smaller).
+    let density = max(slot.density, 1.0);
+    var mip = clamp(lod + log2(density), 0.0, f32(LENS_LEVELS - 1));
+    if (density > 1.0) {
+        mip = floor(mip);
+    }
     let window = s.center + p * s.unit_dev;
-    let inset = 0.5 * exp2(ceil(mip));
+    let inset = 0.5 * exp2(ceil(mip)) / density;
     let lo = vec2<f32>(inset);
     let hi = max(slot.copy_size - inset, lo);
     let local = clamp(window - slot.copy_origin, lo, hi);
-    let uv = (slot.slot_origin + local) / atlas_size;
+    let uv = (slot.slot_origin + local * density) / atlas_size;
     return textureSampleLevel(t_lens_atlas, s_lens_atlas, uv, mip).rgb;
 }
 
@@ -271,7 +340,9 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
         let bend = lens_radial_bend(s, lens, local, amount);
         glass = lens_bent(s, slot, atlas_size, local, bend, 0.0, max(s.blur_shift, 0.0));
         if (frost_sigma > 0.0) {
-            let frost = lens_frosted(s, slot, atlas_size, local + bend, max(frost_sigma, 0.5));
+            let ratio = clamp(1.0 - abs(dist) / (min(s.half_size.x, s.half_size.y) * s.edge_band / 0.35), 0.0, 1.0);
+            let sigma = frost_sigma * mix(1.0, s.frost_edge, pow(ratio, 1.3));
+            let frost = lens_frosted(s, slot, atlas_size, local + bend, max(sigma, 0.5));
             glass = mix(glass, frost, lens.blur_mix);
         }
         glass = lens_saturate(glass, lens.tune_saturation);
@@ -290,10 +361,14 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
         let k = lens.refract * pow(bend_edge, lens.tune_bend_curve);
         let bend = -bend_dir * k;
         let split = lens.dispersion * 0.35;
-        let lod = max(mix(lens.blur_center, lens.blur_edge, pow(bend_edge, 1.3)) + s.blur_shift, 0.0);
+        // QUILL (glass stage 5): the blur is measured where it shows, so a
+        // magnified middle reads its backdrop that much finer.
+        let lod = max(mix(lens.blur_center, lens.blur_edge, pow(bend_edge, 1.3)) + s.blur_shift, 0.0)
+            - log2(mag);
         glass = lens_bent(s, slot, atlas_size, at, bend, split, lod);
         if (frost_sigma > 0.0) {
-            let frost = lens_frosted(s, slot, atlas_size, at + bend, max(frost_sigma, 0.5));
+            let sigma = frost_sigma * mix(1.0, s.frost_edge, pow(bend_edge, 1.3));
+            let frost = lens_frosted(s, slot, atlas_size, at + bend, max(sigma, 0.5));
             glass = mix(glass, frost, lens.blur_mix);
         }
         glass = lens_saturate(glass, lens.tune_saturation);

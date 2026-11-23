@@ -662,3 +662,43 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
   into slots aligned to `LENS_ATLAS_ALIGN` with `LENS_ATLAS_GUTTER` between
   them (`LensCopy` per lens), and `LENS_ATLAS_LEVELS` is the atlas's mip
   count. Its tests are in Quill's `src/ui/backdrop_lens_tests.rs`.
+
+## Backdrop glass (stage 5)
+
+Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`,
+"What stage 5 adds"). Ported from quill-tools/gpui-liquid-glass 0.3.0,
+whose `gpui-patches/` carry the same change against crates.io GPUI.
+
+- `src/scene/backdrop_frame.rs` (new): one plan per frame for every lens
+  (`LensReuse::plan` gives a `LensFrame` of `LensSlotPlan`s), so each lens
+  keeps its own atlas slot for the whole frame. A lens whose last copy
+  still holds its footprint, over the same primitives (hashed without
+  their draw order), reuses the slot and skips the copy and the blur.
+  Anything that changes under the copied region copies again: a primitive
+  added, removed, moved, recoloured or reordered, a surface, a freed
+  sprite-atlas tile, a new atlas, a new target size. Glass under glass
+  counts as that lens, the region it read and what lay there; a label
+  inked from some glass counts with what that glass holds. The renderers
+  forget the plan before drawing and keep it only after a frame drew every
+  batch as planned. Also `LensInk`, `LensInkEntry` and
+  `lens_ink_instances`, the shader records for inked labels.
+- `src/scene/backdrop_sharp.rs` (new) and `src/window/backdrop_glass.rs`
+  (new): `LensDetail::Rendered { density }` records the primitives under a
+  lens again as a sub-scene at `density` texels per device pixel, glyphs
+  and icons rasterized again at that scale (`SharpBackdrop`). A lens with a
+  path or a surface under it copies instead. Glyph sources are recorded
+  only while a frame has such a lens, so other frames pay nothing.
+- `src/scene.rs`, `src/window.rs`: `Scene::inks`, `Scene::sharp_backdrops`,
+  `Scene::insert_inked_sprite`, `Window::with_lens_ink` (labels painted
+  inside carry their two inks in `MonochromeSprite::pad` and draw in
+  grayscale antialiasing), and each lens's id and density. A replayed
+  range carries its inks and glyph sources over.
+- `src/scene/backdrop_lens.rs`: `LensDroplet`, `LensBlob` and `LensNeck`
+  (shapes melted into the body with a smooth union, in the same lens),
+  `LensTune::frost_edge`, `LensDetail`, `LensCopy::density` and
+  `BackdropLens::glass_bounds`.
+- `src/platform.rs`: `AtlasState::removals`, counted on every freed tile
+  and every clear.
+- Tests: Quill's `src/ui/backdrop_lens_tests.rs` (reuse, inks, droplet
+  bounds, density); the full reuse suite is in gpui-liquid-glass's
+  `tests/reuse.rs`.

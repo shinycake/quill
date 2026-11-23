@@ -86,6 +86,8 @@ mod apple_build {
             "LensSlot".into(),
             "LensDownsampleIndex".into(),
             "LensDownsampleSlot".into(),
+            // QUILL (glass stage 5): inked labels.
+            "LensInkInstance".into(),
         ]);
         config.no_includes = true;
         config.enumeration.prefix_with_name = true;

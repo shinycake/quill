@@ -4,8 +4,10 @@
 //! what is painted over a lens draws on top of it.
 
 use gpui_kit::{
-    BackdropLens, Background, Bounds, ContentMask, LENS_ATLAS_GUTTER, LensBend, LensCopy,
-    LensMaterial, LensPacking, LensStyle, LensTune, Quad, ScaledPixels, Scene, bounds, hsla, point,
+    AtlasTextureId, AtlasTextureKind, AtlasTile, BackdropLens, Background, Bounds, ContentMask,
+    LENS_ATLAS_GUTTER, LensBend, LensCopy, LensDetail, LensDroplet, LensFrameContext, LensInk,
+    LensInkEntry, LensMaterial, LensPacking, LensReuse, LensStyle, LensTune, LensWork,
+    MonochromeSprite, Quad, ScaledPixels, Scene, TileId, TransformationMatrix, bounds, hsla, point,
     px, size,
 };
 
@@ -36,6 +38,9 @@ fn style() -> LensStyle {
         tune: LensTune::default(),
         light: point(0.0, -1.0),
         light_mix: 0.0,
+        droplet: None,
+        blob: None,
+        detail: LensDetail::Copied,
     }
 }
 
@@ -207,11 +212,13 @@ fn footprints_are_clipped_to_the_target_and_aligned_in_the_atlas() {
                 from: (0, 20),
                 to: (0, 0),
                 size: (90, 50),
+                density: 1,
             },
             LensCopy {
                 from: (900, 700),
                 to: (96 + LENS_ATLAS_GUTTER, 0),
                 size: (100, 100),
+                density: 1,
             },
         ]
     );
@@ -236,4 +243,117 @@ fn a_full_row_starts_a_shelf() {
 fn footprints_past_the_largest_atlas_draw_flat() {
     let lenses = [lens(0.0, 0.0, 3000.0, 40.0)];
     assert_eq!(LensPacking::pack(&lenses, (4000, 800), 2048), None);
+}
+
+// Stage 5: reused backdrops, inked labels, gooey shapes, sharp loupes.
+
+fn frame_context() -> LensFrameContext {
+    LensFrameContext {
+        target: (1000, 800),
+        atlas: 1,
+        sprites: 0,
+    }
+}
+
+fn page(shade: f32) -> Scene {
+    let mut scene = Scene::default();
+    scene.insert_primitive(Quad {
+        background: Background::from(hsla(0.0, 0.0, shade, 1.0)),
+        ..quad(0.0, 0.0, 400.0, 100.0)
+    });
+    scene.insert_primitive(lens(10.0, 10.0, 80.0, 40.0));
+    scene.finish();
+    scene
+}
+
+/// What each lens of `scene` does this frame, the frame kept as drawn.
+fn plan(reuse: &mut LensReuse, scene: &Scene) -> Vec<LensWork> {
+    let Some(frame) = reuse.plan(scene, frame_context(), 16384, false) else {
+        panic!("the lens fits an atlas");
+    };
+    reuse.keep(&frame, frame_context());
+    frame.slots.iter().map(|slot| slot.work).collect()
+}
+
+#[test]
+fn a_lens_over_still_content_reuses_its_backdrop_until_it_changes() {
+    let mut reuse = LensReuse::default();
+    assert_eq!(plan(&mut reuse, &page(0.5)), [LensWork::Copy]);
+    assert_eq!(plan(&mut reuse, &page(0.5)), [LensWork::Reuse]);
+    assert_eq!(plan(&mut reuse, &page(0.2)), [LensWork::Copy]);
+    reuse.forget();
+    assert_eq!(plan(&mut reuse, &page(0.2)), [LensWork::Copy]);
+}
+
+#[test]
+fn an_inked_label_reads_the_glass_under_it_and_none_beside_it() {
+    let ink = LensInk {
+        on_light: hsla(0.0, 0.0, 0.0, 1.0),
+        on_dark: hsla(0.0, 0.0, 1.0, 1.0),
+    };
+    let glyph = |x: f32| MonochromeSprite {
+        order: 0,
+        pad: 0,
+        tile: AtlasTile {
+            texture_id: AtlasTextureId {
+                index: 0,
+                kind: AtlasTextureKind::Monochrome,
+            },
+            tile_id: TileId(1),
+            padding: 0,
+            bounds: Default::default(),
+        },
+        bounds: rect(x, 25.0, 10.0, 10.0),
+        content_mask: everywhere(),
+        color: hsla(0.0, 0.0, 0.5, 1.0),
+        transformation: TransformationMatrix::unit(),
+    };
+    let mut scene = Scene::default();
+    scene.insert_primitive(lens(10.0, 10.0, 80.0, 40.0));
+    scene.insert_inked_sprite(glyph(40.0), ink);
+    scene.insert_inked_sprite(glyph(300.0), ink);
+    scene.finish();
+    // Each glyph's `pad` names its entry (1-based): the lens it reads.
+    let mut read: Vec<(f32, Option<u32>)> = scene
+        .monochrome_sprites
+        .iter()
+        .map(|sprite| {
+            let entry = scene.inks.get((sprite.pad as usize).wrapping_sub(1));
+            assert_eq!(entry.map(|entry| entry.ink), Some(ink));
+            (sprite.bounds.origin.x.0, entry.map(|entry| entry.lens))
+        })
+        .collect();
+    read.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(
+        read,
+        [(40.0, Some(0)), (300.0, Some(LensInkEntry::NO_LENS))]
+    );
+}
+
+#[test]
+fn a_droplet_widens_the_glass_and_its_copy() {
+    let body = rect(10.0, 10.0, 80.0, 40.0);
+    let mut drop = style();
+    drop.droplet = Some(LensDroplet {
+        offset_x: px(60.0),
+        radius: px(20.0),
+        softness: px(8.0),
+    });
+    let plain = BackdropLens::new(body, ScaledPixels(20.0), body, everywhere(), 1.0, &style());
+    let gooey = BackdropLens::new(body, ScaledPixels(20.0), body, everywhere(), 1.0, &drop);
+    // The droplet's centre sits 60 px right of the body's (50), radius 20,
+    // and the gooey bridge can bulge a quarter of its softness past that.
+    assert_eq!(gooey.glass_bounds().right(), ScaledPixels(132.0));
+    assert_eq!(plain.glass_bounds(), body);
+}
+
+#[test]
+fn a_sharp_loupe_asks_for_its_density_and_a_copied_one_for_none() {
+    let body = rect(10.0, 10.0, 80.0, 80.0);
+    let mut sharp = style();
+    sharp.detail = LensDetail::Rendered { density: 3 };
+    let lens = |style: &LensStyle| {
+        BackdropLens::new(body, ScaledPixels(40.0), body, everywhere(), 1.0, style).density
+    };
+    assert_eq!((lens(&sharp), lens(&style())), (3, 0));
 }

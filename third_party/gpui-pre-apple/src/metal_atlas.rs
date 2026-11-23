@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
-// images in textures of their own. See QUILL-CHANGES.md.
+// images in textures of their own; `MetalAtlas::removals` for backdrop glass.
+// See QUILL-CHANGES.md.
 use anyhow::{Context as _, Result, ensure};
 use etagere::BucketedAtlasAllocator;
 use gpui::{
@@ -17,6 +18,11 @@ use std::{borrow::Cow, ptr::NonNull};
 pub struct MetalAtlas(Mutex<AtlasState<MetalAtlasTextures>>);
 
 impl MetalAtlas {
+    /// QUILL (glass stage 5): tiles freed so far (`AtlasState::removals`).
+    pub(crate) fn removals(&self) -> u64 {
+        self.0.lock().removals()
+    }
+
     pub(crate) fn new(
         device: Retained<ProtocolObject<dyn MTLDevice>>,
         supports_shared_storage: bool,

@@ -235,3 +235,12 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
 - Stage 3: `src/wgpu_renderer/lens.rs` packs with gpui-pre's shared
   `LensPacking::pack` (and `LENS_ATLAS_LEVELS`) instead of its own copy; the
   packing tests moved with it.
+- Stage 5: `src/wgpu_renderer/lens.rs` and `src/wgpu_renderer.rs` draw
+  from gpui-pre's frame plan: a lens batch copies and blurs only its fresh
+  slots, a batch of reused slots does not end the render pass, and the
+  plan is kept only after a submit in which every batch drew as planned.
+  `src/shaders_lens.wgsl`: gooey shapes, frost towards the rim and the
+  magnifier's finer read, as in gpui-pre-apple's `shaders.metal`.
+  `src/wgpu_atlas.rs`: `WgpuAtlas::removals`. Inked labels draw in their
+  own colour here (the sprite shader ignores the ink) and re-rendered
+  backdrops copy the frame like any lens.

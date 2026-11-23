@@ -889,7 +889,15 @@ impl MetalRenderer {
             &self.instance_buffer_pool,
             self.is_unified_memory,
         )?;
-        let instance_bindings = write_instances(scene, &mut writer).with_context(|| {
+        // QUILL: the frame's glass is planned first: which lens backdrops
+        // are copied, kept from last frame or drawn again sharper, and
+        // where inked labels read them.
+        let glass = self
+            .plan_glass(scene, texture, &mut writer)
+            .inspect_err(|error| log::error!("glass draws flat: {error:#}"))
+            .ok()
+            .flatten();
+        let instance_bindings = write_instances(scene, &mut writer, glass.as_ref()).with_context(|| {
             format!(
                 "writing instance data: {} paths, {} shadows, {} quads, {} underlines, {} mono, {} poly, {} surfaces",
                 scene.paths.len(),
@@ -902,17 +910,30 @@ impl MetalRenderer {
             )
         })?;
         let mut surface_textures = Vec::new();
-        let command_buffer = self.draw_primitives_to_texture(
-            scene,
-            &instance_bindings,
-            &mut writer,
-            texture,
-            viewport_size,
-            &mut surface_textures,
-        )?;
+        // QUILL: what this frame copies is kept for the next one first; a
+        // batch that fails to fill its slots, or a frame that fails, forgets
+        // it again.
+        match &glass {
+            Some(glass) => self.lens.keep(glass),
+            None => self.lens.forget(),
+        }
+        let command_buffer = self
+            .draw_primitives_to_texture(
+                scene,
+                &instance_bindings,
+                &mut writer,
+                texture,
+                viewport_size,
+                &mut surface_textures,
+                glass.as_ref(),
+            )
+            .inspect_err(|_| self.lens.forget())?;
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
         let frame_resources = Cell::new(Some((writer.finish(), surface_textures)));
+        if let Some(glass) = &glass {
+            glass.commit_renders();
+        }
         let block = RcBlock::new(
             move |_: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
                 if let Some((instance_buffer, _surface_textures)) = frame_resources.take() {
@@ -1106,6 +1127,7 @@ impl MetalRenderer {
         texture: &ProtocolObject<dyn MTLTexture>,
         viewport_size: Size<DevicePixels>,
         surface_textures: &mut Vec<CFRetained<CVMetalTexture>>,
+        glass: Option<&lens::GlassFrame>,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let command_queue = self.command_queue.clone();
         let command_buffer = command_queue
@@ -1199,9 +1221,8 @@ impl MetalRenderer {
                     }
                 }
                 PrimitiveBatch::Lenses(range) => {
-                    let lenses = scene.lenses.get(range.clone()).unwrap_or_default();
                     self.draw_lenses(
-                        lenses,
+                        glass,
                         range,
                         instance_bindings,
                         writer,
@@ -1567,6 +1588,18 @@ impl MetalRenderer {
             command_encoder.setFragmentTexture_atIndex(
                 Some(&texture),
                 SpriteInputIndex::AtlasTexture as usize,
+            );
+            // QUILL (glass stage 5): inked labels read the lens atlas; without
+            // one the sprite atlas stands in and is never sampled (every
+            // record then says the glass drew flat).
+            command_encoder.setVertexBuffer_offset_atIndex(
+                Some(&instance_bindings.lens_inks.buffer),
+                instance_bindings.lens_inks.offset,
+                SpriteInputIndex::Inks as usize,
+            );
+            command_encoder.setVertexTexture_atIndex(
+                Some(instance_bindings.lens_atlas.as_deref().unwrap_or(&texture)),
+                SpriteInputIndex::LensAtlas as usize,
             );
             command_encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
                 MTLPrimitiveType::Triangle,
@@ -2175,10 +2208,21 @@ struct InstanceBindings {
     surfaces: InstanceBinding,
     /// QUILL: each lens's fallback quad, for batches that draw flat.
     lens_fallbacks: InstanceBinding,
+    /// QUILL (glass stage 5): where each inked label reads its glass, and the
+    /// atlas it reads (`None` when the frame's glass draws flat).
+    lens_inks: InstanceBinding,
+    lens_atlas: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
 }
 
-fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<InstanceBindings> {
+fn write_instances(
+    scene: &Scene,
+    writer: &mut InstanceBufferWriter,
+    glass: Option<&lens::GlassFrame>,
+) -> Result<InstanceBindings> {
+    let inks = gpui::lens_ink_instances(scene, glass.map(|glass| &glass.plan));
     Ok(InstanceBindings {
+        lens_inks: writer.write(&inks)?,
+        lens_atlas: glass.map(|glass| glass.atlas().clone()),
         quads: writer.write(&scene.quads)?,
         shadows: writer.write(&scene.shadows)?,
         underlines: writer.write(&scene.underlines)?,
@@ -2357,6 +2401,9 @@ enum SpriteInputIndex {
     ViewportSize = 2,
     AtlasTextureSize = 3,
     AtlasTexture = 4,
+    /// QUILL (glass stage 5): inked labels' records and the lens atlas.
+    Inks = 5,
+    LensAtlas = 6,
 }
 
 #[repr(C)]

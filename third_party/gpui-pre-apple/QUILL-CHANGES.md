@@ -248,3 +248,18 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
   `BackdropLens` and the lens slot and index types.
 - Stage 3: `src/metal_renderer/lens.rs` packs with gpui-pre's shared
   `LensPacking::pack` (and `LENS_ATLAS_LEVELS`) instead of its own copy.
+- Stage 5 (all five extras): `src/metal_renderer/lens.rs` and
+  `src/metal_renderer.rs` make gpui-pre's frame plan before the first batch;
+  a lens batch copies and blurs only its fresh slots, and a batch of reused
+  slots only draws. Re-rendered backdrops (`LensDetail::Rendered`) draw into
+  pooled canvases on their own command buffers, committed before the
+  frame's, and are blitted into their slots; the idle release frees the
+  canvases with the atlas. `src/shaders.metal`: the gooey signed distance
+  (the source kit's `melt`, a neck whose softness peaks at its middle),
+  frost that changes towards the rim, a dense slot read at the matching mip
+  level, a magnifier that reads finer where it enlarges, and inks: the
+  monochrome sprite shader samples the lens atlas under each glyph's centre
+  and picks `on_light` or `on_dark` there, in the frame being drawn.
+  `src/metal_atlas.rs`: `MetalAtlas::removals`. `build.rs` and
+  `vendor/gpui/src/scene.rs`: the new fields and `LensInkInstance` for the
+  shader header.

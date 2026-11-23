@@ -2,11 +2,14 @@
 //! QUILL: backdrop glass on wgpu (`PrimitiveBatch::Lenses`), as
 //! gpui-pre-apple's `metal_renderer/lens.rs` draws it on Metal.
 //!
-//! A lens batch ends the frame's render pass, copies each lens's footprint
-//! out of the target into a slot of a pooled atlas, fills the atlas's mip
-//! levels with dual-Kawase downsamples, resumes the pass over what was
-//! drawn and draws the lenses from the atlas (`fs_lens` in
-//! shaders_lens.wgsl). A target that can't be read (no `COPY_SRC`), the
+//! The frame plans every lens's slot in one pooled atlas before its first
+//! batch ([`WgpuRendererCore::plan_glass`], gpui-pre's `LensReuse`). A lens
+//! batch ends the frame's render pass, copies the footprints of its lenses
+//! whose backdrop changed out of the target into their slots, fills those
+//! slots' mip levels with dual-Kawase downsamples, resumes the pass over
+//! what was drawn and draws the lenses from the atlas (`fs_lens` in
+//! shaders_lens.wgsl). A batch whose every slot still holds its backdrop
+//! from the last frame keeps the pass and only draws. A target that can't be read (no `COPY_SRC`), the
 //! texture instance transport (WebGL), pipelines that did not build or
 //! footprints too large for an atlas draw the batch as its fallback quads.
 //!
@@ -18,7 +21,10 @@
 use super::{InstanceData, WgpuRendererCore};
 use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
-use gpui::{BackdropLens, LENS_ATLAS_LEVELS, LensCopy, LensPacking};
+use gpui::{
+    BackdropLens, LENS_ATLAS_LEVELS, LensCopy, LensFrame, LensFrameContext, LensReuse,
+    LensSlotPlan, LensWork, Scene,
+};
 use std::num::NonZeroU64;
 
 /// The lens shader over the shared definitions it uses (and the storage
@@ -43,12 +49,14 @@ const MAX_SIDE: u32 = 16384;
 // where a `Bounds` (two vec2) aligns to 8 bytes. These are the offsets that
 // alignment could move, and the stride of the storage array.
 const _: () = {
-    assert!(std::mem::size_of::<BackdropLens>() == 240);
+    assert!(std::mem::size_of::<BackdropLens>() == 296);
+    assert!(std::mem::size_of::<BackdropLens>() % 8 == 0);
     assert!(std::mem::offset_of!(BackdropLens, bounds) == 8);
     assert!(std::mem::offset_of!(BackdropLens, content_mask) == 24);
     assert!(std::mem::offset_of!(BackdropLens, body) == 40);
     assert!(std::mem::offset_of!(BackdropLens, color) == 96);
     assert!(std::mem::offset_of!(BackdropLens, light_mix) == 236);
+    assert!(std::mem::offset_of!(BackdropLens, tune_frost_edge) == 292);
 };
 
 /// Where one lens's backdrop lies in the target and in the atlas, device
@@ -62,8 +70,24 @@ struct LensSlot {
     copy_h: f32,
     slot_x: f32,
     slot_y: f32,
-    pad_x: f32,
-    pad_y: f32,
+    density: f32,
+    pad: f32,
+}
+
+impl LensSlot {
+    fn of(plan: &LensSlotPlan) -> Self {
+        let copy = plan.copy;
+        Self {
+            copy_x: copy.from.0 as f32,
+            copy_y: copy.from.1 as f32,
+            copy_w: copy.size.0 as f32,
+            copy_h: copy.size.1 as f32,
+            slot_x: copy.to.0 as f32,
+            slot_y: copy.to.1 as f32,
+            density: copy.density.max(1) as f32,
+            pad: 0.0,
+        }
+    }
 }
 
 /// One slot of one downsample pass: the texels it writes in the level
@@ -363,19 +387,41 @@ struct FrameCopy {
 /// What drawing glass keeps between frames. All of it is dropped with the
 /// renderer's other resources on a device loss; the atlas goes after the
 /// first frame without glass, the frame copy once the glass leaves the
-/// screen, and both on a resize.
+/// screen, and both on a resize. `reuse` remembers what the atlas's slots
+/// hold, and `atlas_generation` moves whenever the atlas is made or
+/// dropped, so nothing is reused from an atlas that is not the one drawn.
 #[derive(Default)]
 pub(super) struct LensState {
     pipelines: Pipelines,
     atlas: Option<LensAtlas>,
+    atlas_generation: u64,
+    reuse: LensReuse,
     frame_copy: Option<FrameCopy>,
 }
 
 impl LensState {
     /// Frees the atlas and the frame copy (the window was resized).
     pub(super) fn release(&mut self) {
-        self.atlas = None;
+        self.drop_atlas();
         self.frame_copy = None;
+    }
+
+    fn drop_atlas(&mut self) {
+        if self.atlas.take().is_some() {
+            self.atlas_generation = self.atlas_generation.wrapping_add(1);
+        }
+        self.reuse.forget();
+    }
+
+    /// Nothing in the atlas is known to be current (set before a frame
+    /// draws, so a frame that fails part way leaves it so).
+    pub(super) fn forget(&mut self) {
+        self.reuse.forget();
+    }
+
+    /// The frame drew every lens as planned.
+    pub(super) fn keep(&mut self, glass: &GlassFrame) {
+        self.reuse.keep(&glass.plan, glass.context);
     }
 
     fn pipelines(
@@ -416,18 +462,19 @@ impl LensState {
         width: u32,
         height: u32,
         max_side: u32,
-    ) -> &LensAtlas {
+    ) -> (&LensAtlas, bool) {
         if let Some(atlas) = self
             .atlas
             .take_if(|atlas| atlas.fits(format, width, height))
         {
-            return self.atlas.insert(atlas);
+            return (self.atlas.insert(atlas), false);
         }
-        // Dropped, not destroyed: an earlier batch of this frame may still
-        // name the old one in the unsubmitted encoder.
+        // Dropped, not destroyed: an earlier frame may still name the old
+        // one in work the queue has not finished.
         self.atlas = None;
-        self.atlas
-            .insert(LensAtlas::new(device, format, width, height, max_side))
+        self.atlas_generation = self.atlas_generation.wrapping_add(1);
+        let atlas = LensAtlas::new(device, format, width, height, max_side);
+        (self.atlas.insert(atlas), true)
     }
 }
 
@@ -457,20 +504,47 @@ struct DownsamplePass {
     bind_group: wgpu::BindGroup,
 }
 
+/// The frame's glass, planned before its first batch: every lens's slot in
+/// the atlas, and whether last frame's copy still holds it.
+pub(super) struct GlassFrame {
+    pipelines: LensPipelines,
+    atlas: wgpu::Texture,
+    atlas_view: wgpu::TextureView,
+    levels: Vec<wgpu::TextureView>,
+    plan: LensFrame,
+    context: LensFrameContext,
+}
+
+/// How a frame's lens batches were drawn: all from the frame's plan, or
+/// some flat (whose slots then hold nothing to reuse).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GlassDrawn {
+    AsPlanned,
+    Flat,
+}
+
 /// Everything one lens batch draws with, gathered before the pass ends.
 pub(super) struct LensPlan {
     lens_pipeline: wgpu::RenderPipeline,
     downsample_pipeline: wgpu::RenderPipeline,
     atlas: wgpu::Texture,
+    /// The slots whose backdrop is copied this frame.
     copies: Vec<LensCopy>,
     glass: wgpu::BindGroup,
     downsamples: Vec<DownsamplePass>,
+    fresh: u32,
     count: u32,
 }
 
 impl LensPlan {
-    /// Copies the footprints into the atlas and fills its mip levels. The
-    /// frame's pass must have ended.
+    /// Whether the batch copies anything, so the frame's pass must end
+    /// first ([`Self::copy_backdrop`]).
+    pub(super) fn copies_backdrop(&self) -> bool {
+        self.fresh > 0
+    }
+
+    /// Copies the fresh footprints into the atlas and fills their mip
+    /// levels. The frame's pass must have ended.
     pub(super) fn copy_backdrop(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::Texture) {
         for copy in self
             .copies
@@ -524,7 +598,7 @@ impl LensPlan {
             });
             pass.set_pipeline(&self.downsample_pipeline);
             pass.set_bind_group(0, &downsample.bind_group, &[]);
-            pass.draw(0..4, 0..self.count);
+            pass.draw(0..4, 0..self.fresh);
         }
     }
 }
@@ -570,84 +644,115 @@ impl WgpuRendererCore {
     /// Frees the atlas after a frame without glass.
     pub(super) fn release_idle_lens_atlas(&mut self, lenses: usize) {
         if lenses == 0 {
-            self.resources.lens.atlas = None;
+            self.resources.lens.drop_atlas();
         }
     }
 
-    /// The batch's plan, or `None` when it must draw flat: the target can't
-    /// be read, or the pipelines, the atlas or the storage can't be had.
-    pub(super) fn plan_lenses(
+    /// Plans the frame's glass: `None` when it draws flat (no lenses, a
+    /// target that can't be read, no pipelines, or lenses too large for
+    /// an atlas). Re-rendered backdrops are Metal's; here those lenses
+    /// copy what the frame drew.
+    pub(super) fn plan_glass(
         &mut self,
-        lenses: &[BackdropLens],
+        scene: &Scene,
         target: &wgpu::Texture,
         premultiplied_alpha: bool,
+    ) -> Option<GlassFrame> {
+        if scene.lenses.is_empty() || !target.usage().contains(wgpu::TextureUsages::COPY_SRC) {
+            return None;
+        }
+        let pipelines = self.lens_pipelines(premultiplied_alpha)?;
+        let max_side = self.lens_max_side();
+        let mut context = LensFrameContext {
+            target: (target.width(), target.height()),
+            atlas: self.resources.lens.atlas_generation,
+            sprites: self.atlas.removals(),
+        };
+        let mut plan = self
+            .resources
+            .lens
+            .reuse
+            .plan(scene, context, max_side, false)?;
+        let format = target.format();
+        let resources = &mut self.resources;
+        let (atlas, made) =
+            resources
+                .lens
+                .atlas(&resources.device, format, plan.width, plan.height, max_side);
+        let (texture, view, levels) = (
+            atlas.texture.clone(),
+            atlas.view.clone(),
+            atlas.levels.clone(),
+        );
+        if made {
+            plan.copy_everything();
+        }
+        context.atlas = resources.lens.atlas_generation;
+        Some(GlassFrame {
+            pipelines,
+            atlas: texture,
+            atlas_view: view,
+            levels,
+            plan,
+            context,
+        })
+    }
+
+    /// The batch of lenses `range` of the scene, or `None` when it must
+    /// draw flat (the storage can't be had).
+    pub(super) fn plan_lenses(
+        &mut self,
+        glass: &GlassFrame,
+        lenses: &[BackdropLens],
+        range: std::ops::Range<usize>,
         instance_offset: &mut u64,
     ) -> Result<Option<LensPlan>> {
-        if lenses.is_empty() || !target.usage().contains(wgpu::TextureUsages::COPY_SRC) {
+        let planned = glass.plan.batch(range);
+        if lenses.is_empty() || planned.len() != lenses.len() {
             return Ok(None);
         }
-        let Some(pipelines) = self.lens_pipelines(premultiplied_alpha) else {
-            return Ok(None);
-        };
-        let max_side = self.lens_max_side();
-        let Some(packing) = LensPacking::pack(lenses, (target.width(), target.height()), max_side)
-        else {
-            return Ok(None);
-        };
         let Some(lens_data) = self.write_lens_storage(instance_offset, lenses)? else {
             return Ok(None);
         };
-        let slots: Vec<LensSlot> = packing
-            .copies
-            .iter()
-            .map(|copy| LensSlot {
-                copy_x: copy.from.0 as f32,
-                copy_y: copy.from.1 as f32,
-                copy_w: copy.size.0 as f32,
-                copy_h: copy.size.1 as f32,
-                slot_x: copy.to.0 as f32,
-                slot_y: copy.to.1 as f32,
-                pad_x: 0.0,
-                pad_y: 0.0,
-            })
-            .collect();
+        let slots: Vec<LensSlot> = planned.iter().map(LensSlot::of).collect();
         let Some(slot_data) = self.write_lens_storage(instance_offset, &slots)? else {
             return Ok(None);
         };
+        let copies: Vec<LensCopy> = planned
+            .iter()
+            .filter(|slot| slot.work != LensWork::Reuse)
+            .map(|slot| slot.copy)
+            .collect();
         let mut level_data = Vec::with_capacity(LEVELS as usize);
-        for level in 1..LEVELS {
-            let at = |v: u32, level: u32| v as f32 / (1u32 << level) as f32;
-            let level_slots: Vec<LensDownsampleSlot> = packing
-                .copies
-                .iter()
-                .map(|copy| LensDownsampleSlot {
-                    dst_x: at(copy.to.0, level),
-                    dst_y: at(copy.to.1, level),
-                    dst_w: at(copy.size.0, level).ceil(),
-                    dst_h: at(copy.size.1, level).ceil(),
-                    src_x0: at(copy.to.0, level - 1),
-                    src_y0: at(copy.to.1, level - 1),
-                    src_x1: at(copy.to.0, level - 1) + at(copy.size.0, level - 1).ceil(),
-                    src_y1: at(copy.to.1, level - 1) + at(copy.size.1, level - 1).ceil(),
-                })
-                .collect();
-            let Some(data) = self.write_lens_storage(instance_offset, &level_slots)? else {
-                return Ok(None);
-            };
-            level_data.push(data);
+        if !copies.is_empty() {
+            for level in 1..LEVELS {
+                let at = |v: u32, level: u32| v as f32 / (1u32 << level) as f32;
+                let level_slots: Vec<LensDownsampleSlot> = copies
+                    .iter()
+                    .map(|copy| {
+                        let (w, h) = copy.texels();
+                        LensDownsampleSlot {
+                            dst_x: at(copy.to.0, level),
+                            dst_y: at(copy.to.1, level),
+                            dst_w: at(w, level).ceil(),
+                            dst_h: at(h, level).ceil(),
+                            src_x0: at(copy.to.0, level - 1),
+                            src_y0: at(copy.to.1, level - 1),
+                            src_x1: at(copy.to.0, level - 1) + at(w, level - 1).ceil(),
+                            src_y1: at(copy.to.1, level - 1) + at(h, level - 1).ceil(),
+                        }
+                    })
+                    .collect();
+                let Some(data) = self.write_lens_storage(instance_offset, &level_slots)? else {
+                    return Ok(None);
+                };
+                level_data.push(data);
+            }
         }
 
-        let format = target.format();
-        let resources = &mut self.resources;
-        let atlas = resources.lens.atlas(
-            &resources.device,
-            format,
-            packing.width,
-            packing.height,
-            max_side,
-        );
-        let device = &resources.device;
-        let glass = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let pipelines = &glass.pipelines;
+        let device = &self.resources.device;
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("lens_bind_group"),
             layout: &pipelines.lens_layout,
             entries: &[
@@ -655,7 +760,7 @@ impl WgpuRendererCore {
                 slot_data.binding(5),
                 wgpu::BindGroupEntry {
                     binding: 6,
-                    resource: wgpu::BindingResource::TextureView(&atlas.view),
+                    resource: wgpu::BindingResource::TextureView(&glass.atlas_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 7,
@@ -663,10 +768,10 @@ impl WgpuRendererCore {
                 },
             ],
         });
-        let downsamples = atlas
+        let downsamples = glass
             .levels
             .iter()
-            .zip(atlas.levels.iter().skip(1))
+            .zip(glass.levels.iter().skip(1))
             .zip(&level_data)
             .map(|((source, target), slots)| DownsamplePass {
                 target: target.clone(),
@@ -688,11 +793,12 @@ impl WgpuRendererCore {
             })
             .collect();
         Ok(Some(LensPlan {
-            lens_pipeline: pipelines.lens,
-            downsample_pipeline: pipelines.downsample,
-            atlas: atlas.texture.clone(),
-            copies: packing.copies,
-            glass,
+            lens_pipeline: pipelines.lens.clone(),
+            downsample_pipeline: pipelines.downsample.clone(),
+            atlas: glass.atlas.clone(),
+            fresh: u32::try_from(copies.len()).unwrap_or(u32::MAX),
+            copies,
+            glass: bind_group,
             downsamples,
             count: u32::try_from(lenses.len()).unwrap_or(u32::MAX),
         }))

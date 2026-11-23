@@ -1669,6 +1669,12 @@ impl WgpuRendererCore {
     ) -> Result<wgpu::SubmissionIndex> {
         let frame_view = &target.create_view(&wgpu::TextureViewDescriptor::default());
         self.release_idle_lens_atlas(scene.lenses.len());
+        // QUILL: the frame's slots, planned before anything is drawn. What
+        // the atlas holds counts as unknown until the frame is submitted
+        // with every batch drawn as planned.
+        let glass = self.plan_glass(scene, target, premultiplied_alpha);
+        self.resources.lens.forget();
+        let mut glass_drawn = lens::GlassDrawn::AsPlanned;
         let mut instance_offset = 0;
         let instance_bindings = self
             .write_instances(scene, &mut instance_offset)
@@ -1809,13 +1815,17 @@ impl WgpuRendererCore {
                         // is under it and resumes (`lens.rs`); else the
                         // batch draws as its fallback quads.
                         let lenses = scene.lenses.get(range.clone()).unwrap_or_default();
-                        let plan = self
-                            .plan_lenses(lenses, target, premultiplied_alpha, &mut instance_offset)
-                            .unwrap_or_else(|error| {
-                                log::error!("glass draws flat: {error:#}");
-                                None
-                            });
+                        let plan = match &glass {
+                            Some(glass) => self
+                                .plan_lenses(glass, lenses, range.clone(), &mut instance_offset)
+                                .unwrap_or_else(|error| {
+                                    log::error!("glass draws flat: {error:#}");
+                                    None
+                                }),
+                            None => None,
+                        };
                         let Some(plan) = plan else {
+                            glass_drawn = lens::GlassDrawn::Flat;
                             self.draw_instances(
                                 &instance_bindings.lens_fallbacks,
                                 &self.resources().pipelines.quads,
@@ -1824,22 +1834,26 @@ impl WgpuRendererCore {
                             );
                             continue;
                         };
-                        drop(pass);
-                        plan.copy_backdrop(&mut encoder, target);
-                        pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some("main_pass_after_glass"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: frame_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Load,
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            })],
-                            depth_stencil_attachment: None,
-                            ..Default::default()
-                        });
+                        // Slots that still hold last frame's backdrop need
+                        // no copy, and a batch of only those keeps the pass.
+                        if plan.copies_backdrop() {
+                            drop(pass);
+                            plan.copy_backdrop(&mut encoder, target);
+                            pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("main_pass_after_glass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: frame_view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Load,
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                    depth_slice: None,
+                                })],
+                                depth_stencil_attachment: None,
+                                ..Default::default()
+                            });
+                        }
                         self.draw_glass(&plan, &mut pass);
                     }
                     PrimitiveBatch::Surfaces(range) => {
@@ -1860,6 +1874,9 @@ impl WgpuRendererCore {
             .queue
             .submit(std::iter::once(encoder.finish()));
         self.resources.yuv_surfaces.end_frame();
+        if let (Some(glass), lens::GlassDrawn::AsPlanned) = (&glass, glass_drawn) {
+            self.resources.lens.keep(glass);
+        }
         Ok(submission)
     }
 

@@ -3,11 +3,14 @@
 //! gpui-pre-apple's `metal_renderer/lens.rs` and gpui-pre-wgpu's
 //! `wgpu_renderer/lens.rs` draw it.
 //!
-//! A lens batch unbinds the back buffer, copies each lens's footprint out of
-//! it into a slot of a pooled atlas (`CopySubresourceRegion`), fills the
-//! atlas's mip levels with dual-Kawase downsamples, binds the back buffer
-//! again and draws the lenses from the atlas (`lens_fragment` in
-//! shaders_lens.hlsl). A back buffer that can't be copied (more than one
+//! The frame plans every lens's slot in one pooled atlas before its first
+//! batch ([`DirectXRenderer::plan_glass`], gpui-pre's `LensReuse`). A lens
+//! batch unbinds the back buffer, copies the footprints of its lenses whose
+//! backdrop changed out of it into their slots (`CopySubresourceRegion`),
+//! fills those slots' mip levels with dual-Kawase downsamples, binds the
+//! back buffer again and draws the lenses from the atlas (`lens_fragment`
+//! in shaders_lens.hlsl). A batch whose every slot still holds its backdrop
+//! from the last frame only draws. A back buffer that can't be copied (more than one
 //! sample), shaders that did not build or footprints too large for an atlas
 //! draw the batch as its fallback quads.
 //!
@@ -19,7 +22,10 @@
 use std::slice;
 
 use anyhow::{Context, Result};
-use gpui::{BackdropLens, LENS_ATLAS_LEVELS, LensCopy, LensPacking};
+use gpui::{
+    BackdropLens, LENS_ATLAS_LEVELS, LensCopy, LensFrame, LensFrameContext, LensReuse,
+    LensSlotPlan, LensWork, Scene,
+};
 use windows::Win32::Graphics::{Direct3D::*, Direct3D11::*, Dxgi::Common::*};
 
 use super::shader_resources::ShaderModule;
@@ -40,7 +46,7 @@ const MAX_SIDE_LEVEL_10: u32 = 8192;
 // `BackdropLens` in shaders_lens.hlsl: a structured buffer packs its fields
 // at 4 bytes, as `#[repr(C)]` lays out these all-4-byte fields.
 const _: () = {
-    assert!(std::mem::size_of::<BackdropLens>() == 240);
+    assert!(std::mem::size_of::<BackdropLens>() == 296);
     assert!(std::mem::size_of::<LensSlot>() == 32);
     assert!(std::mem::size_of::<LensDownsampleSlot>() == 32);
 };
@@ -56,8 +62,24 @@ struct LensSlot {
     copy_h: f32,
     slot_x: f32,
     slot_y: f32,
-    pad_x: f32,
-    pad_y: f32,
+    density: f32,
+    pad: f32,
+}
+
+impl LensSlot {
+    fn of(plan: &LensSlotPlan) -> Self {
+        let copy = plan.copy;
+        Self {
+            copy_x: copy.from.0 as f32,
+            copy_y: copy.from.1 as f32,
+            copy_w: copy.size.0 as f32,
+            copy_h: copy.size.1 as f32,
+            slot_x: copy.to.0 as f32,
+            slot_y: copy.to.1 as f32,
+            density: copy.density.max(1) as f32,
+            pad: 0.0,
+        }
+    }
 }
 
 /// One slot of one downsample pass: the texels it writes in the level being
@@ -81,15 +103,16 @@ impl LensDownsampleSlot {
     /// level above.
     fn new(copy: &LensCopy, level: u32) -> Self {
         let at = |v: u32, level: u32| v as f32 / (1u32 << level) as f32;
+        let (w, h) = copy.texels();
         Self {
             dst_x: at(copy.to.0, level),
             dst_y: at(copy.to.1, level),
-            dst_w: at(copy.size.0, level).ceil(),
-            dst_h: at(copy.size.1, level).ceil(),
+            dst_w: at(w, level).ceil(),
+            dst_h: at(h, level).ceil(),
             src_x0: at(copy.to.0, level - 1),
             src_y0: at(copy.to.1, level - 1),
-            src_x1: at(copy.to.0, level - 1) + at(copy.size.0, level - 1).ceil(),
-            src_y1: at(copy.to.1, level - 1) + at(copy.size.1, level - 1).ceil(),
+            src_x1: at(copy.to.0, level - 1) + at(w, level - 1).ceil(),
+            src_y1: at(copy.to.1, level - 1) + at(h, level - 1).ceil(),
         }
     }
 }
@@ -349,36 +372,73 @@ impl LensAtlas {
 
 /// What drawing glass keeps between frames, per window. The atlas goes
 /// after the first frame without glass; all of it goes with the device.
+/// `reuse` remembers what the atlas's slots hold, and `atlas_generation`
+/// moves whenever the atlas is made or dropped, so nothing is reused from
+/// an atlas that is not the one drawn.
 #[derive(Default)]
 pub(super) struct LensState {
     pipelines: Pipelines,
     atlas: Option<LensAtlas>,
+    atlas_generation: u64,
+    reuse: LensReuse,
 }
 
 impl LensState {
     /// Frees the atlas after a frame without glass.
     pub(super) fn release_idle_atlas(&mut self, lenses: usize) {
         if lenses == 0 {
-            self.atlas = None;
+            if self.atlas.take().is_some() {
+                self.atlas_generation = self.atlas_generation.wrapping_add(1);
+            }
+            self.reuse.forget();
         }
+    }
+
+    /// Nothing in the atlas is known to be current (set before a frame
+    /// draws, so a frame that fails part way leaves it so).
+    pub(super) fn forget(&mut self) {
+        self.reuse.forget();
+    }
+
+    /// The frame drew every lens as planned.
+    pub(super) fn keep(&mut self, glass: &GlassFrame) {
+        self.reuse.keep(&glass.plan, glass.context);
+    }
+
+    /// An atlas that holds `width` x `height` in `format`: the pooled one
+    /// when it does (`false`), else a new one (`true`).
+    fn atlas(
+        &mut self,
+        device: &ID3D11Device,
+        format: DXGI_FORMAT,
+        width: u32,
+        height: u32,
+        max_side: u32,
+    ) -> Result<bool> {
+        if let Some(kept) = self.atlas.take_if(|kept| kept.fits(format, width, height)) {
+            self.atlas = Some(kept);
+            return Ok(false);
+        }
+        self.atlas = None;
+        self.atlas_generation = self.atlas_generation.wrapping_add(1);
+        self.atlas = Some(LensAtlas::new(device, format, width, height, max_side)?);
+        Ok(true)
     }
 }
 
-/// An atlas that holds `width` x `height` in `format`: the pooled one when it
-/// does, else a new one.
-fn atlas<'a>(
-    atlas: &'a mut Option<LensAtlas>,
-    device: &ID3D11Device,
-    format: DXGI_FORMAT,
-    width: u32,
-    height: u32,
-    max_side: u32,
-) -> Result<&'a LensAtlas> {
-    if let Some(kept) = atlas.take_if(|kept| kept.fits(format, width, height)) {
-        return Ok(atlas.insert(kept));
-    }
-    *atlas = None;
-    Ok(atlas.insert(LensAtlas::new(device, format, width, height, max_side)?))
+/// The frame's glass, planned before its first batch: every lens's slot in
+/// the atlas, and whether last frame's copy still holds it.
+pub(super) struct GlassFrame {
+    plan: LensFrame,
+    context: LensFrameContext,
+}
+
+/// How a frame's lens batches were drawn: all from the frame's plan, or
+/// some flat (whose slots then hold nothing to reuse).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum GlassDrawn {
+    AsPlanned,
+    Flat,
 }
 
 /// The largest atlas side the device takes, a whole number of steps.
@@ -393,12 +453,63 @@ fn max_atlas_side(device: &ID3D11Device) -> u32 {
 }
 
 impl DirectXRenderer {
-    /// Draws a batch of lenses over what the back buffer holds, or says it
-    /// must draw flat. Leaves the back buffer bound with the frame's
-    /// viewport, whatever happens.
-    pub(super) fn draw_lenses(&mut self, lenses: &[BackdropLens]) -> Result<Glass> {
+    /// Plans the frame's glass: `None` when it draws flat (no lenses, a
+    /// back buffer that can't be copied, no shaders, lenses too large for
+    /// an atlas, or no atlas). Re-rendered backdrops are Metal's; here
+    /// those lenses copy what the frame drew.
+    pub(super) fn plan_glass(&mut self, scene: &Scene) -> Option<GlassFrame> {
+        if scene.lenses.is_empty() {
+            return None;
+        }
+        let device = &self.devices.as_ref()?.device;
+        let target = self.resources.as_ref()?.render_target.as_ref()?;
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        // SAFETY: a plain query of the live back buffer.
+        unsafe { target.GetDesc(&mut desc) };
+        // A copy with a source box needs a single-sample source; the
+        // flip-model back buffer always is one, but refuse rather than copy
+        // if that ever changes.
+        if desc.SampleDesc.Count != 1 {
+            return None;
+        }
+        let state = &mut self.pipelines.lenses;
+        state.pipelines.get(device)?;
+        let max_side = max_atlas_side(device);
+        let mut context = LensFrameContext {
+            target: (desc.Width, desc.Height),
+            atlas: state.atlas_generation,
+            sprites: self.atlas.removals(),
+        };
+        let mut plan = state.reuse.plan(scene, context, max_side, false)?;
+        let made = state
+            .atlas(device, desc.Format, plan.width, plan.height, max_side)
+            .inspect_err(|error| log::error!("glass draws flat: {error:#}"))
+            .ok()?;
+        if made {
+            plan.copy_everything();
+        }
+        context.atlas = state.atlas_generation;
+        Some(GlassFrame { plan, context })
+    }
+
+    /// Draws lenses `range` of the scene over what the back buffer holds,
+    /// as `glass` planned them, or says they must draw flat. Leaves the
+    /// back buffer bound with the frame's viewport, whatever happens.
+    pub(super) fn draw_lenses(
+        &mut self,
+        glass: Option<&GlassFrame>,
+        lenses: &[BackdropLens],
+        range: std::ops::Range<usize>,
+    ) -> Result<Glass> {
         if lenses.is_empty() {
             return Ok(Glass::Drawn);
+        }
+        let Some(glass) = glass else {
+            return Ok(Glass::Flat);
+        };
+        let planned = glass.plan.batch(range);
+        if planned.len() != lenses.len() {
+            return Ok(Glass::Flat);
         }
         let devices = self.devices.as_ref().context("devices missing")?;
         let resources = self.resources.as_ref().context("resources missing")?;
@@ -410,63 +521,36 @@ impl DirectXRenderer {
         let Some(target) = resources.render_target.as_ref() else {
             return Ok(Glass::Flat);
         };
-        let mut desc = D3D11_TEXTURE2D_DESC::default();
-        // SAFETY: a plain query of the live back buffer.
-        unsafe { target.GetDesc(&mut desc) };
-        // A copy with a source box needs a single-sample source; the
-        // flip-model back buffer always is one, but refuse rather than copy
-        // if that ever changes.
-        if desc.SampleDesc.Count != 1 {
-            return Ok(Glass::Flat);
-        }
         let device = &devices.device;
         let context = &devices.device_context;
         let state = &mut self.pipelines.lenses;
-        let Some(pipelines) = state.pipelines.get(device) else {
+        let (Some(pipelines), Some(atlas)) = (state.pipelines.get(device), state.atlas.as_ref())
+        else {
             return Ok(Glass::Flat);
         };
-        let max_side = max_atlas_side(device);
-        let Some(packing) = LensPacking::pack(lenses, (desc.Width, desc.Height), max_side) else {
-            return Ok(Glass::Flat);
-        };
-        let atlas = atlas(
-            &mut state.atlas,
-            device,
-            desc.Format,
-            packing.width,
-            packing.height,
-            max_side,
-        )?;
         let count = u32::try_from(lenses.len()).context("too many lenses in one batch")?;
 
         pipelines.lens.update_buffer(device, context, lenses)?;
-        let slots: Vec<LensSlot> = packing
-            .copies
-            .iter()
-            .map(|copy| LensSlot {
-                copy_x: copy.from.0 as f32,
-                copy_y: copy.from.1 as f32,
-                copy_w: copy.size.0 as f32,
-                copy_h: copy.size.1 as f32,
-                slot_x: copy.to.0 as f32,
-                slot_y: copy.to.1 as f32,
-                pad_x: 0.0,
-                pad_y: 0.0,
-            })
-            .collect();
+        let slots: Vec<LensSlot> = planned.iter().map(LensSlot::of).collect();
         pipelines.slots.write(device, context, &slots)?;
-        // Level k's slots start at (k - 1) * count.
-        let level_slots: Vec<LensDownsampleSlot> = (1..LEVELS)
-            .flat_map(|level| {
-                packing
-                    .copies
-                    .iter()
-                    .map(move |copy| LensDownsampleSlot::new(copy, level))
-            })
+        let copies: Vec<LensCopy> = planned
+            .iter()
+            .filter(|slot| slot.work != LensWork::Reuse)
+            .map(|slot| slot.copy)
             .collect();
-        pipelines
-            .downsample
-            .update_buffer(device, context, &level_slots)?;
+        if !copies.is_empty() {
+            // Level k's slots start at (k - 1) * copies.
+            let level_slots: Vec<LensDownsampleSlot> = (1..LEVELS)
+                .flat_map(|level| {
+                    copies
+                        .iter()
+                        .map(move |copy| LensDownsampleSlot::new(copy, level))
+                })
+                .collect();
+            pipelines
+                .downsample
+                .update_buffer(device, context, &level_slots)?;
+        }
 
         let frame = Frame {
             texture: target,
@@ -479,7 +563,7 @@ impl DirectXRenderer {
             pipelines,
             atlas,
             &frame,
-            &packing.copies,
+            &copies,
             count,
         );
         // SAFETY: rebinds the frame's own live target and viewport, and
@@ -502,9 +586,9 @@ struct Frame<'a> {
     viewport: &'a D3D11_VIEWPORT,
 }
 
-/// Copies the footprints into the atlas, fills its levels and draws the
-/// lenses over the back buffer. The caller restores the bindings after, as
-/// an error can leave an atlas level bound.
+/// Copies the fresh footprints into the atlas, fills their levels and draws
+/// the lenses over the back buffer. The caller restores the bindings after,
+/// as an error can leave an atlas level bound.
 fn draw_glass(
     context: &ID3D11DeviceContext,
     batch_params: &ID3D11Buffer,
@@ -514,9 +598,35 @@ fn draw_glass(
     copies: &[LensCopy],
     count: u32,
 ) -> Result<()> {
+    if !copies.is_empty() {
+        fill_slots(context, batch_params, pipelines, atlas, frame, copies)?;
+    }
+    // SAFETY: binding the back buffer replaces the last level as the
+    // target before the whole chain is bound to be read.
+    unsafe {
+        context.OMSetRenderTargets(Some(slice::from_ref(frame.target)), None);
+        context.RSSetViewports(Some(slice::from_ref(frame.viewport)));
+        context.VSSetShaderResources(3, Some(&[None]));
+        context.PSSetShaderResources(2, Some(slice::from_ref(&pipelines.slots.view)));
+        context.PSSetShaderResources(3, Some(slice::from_ref(&atlas.chain)));
+    }
+    pipelines.lens.draw_range(context, batch_params, 0, count)
+}
+
+/// Copies `copies` out of the back buffer into their slots and fills their
+/// mip levels.
+fn fill_slots(
+    context: &ID3D11DeviceContext,
+    batch_params: &ID3D11Buffer,
+    pipelines: &LensPipelines,
+    atlas: &LensAtlas,
+    frame: &Frame<'_>,
+    copies: &[LensCopy],
+) -> Result<()> {
+    let fresh = u32::try_from(copies.len()).context("too many lenses in one batch")?;
     // SAFETY: unbinding the back buffer before it is read; every source box
     // lies inside it and every destination inside the atlas's level 0
-    // (`LensPacking::pack` clipped the footprints to the target and sized
+    // (the frame's plan clipped the footprints to the target and sized
     // the atlas to hold the slots), and both share one format.
     unsafe {
         context.OMSetRenderTargets(None, None);
@@ -557,18 +667,9 @@ fn draw_glass(
         pipelines.downsample.draw_range(
             context,
             batch_params,
-            level.saturating_mul(count),
-            count,
+            level.saturating_mul(fresh),
+            fresh,
         )?;
     }
-    // SAFETY: binding the back buffer replaces the last level as the
-    // target before the whole chain is bound to be read.
-    unsafe {
-        context.OMSetRenderTargets(Some(slice::from_ref(frame.target)), None);
-        context.RSSetViewports(Some(slice::from_ref(frame.viewport)));
-        context.VSSetShaderResources(3, Some(&[None]));
-        context.PSSetShaderResources(2, Some(slice::from_ref(&pipelines.slots.view)));
-        context.PSSetShaderResources(3, Some(slice::from_ref(&atlas.chain)));
-    }
-    pipelines.lens.draw_range(context, batch_params, 0, count)
+    Ok(())
 }

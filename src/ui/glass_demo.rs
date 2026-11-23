@@ -3,8 +3,13 @@
 //! README showcase conversation and lays glass over it, live: a clear and
 //! a tinted button over the chat rows, a tab bar over the photo whose
 //! selection lens sits between two tabs (glass over glass), a frosted card
-//! over the photo's edge and a round magnifier over a message. No product
-//! UI uses the glass yet.
+//! over the photo's edge, and two loupes over a message: one enlarging the
+//! frame's pixels, one drawing the text under it again three times finer
+//! (`LensDetail::Rendered`, Metal; elsewhere it copies). The gooey shapes
+//! of stage 5 are here too: a select whose list hangs off its button by a
+//! neck (`LensBlob`) and an action button whose arrow is a droplet melting
+//! off the body (`LensDroplet`), its labels inked from the glass under
+//! each glyph (`Window::with_lens_ink`). No product UI uses the glass yet.
 //!
 //! `QUILL_DEMO_GLASS=off` paints the same labels without the glass, to see
 //! (and time) the frame under it. The looks are the presets of
@@ -17,9 +22,10 @@ use crate::ui::showcase_demo as sc;
 use gpui_kit::component::Root;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::{
-    AnyView, App, AppContext, Context, FontWeight, Hsla, InteractiveElement, IntoElement, LensBend,
-    LensBorder, LensMaterial, LensStyle, LensTune, ParentElement, Render, Rgba, Styled, Window,
-    canvas, div, point, px,
+    AnyView, App, AppContext, Bounds, Context, Font, FontWeight, Hsla, InteractiveElement,
+    IntoElement, LensBend, LensBlob, LensBorder, LensDetail, LensDroplet, LensInk, LensMaterial,
+    LensNeck, LensStyle, LensTune, ParentElement, Pixels, Render, Rgba, SharedString, Styled,
+    TextAlign, TextRun, Window, canvas, div, point, px, size,
 };
 use std::sync::atomic::Ordering;
 
@@ -134,6 +140,9 @@ fn clear_button(press: f32, frost: f32, pal: &Palette) -> LensStyle {
         tune: LensTune::default(),
         light: point(0.0, -1.0),
         light_mix: 0.0,
+        droplet: None,
+        blob: None,
+        detail: LensDetail::Copied,
     }
 }
 
@@ -202,19 +211,118 @@ fn card(bend: f32, pal: &Palette) -> LensStyle {
     }
 }
 
-/// A clear lens that magnifies, lit from the lower right.
-fn magnifier(pal: &Palette) -> LensStyle {
+/// A clear lens that about doubles its middle, lit from the lower right;
+/// `detail` says whether it enlarges the frame or draws it again finer.
+fn magnifier(detail: LensDetail, pal: &Palette) -> LensStyle {
     let mut style = clear_button(0.0, 0.0, pal);
     if let LensMaterial::Clear {
         bend: LensBend::Edge { magnify, .. },
         ..
     } = &mut style.material
     {
-        *magnify = 0.18;
+        *magnify = 1.0;
     }
     style.light = point(0.6, 0.8);
     style.light_mix = 0.5;
+    style.detail = detail;
     style
+}
+
+/// Gap between a separated droplet and the body, as a share of the height
+/// (the action button of quill-tools/gpui-liquid-glass).
+const DROPLET_GAP: f32 = 0.25;
+
+fn smooth(a: f32, b: f32, v: f32) -> f32 {
+    let t = ((v - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// The action button's glass in a `w` x `h` box: the body, and its right
+/// end a droplet `apart` 0..1 of the way off it. Returns the body (in the
+/// box) and the style; the droplet's centre is `h / 2` from the box's
+/// right edge.
+fn action_glass(w: f32, h: f32, apart: f32, pal: &Palette) -> (Bounds<Pixels>, LensStyle) {
+    let t = apart.clamp(0.0, 1.06);
+    let pull = h * (1.0 + DROPLET_GAP) * t;
+    let body = Bounds::new(point(px(0.0), px(0.0)), size(px(w - pull), px(h)));
+    let mut style = clear_button(0.0, 0.25, pal);
+    style.droplet = (t > 0.001).then(|| LensDroplet {
+        offset_x: px(w / 2.0 - h / 2.0 + pull / 2.0),
+        radius: px(h / 2.0),
+        softness: px(h * 0.34 * smooth(0.0, 0.15, t) * (1.0 - smooth(0.8, 1.0, t))),
+    });
+    (body, style)
+}
+
+/// The select's frosted button with its list swelling out below on a neck,
+/// `drop` below the button's centre, `list` its size.
+fn select_glass(button_w: f32, drop: f32, list: (f32, f32), pal: &Palette) -> LensStyle {
+    let mut style = card(0.0, pal);
+    style.shadow = 0.1;
+    style.strength = 1.0;
+    style.blob = Some(LensBlob {
+        offset: point(px(0.0), px(drop)),
+        half_size: size(px(list.0 / 2.0), px(list.1 / 2.0)),
+        corner_radius: px(22.0),
+        softness: px(24.0),
+        neck: Some(LensNeck {
+            x: px(0.0),
+            width: px(button_w * 0.3),
+        }),
+    });
+    style
+}
+
+/// Text centred in its box; over glass with `ink`, each glyph takes the
+/// ink that reads on the glass under it.
+fn label(
+    text: &'static str,
+    font_size: f32,
+    ink: Option<LensInk>,
+    color: Hsla,
+) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |bounds, (), window, cx| {
+            let font = Font {
+                weight: FontWeight::SEMIBOLD,
+                ..window.text_style().font()
+            };
+            let run = TextRun {
+                len: text.len(),
+                font,
+                color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let line = window.text_system().shape_line(
+                SharedString::new_static(text),
+                px(font_size),
+                &[run],
+                None,
+            );
+            let line_height = px(font_size * 1.3);
+            let origin = point(
+                bounds.center().x - line.width / 2.0,
+                bounds.center().y - line_height / 2.0,
+            );
+            let mut paint = |window: &mut Window| {
+                line.paint(origin, line_height, TextAlign::Left, None, window, cx)
+            };
+            let painted = match ink {
+                Some(ink) => window.with_lens_ink(ink, paint),
+                None => paint(window),
+            };
+            if let Err(error) = painted {
+                log::debug!("glass demo label: {error}");
+            }
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 const TABS: [&str; 4] = ["Chats", "Calls", "Stories", "Settings"];
@@ -237,6 +345,69 @@ impl GlassOverlay {
         .top_0()
         .left_0()
         .size_full()
+    }
+
+    /// Glass on `body`, a box inside its parent.
+    fn lens_on(&self, body: Bounds<Pixels>, radius: f32, style: LensStyle) -> impl IntoElement {
+        let glass = self.glass;
+        canvas(
+            |_, _, _| (),
+            move |bounds, (), window, _| {
+                if glass {
+                    let body = Bounds::new(bounds.origin + body.origin, body.size);
+                    window.paint_backdrop_lens(body, px(radius), &style);
+                }
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
+    /// The ink of labels on clear glass, while there is glass.
+    fn ink(&self) -> Option<LensInk> {
+        self.glass.then(|| LensInk {
+            on_light: Palette::new(false).text,
+            on_dark: Palette::new(true).text,
+        })
+    }
+
+    /// The action button mid-melt: its arrow a droplet halfway off the
+    /// body, the gooey bridge between them still holding.
+    fn action(&self, left: f32, top: f32, pal: &Palette) -> gpui_kit::Div {
+        const W: f32 = 210.0;
+        const H: f32 = 48.0;
+        let (body, style) = action_glass(W, H, 0.6, pal);
+        let ink = self.ink();
+        placed(left, top, W, H)
+            .child(self.lens_on(body, 999.0, style))
+            .child(
+                placed(0.0, 0.0, body.size.width.into(), H)
+                    .child(label("Send", 16.0, ink, pal.text)),
+            )
+            .child(placed(W - H, 0.0, H, H).child(label("\u{2192}", 18.0, ink, pal.text)))
+    }
+
+    /// The select with its list hanging off the button by a neck.
+    fn select(&self, left: f32, top: f32, pal: &Palette) -> gpui_kit::Div {
+        const W: f32 = 160.0;
+        const H: f32 = 44.0;
+        const GAP: f32 = 10.0;
+        const ROW: f32 = 36.0;
+        let options = ["Viewer", "Editor", "Owner"];
+        let list = (W, ROW * options.len() as f32 + 12.0);
+        let drop = H / 2.0 + GAP + list.1 / 2.0;
+        let ink = self.ink();
+        let body = Bounds::new(point(px(0.0), px(0.0)), size(px(W), px(H)));
+        let mut select = placed(left, top, W, H)
+            .child(self.lens_on(body, 16.0, select_glass(W, drop, list, pal)))
+            .child(label("Role", 15.0, ink, pal.text));
+        for (i, option) in options.into_iter().enumerate() {
+            let y = H + GAP + 6.0 + i as f32 * ROW;
+            select = select.child(placed(0.0, y, W, ROW).child(label(option, 14.0, ink, pal.text)));
+        }
+        select
     }
 
     fn button(
@@ -349,9 +520,15 @@ impl Render for GlassOverlay {
                     .child(self.button(170.0, 300.0, "Save", white, tinted(blue, &pal)))
                     .child(self.tabs(390.0, 172.0, &pal))
                     .child(self.card(560.0, 236.0, &pal))
+                    .child(self.select(385.0, 236.0, &pal))
+                    .child(self.action(12.0, 470.0, &pal))
                     .child(
-                        placed(880.0, 420.0, 150.0, 150.0).child(self.lens(75.0, magnifier(&pal))),
-                    ),
+                        placed(768.0, 435.0, 124.0, 124.0)
+                            .child(self.lens(62.0, magnifier(LensDetail::Copied, &pal))),
+                    )
+                    .child(placed(1030.0, 435.0, 124.0, 124.0).child(
+                        self.lens(62.0, magnifier(LensDetail::Rendered { density: 3 }, &pal)),
+                    )),
             )
     }
 }

@@ -26,7 +26,7 @@ use windows::{
 };
 
 use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
-use backdrop_glass::{Glass, LensState};
+use backdrop_glass::{Glass, GlassDrawn, LensState};
 use hdr_surfaces::{HdrSurfaces, OutputMode};
 use yuv_surfaces::YuvSurfaces;
 use crate::*;
@@ -403,6 +403,12 @@ impl DirectXRenderer {
             _ => [0.0f32; 4],
         })?;
         self.upload_scene_buffers(scene)?;
+        // QUILL: the frame's slots, planned before anything is drawn. What
+        // the atlas holds counts as unknown until every batch drew as
+        // planned.
+        let glass = self.plan_glass(scene);
+        self.pipelines.lenses.forget();
+        let mut glass_drawn = GlassDrawn::AsPlanned;
 
         let annotation = self
             .devices
@@ -441,13 +447,18 @@ impl DirectXRenderer {
                 // quads, uploaded after the scene's own.
                 PrimitiveBatch::Lenses(range) => {
                     let lenses = scene.lenses.get(range.clone()).unwrap_or_default();
-                    let glass = self.draw_lenses(lenses).unwrap_or_else(|error| {
-                        log::error!("glass draws flat: {error:#}");
-                        Glass::Flat
-                    });
-                    match glass {
+                    let drawn = self
+                        .draw_lenses(glass.as_ref(), lenses, range.clone())
+                        .unwrap_or_else(|error| {
+                            log::error!("glass draws flat: {error:#}");
+                            Glass::Flat
+                        });
+                    match drawn {
                         Glass::Drawn => Ok(()),
-                        Glass::Flat => self.draw_quads(scene.quads.len() + range.start, range.len()),
+                        Glass::Flat => {
+                            glass_drawn = GlassDrawn::Flat;
+                            self.draw_quads(scene.quads.len() + range.start, range.len())
+                        }
                     }
                 }
             }
@@ -473,6 +484,9 @@ impl DirectXRenderer {
             yuv.end_frame();
         }
         self.pipelines.lenses.release_idle_atlas(scene.lenses.len());
+        if let (Some(glass), GlassDrawn::AsPlanned) = (&glass, glass_drawn) {
+            self.pipelines.lenses.keep(glass);
+        }
         if scene.surfaces.is_empty() {
             self.pipelines.hdr_surfaces.release();
             if let Some(yuv) = self.pipelines.yuv_surfaces.as_mut() {
