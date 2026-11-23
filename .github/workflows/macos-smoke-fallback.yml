@@ -1,6 +1,8 @@
 name: macos-smoke-fallback
-# Hosted-macOS fallback for the macOS compile gate. Used ONLY when Idan's
-# M1 Pro self-hosted runner is offline.
+# Hosted-macOS compile gate (the `macos-ui-build` status). The owner's
+# self-hosted Mac runner was removed on 2026-11-22: a public repository with
+# collaborators must not run their code on a personal machine
+# (docs/decisions/release-secrets.md).
 # workflow_dispatch ONLY (triggering requires write access) — the merge
 # pipeline dispatches it explicitly in that case. There are intentionally no
 # pull_request triggers, so this never runs on its own.

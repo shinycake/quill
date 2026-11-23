@@ -26,8 +26,7 @@ on:
         required: false
       TELEGRAM_API_HASH:
         required: false
-      # Not passed by callers: a release build reads these from the `release`
-      # environment, which overrides caller secrets.
+      # From the `release` environment; the caller passes `secrets: inherit`.
       MACOS_SIGNING_P12:
         description: 'Base64 PKCS#12 holding the Apple Development or Developer ID Application identity'
         required: false
@@ -62,11 +61,14 @@ jobs:
   macos-package:
     name: macos-package
     needs: calls
-    # Release builds (a version is set) run in the protected `release`
+    # Release builds (a version is set) on main run in the protected `release`
     # environment, which holds the MACOS_* signing and notarization secrets and
-    # waits for the owner's approval. CI builds get no environment and stay
-    # ad-hoc signed (docs/decisions/release-secrets.md).
-    environment: ${{ inputs.version != '' && 'release' || '' }}
+    # waits for the owner's approval. The caller must pass `secrets: inherit`:
+    # without it a called job sees no environment secrets. CI builds get no
+    # environment and stay ad-hoc signed (docs/decisions/release-secrets.md).
+    # Dry runs from other branches cannot use the environment: they build
+    # ad-hoc signed.
+    environment: ${{ inputs.version != '' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag') && 'release' || '' }}
     # arm64. The deployment target above, not the runner, sets the oldest
     # macOS Quill runs on; check-bundle-macho.sh fails on any library that
     # needs a newer one.

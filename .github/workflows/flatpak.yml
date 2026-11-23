@@ -1,10 +1,11 @@
 # Builds the Flatpak manifest (packaging/flatpak) in the Flatpak build
 # container, lints it with flatpak-builder-lint, and checks the installed app
 # starts and finds every library. Pull requests build the release the
-# manifest names; a published release builds that new release, attaches
-# the bundles to it (quill-linux-<arch>.flatpak) and rebuilds the site,
-# which serves them as Quill's own Flatpak repo (scripts/site-flatpak-repo.sh).
-# A manual run with a tag does the same for that release.
+# manifest names. The release workflow calls it on each new draft release
+# (`artifact`): it builds from that draft's tarballs and attaches the
+# bundles (quill-linux-<arch>.flatpak) to the draft, because published
+# releases are immutable. The site serves them as Quill's own Flatpak repo
+# after publishing (scripts/site-flatpak-repo.sh).
 name: flatpak
 
 on:
@@ -17,11 +18,19 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release to build and attach the bundles to (vYEAR.MONTHDAY.COMMITS); empty builds main's manifest
+        description: Published release to build (vYEAR.MONTHDAY.COMMITS); empty builds main's manifest. Nothing is attached.
         required: false
         default: ""
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: The draft release to build and attach the bundles to
+        type: string
+        required: true
+      artifact:
+        description: The release workflow's artifact holding the draft's files
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -51,13 +60,20 @@ jobs:
     env:
       APP_ID: io.github.shinycake.Quill
       MANIFEST: packaging/flatpak/io.github.shinycake.Quill.yml
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      TAG: ${{ inputs.tag }}
+      ARTIFACT: ${{ inputs.artifact }}
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/download-artifact@v8
+        if: env.ARTIFACT != ''
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ runner.temp }}/release
+
       - name: Point the manifest at this release
         if: env.TAG != ''
-        run: bash packaging/flatpak/bump.sh "$TAG"
+        run: bash packaging/flatpak/bump.sh "$TAG" ${ARTIFACT:+"$RUNNER_TEMP/release/release-out"}
 
       # Screenshots are linked from main, so a pull request that adds or
       # changes one cannot reach it yet: pull requests skip the URL check.
@@ -115,21 +131,22 @@ jobs:
           run --command=sh "$APP_ID" -c 'readlink -f /app/bin/quill' | grep -qx /app/lib/quill/quill
 
   publish:
-    name: attach the bundles and rebuild the site's Flatpak repo
+    name: attach the bundles to the draft release
     needs: flatpak
-    if: github.event_name == 'release' || inputs.tag != ''
+    if: inputs.artifact != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      TAG: ${{ inputs.tag }}
     steps:
       - uses: actions/download-artifact@v8
         with:
           pattern: quill-flatpak-*
           merge-multiple: true
-      - name: Attach the bundles to the release
-        run: gh release upload "$TAG" -R "$GITHUB_REPOSITORY" quill-linux-x86_64.flatpak quill-linux-aarch64.flatpak --clobber
-      - name: Rebuild the site
-        run: gh api "repos/$GITHUB_REPOSITORY/dispatches" -f event_type=site-refresh
+      - name: Attach the bundles to the draft
+        run: |
+          [ "$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true ] \
+            || { echo "::error::$TAG is not a draft"; exit 1; }
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" quill-linux-x86_64.flatpak quill-linux-aarch64.flatpak --clobber
