@@ -11,7 +11,7 @@
 #
 # Environment:
 #   QUILL_PREFIX     install prefix (default ~/.local)
-#   QUILL_VERSION    release tag such as v2026.1017.2948 (default: latest)
+#   QUILL_VERSION    release tag such as v2026.1017.2948 (default: the newest verified release)
 #   QUILL_TAR_URL    tarball URL (curl syntax, file:// works); skips the
 #                    checksum unless QUILL_SHA256 is set
 #   QUILL_NO_OPEN=1  don't start Quill when done
@@ -59,13 +59,18 @@ if [ -n "${QUILL_TAR_URL:-}" ]; then
   tar_url="$QUILL_TAR_URL"
   sums_url=""
 else
-  if [ -n "${QUILL_VERSION:-}" ]; then
-    base="https://github.com/$REPO/releases/download/$QUILL_VERSION"
-  else
-    base="https://github.com/$REPO/releases/latest/download"
+  # The tag and its checksums come from the website, which only main can
+  # deploy and which lists only releases whose signatures verify; GitHub's
+  # "latest" release is not trusted (docs/decisions/release-secrets.md).
+  site="https://shinycake.github.io/quill/data"
+  tag="${QUILL_VERSION:-}"
+  if [ -z "$tag" ]; then
+    tag="$(curl -fsSL "$site/release-tag.txt" | tr -d '[:space:]')" || die "couldn't fetch the current release"
   fi
+  case "$tag" in v[0-9]*.[0-9]*.[0-9]*) ;; *) die "not a release tag: $tag" ;; esac
+  base="https://github.com/$REPO/releases/download/$tag"
   tar_url="$base/$asset"
-  sums_url="$base/SHA256SUMS.txt"
+  sums_url="$site/sums/$tag.txt"
 fi
 
 want="${QUILL_SHA256:-}"

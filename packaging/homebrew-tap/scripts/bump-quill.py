@@ -10,7 +10,6 @@ exits non-zero so the workflow fails instead of reporting a silent success.
 GITHUB_TOKEN, when set, authenticates the API call: unauthenticated calls
 share the runner IP's 60-per-hour limit and get rate limited.
 """
-import json
 import os
 import re
 import sys
@@ -61,12 +60,15 @@ def retry_wait(e: urllib.error.HTTPError, attempt: int) -> int:
     return backoff
 
 
-release = json.loads(get(f"https://api.github.com/repos/{REPO}/releases/latest"))
-tag = release.get("tag_name", "")
+# The website (deployed only from main) names the newest release whose
+# signatures verify and serves its checksums; GitHub's "latest" release is not
+# trusted (docs/decisions/release-secrets.md in shinycake/quill).
+SITE = "https://shinycake.github.io/quill/data"
+tag = get(f"{SITE}/release-tag.txt").decode().strip()
 version = tag.removeprefix("v")
 if not re.fullmatch(r"\d{4}\.\d{3,4}\.\d+", version):
     sys.exit(f"unexpected tag {tag!r}")
-sums = get(f"https://github.com/{REPO}/releases/download/{tag}/SHA256SUMS.txt").decode()
+sums = get(f"{SITE}/sums/{tag}.txt").decode()
 digest = next((line.split()[0] for line in sums.splitlines() if line.endswith(f"  {ASSET}")), None)
 if not digest or not re.fullmatch(r"[0-9a-f]{64}", digest):
     sys.exit(f"no checksum for {ASSET} in {tag}")

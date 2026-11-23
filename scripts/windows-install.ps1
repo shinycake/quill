@@ -14,7 +14,7 @@
 #
 # Environment:
 #   QUILL_INSTALL_DIR  folder to install into (default %LOCALAPPDATA%\Programs\Quill)
-#   QUILL_VERSION      release tag such as v2026.1017.2948 (default: latest)
+#   QUILL_VERSION      release tag such as v2026.1017.2948 (default: the newest verified release)
 #   QUILL_ZIP_URL      zip URL; skips the checksum unless QUILL_SHA256 is set
 #   QUILL_NO_OPEN=1    don't start Quill when done
 #   QUILL_NO_SHORTCUT=1  skip the Start menu shortcut and the Settings > Apps entry
@@ -73,13 +73,18 @@ try {
         $zipUrl = $env:QUILL_ZIP_URL
         $sumsUrl = $null
     } else {
-        if ($env:QUILL_VERSION) {
-            $base = "https://github.com/$repo/releases/download/$($env:QUILL_VERSION)"
-        } else {
-            $base = "https://github.com/$repo/releases/latest/download"
+        # The tag and its checksums come from the website, which only main can
+        # deploy and which lists only releases whose signatures verify;
+        # GitHub's "latest" release is not trusted (docs/decisions/release-secrets.md).
+        $site = 'https://shinycake.github.io/quill/data'
+        $tag = $env:QUILL_VERSION
+        if (-not $tag) {
+            try { $tag = (Get-Url "$site/release-tag.txt").Trim() } catch { Fail "couldn't fetch the current release ($($_.Exception.Message))" }
         }
+        if ($tag -notmatch '^v\d+\.\d+\.\d+$') { Fail "not a release tag: $tag" }
+        $base = "https://github.com/$repo/releases/download/$tag"
         $zipUrl = "$base/$asset"
-        $sumsUrl = "$base/SHA256SUMS.txt"
+        $sumsUrl = "$site/sums/$tag.txt"
     }
 
     $want = $env:QUILL_SHA256
