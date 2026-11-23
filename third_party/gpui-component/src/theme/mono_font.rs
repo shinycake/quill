@@ -12,9 +12,9 @@
 //! `add_fonts`, and Windows lists families under their localized names, so an
 //! English name for a CJK font would look missing when it is not.
 
-use gpui::{App, BackgroundExecutor, SharedString, TextSystem, font};
+use gpui::{App, SharedString};
 use gpui_base::TypographyTokens;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 /// Monospace families tried, in order, when the platform default is missing.
 const MONO_FONT_ALTERNATES: &[&str] = if cfg!(target_os = "macos") {
@@ -50,14 +50,7 @@ fn installed_default_mono_font_family(cx: &App) -> SharedString {
     RESOLVED
         .get_or_init(|| {
             let default = default_mono_font_family();
-            // QUILL: a default that loads under its own name is kept without
-            // the installed list, which takes tens of milliseconds to build.
-            // The web starts with no font and would panic resolving one.
-            let family = if !cfg!(target_family = "wasm") && loads_as_itself(cx, &default) {
-                default.clone()
-            } else {
-                first_installed(&default, MONO_FONT_ALTERNATES, installed_font_names(cx))
-            };
+            let family = first_installed(&default, MONO_FONT_ALTERNATES, installed_font_names(cx));
             if family != default {
                 tracing::warn!(
                     "Monospace font {default:?} is not installed, using {family:?} instead."
@@ -68,35 +61,14 @@ fn installed_default_mono_font_family(cx: &App) -> SharedString {
         .clone()
 }
 
-/// Whether GPUI loads `family` itself rather than a fallback for it.
-fn loads_as_itself(cx: &App, family: &SharedString) -> bool {
-    let text_system = cx.text_system();
-    text_system
-        .get_font_for_id(text_system.resolve_font(&font(family.clone())))
-        .is_some_and(|resolved| resolved.family == *family)
-}
-
-static INSTALLED_FONT_NAMES: OnceLock<Vec<String>> = OnceLock::new();
-
 /// The families installed on the machine, listed once per process.
 ///
-/// Enumerating fonts costs around fifty milliseconds on macOS, and the
+/// Enumerating fonts costs around a hundred milliseconds on macOS, and the
 /// answer only depends on the system fonts, which do not change while the
 /// process runs.
-pub fn installed_font_names(cx: &App) -> &'static [String] {
-    INSTALLED_FONT_NAMES.get_or_init(|| cx.text_system().all_font_names())
-}
-
-/// Lists the installed families on a background thread, so the first caller
-/// of [`installed_font_names`] (the theme's `init` when a default font is
-/// missing, else a font picker) finds the list ready, or waits only for the
-/// rest of it, instead of enumerating fonts on the main thread.
-pub fn prefetch_installed_font_names(text_system: Arc<TextSystem>, executor: &BackgroundExecutor) {
-    executor
-        .spawn(async move {
-            INSTALLED_FONT_NAMES.get_or_init(|| text_system.all_font_names());
-        })
-        .detach();
+pub(super) fn installed_font_names(cx: &App) -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| cx.text_system().all_font_names())
 }
 
 /// `default` when it is installed, else the first installed alternate, else

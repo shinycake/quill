@@ -67,7 +67,6 @@ pub mod notification;
 pub mod pagination;
 pub mod plot;
 pub mod popover;
-pub mod popover_glass;
 pub mod progress;
 pub mod questionnaire;
 pub mod radio;

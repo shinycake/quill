@@ -59,7 +59,7 @@ pub(crate) fn highlight_code(
 }
 
 /// Highlight names for `text`, for presentations that resolve styles later.
-pub fn capture_names(language: &str, text: &str) -> Vec<(Range<usize>, SharedString)> {
+pub(crate) fn capture_names(language: &str, text: &str) -> Vec<(Range<usize>, SharedString)> {
     let Some(syntax) = find_syntax(language) else {
         return Vec::new();
     };

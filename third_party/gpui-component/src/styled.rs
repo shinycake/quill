@@ -185,16 +185,6 @@ impl<T: Styled + Sized> ThemeStyled for T {
 
     fn popover_style(self, cx: &App) -> Self {
         let theme = cx.theme();
-        // QUILL (glass effects): the app's glass replaces the fill and the
-        // ring-and-shadow edge; the lens draws its own rim and shadow.
-        if let Some(lens) =
-            crate::popover_glass::popover_glass(crate::popover_glass::PopoverGlassSurface::Popover, cx)
-        {
-            return self
-                .text_color(theme.popover_foreground)
-                .rounded(theme.radius)
-                .backdrop_glass(Some(lens));
-        }
         // No border: the edge is the ring inside `popover_shadow`, which is how
         // shadcn draws it and the only way the shadow can show through it.
         self.bg(theme.popover)

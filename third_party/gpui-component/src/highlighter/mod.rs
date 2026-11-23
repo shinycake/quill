@@ -18,10 +18,6 @@ pub(crate) use input_adapter::input_highlighter_factory;
 mod syntect_backend;
 #[cfg(all(feature = "syntect", not(feature = "tree-sitter")))]
 pub(crate) use syntect_backend::{highlight_code, input_highlighter_factory};
-// Quill: the highlight names of a text, for callers that color them
-// themselves (QUILL-CHANGES.md).
-#[cfg(all(feature = "syntect", not(feature = "tree-sitter")))]
-pub use syntect_backend::capture_names;
 
 #[cfg(not(any(feature = "tree-sitter", feature = "syntect")))]
 pub(crate) fn input_highlighter_factory() -> gpui_base::input::InputHighlighterFactory {

@@ -135,16 +135,6 @@ impl<E: InteractiveElement + ParentElement + Styled + Element> FocusTrapContaine
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl<E: InteractiveElement + ParentElement + Styled + Element> gpui::IntoElement
-    for FocusTrapContainer<E>
-{
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 impl<E: InteractiveElement + ParentElement + Styled + Element> ParentElement
     for FocusTrapContainer<E>
 {
@@ -185,10 +175,6 @@ impl<E: InteractiveElement + ParentElement + Styled + Element + 'static> Element
 
     fn a11y_role(&self) -> Option<gpui::Role> {
         self.base.a11y_role()
-    }
-
-    fn a11y_tag(&self) -> Option<gpui::SharedString> {
-        self.base.a11y_tag()
     }
 
     fn write_a11y_info(&self, node: &mut gpui::accesskit::Node) {

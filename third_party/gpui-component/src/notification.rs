@@ -418,13 +418,6 @@ impl Render for Notification {
         };
         let has_icon = icon.is_some();
         let placement = self.placement.unwrap_or(cx.theme().notification.placement);
-        // QUILL (glass effects): glass replaces the card's fill, border and
-        // shadow; the lens draws its own rim and shadow.
-        let glass = crate::popover_glass::popover_glass(
-            crate::popover_glass::PopoverGlassSurface::Toast,
-            cx,
-        );
-        let solid = glass.is_none();
 
         BaseToast::new("notification")
             .transition_status(transition_status)
@@ -434,15 +427,11 @@ impl Render for Notification {
             .occlude()
             .relative()
             .w_full()
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().tokens.popover)
             .rounded(cx.theme().radius_lg)
-            .map(|this| match glass {
-                Some(lens) => this.backdrop_glass(Some(lens)),
-                None => this
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().tokens.popover)
-                    .shadow(toast_shadow(1.)),
-            })
+            .shadow(toast_shadow(1.))
             .py_3p5()
             .px_4()
             .gap_3()
@@ -511,9 +500,7 @@ impl Render for Notification {
                 move |this, delta| {
                     if closing {
                         let opacity = 1. - delta;
-                        let that = this
-                            .opacity(opacity)
-                            .when(solid, |this| this.shadow(toast_shadow(opacity.powi(3))));
+                        let that = this.opacity(opacity).shadow(toast_shadow(opacity.powi(3)));
                         let y_offset = match placement {
                             Anchor::TopLeft | Anchor::TopRight | Anchor::TopCenter => {
                                 -delta * NOTIFICATION_TRANSITION_OFFSET
@@ -546,7 +533,7 @@ impl Render for Notification {
                         // threshold, which popped.
                         this.top(px(0.) + y_offset)
                             .opacity(opacity)
-                            .when(solid, |this| this.shadow(toast_shadow(opacity.powi(3))))
+                            .shadow(toast_shadow(opacity.powi(3)))
                     }
                 },
             )
@@ -643,7 +630,7 @@ impl SystemNotificationRegistry {
             return;
         };
         entries.remove(ix);
-        cx.dismiss_system_notification(&tag);
+        cx.dismiss_system_notification(&tag).detach();
     }
 
     /// Retract all of the window's system notifications whose id matches the
@@ -675,7 +662,7 @@ impl SystemNotificationRegistry {
             }
         });
         for tag in tags {
-            cx.dismiss_system_notification(&tag);
+            cx.dismiss_system_notification(&tag).detach();
         }
     }
 
@@ -685,7 +672,7 @@ impl SystemNotificationRegistry {
         }
         // Platforms usually remove a clicked notification themselves; retract
         // explicitly for the ones that keep it in the notification center.
-        cx.dismiss_system_notification(&response.tag);
+        cx.dismiss_system_notification(&response.tag).detach();
         // The prefix already proves the notification is ours, so activate even
         // when nothing is left to dispatch to: the platform can deliver a
         // response for a notification posted before the process restarted, and

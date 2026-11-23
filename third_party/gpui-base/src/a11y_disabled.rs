@@ -60,15 +60,6 @@ impl<E: Element<PrepaintState = Option<gpui::Hitbox>> + InteractiveElement> A11y
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl<E: Element> IntoElement for A11yDisabled<E> {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl<E: InteractiveElement> InteractiveElement for A11yDisabled<E> {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.inner.interactivity()
@@ -126,10 +117,6 @@ impl<E: Element> Element for A11yDisabled<E> {
 
     fn a11y_role(&self) -> Option<gpui::Role> {
         self.inner.a11y_role()
-    }
-
-    fn a11y_tag(&self) -> Option<gpui::SharedString> {
-        self.inner.a11y_tag()
     }
 
     fn write_a11y_info(&self, node: &mut accesskit::Node) {

@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
-// formatting spans in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 /// DisplayMap: Public facade for Editor/Input display mapping.
 ///
 /// This combines WrapMap and FoldMap to provide a unified API:
@@ -172,6 +170,23 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    /// Get all fold candidates (the ranges that can be folded)
+    #[inline]
+    pub(crate) fn fold_candidates(&self) -> &[FoldRange] {
+        self.fold_map.fold_candidates()
+    }
+
+    /// Replace the folded ranges: fold each candidate starting at one of
+    /// `start_lines` and unfold all others. Lines that are not candidates are
+    /// ignored. The fold projection is rebuilt once.
+    pub(crate) fn set_folded_lines(&mut self, start_lines: impl IntoIterator<Item = usize>) {
+        self.fold_map.clear_folds();
+        for line in start_lines {
+            self.fold_map.set_folded(line, true);
+        }
+        self.rebuild_fold_projection();
+    }
+
     // ==================== Text and Layout Updates ====================
 
     /// Adjust folds and candidates for a text edit before updating the wrap map.
@@ -227,26 +242,6 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
-    /// Install span fonts without wrapping anything: the edit that changed
-    /// them wraps its own rows next (Quill patch).
-    pub(crate) fn stage_span_fonts(&mut self, fonts: crate::input::text_spans::SpanFonts) {
-        self.wrap_map.stage_span_fonts(fonts);
-    }
-
-    /// Install the font changes of formatting spans, wrapping the rows
-    /// `rewrap` asks for again (Quill patch).
-    pub(crate) fn set_span_fonts(
-        &mut self,
-        fonts: crate::input::text_spans::SpanFonts,
-        rewrap: crate::input::text_spans::SpanRewrap,
-        cx: &mut App,
-    ) {
-        self.wrap_map.set_span_fonts(fonts, rewrap, cx);
-        if rewrap != crate::input::text_spans::SpanRewrap::None {
-            self.rebuild_fold_projection();
-        }
-    }
-
     /// Update layout parameters (wrap width or font)
     pub(crate) fn set_inline_metrics(
         &mut self,
@@ -275,9 +270,20 @@ impl DisplayMap {
         }
     }
 
-    /// The font and size the input lays its text out with.
-    pub fn text_style(&self) -> (&Font, Pixels) {
-        self.wrap_map.text_style()
+    /// The width text is wrapped at, or `None` when it is not wrapped.
+    pub(crate) fn wrap_width(&self) -> Option<Pixels> {
+        self.wrap_map.wrapper().wrap_width()
+    }
+
+    /// Wrap the next replacement of the whole text at `wrap_width`, leaving the current rows as
+    /// they are. Only valid right before such a replacement, which rewraps every line.
+    pub(crate) fn prepare_wrap_width(&mut self, wrap_width: Pixels) {
+        self.wrap_map.prepare_wrap_width(wrap_width);
+    }
+
+    /// The font and size text is measured in.
+    pub(crate) fn font(&self) -> (&Font, Pixels) {
+        self.wrap_map.wrapper().font()
     }
 
     /// Set font parameters

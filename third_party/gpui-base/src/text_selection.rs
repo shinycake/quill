@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
-// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -366,58 +364,6 @@ impl TextSelectionRegistration {
     }
 }
 
-/// Glyph geometry of laid-out text, as the selection machinery reads it. `TextLayout`
-/// implements it; text that does its own layout (bidirectional paragraphs, whose rows
-/// are not a left-to-right sequence of glyphs) supplies another implementation through
-/// [`TextSelectionRun::with_geometry`].
-pub trait RunGeometry {
-    /// Byte length of the laid-out text.
-    fn len(&self) -> usize;
-    /// Height of one row.
-    fn line_height(&self) -> Pixels;
-    /// Window-coordinate bounds of the text.
-    fn bounds(&self) -> Bounds<Pixels>;
-    /// Window position of the caret at byte offset `index`.
-    fn position_for_index(&self, index: usize) -> Option<Point<Pixels>>;
-    /// The byte offset under `position` (`Ok`), or the nearest one (`Err`).
-    fn index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize>;
-    /// The top of the first row and the bottom of the last, in window coordinates.
-    fn rows_extent(&self, line_height: Pixels) -> (Pixels, Pixels);
-    /// What a drag from `start` to `end` selects, when the geometry decides it itself
-    /// instead of leaving it to the left-to-right reading-order walk (text whose rows read
-    /// right to left selects the logical range between the two endpoints): `None` leaves
-    /// it to the walk, `Some(range)` is the answer (`Some(None)` selects nothing).
-    #[allow(clippy::option_option)]
-    fn selected_range(
-        &self,
-        _start: Point<Pixels>,
-        _end: Point<Pixels>,
-    ) -> Option<Option<Range<usize>>> {
-        None
-    }
-}
-
-impl RunGeometry for TextLayout {
-    fn len(&self) -> usize {
-        TextLayout::len(self)
-    }
-    fn line_height(&self) -> Pixels {
-        TextLayout::line_height(self)
-    }
-    fn bounds(&self) -> Bounds<Pixels> {
-        TextLayout::bounds(self)
-    }
-    fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
-        TextLayout::position_for_index(self, index)
-    }
-    fn index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize> {
-        TextLayout::index_for_position(self, position)
-    }
-    fn rows_extent(&self, line_height: Pixels) -> (Pixels, Pixels) {
-        text_rows_extent(self, line_height)
-    }
-}
-
 /// Laid-out text reported by a plain selection participant during paint.
 #[derive(Clone)]
 pub struct TextSelectionRun {
@@ -427,8 +373,6 @@ pub struct TextSelectionRun {
     text: SharedString,
     /// Laid-out glyph geometry in window coordinates.
     layout: TextLayout,
-    /// Geometry of text that lays itself out; replaces `layout` when set.
-    geometry: Option<Rc<dyn RunGeometry>>,
     /// The run's window-coordinate paint bounds.
     bounds: Bounds<Pixels>,
     /// The boundary a triple-click drag snaps to in this run.
@@ -449,33 +393,8 @@ impl TextSelectionRun {
             document_order: 0,
             text: text.into(),
             layout,
-            geometry: None,
             bounds,
             triple_click: TripleClickSelection::LogicalLine,
-        }
-    }
-
-    /// Creates a run whose geometry comes from `geometry` instead of a `TextLayout`.
-    pub fn with_geometry(
-        text: impl Into<SharedString>,
-        geometry: Rc<dyn RunGeometry>,
-        bounds: Bounds<Pixels>,
-    ) -> Self {
-        Self {
-            document_order: 0,
-            text: text.into(),
-            layout: TextLayout::default(),
-            geometry: Some(geometry),
-            bounds,
-            triple_click: TripleClickSelection::LogicalLine,
-        }
-    }
-
-    /// The geometry the selection reads: the custom one, else the `TextLayout`.
-    fn geo(&self) -> &dyn RunGeometry {
-        match &self.geometry {
-            Some(geometry) => geometry.as_ref(),
-            None => &self.layout,
         }
     }
 
@@ -573,7 +492,7 @@ fn selection_range_for_run(
     selection_start: Point<Pixels>,
     selection_end: Point<Pixels>,
 ) -> Option<Range<usize>> {
-    if run.text.len() != run.geo().len() {
+    if run.text.len() != run.layout.len() {
         return None;
     }
 
@@ -581,16 +500,12 @@ fn selection_range_for_run(
         return None;
     }
 
-    if let Some(decided) = run.geo().selected_range(selection_start, selection_end) {
-        return decided;
-    }
-
-    let line_height = run.geo().line_height();
+    let line_height = run.layout.line_height();
     // Each character is tested with its row's top and height, so a run whose
     // rows all miss the band, or all lie strictly inside it with no endpoint
     // on any row, has the same answer for every character. Decide those
     // without the walk below, which scans the layout twice per character.
-    let (rows_top, rows_bottom) = run.geo().rows_extent(line_height);
+    let (rows_top, rows_bottom) = text_rows_extent(&run.layout, line_height);
     let band_top = selection_start.y.min(selection_end.y);
     let band_bottom = selection_start.y.max(selection_end.y);
     if rows_bottom <= band_top || rows_top > band_bottom {
@@ -603,12 +518,12 @@ fn selection_range_for_run(
     let mut range = None;
     for (offset, character) in run.text.char_indices() {
         let next_offset = offset + character.len_utf8();
-        let Some(position) = run.geo().position_for_index(offset) else {
+        let Some(position) = run.layout.position_for_index(offset) else {
             continue;
         };
 
         let char_width = run
-            .geo()
+            .layout
             .position_for_index(next_offset)
             .filter(|next| next.y == position.y)
             .map_or_else(|| line_height.half(), |next| next.x - position.x);
@@ -656,10 +571,10 @@ fn carets_for_multi_click(
     click_count: usize,
 ) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
     let run = runs.iter().find(|run| run.bounds.contains(&position))?;
-    if run.text.len() != run.geo().len() {
+    if run.text.len() != run.layout.len() {
         return None;
     }
-    let offset = match run.geo().index_for_position(position) {
+    let offset = match run.layout.index_for_position(position) {
         Ok(offset) => offset,
         // Beside a line, as after a short last one: three clicks still mean that line.
         Err(nearest) if click_count >= 3 => nearest,
@@ -692,10 +607,10 @@ fn unit_carets(
     if range.is_empty() {
         return None;
     }
-    let line_height = run.geo().line_height();
+    let line_height = run.layout.line_height();
     Some((
-        caret_line_box(run.geo().position_for_index(range.start)?, line_height),
-        caret_line_box(run.geo().position_for_index(range.end)?, line_height),
+        caret_line_box(run.layout.position_for_index(range.start)?, line_height),
+        caret_line_box(run.layout.position_for_index(range.end)?, line_height),
     ))
 }
 
@@ -2187,8 +2102,8 @@ impl WindowSelectionState {
                 return;
             };
             let (Some(start), Some(end)) = (
-                first.geo().position_for_index(0),
-                last.geo().position_for_index(last.text.len()),
+                first.layout.position_for_index(0),
+                last.layout.position_for_index(last.text.len()),
             ) else {
                 return;
             };
@@ -2196,8 +2111,8 @@ impl WindowSelectionState {
             // land on text.
             let inset = px(1.);
             (
-                point(start.x + inset, start.y + first.geo().line_height() / 2.),
-                point(end.x - inset, end.y + last.geo().line_height() / 2.),
+                point(start.x + inset, start.y + first.layout.line_height() / 2.),
+                point(end.x - inset, end.y + last.layout.line_height() / 2.),
             )
         };
         let content_key_resolver = participant.read(cx).content_key_resolver.clone();
@@ -2466,12 +2381,12 @@ impl WindowSelectionState {
         let participant = endpoint.participant.as_ref()?.upgrade()?;
         let runs = participant.read(cx).runs.borrow();
         let run = runs.iter().find(|run| run.bounds.contains(&position))?;
-        if run.text.len() != run.geo().len() {
+        if run.text.len() != run.layout.len() {
             return None;
         }
         // Past the end of a row, the pointer takes the character closest to it.
         let offset = run
-            .geo()
+            .layout
             .index_for_position(position)
             .unwrap_or_else(|closest| closest);
         let (start, end) = unit_carets(run, offset, click_count)?;
@@ -3152,15 +3067,6 @@ struct KeepTextSelection {
     id: ElementId,
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for KeepTextSelection {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for KeepTextSelection {
     type RequestLayoutState = ();
     type PrepaintState = ();
@@ -3236,15 +3142,6 @@ struct TextSelectionScopeMarker<E> {
     element: E,
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl<E: Element> IntoElement for TextSelectionScopeMarker<E> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl<E: Element> Element for TextSelectionScopeMarker<E> {
     type RequestLayoutState = E::RequestLayoutState;
     type PrepaintState = E::PrepaintState;
@@ -3313,15 +3210,6 @@ impl<E: Element> Element for TextSelectionScopeMarker<E> {
 
 #[doc(hidden)]
 pub struct TextSelectionLayerPrepaintState(Entity<WindowSelectionState>);
-
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for TextSelectionLayer {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl Element for TextSelectionLayer {
     type RequestLayoutState = ();
@@ -3533,6 +3421,15 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
                 state.prepare_for_mouse_down(event.click_count == 1 && event.modifiers.shift, cx)
             });
             dispatch_clear_handlers(handlers, cx);
+
+            // Selection layers share this latch for one dispatch. A release
+            // may be stopped by a child or occur outside the window.
+            let latch = state.downgrade();
+            cx.defer(move |cx| {
+                if let Some(state) = latch.upgrade() {
+                    state.update(cx, |state, _| state.mouse_down_prepared = false);
+                }
+            });
         } else if event.click_count == 1 {
             if GlobalState::is_text_selection_suppressed(cx) {
                 state.update(cx, |state, _| state.pending_extension_anchor = None);
@@ -3711,10 +3608,7 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
         if phase.bubble()
             && let Some(state) = mouse_up_state.upgrade()
         {
-            state.update(cx, |state, cx| {
-                state.mouse_down_prepared = false;
-                state.end(cx)
-            });
+            state.update(cx, |state, cx| state.end(cx));
         }
     });
 
@@ -6205,6 +6099,21 @@ mod tests {
         assert_eq!(drag_to("four five six", 6, cx), "two three\nfour five");
         release(2, cx);
         assert_eq!(painted_selection(cx), "two three\nfour five");
+    }
+
+    #[gpui::test]
+    fn a_press_without_a_release_does_not_keep_a_stale_selection(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| SelectableTextsView {
+            texts: vec!["one two three", "four five six"],
+        });
+        painted_selection(cx);
+
+        press_at("one two three", 0, 1, false, cx);
+        assert_eq!(drag_to("one two three", 7, cx), "one two");
+
+        press_at("four five six", 2, 1, false, cx);
+        release(1, cx);
+        assert_eq!(painted_selection(cx), "");
     }
 
     #[gpui::test]
