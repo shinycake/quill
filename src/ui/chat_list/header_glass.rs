@@ -50,6 +50,7 @@ impl QuillApp {
     /// The column `header` (built with every header part as before) turned
     /// into a glass bar over `rows`. The column keeps its id, focus and
     /// key handlers, so the keyboard reaches the list as before.
+    #[inline(never)]
     pub(super) fn float_chat_list_header(
         &self,
         header: Stateful<Div>,

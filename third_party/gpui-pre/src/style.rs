@@ -295,8 +295,9 @@ pub struct Style {
     /// QUILL (backdrop glass): a slab of glass under the element's fill,
     /// drawn from what the window painted behind it
     /// (`Window::paint_backdrop_lens` with the element's bounds and corner
-    /// radius). See third_party/gpui-pre/QUILL-CHANGES.md.
-    pub backdrop_glass: Option<LensStyle>,
+    /// radius). Boxed: every `Div` carries a style, and builders keep
+    /// several on the stack. See third_party/gpui-pre/QUILL-CHANGES.md.
+    pub backdrop_glass: Option<Box<LensStyle>>,
 
     /// The text style of this element
     #[refineable]

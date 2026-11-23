@@ -3,7 +3,9 @@
 Liquid glass that bends, frosts and lights what the window drew under it,
 drawn by the GPU. The design is quill-tools/gpui-liquid-glass/GPU-PLAN.md;
 the looks are the CPU optics in quill-tools/gpui-liquid-glass (a port of
-bilalgursen/liquid-glass, MIT). No product UI uses the glass yet.
+bilalgursen/liquid-glass, MIT). The product surfaces that use it, behind
+Settings › Appearance › Glass effects, are in
+docs/decisions/glass-effects.md.
 
 ## What stage 1 adds
 

@@ -707,7 +707,7 @@ whose `gpui-patches/` carry the same change against crates.io GPUI.
 
 Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`):
 
-- `src/style.rs`: `Style::backdrop_glass: Option<LensStyle>`. `Style::paint`
+- `src/style.rs`: `Style::backdrop_glass: Option<Box<LensStyle>>` (boxed so every `Div` stays small on the builders' stack). `Style::paint`
   calls `Window::paint_backdrop_lens` with the element's bounds and its
   top-left corner radius after the drop shadows and before the fill, so a
   `div` (and anything else styled through `Styled`) can be glass without a

@@ -753,7 +753,7 @@ pub trait Styled: Sized {
     /// adds nothing, so a surface can pass the look it resolved as is. See
     /// third_party/gpui-pre/QUILL-CHANGES.md.
     fn backdrop_glass(mut self, lens: Option<crate::LensStyle>) -> Self {
-        self.style().backdrop_glass = lens;
+        self.style().backdrop_glass = lens.map(Box::new);
         self
     }
 
