@@ -19,8 +19,13 @@ a new digest and no longer matches.
                                       exit 1 unless <path>.sig signs the
                                       local file <path>
     release_verify.py audit           exit 1 if any signed release has a
-                                      file that fails, or "latest" is not
-                                      the newest verified release
+                                      file that fails, an unsigned release
+                                      differs from scripts/legacy-releases.txt,
+                                      or "latest" is not the newest verified
+                                      release
+    release_verify.py legacy          print the snapshot of unsigned releases
+                                      (to write scripts/legacy-releases.txt
+                                      once, when signing began)
 
 Needs GH_TOKEN (or a gh login) and openssl 3.
 """
@@ -145,6 +150,19 @@ def pick(key, releases):
     return None
 
 
+LEGACY = ROOT / "scripts/legacy-releases.txt"
+
+
+def legacy_lines(releases) -> list:
+    """`<tag> <file> <digest>` for every file on every unsigned release."""
+    return sorted(
+        f"{r['tag_name']} {a['name']} {a.get('digest') or '-'}"
+        for r in releases
+        if not r.get("draft") and not signed(r)
+        for a in r.get("assets", [])
+    ) + sorted(f"{r['tag_name']} (release)" for r in releases if not r.get("draft") and not signed(r))
+
+
 def main(argv):
     if not argv:
         sys.exit(__doc__)
@@ -170,8 +188,18 @@ def main(argv):
         r = pick(key, releases)
         print(json.dumps(r))
         return 0
+    if cmd == "legacy":
+        print("\n".join(legacy_lines(releases)))
+        return 0
     if cmd == "audit":
         problems = []
+        if LEGACY.is_file():
+            known = set(LEGACY.read_text(encoding="utf-8").split("\n")) - {""}
+            now = set(legacy_lines(releases))
+            for line in sorted(now - known):
+                problems.append(f"unsigned release file not in the snapshot: {line}")
+            for line in sorted(known - now):
+                problems.append(f"unsigned release file changed or removed: {line}")
         for r in stable(releases):
             if signed(r):
                 problems += failures(key, r)

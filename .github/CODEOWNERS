@@ -13,6 +13,7 @@
 /scripts/macos-*                   @shinycake
 /scripts/release-*                 @shinycake
 /scripts/release_verify.py         @shinycake
+/scripts/legacy-releases.txt       @shinycake
 /scripts/update-install-smoke.py   @shinycake
 /scripts/site-flatpak-repo.sh      @shinycake
 /scripts/site-release-data.py      @shinycake
