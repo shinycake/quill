@@ -33,7 +33,7 @@ zed-rev = "f126950f9d3b62666f97437ae5d4ccac2272c4db"
 
 [features]
 bench-support = ["gpui/bench-support"]
-default = []
+default = ["runtime_shaders"]
 font-kit = [
     "dep:font-kit",
     "dep:core-text",
@@ -223,6 +223,7 @@ features = [
     "std",
     "block2",
     "dispatch2",
+    "objc2-core-foundation",
     "MTLAllocation",
     "MTLBlitCommandEncoder",
     "MTLBuffer",

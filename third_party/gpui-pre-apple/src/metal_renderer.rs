@@ -1,11 +1,16 @@
+// Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
+// window capture renders the scene offscreen and reads it back; backdrop glass
+// (`metal_renderer/lens.rs`). See third_party/gpui-pre-apple/QUILL-CHANGES.md.
 use crate::metal_atlas::MetalAtlas;
+
+mod lens;
+pub use lens::{LensDownsampleIndex, LensDownsampleSlot, LensInputIndex, LensSlot};
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
 use gpui::{
-    AtlasTextureId, Bounds, ContentMask, DevicePixels, PaintSurface, PaintedPath, PrimitiveBatch,
-    ScaledPixels, Scene, Size, quad_depth, quad_depth_scale, size,
+    AtlasTextureId, BackdropLens, Bounds, ContentMask, DevicePixels, PaintSurface, PaintedPath,
+    PrimitiveBatch, ScaledPixels, Scene, Size, quad_depth, quad_depth_scale, size,
 };
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 use image::RgbaImage;
 use objc2::{Message, rc::Retained, runtime::ProtocolObject};
 use objc2_core_foundation::{CFRetained, CGSize};
@@ -13,7 +18,8 @@ use objc2_core_graphics::{CGColorSpace, kCGColorSpaceDisplayP3};
 use objc2_core_video::{
     CVMetalTexture, CVMetalTextureCache, CVMetalTextureGetTexture, CVPixelBufferGetHeight,
     CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
-    CVPixelBufferGetWidthOfPlane, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVReturnSuccess,
+    CVPixelBufferGetWidthOfPlane, kCVPixelFormatType_64RGBAHalf,
+    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVReturnSuccess,
 };
 use objc2_foundation::{NSRange, NSString};
 #[cfg(target_os = "macos")]
@@ -27,20 +33,42 @@ use objc2_metal::{
     MTLResourceOptions, MTLStorageMode, MTLStoreAction, MTLTexture, MTLTextureDescriptor,
     MTLTextureUsage, MTLViewport,
 };
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 use objc2_metal::{MTLBlitCommandEncoder, MTLOrigin, MTLRegion, MTLSize};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 use parking_lot::Mutex;
 
-use std::{cell::Cell, mem, mem::MaybeUninit, ops::Range, ptr, slice, sync::Arc};
+use std::{
+    cell::Cell,
+    mem,
+    mem::MaybeUninit,
+    ops::Range,
+    ptr, slice,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-#[cfg(not(feature = "runtime_shaders"))]
+#[cfg(quill_metallib)]
 const SHADERS_METALLIB: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shaders.metallib"));
 #[cfg(feature = "runtime_shaders")]
 const SHADERS_SOURCE_FILE: &str = include_str!(concat!(env!("OUT_DIR"), "/stitched_shaders.metal"));
 /// Metal requires the offset a buffer is bound at to be 256-byte aligned.
 const INSTANCE_BUFFER_ALIGNMENT: usize = 256;
 const MAX_INSTANCE_BUFFER_SIZE: usize = 256 * 1024 * 1024;
+/// QUILL: a drawable not handed out for this long, while another one was
+/// handed out within `DRAWING_WITHIN`, is a spare (`trim_spare_drawables`).
+const SPARE_DRAWABLE_AFTER: Duration = Duration::from_secs(3);
+const DRAWING_WITHIN: Duration = Duration::from_secs(1);
+
+/// QUILL: an `IOSurfaceRef` as `-[MTLTexture iosurface]` returns it. A bare
+/// `*mut c_void` fails objc2's check of the return type in debug builds.
+#[repr(transparent)]
+struct SurfaceRef(*mut std::ffi::c_void);
+
+// SAFETY: a pointer to the opaque `struct __IOSurface`, as declared.
+unsafe impl objc2::encode::Encode for SurfaceRef {
+    const ENCODING: objc2::encode::Encoding =
+        objc2::encode::Encoding::Pointer(&objc2::encode::Encoding::Struct("__IOSurface", &[]));
+}
 
 pub type Context = Arc<Mutex<InstanceBufferPool>>;
 pub type Renderer = MetalRenderer;
@@ -143,7 +171,20 @@ pub struct MetalRenderer {
     native_views_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     depth_write_state: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     depth_test_state: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
+    /// QUILL: frames with glass draw without the opaque pre-pass, so depth
+    /// neither culls nor occludes (`draw_primitives_to_texture`).
+    depth_ignore_state: Retained<ProtocolObject<dyn MTLDepthStencilState>>,
     depth_texture: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
+    // QUILL: HDR still images (`64RGBAHalf` surfaces), and the drawable
+    // format the pipelines above were built for. A float (EDR) layer swaps
+    // in a set built for `RGBA16Float`; the other set is kept for the way
+    // back. A format whose set failed to build is not tried again, because
+    // the attempt would repeat on every frame.
+    hdr_surfaces_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    drawable_format: MTLPixelFormat,
+    other_pipelines: Option<DrawablePipelines>,
+    failed_format: Option<MTLPixelFormat>,
+    library: Retained<ProtocolObject<dyn MTLLibrary>>,
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
     sprite_atlas: Arc<MetalAtlas>,
     core_video_texture_cache: CFRetained<CVMetalTextureCache>,
@@ -151,6 +192,13 @@ pub struct MetalRenderer {
     /// rendering headlessly without reading pixels back.
     #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
     headless_render_target: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
+    /// QUILL: when each drawable of the layer's pool, known by its
+    /// IOSurface, was last handed out (`trim_spare_drawables`).
+    drawables_handed_out: Vec<(usize, Instant)>,
+    /// QUILL: backdrop glass's pipelines and atlas (`lens.rs`).
+    lens: lens::LensState,
+    /// QUILL: whether the layer hands out drawables glass can read.
+    drawable_reads: lens::DrawableReads,
 }
 
 impl MetalRenderer {
@@ -262,20 +310,43 @@ impl MetalRenderer {
         opaque: bool,
         instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
     ) -> Result<Self> {
-        #[cfg(feature = "runtime_shaders")]
-        let library = device
-            .newLibraryWithSource_options_error(
-                &NSString::from_str(SHADERS_SOURCE_FILE),
-                Some(&objc2_metal::MTLCompileOptions::new()),
-            )
-            .context("building Metal library")?;
-        #[cfg(not(feature = "runtime_shaders"))]
-        let library = device
-            .newLibraryWithData_error(&dispatch2::DispatchData::from_static_bytes(
-                SHADERS_METALLIB,
-            ))
-            .context("loading Metal library")?;
+        Self::with_shaders(device, layer, opaque, instance_buffer_pool, built_in_library)
+    }
 
+    /// QUILL: a window that can't get a renderer comes back as an `Err` the
+    /// caller handles, in place of 0.3.10's `expect`s, which aborted the app.
+    /// `MTLCompilerService` can fail under load, so one failure gets a retry.
+    fn with_shaders(
+        device: Retained<ProtocolObject<dyn MTLDevice>>,
+        layer: Option<Retained<CAMetalLayer>>,
+        opaque: bool,
+        instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
+        library: impl Fn(
+            &ProtocolObject<dyn MTLDevice>,
+        ) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>>,
+    ) -> Result<Self> {
+        let attempt = || {
+            Self::build(
+                device.clone(),
+                layer.clone(),
+                opaque,
+                instance_buffer_pool.clone(),
+                library(&device)?,
+            )
+        };
+        attempt().or_else(|error| {
+            log::warn!("Metal setup failed, trying once more: {error:#}");
+            attempt()
+        })
+    }
+
+    fn build(
+        device: Retained<ProtocolObject<dyn MTLDevice>>,
+        layer: Option<Retained<CAMetalLayer>>,
+        opaque: bool,
+        instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
+        library: Retained<ProtocolObject<dyn MTLLibrary>>,
+    ) -> Result<Self> {
         // Shared memory can be used only if CPU and GPU share the same memory space.
         // https://developer.apple.com/documentation/metal/setting-resource-storage-modes
         // iOS does not support managed resources. Its simulator may report a
@@ -370,6 +441,17 @@ impl MetalRenderer {
 
         let depth_write_state = build_depth_stencil_state(&device, true)?;
         let depth_test_state = build_depth_stencil_state(&device, false)?;
+        let depth_ignore_state = build_depth_ignore_state(&device)?;
+
+        let hdr_surfaces_pipeline_state = build_pipeline_state(
+            &device,
+            &library,
+            "hdr_surfaces",
+            "surface_vertex",
+            "hdr_surface_fragment",
+            MTLPixelFormat::BGRA8Unorm,
+            true,
+        )?;
 
         let command_queue = device.newCommandQueue().context("creating command queue")?;
         let supports_shared_storage = cfg!(target_os = "ios") || is_apple_gpu;
@@ -412,12 +494,21 @@ impl MetalRenderer {
             native_views_pipeline_state,
             depth_write_state,
             depth_test_state,
+            depth_ignore_state,
             depth_texture: None,
+            hdr_surfaces_pipeline_state,
+            drawable_format: MTLPixelFormat::BGRA8Unorm,
+            other_pipelines: None,
+            failed_format: None,
+            library,
             instance_buffer_pool,
             sprite_atlas,
             core_video_texture_cache,
             #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
             headless_render_target: None,
+            drawables_handed_out: Vec::new(),
+            lens: lens::LensState::default(),
+            drawable_reads: lens::DrawableReads::default(),
         })
     }
 
@@ -493,7 +584,96 @@ impl MetalRenderer {
 
     pub fn update_drawable_size(&mut self, size: Size<DevicePixels>) {
         if let Some(layer) = &self.layer {
-            layer.setDrawableSize(CGSize::new(size.width.0 as f64, size.height.0 as f64));
+            let new = CGSize::new(size.width.0 as f64, size.height.0 as f64);
+            let old = layer.drawableSize();
+            // QUILL: a new size empties the pool; none of the known
+            // drawables will be handed out again. The same size (a move
+            // between displays of one scale) keeps them.
+            if old.width != new.width || old.height != new.height {
+                self.drawables_handed_out.clear();
+            }
+            layer.setDrawableSize(new);
+        }
+    }
+
+    /// QUILL: frees the layer's spare drawables while the window is idle.
+    ///
+    /// A `CAMetalLayer` keeps up to `maximumDrawableCount` (3) window-sized
+    /// surfaces in its pool for as long as the window lives, 33 MB each for
+    /// a 1700×1240 pt window at 2x. A drawable size change empties the pool;
+    /// setting the size back right away leaves only the surface on screen,
+    /// which the layer keeps showing until the next present. The next frame
+    /// allocates a fresh drawable.
+    pub fn release_idle_drawables(&mut self) {
+        self.drawables_handed_out.clear();
+        // QUILL: the glass atlas goes too, and the drawables the pool
+        // allocates next are framebuffer-only again until glass is drawn.
+        self.lens.release();
+        self.drawable_reads = lens::DrawableReads::FramebufferOnly;
+        let Some(layer) = &self.layer else {
+            return;
+        };
+        Self::follow_drawable_reads(layer, self.drawable_reads);
+        let size = layer.drawableSize();
+        if size.width <= 1.0 || size.height <= 1.0 {
+            return;
+        }
+        layer.setDrawableSize(CGSize::new(1.0, 1.0));
+        layer.setDrawableSize(size);
+    }
+
+    /// QUILL: frees the layer's spare drawables while the window keeps
+    /// drawing.
+    ///
+    /// A burst (the first frames, a scroll) can fill the pool with all three
+    /// drawables, and the layer keeps them for as long as anything animates,
+    /// so the idle release above never runs. A slow animation (a looping
+    /// custom emoji at 30 or 60 fps on a 120 Hz display) only cycles two:
+    /// the third, a whole window-sized surface, sits unused. A drawable not
+    /// handed out for `SPARE_DRAWABLE_AFTER` while others are is such a
+    /// spare: empty the pool as the idle release does, and the next frames
+    /// allocate only the drawables they use. Content that needs all three
+    /// keeps handing each one out, so this never fires for it. Two are the
+    /// floor (one on screen, one to draw into): emptying a pool of two
+    /// frees nothing the next frames don't allocate again.
+    fn trim_spare_drawables(&mut self) {
+        if self.drawables_handed_out.len() < 3 {
+            return;
+        }
+        let now = Instant::now();
+        let age = |at: &Instant| now.saturating_duration_since(*at);
+        let spare = self
+            .drawables_handed_out
+            .iter()
+            .any(|(_, at)| age(at) >= SPARE_DRAWABLE_AFTER);
+        let drawing = self
+            .drawables_handed_out
+            .iter()
+            .any(|(_, at)| age(at) < DRAWING_WITHIN);
+        if spare && drawing {
+            self.release_idle_drawables();
+        }
+    }
+
+    /// QUILL: records that `drawable` was handed out now. A pooled drawable
+    /// keeps its IOSurface, so the surface names it.
+    fn note_drawable_handed_out(&mut self, drawable: &ProtocolObject<dyn CAMetalDrawable>) {
+        let texture = drawable.texture();
+        // SAFETY: `iosurface` is a getter returning an unretained IOSurfaceRef
+        // (or null).
+        let surface: SurfaceRef = unsafe { objc2::msg_send![&*texture, iosurface] };
+        if surface.0.is_null() {
+            return;
+        }
+        let id = surface.0 as usize;
+        let now = Instant::now();
+        match self
+            .drawables_handed_out
+            .iter_mut()
+            .find(|(known, _)| *known == id)
+        {
+            Some((_, at)) => *at = now,
+            None => self.drawables_handed_out.push((id, now)),
         }
     }
 
@@ -525,24 +705,34 @@ impl MetalRenderer {
             self.shows_native_views = shows_native_views;
             layer.setOpaque(self.opaque && !shows_native_views);
         }
+        // QUILL: free spares a burst left before taking the next drawable.
+        self.trim_spare_drawables();
+        // QUILL: glass reads the drawable back, so a frame with lenses asks
+        // the layer for readable drawables (`lens::DrawableReads`).
+        self.drawable_reads = self.drawable_reads.after_frame(scene.lenses.len());
+        Self::follow_drawable_reads(&layer, self.drawable_reads);
         let drawable = match &mut self.display_link_mode {
             DisplayLinkMode::Attached { drawable } => {
                 let Some(drawable) = drawable.take() else {
                     log::error!("skipped a frame drawn outside its display link's update");
                     return;
                 };
-                drawable
+                Some(drawable)
             }
             DisplayLinkMode::Detached => {
-                let Some(drawable) = layer.nextDrawable() else {
-                    log::error!(
-                        "failed to retrieve next drawable, drawable size: {:?}",
-                        layer.drawableSize()
-                    );
-                    return;
-                };
-                drawable
+                crate::display_link::invalidate_retired();
+                layer.nextDrawable()
             }
+        };
+        let Some(drawable) = drawable
+            .and_then(|drawable| self.usable_drawable(&layer, drawable))
+            .map(|drawable| self.readable_drawable(&layer, drawable, !scene.lenses.is_empty()))
+        else {
+            log::error!(
+                "failed to retrieve next drawable, drawable size: {:?}",
+                layer.drawableSize()
+            );
+            return;
         };
         // A display link's drawable was sized when the link handed it out,
         // which can be before a resize the layer has since taken.
@@ -551,6 +741,7 @@ impl MetalRenderer {
             (texture.width() as i32).into(),
             (texture.height() as i32).into(),
         );
+        self.note_drawable_handed_out(&drawable);
 
         let command_buffer = match self.render_frame(scene, &drawable.texture(), viewport_size) {
             Ok(command_buffer) => command_buffer,
@@ -570,18 +761,70 @@ impl MetalRenderer {
         }
     }
 
+    /// QUILL: a drawable in a format the pipelines can draw. When the float
+    /// set can't be built, the layer leaves extended range for the 8-bit set,
+    /// which the frame in hand and every later one draws with, display link
+    /// or not. The HDR picture comes out clamped to standard range.
+    fn usable_drawable(
+        &mut self,
+        layer: &CAMetalLayer,
+        drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
+    ) -> Option<Retained<ProtocolObject<dyn CAMetalDrawable>>> {
+        let Err(error) = self.match_drawable_format(drawable.texture().pixelFormat()) else {
+            return Some(drawable);
+        };
+        log::error!("leaving extended range: {error:#}");
+        leave_extended_range(layer);
+        layer.nextDrawable()
+    }
+
+    /// QUILL: the layer's drawables are readable while glass is drawn.
+    /// Debug builds with `test-support` keep them readable throughout, for
+    /// captures.
+    fn follow_drawable_reads(layer: &CAMetalLayer, reads: lens::DrawableReads) {
+        let framebuffer_only =
+            !reads.readable() && !cfg!(all(feature = "test-support", debug_assertions));
+        if layer.framebufferOnly() != framebuffer_only {
+            layer.setFramebufferOnly(framebuffer_only);
+        }
+    }
+
+    /// QUILL: a frame with glass needs a drawable it can read. One handed
+    /// out before the layer turned readable (a display link's) is swapped
+    /// for the layer's next; when none comes, the glass draws flat.
+    fn readable_drawable(
+        &self,
+        layer: &CAMetalLayer,
+        drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
+        has_glass: bool,
+    ) -> Retained<ProtocolObject<dyn CAMetalDrawable>> {
+        if !has_glass || !drawable.texture().isFramebufferOnly() {
+            return drawable;
+        }
+        layer.nextDrawable().unwrap_or(drawable)
+    }
+
     fn render_frame(
         &mut self,
         scene: &Scene,
         texture: &ProtocolObject<dyn MTLTexture>,
         viewport_size: Size<DevicePixels>,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
+        self.match_drawable_format(texture.pixelFormat())?;
         let mut writer = InstanceBufferWriter::new(
             &self.device,
             &self.instance_buffer_pool,
             self.is_unified_memory,
         )?;
-        let instance_bindings = write_instances(scene, &mut writer).with_context(|| {
+        // QUILL: the frame's glass is planned first: which lens backdrops
+        // are copied, kept from last frame or drawn again sharper, and
+        // where inked labels read them.
+        let glass = self
+            .plan_glass(scene, texture, &mut writer)
+            .inspect_err(|error| log::error!("glass draws flat: {error:#}"))
+            .ok()
+            .flatten();
+        let instance_bindings = write_instances(scene, &mut writer, glass.as_ref()).with_context(|| {
             format!(
                 "writing instance data: {} paths, {} shadows, {} quads, {} underlines, {} mono, {} poly, {} surfaces",
                 scene.paths.len(),
@@ -594,20 +837,44 @@ impl MetalRenderer {
             )
         })?;
         let mut surface_textures = Vec::new();
-        let command_buffer = self.draw_primitives_to_texture(
-            scene,
-            &instance_bindings,
-            texture,
-            viewport_size,
-            &mut surface_textures,
-        )?;
+        // QUILL: what this frame copies is kept for the next one first; a
+        // batch that fails to fill its slots, or a frame that fails, forgets
+        // it again.
+        match &glass {
+            Some(glass) => self.lens.keep(glass),
+            None => self.lens.forget(),
+        }
+        let command_buffer = self
+            .draw_primitives_to_texture(
+                scene,
+                &instance_bindings,
+                &mut writer,
+                texture,
+                viewport_size,
+                &mut surface_textures,
+                glass.as_ref(),
+            )
+            .inspect_err(|_| self.lens.forget())?;
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
         let frame_resources = Cell::new(Some((writer.finish(), surface_textures)));
+        if let Some(glass) = &glass {
+            glass.commit_renders();
+        }
+        // QUILL (glass effects): `QUILL_GPU_PROBE=1` prints each frame's GPU
+        // time and its lens count to stderr ("GLASSGPU main <ms> <lenses>"),
+        // for the budget table in docs/decisions/glass-effects.md.
+        let probe_lenses = gpu_probe_on().then_some(scene.lenses.len());
         let block = RcBlock::new(
-            move |_: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+            move |buffer: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
                 if let Some((instance_buffer, _surface_textures)) = frame_resources.take() {
                     instance_buffer_pool.lock().release(instance_buffer);
+                }
+                if let Some(lenses) = probe_lenses {
+                    // SAFETY: Metal passes the completed, live command buffer.
+                    let buffer = unsafe { buffer.as_ref() };
+                    let ms = (buffer.GPUEndTime() - buffer.GPUStartTime()) * 1000.0;
+                    eprintln!("GLASSGPU main {ms:.4} {lenses}");
                 }
             },
         );
@@ -641,11 +908,29 @@ impl MetalRenderer {
         self.render_offscreen(scene, viewport_size)
     }
 
+    /// QUILL: a window's frame, rendered offscreen at the layer's drawable
+    /// size and read back; nothing is presented and the screen is not
+    /// read. Backs `Window::capture_frame` on macOS.
+    pub fn capture_scene(&mut self, scene: &Scene) -> Result<RgbaImage> {
+        let layer = self
+            .layer
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("the window has no layer to capture"))?;
+        let drawable = layer.drawableSize();
+        let viewport_size: Size<DevicePixels> = size(
+            (drawable.width.ceil() as i32).into(),
+            (drawable.height.ceil() as i32).into(),
+        );
+        self.render_scene_to_image(scene, viewport_size)
+    }
+
     /// Renders a scene to an image without requiring a window or CAMetalLayer.
     ///
     /// This is the primary method for headless rendering. It creates an offscreen
     /// texture, renders the scene to it, and returns the pixel data as an RGBA image.
-    #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+    ///
+    /// QUILL: built in every configuration; a window renders its own scene
+    /// through it for in-process captures ([`Self::capture_scene`]).
     pub fn render_scene_to_image(
         &mut self,
         scene: &Scene,
@@ -662,7 +947,6 @@ impl MetalRenderer {
 
     /// Renders a scene into a new offscreen texture of `size` and reads it
     /// back, without presenting anything.
-    #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
     fn render_offscreen(&mut self, scene: &Scene, size: Size<DevicePixels>) -> Result<RgbaImage> {
         if size.width.0 <= 0 || size.height.0 <= 0 {
             anyhow::bail!("Invalid size for render_offscreen: {:?}", size);
@@ -760,9 +1044,11 @@ impl MetalRenderer {
         &mut self,
         scene: &Scene,
         instance_bindings: &InstanceBindings,
+        writer: &mut InstanceBufferWriter,
         texture: &ProtocolObject<dyn MTLTexture>,
         viewport_size: Size<DevicePixels>,
         surface_textures: &mut Vec<CFRetained<CVMetalTexture>>,
+        glass: Option<&lens::GlassFrame>,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let command_queue = self.command_queue.clone();
         let command_buffer = command_queue
@@ -771,36 +1057,35 @@ impl MetalRenderer {
         let alpha = if self.opaque { 1. } else { 0. };
         let depth_texture = self.depth_texture_matching(texture)?;
 
-        let command_encoder = new_command_encoder_for_texture(
+        let mut command_encoder = new_command_encoder_for_texture(
             &command_buffer,
             texture,
             &depth_texture,
             viewport_size,
-            MTLClearColor {
+            Some(MTLClearColor {
                 red: 0.,
                 green: 0.,
                 blue: 0.,
                 alpha,
-            },
+            }),
         )?;
-        let depth_scale = quad_depth_scale(scene.quads.len());
-        // SAFETY: Metal copies both values, which match every vertex shader's
-        // `GlobalInputIndex_ViewportSize` and `GlobalInputIndex_DepthScale` arguments.
-        unsafe {
-            command_encoder.setVertexBytes_length_atIndex(
-                ptr::NonNull::from(&viewport_size).cast(),
-                mem::size_of_val(&viewport_size),
-                GlobalInputIndex::ViewportSize as usize,
-            );
-            command_encoder.setVertexBytes_length_atIndex(
-                ptr::NonNull::from(&depth_scale).cast(),
-                mem::size_of_val(&depth_scale),
-                GlobalInputIndex::DepthScale as usize,
-            );
+        // QUILL: a frame with lenses draws without the opaque pre-pass. A lens
+        // batch ends the pass (its depth buffer is memoryless and goes with
+        // it), and opaque quads drawn ahead would show in the glass's backdrop
+        // before their turn. A zero depth scale keeps the quad pass from
+        // culling them, and depth neither tests nor writes.
+        let depth_scale = if scene.lenses.is_empty() {
+            quad_depth_scale(scene.quads.len())
+        } else {
+            0.0
+        };
+        set_frame_globals(&command_encoder, viewport_size, depth_scale);
+        if depth_scale > 0.0 {
+            self.draw_opaque_quads(scene.quads.len(), instance_bindings, &command_encoder);
+            command_encoder.setDepthStencilState(Some(&self.depth_test_state));
+        } else {
+            command_encoder.setDepthStencilState(Some(&self.depth_ignore_state));
         }
-
-        self.draw_opaque_quads(scene.quads.len(), instance_bindings, &command_encoder);
-        command_encoder.setDepthStencilState(Some(&self.depth_test_state));
 
         let mut quad_cursor: u32 = 0;
         let mut path_tile_cursor = 0;
@@ -828,7 +1113,7 @@ impl MetalRenderer {
                 }
                 PrimitiveBatch::Quads(range) => {
                     quad_cursor += range.len() as u32;
-                    self.draw_quads(range, instance_bindings, &command_encoder)
+                    self.draw_quads(range, &instance_bindings.quads, &command_encoder)
                 }
                 PrimitiveBatch::Paths(range) => {
                     let tiles_start = path_tile_cursor;
@@ -873,6 +1158,19 @@ impl MetalRenderer {
                 }
                 PrimitiveBatch::NativeViews(range) => {
                     self.draw_native_views(range, instance_bindings, &command_encoder)
+                }
+                PrimitiveBatch::Lenses(range) => {
+                    self.draw_lenses(
+                        glass,
+                        range,
+                        instance_bindings,
+                        writer,
+                        texture,
+                        &depth_texture,
+                        viewport_size,
+                        &command_buffer,
+                        &mut command_encoder,
+                    )?;
                 }
                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),
             }
@@ -1067,7 +1365,7 @@ impl MetalRenderer {
     fn draw_quads(
         &self,
         quads: Range<usize>,
-        instance_bindings: &InstanceBindings,
+        binding: &InstanceBinding,
         command_encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
     ) {
         if quads.is_empty() {
@@ -1079,13 +1377,13 @@ impl MetalRenderer {
         // Metal retains the buffers, and writer.finish publishes their writes.
         unsafe {
             command_encoder.setVertexBuffer_offset_atIndex(
-                Some(&instance_bindings.quads.buffer),
-                instance_bindings.quads.offset,
+                Some(&binding.buffer),
+                binding.offset,
                 QuadInputIndex::Quads as usize,
             );
             command_encoder.setFragmentBuffer_offset_atIndex(
-                Some(&instance_bindings.quads.buffer),
-                instance_bindings.quads.offset,
+                Some(&binding.buffer),
+                binding.offset,
                 QuadInputIndex::Quads as usize,
             );
             command_encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
@@ -1173,6 +1471,18 @@ impl MetalRenderer {
                 Some(&texture),
                 SpriteInputIndex::AtlasTexture as usize,
             );
+            // QUILL (glass stage 5): inked labels read the lens atlas; without
+            // one the sprite atlas stands in and is never sampled (every
+            // record then says the glass drew flat).
+            command_encoder.setVertexBuffer_offset_atIndex(
+                Some(&instance_bindings.lens_inks.buffer),
+                instance_bindings.lens_inks.offset,
+                SpriteInputIndex::Inks as usize,
+            );
+            command_encoder.setVertexTexture_atIndex(
+                Some(instance_bindings.lens_atlas.as_deref().unwrap_or(&texture)),
+                SpriteInputIndex::LensAtlas as usize,
+            );
             command_encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
                 MTLPrimitiveType::TriangleStrip,
                 0,
@@ -1257,52 +1567,115 @@ impl MetalRenderer {
             );
         }
 
+        // QUILL: the surface's pixel format picks the pipeline; a format
+        // nothing here draws is skipped (upstream asserted).
+        let extended_output = u32::from(self.drawable_format == MTLPixelFormat::RGBA16Float);
         for (index, surface) in surfaces.iter().enumerate() {
             let image_buffer = &surface.image_buffer;
             let texture_size = size(
                 DevicePixels::from(CVPixelBufferGetWidth(image_buffer) as i32),
                 DevicePixels::from(CVPixelBufferGetHeight(image_buffer) as i32),
             );
-
-            let pixel_format = CVPixelBufferGetPixelFormatType(image_buffer);
-            anyhow::ensure!(
-                pixel_format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-                "unsupported surface pixel format: {pixel_format:#x}"
-            );
-
-            let plane_texture = |plane, format| -> Result<CFRetained<CVMetalTexture>> {
-                let width = CVPixelBufferGetWidthOfPlane(image_buffer, plane);
-                let height = CVPixelBufferGetHeightOfPlane(image_buffer, plane);
+            // QUILL: a texture over one plane of the buffer, or `None` when
+            // CoreVideo can't make one (the surface is then skipped).
+            let texture_from_image = |pixel_format, width, height, plane| {
                 let mut texture = ptr::null_mut();
-                // SAFETY: The buffer has two planes matching these formats and dimensions, and the output pointer is writable.
+                // SAFETY: a live cache and pixel buffer; on success `texture`
+                // holds a +1 CVMetalTexture, which `from_raw` takes over.
                 let status = unsafe {
                     CVMetalTextureCache::create_texture_from_image(
                         None,
                         &self.core_video_texture_cache,
                         image_buffer,
                         None,
-                        format,
+                        pixel_format,
                         width,
                         height,
                         plane,
                         ptr::NonNull::from(&mut texture),
                     )
                 };
-                anyhow::ensure!(
-                    status == kCVReturnSuccess,
-                    "creating CoreVideo Metal texture for plane {plane}: status {status}"
-                );
-                let texture =
-                    ptr::NonNull::new(texture).context("retrieving CoreVideo Metal texture")?;
-                // SAFETY: The successful create call transfers ownership of this non-null texture.
-                Ok(unsafe { CFRetained::from_raw(texture) })
+                if status != kCVReturnSuccess {
+                    return None;
+                }
+                ptr::NonNull::new(texture)
+                    .map(|texture| unsafe { CFRetained::<CVMetalTexture>::from_raw(texture) })
             };
-            let y_texture = plane_texture(0, MTLPixelFormat::R8Unorm)?;
-            let cb_cr_texture = plane_texture(1, MTLPixelFormat::RG8Unorm)?;
-            let y_metal_texture =
-                CVMetalTextureGetTexture(&y_texture).context("retrieving luma Metal texture")?;
-            let cb_cr_metal_texture = CVMetalTextureGetTexture(&cb_cr_texture)
-                .context("retrieving chroma Metal texture")?;
+            let format = CVPixelBufferGetPixelFormatType(image_buffer);
+            if format == kCVPixelFormatType_64RGBAHalf {
+                let Some(texture) = texture_from_image(
+                    MTLPixelFormat::RGBA16Float,
+                    CVPixelBufferGetWidth(image_buffer),
+                    CVPixelBufferGetHeight(image_buffer),
+                    0,
+                ) else {
+                    continue;
+                };
+                let Some(metal_texture) = CVMetalTextureGetTexture(&texture) else {
+                    continue;
+                };
+                let params = HdrSurfaceParams {
+                    headroom: hdr_headroom(image_buffer),
+                    extended_output,
+                };
+                command_encoder.setRenderPipelineState(&self.hdr_surfaces_pipeline_state);
+                // SAFETY: the sizes are copied from live values, `metal_texture` is the
+                // live MTLTexture of `texture`, which outlives this draw's encoding, and
+                // the six unit vertices draw one instance within the uploaded range.
+                unsafe {
+                    command_encoder.setVertexBytes_length_atIndex(
+                        ptr::NonNull::from(&texture_size).cast(),
+                        mem::size_of_val(&texture_size),
+                        SurfaceInputIndex::TextureSize as usize,
+                    );
+                    command_encoder.setFragmentBytes_length_atIndex(
+                        ptr::NonNull::from(&params).cast(),
+                        mem::size_of_val(&params),
+                        0,
+                    );
+                    command_encoder.setFragmentTexture_atIndex(
+                        Some(&metal_texture),
+                        SurfaceInputIndex::YTexture as usize,
+                    );
+                    command_encoder
+                        .drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
+                            MTLPrimitiveType::Triangle,
+                            0,
+                            6,
+                            1,
+                            first_surface + index,
+                        );
+                }
+                surface_textures.push(texture);
+                continue;
+            }
+            if format != kCVPixelFormatType_420YpCbCr8BiPlanarFullRange {
+                log::warn!("skipping a surface in an unsupported pixel format {format:#x}");
+                continue;
+            }
+            command_encoder.setRenderPipelineState(&self.surfaces_pipeline_state);
+
+            let plane_texture = |plane, pixel_format| {
+                texture_from_image(
+                    pixel_format,
+                    CVPixelBufferGetWidthOfPlane(image_buffer, plane),
+                    CVPixelBufferGetHeightOfPlane(image_buffer, plane),
+                    plane,
+                )
+            };
+            let Some(y_texture) = plane_texture(0, MTLPixelFormat::R8Unorm) else {
+                continue;
+            };
+            let Some(cb_cr_texture) = plane_texture(1, MTLPixelFormat::RG8Unorm)
+            else {
+                continue;
+            };
+            let (Some(y_metal), Some(cb_cr_metal)) = (
+                CVMetalTextureGetTexture(&y_texture),
+                CVMetalTextureGetTexture(&cb_cr_texture),
+            ) else {
+                continue;
+            };
 
             // SAFETY: The size is copied from a live value, and both planes match their shader texture slots.
             // The frame completion handler retains the CoreVideo wrappers until GPU reads finish.
@@ -1313,11 +1686,11 @@ impl MetalRenderer {
                     SurfaceInputIndex::TextureSize as usize,
                 );
                 command_encoder.setFragmentTexture_atIndex(
-                    Some(&y_metal_texture),
+                    Some(&y_metal),
                     SurfaceInputIndex::YTexture as usize,
                 );
                 command_encoder.setFragmentTexture_atIndex(
-                    Some(&cb_cr_metal_texture),
+                    Some(&cb_cr_metal),
                     SurfaceInputIndex::CbCrTexture as usize,
                 );
             }
@@ -1336,6 +1709,142 @@ impl MetalRenderer {
         }
         Ok(())
     }
+
+    /// QUILL: rebuild (or swap back) the pipelines that draw into the
+    /// drawable when its pixel format changes (an EDR float layer and back).
+    /// Path rasterization keeps its own 8-bit intermediate.
+    fn match_drawable_format(&mut self, format: MTLPixelFormat) -> Result<()> {
+        if format == self.drawable_format {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            self.failed_format != Some(format),
+            "the {format:?} pipelines did not build earlier"
+        );
+        let stashed = self
+            .other_pipelines
+            .take_if(|pipelines| pipelines.format == format);
+        let incoming = match stashed {
+            Some(pipelines) => pipelines,
+            None => DrawablePipelines::build(&self.device, &self.library, format)
+                .inspect_err(|_| self.failed_format = Some(format))?,
+        };
+        let outgoing = DrawablePipelines {
+            format: self.drawable_format,
+            path_tiles: mem::replace(&mut self.path_tiles_pipeline_state, incoming.path_tiles),
+            shadows: mem::replace(&mut self.shadows_pipeline_state, incoming.shadows),
+            quads: mem::replace(&mut self.quads_pipeline_state, incoming.quads),
+            opaque_quads: mem::replace(
+                &mut self.opaque_quads_pipeline_state,
+                incoming.opaque_quads,
+            ),
+            underlines: mem::replace(&mut self.underlines_pipeline_state, incoming.underlines),
+            monochrome_sprites: mem::replace(
+                &mut self.monochrome_sprites_pipeline_state,
+                incoming.monochrome_sprites,
+            ),
+            polychrome_sprites: mem::replace(
+                &mut self.polychrome_sprites_pipeline_state,
+                incoming.polychrome_sprites,
+            ),
+            surfaces: mem::replace(&mut self.surfaces_pipeline_state, incoming.surfaces),
+            native_views: mem::replace(
+                &mut self.native_views_pipeline_state,
+                incoming.native_views,
+            ),
+            hdr_surfaces: mem::replace(&mut self.hdr_surfaces_pipeline_state, incoming.hdr_surfaces),
+        };
+        self.other_pipelines = Some(outgoing);
+        self.drawable_format = format;
+        Ok(())
+    }
+}
+
+/// QUILL: the state Quill's `set_window_edr` puts back when the viewer closes.
+/// That code only touches the layer when the viewer's state changes, so the
+/// layer stays 8-bit after this.
+fn leave_extended_range(layer: &CAMetalLayer) {
+    layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+    layer.setWantsExtendedDynamicRangeContent(false);
+    layer.setColorspace(None);
+}
+
+/// QUILL: the pipelines that draw into the drawable, for one pixel format.
+struct DrawablePipelines {
+    format: MTLPixelFormat,
+    path_tiles: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    shadows: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    quads: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    opaque_quads: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    underlines: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    monochrome_sprites: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    polychrome_sprites: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    surfaces: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    native_views: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    hdr_surfaces: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+}
+
+impl DrawablePipelines {
+    /// Built as `build` builds the 8-bit set: blending on, except the
+    /// opaque pre-pass and native views, which replace what is beneath.
+    fn build(
+        device: &ProtocolObject<dyn MTLDevice>,
+        library: &ProtocolObject<dyn MTLLibrary>,
+        format: MTLPixelFormat,
+    ) -> Result<Self> {
+        let blended = |label: &str, vertex: &str, fragment: &str| {
+            build_pipeline_state(device, library, label, vertex, fragment, format, true)
+        };
+        let replacing = |label: &str, vertex: &str, fragment: &str| {
+            build_pipeline_state(device, library, label, vertex, fragment, format, false)
+        };
+        Ok(Self {
+            format,
+            path_tiles: blended("path_tiles", "path_tile_vertex", "path_tile_fragment")?,
+            shadows: blended("shadows", "shadow_vertex", "shadow_fragment")?,
+            quads: blended("quads", "quad_vertex", "quad_fragment")?,
+            opaque_quads: replacing("opaque_quads", "opaque_quad_vertex", "opaque_quad_fragment")?,
+            underlines: blended("underlines", "underline_vertex", "underline_fragment")?,
+            monochrome_sprites: blended(
+                "monochrome_sprites",
+                "monochrome_sprite_vertex",
+                "monochrome_sprite_fragment",
+            )?,
+            polychrome_sprites: blended(
+                "polychrome_sprites",
+                "polychrome_sprite_vertex",
+                "polychrome_sprite_fragment",
+            )?,
+            surfaces: blended("surfaces", "surface_vertex", "surface_fragment")?,
+            native_views: replacing("native_views", "native_view_vertex", "native_view_fragment")?,
+            hdr_surfaces: blended("hdr_surfaces", "surface_vertex", "hdr_surface_fragment")?,
+        })
+    }
+}
+
+/// QUILL: `hdr_surface_fragment`'s parameters (`HdrSurfaceParams` in
+/// shaders.metal).
+#[repr(C)]
+struct HdrSurfaceParams {
+    headroom: f32,
+    extended_output: u32,
+}
+
+/// QUILL: the EDR headroom the app attached to an HDR pixel buffer
+/// (`QuillHdrHeadroom`, a CFNumber); 1.0 without one.
+fn hdr_headroom(buffer: &objc2_core_video::CVPixelBuffer) -> f32 {
+    use objc2_core_foundation::{CFNumber, CFString};
+    let key = CFString::from_static_str("QuillHdrHeadroom");
+    // SAFETY: a null attachment mode is allowed; the copy comes back +1 and
+    // `CFRetained` releases it.
+    let Some(value) = (unsafe { buffer.attachment(&key, ptr::null_mut()) }) else {
+        return 1.0;
+    };
+    value
+        .downcast_ref::<CFNumber>()
+        .and_then(CFNumber::as_f32)
+        .filter(|headroom| headroom.is_finite() && *headroom >= 1.0)
+        .unwrap_or(1.0)
 }
 
 fn new_command_encoder_for_texture(
@@ -1343,7 +1852,9 @@ fn new_command_encoder_for_texture(
     texture: &ProtocolObject<dyn MTLTexture>,
     depth_texture: &ProtocolObject<dyn MTLTexture>,
     viewport_size: Size<DevicePixels>,
-    clear_color: MTLClearColor,
+    // QUILL: `None` loads what the target holds, for the pass a lens batch
+    // reopens over what was drawn.
+    clear_color: Option<MTLClearColor>,
 ) -> Result<Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>> {
     let render_pass_descriptor = MTLRenderPassDescriptor::new();
     // SAFETY: Index zero is within the render pass's color attachment array.
@@ -1354,8 +1865,13 @@ fn new_command_encoder_for_texture(
     };
     color_attachment.setTexture(Some(texture));
     color_attachment.setStoreAction(MTLStoreAction::Store);
-    color_attachment.setLoadAction(MTLLoadAction::Clear);
-    color_attachment.setClearColor(clear_color);
+    match clear_color {
+        Some(clear_color) => {
+            color_attachment.setLoadAction(MTLLoadAction::Clear);
+            color_attachment.setClearColor(clear_color);
+        }
+        None => color_attachment.setLoadAction(MTLLoadAction::Load),
+    }
 
     let depth_attachment = render_pass_descriptor.depthAttachment();
     depth_attachment.setTexture(Some(depth_texture));
@@ -1378,7 +1894,6 @@ fn new_command_encoder_for_texture(
     Ok(command_encoder)
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
 fn read_texture_to_image(texture: &ProtocolObject<dyn MTLTexture>) -> Result<RgbaImage> {
     let width = texture.width() as u32;
     let height = texture.height() as u32;
@@ -1408,6 +1923,45 @@ fn read_texture_to_image(texture: &ProtocolObject<dyn MTLTexture>) -> Result<Rgb
     }
 
     RgbaImage::from_raw(width, height, pixels).context("creating RGBA image from pixel data")
+}
+
+#[cfg(feature = "runtime_shaders")]
+fn library_from_source(
+    device: &ProtocolObject<dyn MTLDevice>,
+    source: &str,
+) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>> {
+    device
+        .newLibraryWithSource_options_error(
+            &NSString::from_str(source),
+            Some(&objc2_metal::MTLCompileOptions::new()),
+        )
+        .context("building Metal library")
+}
+
+#[cfg(quill_metallib)]
+fn precompiled_library(
+    device: &ProtocolObject<dyn MTLDevice>,
+) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>> {
+    device
+        .newLibraryWithData_error(&dispatch2::DispatchData::from_static_bytes(
+            SHADERS_METALLIB,
+        ))
+        .context("loading Metal library")
+}
+
+fn built_in_library(
+    device: &ProtocolObject<dyn MTLDevice>,
+) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>> {
+    #[cfg(quill_metallib)]
+    let library = precompiled_library(device);
+    #[cfg(all(quill_metallib, feature = "runtime_shaders"))]
+    let library = library.or_else(|error| {
+        log::warn!("the precompiled shaders did not load: {error:#}");
+        library_from_source(device, SHADERS_SOURCE_FILE)
+    });
+    #[cfg(not(quill_metallib))]
+    let library = library_from_source(device, SHADERS_SOURCE_FILE);
+    library
 }
 
 fn build_pipeline_state(
@@ -1459,6 +2013,42 @@ fn build_depth_stencil_state(
         .context("creating depth stencil state")
 }
 
+/// QUILL: depth that neither tests nor writes, for frames drawn without the
+/// opaque pre-pass (frames with glass).
+fn build_depth_ignore_state(
+    device: &ProtocolObject<dyn MTLDevice>,
+) -> Result<Retained<ProtocolObject<dyn MTLDepthStencilState>>> {
+    let descriptor = MTLDepthStencilDescriptor::new();
+    descriptor.setDepthCompareFunction(MTLCompareFunction::Always);
+    descriptor.setDepthWriteEnabled(false);
+    device
+        .newDepthStencilStateWithDescriptor(&descriptor)
+        .context("creating depth-ignoring stencil state")
+}
+
+/// The bytes every vertex shader reads at `GlobalInputIndex`. QUILL: also
+/// set again on the encoder a lens batch reopens.
+fn set_frame_globals(
+    command_encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+    viewport_size: Size<DevicePixels>,
+    depth_scale: f32,
+) {
+    // SAFETY: Metal copies both values, which match every vertex shader's
+    // `GlobalInputIndex_ViewportSize` and `GlobalInputIndex_DepthScale` arguments.
+    unsafe {
+        command_encoder.setVertexBytes_length_atIndex(
+            ptr::NonNull::from(&viewport_size).cast(),
+            mem::size_of_val(&viewport_size),
+            GlobalInputIndex::ViewportSize as usize,
+        );
+        command_encoder.setVertexBytes_length_atIndex(
+            ptr::NonNull::from(&depth_scale).cast(),
+            mem::size_of_val(&depth_scale),
+            GlobalInputIndex::DepthScale as usize,
+        );
+    }
+}
+
 #[derive(Clone)]
 struct InstanceBinding {
     buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
@@ -1476,16 +2066,29 @@ struct InstanceBindings {
     polychrome_sprites: InstanceBinding,
     surfaces: InstanceBinding,
     native_views: InstanceBinding,
+    /// QUILL: each lens's fallback quad, for batches that draw flat.
+    lens_fallbacks: InstanceBinding,
+    /// QUILL (glass stage 5): where each inked label reads its glass, and the
+    /// atlas it reads (`None` when the frame's glass draws flat).
+    lens_inks: InstanceBinding,
+    lens_atlas: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
 }
 
-fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<InstanceBindings> {
+fn write_instances(
+    scene: &Scene,
+    writer: &mut InstanceBufferWriter,
+    glass: Option<&lens::GlassFrame>,
+) -> Result<InstanceBindings> {
     let mut path_paints = Vec::with_capacity(scene.paths.len());
     let mut path_curves = Vec::new();
     let mut path_tiles = Vec::new();
     for path in &scene.paths {
         path.append_to(&mut path_paints, &mut path_curves, &mut path_tiles);
     }
+    let inks = gpui::lens_ink_instances(scene, glass.map(|glass| &glass.plan));
     Ok(InstanceBindings {
+        lens_inks: writer.write(&inks)?,
+        lens_atlas: glass.map(|glass| glass.atlas().clone()),
         quads: writer.write(&scene.quads)?,
         path_tiles: writer.write(&path_tiles)?,
         path_curves: writer.write(&path_curves)?,
@@ -1504,6 +2107,7 @@ fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<I
                 content_mask: native_view.content_mask,
             }
         }))?,
+        lens_fallbacks: writer.write_iter(scene.lenses.iter().map(BackdropLens::fallback_quad))?,
     })
 }
 
@@ -1673,6 +2277,9 @@ enum SpriteInputIndex {
     Sprites = 2,
     AtlasTextureSize = 3,
     AtlasTexture = 4,
+    /// QUILL (glass stage 5): inked labels' records and the lens atlas.
+    Inks = 5,
+    LensAtlas = 6,
 }
 
 #[repr(C)]
@@ -1697,12 +2304,12 @@ pub struct SurfaceBounds {
     pub content_mask: ContentMask<ScaledPixels>,
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+#[cfg(any(feature = "bench-support", feature = "test-support"))]
 pub struct MetalHeadlessRenderer {
     renderer: MetalRenderer,
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+#[cfg(any(feature = "bench-support", feature = "test-support"))]
 impl MetalHeadlessRenderer {
     pub fn new() -> Result<Self> {
         let instance_buffer_pool = Arc::new(Mutex::new(InstanceBufferPool::default()));
@@ -1711,7 +2318,7 @@ impl MetalHeadlessRenderer {
     }
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+#[cfg(any(feature = "bench-support", feature = "test-support"))]
 impl gpui::PlatformHeadlessRenderer for MetalHeadlessRenderer {
     fn render_scene_to_image(
         &mut self,
@@ -1734,6 +2341,7 @@ impl gpui::PlatformHeadlessRenderer for MetalHeadlessRenderer {
 mod tests {
     use super::*;
     use gpui::Point;
+    use std::cell::Cell;
     use objc2_core_foundation::{CFDictionary, CFType};
     use objc2_core_video::{
         CVPixelBufferCreate, CVPixelBufferGetBaseAddressOfPlane,
@@ -1795,6 +2403,160 @@ mod tests {
             DisplayLinkMode::Detached
         ));
         Ok(())
+    }
+
+    fn renderer_from(
+        library: impl Fn(
+            &ProtocolObject<dyn MTLDevice>,
+        ) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>>,
+    ) -> Result<MetalRenderer> {
+        MetalRenderer::with_shaders(
+            MetalRenderer::create_device()?,
+            None,
+            true,
+            Arc::new(Mutex::new(InstanceBufferPool::default())),
+            library,
+        )
+    }
+
+    #[test]
+    fn shaders_that_do_not_compile_are_an_error() {
+        let tries = Cell::new(0);
+        let result = renderer_from(|device| {
+            tries.set(tries.get() + 1);
+            library_from_source(device, "this is not a shader")
+        });
+        assert!(result.is_err());
+        assert_eq!(tries.get(), 2);
+    }
+
+    #[test]
+    fn a_library_without_our_functions_is_an_error() {
+        let error = renderer_from(|device| library_from_source(device, "#include <metal_stdlib>"))
+            .err()
+            .expect("the renderer needs its shader functions");
+        assert!(format!("{error:#}").contains("locating vertex function"));
+    }
+
+    #[cfg(quill_metallib)]
+    #[test]
+    fn the_precompiled_shaders_build_every_pipeline() {
+        renderer_from(precompiled_library).unwrap();
+    }
+
+    #[test]
+    fn one_failed_library_build_is_retried() {
+        let tries = Cell::new(0);
+        let result = renderer_from(|device| {
+            tries.set(tries.get() + 1);
+            if tries.get() == 1 {
+                library_from_source(device, "this is not a shader")
+            } else {
+                built_in_library(device)
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(tries.get(), 2);
+    }
+
+    fn library_without_functions(
+        device: &ProtocolObject<dyn MTLDevice>,
+    ) -> Retained<ProtocolObject<dyn MTLLibrary>> {
+        library_from_source(device, "#include <metal_stdlib>").unwrap()
+    }
+
+    fn renderer_on_a_float_layer() -> MetalRenderer {
+        let renderer = MetalRenderer::new(Default::default(), false, false).unwrap();
+        let layer = renderer.layer().unwrap();
+        layer.setDrawableSize(CGSize::new(16.0, 16.0));
+        layer.setFramebufferOnly(false);
+        layer.setPixelFormat(MTLPixelFormat::RGBA16Float);
+        layer.setWantsExtendedDynamicRangeContent(true);
+        renderer
+    }
+
+    fn empty_scene() -> Scene {
+        let mut scene = Scene::default();
+        scene.finish();
+        scene
+    }
+
+    #[test]
+    fn a_failed_edr_switch_leaves_edr_and_still_draws() {
+        let mut renderer = renderer_on_a_float_layer();
+        renderer.library = library_without_functions(&renderer.device);
+
+        renderer.draw(&empty_scene());
+
+        let layer = renderer.layer().unwrap();
+        assert_eq!(layer.pixelFormat(), MTLPixelFormat::BGRA8Unorm);
+        assert!(!layer.wantsExtendedDynamicRangeContent());
+    }
+
+    #[test]
+    fn a_failed_edr_switch_under_the_display_link_leaves_edr_and_still_draws() {
+        let mut renderer = renderer_on_a_float_layer();
+        renderer.library = library_without_functions(&renderer.device);
+        let drawable = renderer.layer().unwrap().nextDrawable().unwrap();
+        renderer.set_display_link_attached(true);
+        renderer.set_frame_drawable(Some(drawable));
+
+        renderer.draw(&empty_scene());
+
+        let layer = renderer.layer().unwrap();
+        assert_eq!(layer.pixelFormat(), MTLPixelFormat::BGRA8Unorm);
+        assert!(!layer.wantsExtendedDynamicRangeContent());
+        assert!(matches!(
+            renderer.display_link_mode,
+            DisplayLinkMode::Attached { drawable: None }
+        ));
+    }
+
+    #[test]
+    fn a_format_that_failed_is_not_built_again() {
+        let mut renderer = renderer_on_a_float_layer();
+        let library = mem::replace(
+            &mut renderer.library,
+            library_without_functions(&renderer.device),
+        );
+        renderer.draw(&empty_scene());
+        assert_eq!(
+            renderer.layer().unwrap().pixelFormat(),
+            MTLPixelFormat::BGRA8Unorm
+        );
+
+        // A rebuild would work now, and would keep the layer on float.
+        renderer.library = library;
+        let layer = renderer.layer().unwrap();
+        layer.setPixelFormat(MTLPixelFormat::RGBA16Float);
+        renderer.draw(&empty_scene());
+
+        assert_eq!(
+            renderer.layer().unwrap().pixelFormat(),
+            MTLPixelFormat::BGRA8Unorm
+        );
+    }
+
+    #[test]
+    fn a_failed_switch_keeps_the_stashed_pipelines() {
+        let mut renderer = MetalRenderer::new_headless(Default::default()).unwrap();
+        renderer
+            .match_drawable_format(MTLPixelFormat::RGBA16Float)
+            .unwrap();
+        renderer
+            .match_drawable_format(MTLPixelFormat::BGRA8Unorm)
+            .unwrap();
+        renderer.library = library_without_functions(&renderer.device);
+
+        assert!(
+            renderer
+                .match_drawable_format(MTLPixelFormat::RGBA8Unorm)
+                .is_err()
+        );
+
+        renderer
+            .match_drawable_format(MTLPixelFormat::RGBA16Float)
+            .unwrap();
     }
 
     #[test]
@@ -1900,4 +2662,11 @@ mod tests {
         assert_eq!(command_buffer.status(), MTLCommandBufferStatus::Completed);
         assert_eq!(read_texture_to_image(&target_texture).unwrap(), image);
     }
+}
+
+/// QUILL (glass effects): whether `QUILL_GPU_PROBE` asks for per-frame GPU
+/// times. Read once.
+fn gpu_probe_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("QUILL_GPU_PROBE").is_ok_and(|value| value == "1"))
 }
