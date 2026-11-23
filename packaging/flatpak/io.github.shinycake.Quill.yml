@@ -64,11 +64,11 @@ modules:
     sources:
       - type: archive
         only-arches: [x86_64]
-        url: https://github.com/shinycake/quill/releases/download/v2026.1103.4954/quill-linux-x86_64-bundle.tar.gz
-        sha256: 23b9b97b918cb0f0c465383268285c236477f2553a493a9b594c370efdd45f33
+        url: https://github.com/shinycake/quill/releases/download/v2026.1123.6926/quill-linux-x86_64-bundle.tar.gz
+        sha256: ef218dccbd61faa3c03f10e026da904e5394d840026f58d135866d0a3b4bb9ad
       - type: archive
         only-arches: [aarch64]
-        url: https://github.com/shinycake/quill/releases/download/v2026.1103.4954/quill-linux-aarch64-bundle.tar.gz
-        sha256: a9dd355135b6e51b5189bccdf2456ae8ea511f5ee22a701523aee224fe686c08
+        url: https://github.com/shinycake/quill/releases/download/v2026.1123.6926/quill-linux-aarch64-bundle.tar.gz
+        sha256: 05e7f6ce254819d09e77214be44c9629d8dc4165a473dd4f6c2cd059a8f6b60e
       - type: file
         path: io.github.shinycake.Quill.metainfo.xml

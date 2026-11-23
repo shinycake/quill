@@ -86,31 +86,31 @@
   </content_rating>
   <releases>
     <release version="2026.1103.4954" date="2026-11-03">
-      <url type="details">https://github.com/shinycake/quill/releases/tag/v2026.1103.4954</url>
+      <url type="details">https://github.com/shinycake/quill/releases</url>
       <description>
         <p>New ways to install: a macOS disk image, a Windows installer, Homebrew and Chocolatey. Inside Flatpak, Quill now uses its Flatpak app id and hides settings that cannot work in the sandbox.</p>
       </description>
     </release>
     <release version="2026.1103.4940" date="2026-11-03">
-      <url type="details">https://github.com/shinycake/quill/releases/tag/v2026.1103.4940</url>
+      <url type="details">https://github.com/shinycake/quill/releases</url>
       <description>
         <p>New poll design, wallpapers set by the other person, and notifications that open the chat with the cursor in the message box.</p>
       </description>
     </release>
     <release version="2026.1102.4879" date="2026-11-02">
-      <url type="details">https://github.com/shinycake/quill/releases/tag/v2026.1102.4879</url>
+      <url type="details">https://github.com/shinycake/quill/releases</url>
       <description>
         <p>More picture formats can be sent as photos, and the cache is kept to 1 GB by default.</p>
       </description>
     </release>
     <release version="2026.1031.4046" date="2026-10-31">
-      <url type="details">https://github.com/shinycake/quill/releases/tag/v2026.1031.4046</url>
+      <url type="details">https://github.com/shinycake/quill/releases</url>
       <description>
         <p>Chats in their own windows use less memory and CPU, and voice notes take far less CPU.</p>
       </description>
     </release>
     <release version="2026.1031.4016" date="2026-10-31">
-      <url type="details">https://github.com/shinycake/quill/releases/tag/v2026.1031.4016</url>
+      <url type="details">https://github.com/shinycake/quill/releases</url>
       <description>
         <p>Lower memory use through long sessions, and less CPU when sounds play.</p>
       </description>

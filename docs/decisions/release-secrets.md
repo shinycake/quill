@@ -109,7 +109,8 @@ secrets, environments or protection rules.
 
 For now `* @shinycake` in CODEOWNERS makes every merge to main wait for the
 owner's review, so a collaborator cannot approve and merge someone else's
-change to the app either. Releases made before signing existed are deleted
-together with their tags once the first signed release is published: those
+change to the app either. The 35 releases made before signing existed were
+deleted together with their tags on 2026-11-23, right after the first signed
+release (v2026.1123.6926) was published: those
 releases cannot be made immutable, and a collaborator could otherwise mark one
 "latest" and swap its files for clients that only check digests.
