@@ -76,8 +76,7 @@ impl PlatformDispatcher for AppleDispatcher {
     fn prevent_app_nap(&self, reason: &str) -> ActivityGuard {
         AppleActivity::begin(
             reason,
-            NSActivityOptions::UserInitiatedAllowingIdleSystemSleep
-                | NSActivityOptions::LatencyCritical,
+            NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
         )
     }
 }
