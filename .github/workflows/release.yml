@@ -368,3 +368,16 @@ jobs:
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
             echo "removed the partial draft for $TAG"
           fi
+
+  # Published releases are immutable, so the Flatpak bundles are built from
+  # the draft's tarballs and attached to the draft before the owner publishes.
+  flatpak:
+    name: flatpak
+    needs: [prepare, release]
+    if: needs.prepare.outputs.publish == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/flatpak.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}
+      artifact: quill-release-${{ needs.prepare.outputs.tag }}

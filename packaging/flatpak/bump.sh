@@ -3,16 +3,25 @@
 # and their sha256 from the release's SHA256SUMS.txt.
 #
 #   bash packaging/flatpak/bump.sh v2026.1103.4940
+#   bash packaging/flatpak/bump.sh v2026.1103.4940 release-out
 #
-# CI runs this on `release: published` to build the new release.
+# With a folder (the release workflow's files, before the draft is
+# published), it reads SHA256SUMS.txt there and builds from local copies of
+# the tarballs: a draft's files are not public yet.
 set -euo pipefail
 
 TAG="${1:?usage: bump.sh vYEAR.MONTHDAY.COMMITS}"
 [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: unexpected tag $TAG" >&2; exit 2; }
-MANIFEST="$(dirname "${BASH_SOURCE[0]}")/io.github.shinycake.Quill.yml"
+LOCAL="${2:-}"
+DIR="$(dirname "${BASH_SOURCE[0]}")"
+MANIFEST="$DIR/io.github.shinycake.Quill.yml"
 BASE="https://github.com/shinycake/quill/releases/download/$TAG"
 
-sums="$(curl -fsSL --retry 3 "$BASE/SHA256SUMS.txt")"
+if [ -n "$LOCAL" ]; then
+  sums="$(cat "$LOCAL/SHA256SUMS.txt")"
+else
+  sums="$(curl -fsSL --retry 3 "$BASE/SHA256SUMS.txt")"
+fi
 for arch in x86_64 aarch64; do
   asset="quill-linux-$arch-bundle.tar.gz"
   sum="$(awk -v name="$asset" '$2 == name { print $1 }' <<<"$sums")"
@@ -26,5 +35,10 @@ for arch in x86_64 aarch64; do
   mv "$MANIFEST.tmp" "$MANIFEST"
   grep -q "$BASE/$asset" "$MANIFEST" || { echo "error: $asset url not updated" >&2; exit 2; }
   grep -q "sha256: $sum" "$MANIFEST" || { echo "error: $asset sha256 not updated" >&2; exit 2; }
+  if [ -n "$LOCAL" ]; then
+    cp "$LOCAL/$asset" "$DIR/$asset"
+    sed -i.bak "s#url: $BASE/$asset#path: $asset#" "$MANIFEST" && rm -f "$MANIFEST.bak"
+    grep -q "path: $asset" "$MANIFEST" || { echo "error: $asset path not set" >&2; exit 2; }
+  fi
 done
 echo "Manifest now builds $TAG"

@@ -53,6 +53,21 @@ owner's `~/.quill-signing/update-ed25519.pem`. Releases made before this
 change are not signed, so the first signed release still reaches older
 installs through their old, digest-only check.
 
+## Immutable releases and checked drafts
+
+Published releases are immutable (repository setting, 2026-11-22): no file
+on them can be added, replaced or removed, and their tag can't move. So
+everything is attached while the release is still a draft: `release.yml`
+uploads its files and its `flatpak` job attaches the Flatpak bundles, built
+from the draft's own tarballs.
+
+A draft can still be changed by anyone with write access. Publish with
+`scripts/release-publish.sh <tag>`, never the Publish button or
+`gh release edit --draft=false`. It checks that the draft holds exactly the
+files the release.yml run on `main` built, with the same SHA-256 and all
+uploaded by github-actions, and only then publishes. `--check-only` checks
+without publishing. Editing the draft's notes is fine; they are not checked.
+
 ## No self-hosted runners
 
 The owner's Mac (`idan-m1pro`) was a self-hosted runner for
