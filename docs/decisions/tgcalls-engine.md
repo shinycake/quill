@@ -35,7 +35,7 @@ Everything matches Telegram Desktop at `dev` f985723b (26 Oct 2026):
 | OpenH264 | v2.6.0 | prepare.py |
 | mozjpeg | v4.1.5 | prepare.py |
 | rnnoise | d8ea2b0 (desktop-app fork) | prepare.py |
-| FFmpeg | n9.0.2 | Quill's `scripts/build-ffmpeg.sh` (same release as tdesktop) |
+| FFmpeg | n9.1 | Quill's `scripts/build-ffmpeg.sh` (tdesktop builds release/8.1) |
 
 - tg_owt is built static with `TG_OWT_BUILD_AUDIO_BACKENDS=OFF` as tdesktop
   does: the app brings its own audio device module. Quill's is in the C API,
