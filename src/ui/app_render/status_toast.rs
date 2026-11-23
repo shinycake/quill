@@ -3,8 +3,8 @@
 //! (`ui/status_note.rs`), not from its words. The queue and the timers are
 //! state (`ui/toast_queue.rs`); this file only wires them to the frame.
 
-use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::*;
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use crate::ui::status_note::{NoteClick, NoteKind, StatusNote};
 use crate::ui::surface_reveal;
 use gpui_kit::TestSupportExt;

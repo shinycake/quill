@@ -124,21 +124,16 @@ impl QuillApp {
             .border_color(cx.theme().border)
             .bg(cx.theme().sidebar)
             .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .size_full()
-                            .flex()
-                            .flex_col()
-                            .child(rows),
-                    ),
+                div().relative().flex_1().min_h_0().w_full().child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .flex()
+                        .flex_col()
+                        .child(rows),
+                ),
             )
             .child(bar)
     }

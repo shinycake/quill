@@ -21,8 +21,8 @@
 //! room for the lines it shows; what it shows under the picture is capped
 //! at a quarter of the window in whole lines, and scrolls past that.
 
-use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::*;
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use crate::ui::message_text::{RichTextSource, custom_emoji_paths, measure_rich_text};
 use crate::ui::motion::Glide;
 use gpui_kit::component::scroll::ScrollableElement as _;

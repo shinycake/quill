@@ -96,7 +96,9 @@ fn an_open_menu_is_one_lens_with_glass_on(cx: &mut TestAppContext) {
 fn highlighted(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatId> {
     app.update(vcx, |app, _| {
         app.chat_list.items.iter().find_map(|item| match item {
-            ChatListItem::Chat { id, .. } if app.chat_list.keys.list_highlighted(ListRow::Chat(*id)) => {
+            ChatListItem::Chat { id, .. }
+                if app.chat_list.keys.list_highlighted(ListRow::Chat(*id)) =>
+            {
                 Some(*id)
             }
             _ => None,
@@ -119,9 +121,7 @@ fn click_below_bar(
 }
 
 #[gpui_kit::test]
-fn the_chat_list_scrolls_under_a_glass_header_and_the_keys_stay_below_it(
-    cx: &mut TestAppContext,
-) {
+fn the_chat_list_scrolls_under_a_glass_header_and_the_keys_stay_below_it(cx: &mut TestAppContext) {
     quill::settings::use_isolated_app_root(quill::scratch::process_dir("quill-glass-bar"));
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -133,13 +133,19 @@ fn the_chat_list_scrolls_under_a_glass_header_and_the_keys_stay_below_it(
         cx.notify();
     });
     set_material(&app, vcx, Material::Solid);
-    assert!(vcx.debug_bounds("chat-list-glass-bar").is_none(), "solid: no bar");
+    assert!(
+        vcx.debug_bounds("chat-list-glass-bar").is_none(),
+        "solid: no bar"
+    );
     set_material(&app, vcx, Material::Glass);
     let Some(bar) = vcx.debug_bounds("chat-list-glass-bar") else {
         panic!("glass on: the header floats as a bar");
     };
     let inset = app.update(vcx, |app, _| app.chat_list.header_inset.get());
-    assert_eq!(inset, bar.size.height, "the rows' padding is the bar's height");
+    assert_eq!(
+        inset, bar.size.height,
+        "the rows' padding is the bar's height"
+    );
     let Some(rows) = vcx.debug_bounds("chat-list-rows") else {
         panic!("the rows are drawn");
     };

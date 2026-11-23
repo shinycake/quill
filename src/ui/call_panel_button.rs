@@ -76,8 +76,12 @@ pub(super) fn call_button(
                     // The plain wash becomes glass with glass effects on;
                     // the coloured states keep their fill.
                     if style == ButtonLook::Plain {
-                        crate::ui::glass::GlassFill::new(disc, crate::ui::glass::GlassRole::MediaIcon, bg)
-                            .into_any_element()
+                        crate::ui::glass::GlassFill::new(
+                            disc,
+                            crate::ui::glass::GlassRole::MediaIcon,
+                            bg,
+                        )
+                        .into_any_element()
                     } else {
                         disc.into_any_element()
                     }

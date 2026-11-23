@@ -1,11 +1,11 @@
 //! Composer command menus, quote/reply/edit banners, link previews and captions.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;

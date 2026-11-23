@@ -13,8 +13,8 @@
 
 use gpui_kit::component::theme::ThemeColor;
 use gpui_kit::{
-    Hsla, LENS_DESIGN_HEIGHT, LensBend, LensDetail, LensMaterial, LensStyle, LensTune, Rgba,
-    point, px,
+    Hsla, LENS_DESIGN_HEIGHT, LensBend, LensDetail, LensMaterial, LensStyle, LensTune, Rgba, point,
+    px,
 };
 
 /// What a surface is, which decides its look. The list is closed: a new

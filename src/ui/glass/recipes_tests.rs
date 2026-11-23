@@ -110,7 +110,6 @@ fn luminance(color: Rgba) -> f32 {
     0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
 }
 
-
 fn backdrops() -> [(&'static str, Rgba); 2] {
     [
         (
@@ -145,10 +144,14 @@ fn check(theme: &str, colors: &ThemeColor) {
             let secondary = contrast(labels.secondary, glass);
             let floor = if role.holds_text() { 4.5 } else { 3.0 };
             if primary < floor {
-                failures.push(format!("{theme} {role:?} over {name}: primary {primary:.2}:1"));
+                failures.push(format!(
+                    "{theme} {role:?} over {name}: primary {primary:.2}:1"
+                ));
             }
             if secondary < 3.0 {
-                failures.push(format!("{theme} {role:?} over {name}: secondary {secondary:.2}:1"));
+                failures.push(format!(
+                    "{theme} {role:?} over {name}: secondary {secondary:.2}:1"
+                ));
             }
         }
     }

@@ -6,9 +6,9 @@
 //! from `app_demo.rs` next to the `@` mention menu.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::app::QuillApp;
 use super::emoji_bar::{BarOwner, EmojiBarUi};
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;

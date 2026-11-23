@@ -3,9 +3,7 @@
 
 use super::{GlassRole, lens};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::{
-    App, Hsla, IntoElement, LensStyle, RenderOnce, Styled, Window, transparent_black,
-};
+use gpui_kit::{App, Hsla, IntoElement, LensStyle, RenderOnce, Styled, Window, transparent_black};
 
 pub(crate) trait GlassSurface: Styled + Sized {
     /// Glass of `role` while the look is glass, else `solid` (exactly the

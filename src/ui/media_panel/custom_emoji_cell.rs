@@ -1,7 +1,7 @@
 //! Methods moved out of `media_panel.rs` to keep files under 1000 lines.
 
-use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::*;
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use crate::ui::status_note::StatusNote;
 use crate::ui::sticker_player::{Part, panel_sticker_head};
 use quill::lang::{keys, tr, tr_with};

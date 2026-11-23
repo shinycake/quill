@@ -46,11 +46,7 @@ impl QuillApp {
             .checked(self.appearance.material == Material::Glass)
             .accessibility_label(label)
             .on_click(cx.listener(|this, &on, _, cx| {
-                let material = if on {
-                    Material::Glass
-                } else {
-                    Material::Solid
-                };
+                let material = if on { Material::Glass } else { Material::Solid };
                 this.set_appearance(cx, |appearance| appearance.material = material);
             }));
         let paused = matches!(look, GlassLook::Solid(reason) if reason != SolidReason::Off);
@@ -66,24 +62,19 @@ impl QuillApp {
                     .min_w_0()
                     .gap_0p5()
                     .child(
-                        h_flex()
-                            .gap_2()
-                            .child(div().text_sm().child(label))
-                            .child(
-                                Tag::secondary()
-                                    .outline()
-                                    .small()
-                                    .child(tr(keys::Q_PREFS_GLASS_EXPERIMENTAL)),
-                            ),
+                        h_flex().gap_2().child(div().text_sm().child(label)).child(
+                            Tag::secondary()
+                                .outline()
+                                .small()
+                                .child(tr(keys::Q_PREFS_GLASS_EXPERIMENTAL)),
+                        ),
                     )
                     .child(
                         div()
                             .debug_selector(|| "appearance-glass-caption".into())
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .when(paused, |this| {
-                                this.text_color(cx.theme().foreground)
-                            })
+                            .when(paused, |this| this.text_color(cx.theme().foreground))
                             .child(tr(caption(look))),
                     ),
             )

@@ -4,10 +4,10 @@
 //! `quill::main_menu`; this file draws them from `MainMenuUi`.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::app::QuillApp;
 use super::navigation::NavigationAction;
 use super::pressable::{PressableDiv, focus_ring, hover_fill};
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
