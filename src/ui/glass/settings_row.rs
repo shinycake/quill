@@ -35,7 +35,13 @@ pub(crate) fn caption(look: GlassLook) -> Key {
 impl QuillApp {
     pub(in crate::ui) fn appearance_glass_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let label = tr(keys::Q_PREFS_GLASS_EFFECTS);
-        let look = super::look(cx);
+        // The caption follows the switch: a pause only explains itself
+        // when glass is chosen (the QUILL_GLASS override can draw glass
+        // with the switch off).
+        let look = match self.appearance.material {
+            Material::Glass => super::look(cx),
+            Material::Solid => GlassLook::Solid(SolidReason::Off),
+        };
         let control = Switch::new("appearance-glass-effects")
             .checked(self.appearance.material == Material::Glass)
             .accessibility_label(label)
@@ -75,7 +81,7 @@ impl QuillApp {
                             .debug_selector(|| "appearance-glass-caption".into())
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .when(paused && self.appearance.material == Material::Glass, |this| {
+                            .when(paused, |this| {
                                 this.text_color(cx.theme().foreground)
                             })
                             .child(tr(caption(look))),

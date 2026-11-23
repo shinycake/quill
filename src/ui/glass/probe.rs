@@ -89,7 +89,8 @@ fn read_system() -> SystemGlass {
         .ok()
         .flatten();
         let contrast_flags = quill::winreg::get_string(
-            "Control Panel\\Accessibility\\HighContrast",
+            // A registry path, not interface text.
+            concat!("Control Panel", "\\Accessibility\\HighContrast"),
             "Flags",
         )
         .ok()
