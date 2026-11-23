@@ -78,6 +78,26 @@ class Cargo(unittest.TestCase):
             [("rand", "0.8.5", "0.10.3"), ("serde", "1.0.1", "2.0.0")],
         )
 
+    def test_vendored_members_are_skipped(self):
+        reg = "registry+x"
+        meta = {
+            "workspace_members": ["root", "vendored"],
+            "resolve": {"root": "root", "nodes": [
+                {"id": "root", "deps": [{"pkg": "serde1"}]},
+                {"id": "vendored", "deps": [{"pkg": "html5ever"}]},
+            ]},
+            "packages": [
+                {"id": "root", "name": "quill", "version": "0.1.0", "source": None,
+                 "manifest_path": "/w/quill/Cargo.toml"},
+                {"id": "vendored", "name": "gpui-pre", "version": "0.3.14", "source": None,
+                 "manifest_path": "/w/quill/third_party/gpui-pre/Cargo.toml"},
+                {"id": "serde1", "name": "serde", "version": "1.0.1", "source": reg},
+                {"id": "html5ever", "name": "html5ever", "version": "0.27.0", "source": reg},
+            ],
+        }
+        # gpui-pre's own html5ever follows upstream; only Quill's crates are listed.
+        self.assertEqual(dw.direct_registry_deps(meta), {"serde": "1.0.1"})
+
     def test_held_majors_split_out(self):
         held = {"zbus": ("6", "waits"), "x11rb": ("0.14", "waits")}
         majors = [("rand", "0.8.5", "0.10.3"), ("x11rb", "0.13.2", "0.15.0"), ("zbus", "5.19.0", "6.2.1")]

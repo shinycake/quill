@@ -115,7 +115,7 @@ libloading = "0.9"
 libc = "0.2"
 log = "0.4"
 quill-calls-sys = { path = "crates/quill-calls-sys" }
-qrcode = { version = "0.14", optional = true, default-features = false, features = ["image"] }
+qrcode = { version = "0.15", optional = true, default-features = false, features = ["image"] }
 rand = "0.10"
 # Window handles: macOS sharing type, Windows display affinity (capture blocking).
 raw-window-handle = { version = "0.6.2", optional = true }
