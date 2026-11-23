@@ -564,6 +564,10 @@ mod inline_windows;
 #[cfg(feature = "demo-capture")]
 mod viewer_windows;
 
+/// One press on a chat video downloads its clip and plays it in the viewer.
+#[cfg(feature = "demo-capture")]
+mod viewer_autoplay;
+
 /// With autoplay off: a clicked round video plays with sound (downloaded
 /// first), a clicked MP4 GIF loops on the inline player.
 #[cfg(feature = "demo-capture")]

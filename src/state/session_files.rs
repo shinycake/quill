@@ -208,6 +208,24 @@ impl Session {
         }
     }
 
+    /// A press on Play should ask for `file_id`: nothing fetches it yet, or
+    /// only an automatic download does, at a background priority, which
+    /// the user's request then replaces.
+    pub fn wants_play_download(&self, file_id: FileId) -> bool {
+        if self.should_download(file_id) {
+            return true;
+        }
+        let downloads = &self.media.downloads;
+        file_id.0 != 0
+            && self
+                .media
+                .files
+                .get(&file_id.0)
+                .is_some_and(|file| file.needs_download())
+            && !downloads.is_user(file_id.0)
+            && !downloads.is_cancelling(file_id.0)
+    }
+
     /// An automatic download request goes out.
     pub fn begin_download(&mut self, file_id: FileId) {
         self.media.downloads.begin(file_id.0, DownloadOrigin::Auto);

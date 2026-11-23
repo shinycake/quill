@@ -111,6 +111,15 @@ register_demos![
         "screenshot demo — voice note and round video before download"
     )
     .setup(QuillApp::demo_ready_media_unloaded),
+    // The chat's video (204) not downloaded, autoplay off: a press on its
+    // play disc opens the viewer, which downloads the clip and plays it
+    // once it lands. `QUILL_DEMO_CLIP_LANDS=1` makes that press in the
+    // setup and lands the file, so the capture shows the clip playing.
+    DemoSpec::chats(
+        "ready-video-unloaded",
+        "screenshot demo — chat video before download, one press plays it"
+    )
+    .setup(QuillApp::demo_ready_video_unloaded),
     // The incoming voice note playing at ~40%: the waveform scrubber on
     // the active row and the player bar. `QUILL_DEMO_SEEK_HOVER=<0..1>`
     // puts the pointer over the row's scrubber.
@@ -319,6 +328,47 @@ impl QuillApp {
                     quill::telegram::envelope::LocalFileState::Absent { can_download: true };
             });
         }
+    }
+
+    fn demo_ready_video_unloaded(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        const CLIP: FileId = FileId(96);
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+        apply_ready_video_viewer(session, &self.demo_ui.sink, &self.demo_ui.seq);
+        session.settings.media_prefs.autoplay_videos = false;
+        let Some(local) = session.media.files.get(&CLIP.0).cloned() else {
+            return;
+        };
+        let mut waiting = local.clone();
+        waiting.local = quill::telegram::envelope::LocalFileState::Absent { can_download: true };
+        session.media.files.insert(waiting);
+        if std::env::var_os("QUILL_DEMO_CLIP_LANDS").is_none() {
+            return;
+        }
+        // The press on the chat's disc, then the file landing.
+        self.open_media_viewer(ChatId(11), MessageId(204), cx);
+        demo_expect(
+            self.playback.intent.is_some()
+                && self
+                    .session()
+                    .is_some_and(|session| session.media.downloads.is_user(CLIP.0)),
+            "the press parks the clip and downloads it as the user's",
+        );
+        if let Some(session) = self.demo_session.as_mut() {
+            session.media.files.insert(local);
+        }
+        self.resume_play_intent(cx);
+        demo_expect(
+            self.playback.intent.is_none()
+                && self
+                    .viewer
+                    .clip
+                    .player()
+                    .is_some_and(|player| player.wants_play()),
+            "the clip plays once its file lands",
+        );
     }
 
     fn demo_starting_camera(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
