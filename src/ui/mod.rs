@@ -403,6 +403,7 @@ mod giveaway_create_ui;
 mod giveaway_info_ui;
 mod giveaway_pick_ui;
 mod giveaway_state;
+pub(crate) mod glass;
 mod glass_demo;
 mod group_admin_panels;
 mod group_admin_settings;

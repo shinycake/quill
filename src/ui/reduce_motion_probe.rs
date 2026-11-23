@@ -26,11 +26,16 @@ pub(crate) fn apply(cx: &mut App) {
         gpui_kit::base::ReduceMotionPreference::Allow
     };
     gpui_kit::base::set_reduce_motion_preference(preference, cx);
+    // Every power, battery, heat and motion change passes here, and glass
+    // pauses with them (docs/decisions/glass-effects.md).
+    crate::ui::glass::refresh(cx);
 }
 
 /// Start the probe. The environment override applies at once; the OS answer
 /// follows on the background executor.
 pub(crate) fn apply_at_startup(cx: &mut App) {
+    // Reduce Transparency and Increase Contrast, for glass effects.
+    crate::ui::glass::probe::start(cx);
     if let Some(forced) = env_override() {
         quill::power_saving::set_os_reduce_motion(forced);
         apply(cx);

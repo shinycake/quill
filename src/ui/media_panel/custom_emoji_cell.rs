@@ -1,5 +1,6 @@
 //! Methods moved out of `media_panel.rs` to keep files under 1000 lines.
 
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::*;
 use crate::ui::status_note::StatusNote;
 use crate::ui::sticker_player::{Part, panel_sticker_head};
@@ -602,9 +603,11 @@ impl QuillApp {
             .flex_col()
             .rounded_lg()
             .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().popover)
-            .shadow_lg()
+            .glass_or(GlassRole::Panel, cx, |this| {
+                this.border_color(cx.theme().border)
+                    .bg(cx.theme().popover)
+                    .shadow_lg()
+            })
             .overflow_hidden()
             .child(header)
             .child(body)

@@ -5335,6 +5335,17 @@ impl Window {
         self.next_frame.scene.insert_primitive(lens);
     }
 
+    /// QUILL (glass effects): the lenses the last drawn frame holds and how
+    /// many bands they take (glass over glass is a second band). A lens
+    /// drawn as its fallback quad does not count. For tests and budgets.
+    pub fn rendered_glass(&self) -> (usize, usize) {
+        let lenses = &self.rendered_frame.scene.lenses;
+        let mut bands: Vec<u32> = lenses.iter().map(|lens| lens.order).collect();
+        bands.sort_unstable();
+        bands.dedup();
+        (lenses.len(), bands.len())
+    }
+
     /// Paint the given `Path` into the scene for the next frame at the current z-index.
     ///
     /// This method should only be called as part of the paint phase of element drawing.

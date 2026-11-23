@@ -77,6 +77,13 @@ pub(super) const ENTRIES: &[Entry] = &[
         "padding",
         "smaller rows",
     ]),
+    Entry::new("appearance.glass_effects", P, keys::Q_PREFS_GLASS_EFFECTS).keywords(&[
+        "liquid glass",
+        "transparency",
+        "frosted",
+        "blur",
+        "translucent",
+    ]),
     Entry::new("appearance.chat_style", P, keys::Q_PREFS_CHAT_STYLE)
         .keywords(&["bubbles", "plain", "layout"]),
     Entry::new("appearance.chat_list_rows", P, keys::Q_PREFS_CHAT_LIST_ROWS).keywords(&[

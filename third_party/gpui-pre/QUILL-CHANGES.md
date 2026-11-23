@@ -702,3 +702,22 @@ whose `gpui-patches/` carry the same change against crates.io GPUI.
 - Tests: Quill's `src/ui/backdrop_lens_tests.rs` (reuse, inks, droplet
   bounds, density); the full reuse suite is in gpui-liquid-glass's
   `tests/reuse.rs`.
+
+## Backdrop glass as a style
+
+Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`):
+
+- `src/style.rs`: `Style::backdrop_glass: Option<LensStyle>`. `Style::paint`
+  calls `Window::paint_backdrop_lens` with the element's bounds and its
+  top-left corner radius after the drop shadows and before the fill, so a
+  `div` (and anything else styled through `Styled`) can be glass without a
+  child element to position and order. The element's own fill, border and
+  shadow still paint; a glass surface leaves them unset.
+- `src/styled.rs`: `Styled::backdrop_glass(Option<LensStyle>)`; `None` adds
+  nothing.
+- `src/scene/backdrop_lens.rs`: `LensStyle` and the types inside it derive
+  `Serialize`, `Deserialize` and `JsonSchema`, which `StyleRefinement`
+  needs.
+- `src/window.rs`: `Window::rendered_glass`, the lenses of the last drawn
+  frame and how many bands they take, for Quill's glass tests and budget
+  checks.

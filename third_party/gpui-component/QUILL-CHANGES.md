@@ -140,3 +140,13 @@ row under the pointer takes the selection once the pointer rests for 300 ms
 advance it). The corridor takes the submenu's side from the measured
 bounds, so it does not depend on `update_submenu_menu_anchor`. Re-apply
 when re-vendoring: upstream has no hover intent for submenus.
+
+`src/popover_glass.rs` (new), `src/styled.rs`, `src/notification.rs`: glass
+effects (`docs/decisions/glass-effects.md`). `PopoverGlass` is a global
+holding one function from `PopoverGlassSurface::{Popover, Toast}` to an
+optional `LensStyle`; Quill installs it. While it answers `Some`,
+`popover_style` (popovers, menus, selects, comboboxes, the date picker,
+input completions) and the notification card draw that glass through
+gpui-pre's `Styled::backdrop_glass` instead of their fill, edge ring and
+shadow; while it answers `None`, or with no global, they draw exactly as
+before. Re-apply when re-vendoring.

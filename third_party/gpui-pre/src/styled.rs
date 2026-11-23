@@ -748,6 +748,15 @@ pub trait Styled: Sized {
         self
     }
 
+    /// QUILL (backdrop glass): draws glass of this look under the element's
+    /// fill, over its bounds and with its top-left corner radius. `None`
+    /// adds nothing, so a surface can pass the look it resolved as is. See
+    /// third_party/gpui-pre/QUILL-CHANGES.md.
+    fn backdrop_glass(mut self, lens: Option<crate::LensStyle>) -> Self {
+        self.style().backdrop_glass = lens;
+        self
+    }
+
     /// Sets the grid columns of this element.
     fn grid_cols(mut self, cols: u16) -> Self {
         self.style().grid_cols = Some(GridTemplate {

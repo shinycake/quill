@@ -1,6 +1,7 @@
 //! Composer command menus, quote/reply/edit banners, link previews and captions.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_thumb_png_path};
 use super::pressable::PressableDiv;
@@ -541,9 +542,11 @@ impl QuillApp {
             .p_1()
             .rounded_md()
             .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().popover)
-            .shadow_md();
+            .glass_or(GlassRole::Menu, cx, |this| {
+                this.border_color(cx.theme().border)
+                    .bg(cx.theme().popover)
+                    .shadow_md()
+            });
         for (index, (user_id, name, username)) in items.into_iter().enumerate() {
             let photo = self
                 .session()

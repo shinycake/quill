@@ -228,6 +228,10 @@ pub struct AppearancePrefs {
     /// (Appearance → Compact mode).
     #[serde(default)]
     pub density: crate::density::Density,
+    /// Appearance → Glass effects: menus, tabs and floating buttons drawn as
+    /// glass (`crate::glass`). Solid by default.
+    #[serde(default)]
+    pub material: crate::glass::Material,
     /// Message text size in px.
     #[serde(default = "default_font_size")]
     pub font_size_px: u8,
@@ -330,6 +334,7 @@ impl Default for AppearancePrefs {
             follow_omarchy: true,
             interface_scale_pct: INTERFACE_SCALE_DEFAULT,
             density: crate::density::Density::Standard,
+            material: crate::glass::Material::Solid,
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
             preview_lines: crate::chatlist_style::PREVIEW_LINES_DEFAULT,
@@ -540,6 +545,7 @@ mod tests {
             follow_omarchy: false,
             interface_scale_pct: 150,
             density: crate::density::Density::Compact,
+            material: crate::glass::Material::Glass,
             font_size_px: 17,
             bubbles: false,
             preview_lines: 3,

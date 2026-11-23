@@ -9,6 +9,9 @@
 //! design units of a lens 120 units tall, and `unit` says how many logical
 //! pixels one unit is.
 
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
 use crate::{
     Background, Bounds, ContentMask, Corners, DrawOrder, Edges, Hsla, Pixels, Point, Quad,
     ScaledPixels, Size, point, px,
@@ -23,7 +26,7 @@ pub(crate) const LENS_BAND_BITS: u32 = 24;
 pub const LENS_DESIGN_HEIGHT: f32 = 120.0;
 
 /// How the rim of clear glass bends what is behind it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum LensBend {
     /// Along the rim, as deep as the bevel, with a magnified middle and a
     /// slight colour split: buttons and lenses. `refract` is in units,
@@ -48,7 +51,7 @@ pub enum LensBend {
 }
 
 /// Clear glass shows (and bends) the backdrop; tinted glass is its own colour.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum LensMaterial {
     /// Glass that shows what is behind it.
     Clear {
@@ -69,7 +72,7 @@ pub enum LensMaterial {
 }
 
 /// A line just inside the rim.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LensBorder {
     /// The line's colour; its alpha is how strongly it shows.
     pub color: Hsla,
@@ -81,7 +84,7 @@ pub struct LensBorder {
 /// `bend_curve` (1.6). `frost_edge` multiplies the frost's blur at the rim
 /// (the source shader's `uFrostEdge`): above 1 the frost thickens towards
 /// the edge, below 1 it clears.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub struct LensTune {
     pub rim: f32,
@@ -116,7 +119,7 @@ impl Default for LensTune {
 /// QUILL (glass stage 5): a round droplet melted onto the body, on its
 /// horizontal axis (the source kit's `droplet`): the arrow of an action
 /// button pulling away from it. Logical pixels.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LensDroplet {
     /// The droplet's centre, from the body's centre along x.
     pub offset_x: Pixels,
@@ -128,7 +131,7 @@ pub struct LensDroplet {
 
 /// QUILL (glass stage 5): where a blob's bridge gathers into a neck. Logical
 /// pixels.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LensNeck {
     /// The neck's x, from the body's centre.
     pub x: Pixels,
@@ -139,11 +142,12 @@ pub struct LensNeck {
 /// QUILL (glass stage 5): a second rounded box melted into the body with a
 /// smooth union, in any direction (the source kit's `blob`): a list
 /// swelling out of its button. Logical pixels.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LensBlob {
     /// Its centre, from the body's centre.
     pub offset: Point<Pixels>,
     /// Its half size.
+    #[schemars(with = "(f32, f32)")]
     pub half_size: Size<Pixels>,
     /// Its corner radius.
     pub corner_radius: Pixels,
@@ -154,7 +158,7 @@ pub struct LensBlob {
 }
 
 /// QUILL (glass stage 5): where the glass gets the picture it bends.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum LensDetail {
     /// The pixels the frame drew under the lens.
     #[default]
@@ -169,7 +173,7 @@ pub enum LensDetail {
 }
 
 /// The look of one lens, everything but where it is.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LensStyle {
     /// Logical pixels per design unit; 0 takes the body's height over
     /// [`LENS_DESIGN_HEIGHT`].

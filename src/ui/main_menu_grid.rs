@@ -4,6 +4,7 @@
 //! `quill::main_menu`; this file draws them from `MainMenuUi`.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::app::QuillApp;
 use super::navigation::NavigationAction;
 use super::pressable::{PressableDiv, focus_ring, hover_fill};
@@ -206,8 +207,12 @@ impl QuillApp {
                 let _ = view.update(cx, |this, cx| this.set_main_menu_open(open, window, cx));
             })
             .track_focus(&focus)
-            // The menu floats over the chat list, which shows through it.
-            .bg(cx.theme().popover.opacity(0.94))
+            // The menu floats over the chat list, which shows through it:
+            // a hint of it on the solid surface, frosted glass with glass
+            // effects on.
+            .glass_or(GlassRole::Panel, cx, |this| {
+                this.bg(cx.theme().popover.opacity(0.94))
+            })
             .w(rems(20.))
             .trigger(
                 Button::new("main-menu")

@@ -6,6 +6,7 @@
 //! from `app_demo.rs` next to the `@` mention menu.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use super::app::QuillApp;
 use super::emoji_bar::{BarOwner, EmojiBarUi};
 use gpui_kit::component::*;
@@ -685,9 +686,11 @@ impl QuillApp {
             .p_1()
             .rounded_md()
             .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().popover)
-            .shadow_md();
+            .glass_or(GlassRole::Menu, cx, |this| {
+                this.border_color(cx.theme().border)
+                    .bg(cx.theme().popover)
+                    .shadow_md()
+            });
         let typed = active.query.query.chars().count();
         Some(IntoElement::into_any_element(match active.query.kind {
             SuggestKind::Hashtag => {
