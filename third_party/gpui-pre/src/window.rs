@@ -1,8 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `Window::paint_surface_frame`; the paint filter and `Window::capture_frame`;
-// `Window::frame_number`; `Window::paint_backdrop_lens`; inked labels and
-// re-rendered backdrops for glass (`window/backdrop_glass.rs`).
-// See third_party/gpui-pre/QUILL-CHANGES.md.
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
 #[cfg(any(feature = "inspector", debug_assertions))]
@@ -11,27 +6,25 @@ use crate::Inspector;
 use crate::profiler;
 use crate::subscription::SingleSubscriberSet;
 use crate::taffy::TaffyLayoutEngine;
-use crate::input_rate::InputRateTracker;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AtlasTile, AvailableSpace, BackdropLens, Background, BorderStyle, Bounds,
-    BoxShadow,
+    AsyncWindowContext, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow,
     Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
     DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity,
     EntityId, EventEmitter, FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs,
     Hsla, InputHandler, InputPreference, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent,
-    Keystroke, KeystrokeEvent, LayoutId, LensStyle, LineLayoutIndex, Modifiers, ModifiersChangedEvent,
-    MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent, Path, Pixels,
-    PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
-    PolychromeSprite, Priority, PromptButton, PromptLevel, Quad, Render, RenderGlyphParams,
+    Keystroke, KeystrokeEvent, LayoutId, LineLayoutIndex, Modifiers, ModifiersChangedEvent,
+    MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent, PaintedPath, Path,
+    Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow,
+    Point, PolychromeSprite, Priority, PromptButton, PromptLevel, Quad, Render, RenderGlyphParams,
     RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge, SMOOTH_SVG_SCALE_FACTOR,
     SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow, SharedString, Size,
-    StrikethroughStyle, Style, SubpixelSprite, Subscription, SystemWindowTab,
-    SystemWindowTabController, TabStopMap, Task, TextInputConfiguration, TextInputStateChange,
-    TextRenderingMode, TextStyle, TextStyleRefinement, ThermalState, TransformationMatrix,
-    Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
-    WindowControls, WindowDecorations, WindowInsets, WindowOptions, WindowParams, WindowTextSystem,
-    WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
+    SpriteAnimation, SpriteAnimationId, StrikethroughStyle, Style, SubpixelSprite, Subscription,
+    SystemWindowTab, SystemWindowTabController, TabStopMap, Task, TextInputConfiguration,
+    TextInputStateChange, TextRenderingMode, TextStyle, TextStyleRefinement, ThermalState,
+    TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
+    WindowBounds, WindowControls, WindowDecorations, WindowInsets, WindowOptions, WindowParams,
+    WindowTextSystem, WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
 };
 
 use crate::gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer};
@@ -75,11 +68,12 @@ use std::{
 use uuid::Uuid;
 
 pub(crate) mod a11y;
-mod backdrop_glass;
-mod live_views;
+mod native_view;
 mod prompts;
 
-pub use a11y::{A11yNodeSnapshot, A11ySubtreeBuilder, A11yTreeSnapshot};
+pub use a11y::A11ySubtreeBuilder;
+use native_view::NativeViewState;
+pub use native_view::{NativeView, NativeViewId};
 
 use self::a11y::A11y;
 #[cfg(not(target_family = "wasm"))]
@@ -278,16 +272,6 @@ impl WindowInvalidator {
         self.inner.borrow_mut().dirty_views = views;
     }
 
-    /// Quill: some view waits to be drawn, and `pred` holds for each one.
-    pub(crate) fn all_views(&self, pred: impl Fn(EntityId) -> bool) -> bool {
-        let inner = self.inner.borrow();
-        !inner.dirty_views.is_empty() && inner.dirty_views.iter().all(|view| pred(*view))
-    }
-
-    pub(crate) fn clear_views(&self) {
-        self.inner.borrow_mut().dirty_views.clear();
-    }
-
     pub fn not_drawing(&self) -> bool {
         self.inner.borrow().draw_phase == DrawPhase::None
     }
@@ -372,7 +356,7 @@ thread_local! {
 /// arrive re-entrantly while a draw is already on the stack (e.g. via nested
 /// message pumping in the Windows window procedure), instead of running a
 /// nested draw or panicking on the already-borrowed App.
-fn draw_in_progress() -> bool {
+pub(crate) fn draw_in_progress() -> bool {
     CURRENT_ELEMENT_ARENA.with(|current| current.get().is_some())
 }
 
@@ -473,23 +457,6 @@ impl Drop for ElementArenaScope {
             );
         }
     }
-}
-
-/// Quill: what [`Window::set_paint_filter`] takes.
-#[derive(Clone)]
-pub struct PaintFilter {
-    /// Given the tags of the elements being painted, outermost first,
-    /// whether their paint is drawn.
-    pub allows: std::rc::Rc<dyn Fn(&[SharedString]) -> bool>,
-    /// What covers the bounds of a tagged element whose paint the filter
-    /// refuses while its parent's was drawn, and the whole window when
-    /// paint outside every tagged element is refused: the hidden part
-    /// reads as hidden rather than empty.
-    pub hidden: Hsla,
-    /// What goes under a tagged element the filter draws while its
-    /// parent's paint was refused, standing in for the backgrounds the
-    /// filter left out (the window's own, usually).
-    pub shown: Hsla,
 }
 
 /// Returned when the element arena has been used and so must be cleared before the next draw.
@@ -667,6 +634,15 @@ impl FocusHandle {
     /// Obtains whether this handle contains the given handle in the most recently rendered frame.
     pub fn contains(&self, other: &Self, window: &Window) -> bool {
         self.id.contains(other.id, window)
+    }
+
+    /// Obtains whether the element associated with this handle is part of the most recently rendered frame.
+    pub fn is_rendered(&self, window: &Window) -> bool {
+        window
+            .rendered_frame
+            .dispatch_tree
+            .focusable_node_id(self.id)
+            .is_some()
     }
 
     /// Dispatch an action on the element that rendered this focus handle
@@ -859,7 +835,7 @@ impl HitboxId {
         window.mouse_hit_test.ids.contains(&self)
     }
 
-    fn next(self) -> HitboxId {
+    pub(crate) fn next(self) -> HitboxId {
         HitboxId(self.0.wrapping_add(1))
     }
 }
@@ -1083,17 +1059,8 @@ pub(crate) struct Frame {
     pub(crate) dispatch_tree: DispatchTree,
     pub(crate) scene: Scene,
     pub(crate) hitboxes: Vec<Hitbox>,
-    /// [`InteractiveElement::a11y_tag`] per tagged hitbox
-    /// ([`Window::hovered_a11y_tags`]).
-    pub(crate) hitbox_tags: FxHashMap<HitboxId, SharedString>,
-    /// The tags of the focused element and its tagged ancestors, outermost
-    /// first, each time a focused element was painted this frame; the last
-    /// is the one [`Window::focused_a11y_tags`] reads.
-    pub(crate) focus_tags: Vec<Vec<SharedString>>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
-    /// Quill: the [`Entity::live`] views of this frame.
-    pub(crate) live_views: Vec<live_views::LiveView>,
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
     pub(crate) tooltip_requests: Vec<Option<TooltipRequest>>,
     pub(crate) cursor_styles: Vec<CursorStyleRequest>,
@@ -1116,8 +1083,6 @@ pub(crate) struct PrepaintStateIndex {
     dispatch_tree_index: usize,
     accessed_element_states_index: usize,
     line_layout_index: LineLayoutIndex,
-    a11y_index: crate::window::a11y::A11yIndex,
-    focus: Option<FocusId>,
 }
 
 #[derive(Clone, Default)]
@@ -1131,7 +1096,6 @@ pub(crate) struct PaintIndex {
     accessed_element_states_index: usize,
     tab_handle_index: usize,
     line_layout_index: LineLayoutIndex,
-    focus_tags_index: usize,
 }
 
 impl Frame {
@@ -1151,11 +1115,8 @@ impl Frame {
             dispatch_tree,
             scene: Scene::default(),
             hitboxes: Vec::new(),
-            hitbox_tags: FxHashMap::default(),
-            focus_tags: Vec::new(),
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
-            live_views: Vec::new(),
             input_handlers: Vec::new(),
             tooltip_requests: Vec::new(),
             cursor_styles: Vec::new(),
@@ -1175,24 +1136,17 @@ impl Frame {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.scene.clear();
-        self.clear_all_but_scene();
-    }
-
-    fn clear_all_but_scene(&mut self) {
         self.element_states.clear();
         self.accessed_element_states.clear();
         self.mouse_listeners.clear();
         self.dispatch_tree.clear();
+        self.scene.clear();
         self.input_handlers.clear();
         self.tooltip_requests.clear();
         self.cursor_styles.clear();
         self.hitboxes.clear();
-        self.hitbox_tags.clear();
-        self.focus_tags.clear();
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
-        self.live_views.clear();
         self.tab_stops.clear();
         self.focus = None;
 
@@ -1222,16 +1176,6 @@ impl Frame {
                 })),
             })
             .into_inner()
-    }
-
-    fn hitbox_bounds<'a>(
-        &'a self,
-        hit_test: &'a HitTest,
-    ) -> impl Iterator<Item = Bounds<Pixels>> + 'a {
-        self.hitboxes
-            .iter()
-            .filter(|hitbox| hit_test.ids.contains(&hitbox.id))
-            .map(|hitbox| hitbox.bounds)
     }
 
     pub(crate) fn hit_test(&self, position: Point<Pixels>) -> HitTest {
@@ -1284,51 +1228,20 @@ enum InputModality {
     Touch,
 }
 
-/// Quill: what a closed window marked with [`Window::keep_when_closed`]
-/// leaves behind, for the window that replaces it ([`Window::take_over`]).
-/// Everything else in a window belongs to the platform surface or one frame.
-pub struct KeptWindow {
-    id: WindowId,
-    root: Option<AnyView>,
-    focus: Option<FocusId>,
-    element_states: FxHashMap<(GlobalElementId, TypeId), ElementStateBox>,
-    next_frame_callbacks: Vec<FrameCallback>,
-    display_observers: SingleSubscriberSet<AnyObserver>,
-    focus_listeners: SingleSubscriberSet<AnyWindowFocusListener>,
-    focus_lost_listeners: SingleSubscriberSet<AnyObserver>,
-    bounds_observers: SingleSubscriberSet<AnyObserver>,
-    appearance_observers: SingleSubscriberSet<AnyObserver>,
-    button_layout_observers: SingleSubscriberSet<AnyObserver>,
-    visibility_observers: SingleSubscriberSet<Box<dyn FnMut(WindowVisibility, &mut Window, &mut App) -> bool>>,
-    activation_observers: SingleSubscriberSet<AnyObserver>,
-    pending_input_observers: SingleSubscriberSet<AnyObserver>,
-}
-
-impl KeptWindow {
-    /// The closed window's root view.
-    pub fn root(&self) -> Option<&AnyView> {
-        self.root.as_ref()
-    }
-}
-
 /// Holds the state for a specific window.
 pub struct Window {
     pub(crate) handle: AnyWindowHandle,
     pub(crate) invalidator: WindowInvalidator,
     pub(crate) removed: bool,
-    /// Quill: see [`Window::keep_when_closed`].
-    pub(crate) keep_when_closed: bool,
     pub(crate) platform_window: Box<dyn PlatformWindow>,
     pub(crate) display_id: Option<DisplayId>,
     pub(crate) display_observers: SingleSubscriberSet<AnyObserver>,
     is_resizable: bool,
     is_minimizable: bool,
+    last_window_bounds: WindowBounds,
     sprite_atlas: Arc<dyn PlatformAtlas>,
     text_system: Rc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
-    /// QUILL (glass stage 5): the ink of labels painted now (`with_lens_ink`),
-    /// and whether glyphs record how to rasterize them again.
-    glass: backdrop_glass::GlassPaint,
     rem_size: Pixels,
     /// The stack of override values for the window's rem size.
     ///
@@ -1345,8 +1258,6 @@ pub struct Window {
     pub(crate) element_opacity: f32,
     pub(crate) content_mask_stack: Vec<ContentMask<Pixels>>,
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
-    /// QUILL: frames this window began drawing ([`Window::frame_number`]).
-    frames_begun: u64,
     /// The [`TextInputConfiguration`] most recently forwarded to the platform
     /// window, so that only actual changes are forwarded (reconfiguring a live
     /// input session can restart the IME connection).
@@ -1355,10 +1266,9 @@ pub struct Window {
     pub(crate) image_cache_stack: Vec<AnyImageCache>,
     pub(crate) rendered_frame: Frame,
     pub(crate) next_frame: Frame,
-    /// QUILL: `next_frame`'s scene is `rendered_frame`'s with its live views
-    /// drawn again, and the one to show ([`Self::shown_scene`]).
-    scene_patched: bool,
     next_hitbox_id: HitboxId,
+    native_views: Vec<std::rc::Weak<NativeViewState>>,
+    next_native_view_id: u64,
     pub(crate) next_tooltip_id: TooltipId,
     pub(crate) tooltip_bounds: Option<TooltipBounds>,
     pub(crate) next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>>,
@@ -1369,23 +1279,6 @@ pub struct Window {
     default_prevented: bool,
     mouse_position: Point<Pixels>,
     mouse_hit_test: HitTest,
-    /// Quill: the mouse position the drag ghost was last painted for.
-    drag_painted_at: Option<Point<Pixels>>,
-    /// QUILL: the boxes of the hitboxes under the pointer in the last frame
-    /// drawn during a drag.
-    drag_hovered: Option<SmallVec<[Bounds<Pixels>; 8]>>,
-    drag_target_moved: bool,
-    /// The [`InteractiveElement::a11y_tag`]s of the elements being painted,
-    /// outermost first (pushed and popped around each tagged element's
-    /// paint), so the focused element can record the tags above it.
-    pub(crate) a11y_tag_stack: Vec<SharedString>,
-    /// Quill: decides from [`Self::a11y_tag_stack`] whether what is painted
-    /// now reaches the scene ([`Self::set_paint_filter`]).
-    paint_filter: Option<PaintFilter>,
-    /// Quill: under a paint filter, the tag stack each tooltip's owner was
-    /// painted under; the tooltip is painted under the same tags, so it is
-    /// cut with its owner ([`Self::record_tooltip_tags`]).
-    tooltip_tags: Vec<(TooltipId, Vec<SharedString>)>,
     modifiers: Modifiers,
     capslock: Capslock,
     scale_factor: f32,
@@ -1399,6 +1292,9 @@ pub struct Window {
         SingleSubscriberSet<Box<dyn FnMut(WindowVisibility, &mut Window, &mut App) -> bool>>,
     hovered: Rc<Cell<bool>>,
     pub(crate) needs_present: Rc<Cell<bool>>,
+    /// The rendered scene's [`Scene::animation_frame_interval`]. While it is
+    /// `Some`, the scene must keep being presented even when nothing is redrawn.
+    scene_animation_interval: Rc<Cell<Option<Duration>>>,
     /// Tracks recent input event timestamps to determine if input is arriving at a high rate.
     /// Used to selectively enable VRR optimization only when input rate exceeds 60fps.
     pub(crate) input_rate_tracker: Rc<RefCell<InputRateTracker>>,
@@ -1435,6 +1331,17 @@ pub struct Window {
 struct ModifierState {
     modifiers: Modifiers,
     saw_other_input: bool,
+}
+
+/// Tracks input event timestamps to determine if input is arriving at a high rate.
+/// Used for selective VRR (Variable Refresh Rate) optimization.
+#[derive(Clone, Debug)]
+pub(crate) struct InputRateTracker {
+    timestamps: Vec<Instant>,
+    window: Duration,
+    inputs_per_second: u32,
+    sustain_until: Instant,
+    sustain_duration: Duration,
 }
 
 const FRAME_INTERVAL_TOLERANCE: Duration = Duration::from_millis(1);
@@ -1495,6 +1402,40 @@ fn minimum_frame_interval(
     .into_iter()
     .flatten()
     .max()
+}
+
+impl Default for InputRateTracker {
+    fn default() -> Self {
+        Self {
+            timestamps: Vec::new(),
+            window: Duration::from_millis(100),
+            inputs_per_second: 60,
+            sustain_until: Instant::now(),
+            sustain_duration: Duration::from_secs(1),
+        }
+    }
+}
+
+impl InputRateTracker {
+    pub fn record_input(&mut self) {
+        let now = Instant::now();
+        self.timestamps.push(now);
+        self.prune_old_timestamps(now);
+
+        let min_events = self.inputs_per_second as u128 * self.window.as_millis() / 1000;
+        if self.timestamps.len() as u128 >= min_events {
+            self.sustain_until = now + self.sustain_duration;
+        }
+    }
+
+    pub fn is_high_rate(&self) -> bool {
+        Instant::now() < self.sustain_until
+    }
+
+    fn prune_old_timestamps(&mut self, now: Instant) {
+        self.timestamps
+            .retain(|&t| now.duration_since(t) <= self.window);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1646,26 +1587,16 @@ pub(crate) struct ElementStateBox {
     pub(crate) type_name: &'static str,
 }
 
-fn default_bounds(display_id: Option<DisplayId>, cx: &mut App) -> WindowBounds {
-    // TODO, BUG: if you open a window with the currently active window
-    // on the stack, this will erroneously fallback to `None`
-    //
-    // TODO these should be the initial window bounds not considering maximized/fullscreen
-    let active_window_bounds = cx
-        .active_window()
-        .and_then(|w| w.update(cx, |_, window, _| window.window_bounds()).ok());
-
+fn default_bounds(
+    active_window_bounds: Option<WindowBounds>,
+    display: Option<&dyn PlatformDisplay>,
+) -> WindowBounds {
     const CASCADE_OFFSET: f32 = 25.0;
-
-    let display = display_id
-        .map(|id| cx.find_display(id))
-        .unwrap_or_else(|| cx.primary_display());
 
     let default_placement = || Bounds::new(point(px(0.), px(0.)), DEFAULT_WINDOW_SIZE);
 
     // Use visible_bounds to exclude taskbar/dock areas
     let display_bounds = display
-        .as_ref()
         .map(|d| d.visible_bounds())
         .unwrap_or_else(default_placement);
 
@@ -1683,7 +1614,6 @@ fn default_bounds(display_id: Option<DisplayId>, cx: &mut App) -> WindowBounds {
         },
         None => (
             display
-                .as_ref()
                 .map(|d| d.default_bounds())
                 .unwrap_or_else(default_placement),
             WindowBounds::Windowed,
@@ -1750,7 +1680,25 @@ impl Window {
             .as_ref()
             .and_then(|titlebar| titlebar.title.clone());
 
-        let window_bounds = window_bounds.unwrap_or_else(|| default_bounds(display_id, cx));
+        let active_window_placement = cx.active_window_placement();
+        // Explicit bounds only make sense on the display they were computed for.
+        let target_display_id = display_id.or_else(|| {
+            active_window_placement
+                .filter(|_| window_bounds.is_none())
+                .and_then(|(display_id, _)| display_id)
+        });
+        let display = target_display_id
+            .and_then(|display_id| cx.find_display(display_id))
+            .or_else(|| cx.primary_display());
+        let display_id = display
+            .as_ref()
+            .map(|display| display.id())
+            .or(target_display_id);
+        let active_window_bounds = active_window_placement
+            .filter(|(active_display_id, _)| *active_display_id == display_id)
+            .map(|(_, bounds)| bounds);
+        let window_bounds = window_bounds
+            .unwrap_or_else(|| default_bounds(active_window_bounds, display.as_deref()));
         let mut platform_window = cx.platform.open_window(
             handle,
             WindowParams {
@@ -1796,6 +1744,7 @@ impl Window {
         profiler::journal::record_window_visibility(handle.window_id(), visibility);
         let hovered = Rc::new(Cell::new(platform_window.is_hovered()));
         let needs_present = Rc::new(Cell::new(false));
+        let scene_animation_interval = Rc::new(Cell::new(None::<Duration>));
         let next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>> = Default::default();
         let input_rate_tracker = Rc::new(RefCell::new(InputRateTracker::default()));
 
@@ -1961,6 +1910,7 @@ impl Window {
             let invalidator = invalidator.clone();
             let active = active.clone();
             let needs_present = needs_present.clone();
+            let scene_animation_interval = scene_animation_interval.clone();
             let next_frame_callbacks = next_frame_callbacks.clone();
             let input_rate_tracker = input_rate_tracker.clone();
             let mut deferred_force_render = false;
@@ -2007,7 +1957,7 @@ impl Window {
                     mem::take(&mut deferred_force_render) || request_frame_options.force_render;
 
                 let power_state = handle
-                    .update(&mut cx, |_, _, cx| (cx.thermal_state(), cx.frame_power_mode()))
+                    .update(&mut cx, |_, _, cx| (cx.thermal_state(), cx.power_mode()))
                     .with_context(|| {
                         format!(
                             "reading power state for frame request for window {:?}",
@@ -2018,15 +1968,16 @@ impl Window {
 
                 // Keep presenting briefly after high-rate input to prevent display
                 // underclocking, but subject to the same power limits as redraws.
-                let now = Instant::now();
-                let high_rate_input = input_rate_tracker.borrow().is_high_rate(now);
+                let high_rate_input = input_rate_tracker.borrow_mut().is_high_rate();
                 let has_next_frame_callbacks = !next_frame_callbacks.borrow().is_empty();
-                let has_frame_demand = invalidator.is_dirty()
+                let has_demand_besides_animation = invalidator.is_dirty()
                     || force_render
                     || has_next_frame_callbacks
                     || request_frame_options.require_presentation
                     || needs_present.get()
                     || high_rate_input;
+                let has_frame_demand =
+                    has_demand_besides_animation || scene_animation_interval.get().is_some();
 
                 let should_throttle = !request_frame_options.require_presentation;
                 let inactive_without_high_rate_input =
@@ -2042,7 +1993,12 @@ impl Window {
                     thermal_state,
                     power_mode,
                 );
+                let animation_frame_interval = scene_animation_interval
+                    .get()
+                    .filter(|interval| !has_demand_besides_animation && !interval.is_zero());
+                let min_frame_interval = min_frame_interval.max(animation_frame_interval);
 
+                let now = Instant::now();
                 // Idle display-link ticks must neither consume a frame slot nor
                 // wake a demand-driven frame source.
                 if has_frame_demand && frame_pacer.should_defer(now, min_frame_interval) {
@@ -2067,7 +2023,11 @@ impl Window {
                     profiler::journal::record_frame_skipped(
                         window_id,
                         Instant::now(),
-                        if inactive_without_high_rate_input
+                        if animation_frame_interval.is_some()
+                            && animation_frame_interval == min_frame_interval
+                        {
+                            profiler::journal::FrameSkipReason::AnimationFrameRateLimit
+                        } else if inactive_without_high_rate_input
                             && inactive_frame_interval == min_frame_interval
                         {
                             profiler::journal::FrameSkipReason::InactiveFrameRateLimit
@@ -2102,6 +2062,7 @@ impl Window {
                 let should_draw = invalidator.is_dirty() || force_render;
                 let needs_present = request_frame_options.require_presentation
                     || needs_present.get()
+                    || scene_animation_interval.get().is_some()
                     || high_rate_input;
                 if should_draw {
                     measure("frame duration", || {
@@ -2117,6 +2078,7 @@ impl Window {
                                     window.refresh();
                                 }
                                 let arena_clear_needed = window.draw(cx);
+                                window.advance_scene_animations(cx);
                                 window.present();
                                 arena_clear_needed.clear(cx);
                             })
@@ -2130,7 +2092,10 @@ impl Window {
                     })
                 } else if needs_present {
                     handle
-                        .update(&mut cx, |_, window, _| window.present())
+                        .update(&mut cx, |_, window, cx| {
+                            window.advance_scene_animations(cx);
+                            window.present();
+                        })
                         .with_context(|| {
                             format!("presenting frame for window {:?}", handle.window_id())
                         })
@@ -2141,6 +2106,7 @@ impl Window {
                     .update(&mut cx, |_, window, _| {
                         if window.invalidator.is_dirty()
                             || !window.next_frame_callbacks.borrow().is_empty()
+                            || window.scene_animation_interval.get().is_some()
                         {
                             window.platform_window.schedule_frame();
                         }
@@ -2158,7 +2124,10 @@ impl Window {
                 // after this frame (the window was re-invalidated mid-draw, or
                 // animations scheduled next-frame callbacks), re-arm the frame
                 // source explicitly.
-                if invalidator.is_dirty() || !next_frame_callbacks.borrow().is_empty() {
+                if invalidator.is_dirty()
+                    || !next_frame_callbacks.borrow().is_empty()
+                    || scene_animation_interval.get().is_some()
+                {
                     invalidator.wake_platform();
                 }
                 #[cfg(feature = "profiler")]
@@ -2349,6 +2318,40 @@ impl Window {
                     .unwrap_or(None)
             })
         });
+        platform_window.on_hit_test_native_view({
+            let mut cx = cx.to_async();
+            Box::new(move |position| {
+                // The platform can ask while this window is already being
+                // updated, in which case the event stays with GPUI.
+                handle
+                    .update(&mut cx, |_, window, _| {
+                        window.hit_test_native_view(position)
+                    })
+                    .ok()
+                    .flatten()
+            })
+        });
+        platform_window.on_key_down_before_native_view({
+            let mut cx = cx.to_async();
+            Box::new(move |event| {
+                handle
+                    .update(&mut cx, |_, window, cx| {
+                        window.dispatch_key_down_before_native_view(event, cx)
+                    })
+                    .unwrap_or(false)
+            })
+        });
+        platform_window.on_native_view_focused({
+            let mut cx = cx.to_async();
+            Box::new(move |id| {
+                handle
+                    .update(&mut cx, |_, window, cx| window.focus_native_view(id, cx))
+                    .with_context(|| {
+                        format!("focusing a native view in window {:?}", handle.window_id())
+                    })
+                    .log_err();
+            })
+        });
         platform_window.on_move_tab_to_new_window({
             let mut cx = cx.to_async();
             Box::new(move || {
@@ -2429,16 +2432,15 @@ impl Window {
             handle,
             invalidator,
             removed: false,
-            keep_when_closed: false,
             platform_window,
             display_id,
             display_observers: SingleSubscriberSet::new(),
             is_resizable,
             is_minimizable,
+            last_window_bounds: window_bounds,
             sprite_atlas,
             text_system,
             text_rendering_mode: cx.text_rendering_mode.clone(),
-            glass: Default::default(),
             rem_size: px(16.),
             rem_size_override_stack: SmallVec::new(),
             viewport_size: content_size,
@@ -2451,14 +2453,14 @@ impl Window {
             content_mask_stack: Vec::new(),
             element_opacity: 1.0,
             requested_autoscroll: None,
-            frames_begun: 0,
             last_text_input_configuration: None,
             focused_text_input: None,
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame_callbacks,
-            scene_patched: false,
             next_hitbox_id: HitboxId(0),
+            native_views: Vec::new(),
+            next_native_view_id: 0,
             next_tooltip_id: TooltipId::default(),
             tooltip_bounds: None,
             dirty_views: FxHashSet::default(),
@@ -2468,12 +2470,6 @@ impl Window {
             default_prevented: true,
             mouse_position,
             mouse_hit_test: HitTest::default(),
-            drag_painted_at: None,
-            drag_hovered: None,
-            drag_target_moved: false,
-            a11y_tag_stack: Vec::new(),
-            tooltip_tags: Vec::new(),
-            paint_filter: None,
             modifiers,
             capslock,
             scale_factor,
@@ -2486,6 +2482,7 @@ impl Window {
             visibility_observers: SingleSubscriberSet::new(),
             hovered,
             needs_present,
+            scene_animation_interval,
             input_rate_tracker,
             #[cfg(feature = "profiler")]
             window_profiler: profiler::WindowProfiler::new(handle.window_id())?,
@@ -2593,6 +2590,65 @@ impl Window {
         }
     }
 
+    /// This window's part of [`App::debug_state`].
+    ///
+    /// Values GPUI caches are reported next to what the platform reports now,
+    /// so a stale cache shows up as a mismatch.
+    pub(crate) fn debug_state(&self) -> serde_json::Value {
+        let platform_window = &self.platform_window;
+        serde_json::json!({
+            "id": self.handle.window_id().as_u64(),
+            "title": platform_window.get_title(),
+            "bounds": platform_window.bounds(),
+            "window_bounds": format!("{:?}", platform_window.window_bounds()),
+            "content_size": platform_window.content_size(),
+            "viewport_size": self.viewport_size,
+            "scale_factor": {
+                "cached": self.scale_factor,
+                "platform": platform_window.scale_factor(),
+            },
+            "display_id": {
+                "cached": self.display_id.map(u64::from),
+                "platform": platform_window.display().map(|display| u64::from(display.id())),
+            },
+            "active": {
+                "cached": self.active.get(),
+                "platform": platform_window.is_active(),
+            },
+            "hovered": {
+                "cached": self.hovered.get(),
+                "platform": platform_window.is_hovered(),
+            },
+            "visibility": {
+                "cached": format!("{:?}", self.visibility),
+                "platform": format!("{:?}", platform_window.visibility()),
+            },
+            "appearance": {
+                "cached": format!("{:?}", self.appearance),
+                "platform": format!("{:?}", platform_window.appearance()),
+            },
+            "is_fullscreen": platform_window.is_fullscreen(),
+            "is_maximized": platform_window.is_maximized(),
+            "mouse_position": {
+                "cached": self.mouse_position,
+                "platform": platform_window.mouse_position(),
+            },
+            "modifiers": {
+                "cached": self.modifiers,
+                "platform": platform_window.modifiers(),
+            },
+            "cursor_style": self.rendered_frame.cursor_style(self),
+            "frame": {
+                "dirty": self.invalidator.is_dirty(),
+                "needs_present": self.needs_present.get(),
+                "refreshing": self.refreshing,
+                "next_frame_callbacks": self.next_frame_callbacks.borrow().len(),
+            },
+            "gpu": platform_window.gpu_specs(),
+            "platform": platform_window.debug_state(),
+        })
+    }
+
     /// Whether the platform is presenting this window's frames (see
     /// [`WindowVisibility`]).
     pub fn visibility(&self) -> WindowVisibility {
@@ -2669,44 +2725,6 @@ impl Window {
             .map(|view| view.clone().downcast::<E>().ok())
     }
 
-    /// How many subscriptions this window holds, by kind; see
-    /// [`App::live_subscription_counts`].
-    #[cfg(feature = "test-support")]
-    pub fn live_subscription_counts(&self) -> std::collections::BTreeMap<&'static str, usize> {
-        let mut counts = std::collections::BTreeMap::new();
-        counts.insert("focus_listeners", self.focus_listeners.subscriber_count());
-        counts.insert(
-            "focus_lost_listeners",
-            self.focus_lost_listeners.subscriber_count(),
-        );
-        counts.insert("bounds_observers", self.bounds_observers.subscriber_count());
-        counts.insert(
-            "appearance_observers",
-            self.appearance_observers.subscriber_count(),
-        );
-        counts.insert(
-            "button_layout_observers",
-            self.button_layout_observers.subscriber_count(),
-        );
-        counts.insert(
-            "activation_observers",
-            self.activation_observers.subscriber_count(),
-        );
-        counts.insert(
-            "visibility_observers",
-            self.visibility_observers.subscriber_count(),
-        );
-        counts.insert(
-            "display_observers",
-            self.display_observers.subscriber_count(),
-        );
-        counts.insert(
-            "pending_input_observers",
-            self.pending_input_observers.subscriber_count(),
-        );
-        counts
-    }
-
     /// Obtain a handle to the window that belongs to this context.
     pub fn window_handle(&self) -> AnyWindowHandle {
         self.handle
@@ -2723,88 +2741,6 @@ impl Window {
     /// Close this window.
     pub fn remove_window(&mut self) {
         self.removed = true;
-    }
-
-    /// Quill: when this window closes, keep its root view and everything
-    /// registered on the window, for [`App::take_kept_window`].
-    pub fn keep_when_closed(&mut self) {
-        self.keep_when_closed = true;
-    }
-
-    /// Quill: what is left of this window, once it is closing.
-    pub(crate) fn into_kept(mut self: Box<Self>) -> KeptWindow {
-        KeptWindow {
-            id: self.handle.id,
-            root: self.root.take(),
-            focus: self.focus,
-            element_states: mem::take(&mut self.rendered_frame.element_states),
-            next_frame_callbacks: self.next_frame_callbacks.take(),
-            display_observers: mem::replace(&mut self.display_observers, SingleSubscriberSet::new()),
-            focus_listeners: mem::replace(&mut self.focus_listeners, SingleSubscriberSet::new()),
-            focus_lost_listeners: mem::replace(
-                &mut self.focus_lost_listeners,
-                SingleSubscriberSet::new(),
-            ),
-            bounds_observers: mem::replace(&mut self.bounds_observers, SingleSubscriberSet::new()),
-            appearance_observers: mem::replace(
-                &mut self.appearance_observers,
-                SingleSubscriberSet::new(),
-            ),
-            button_layout_observers: mem::replace(
-                &mut self.button_layout_observers,
-                SingleSubscriberSet::new(),
-            ),
-            visibility_observers: mem::replace(
-                &mut self.visibility_observers,
-                SingleSubscriberSet::new(),
-            ),
-            activation_observers: mem::replace(
-                &mut self.activation_observers,
-                SingleSubscriberSet::new(),
-            ),
-            pending_input_observers: mem::replace(
-                &mut self.pending_input_observers,
-                SingleSubscriberSet::new(),
-            ),
-        }
-    }
-
-    /// Quill: become the window `kept` came from. Its subscriptions fire here
-    /// and its handles reach this window, so no entity needs to know it moved.
-    /// Call this first, from the build closure of the window that replaces it;
-    /// the closure then returns the kept root view.
-    pub fn take_over(&mut self, kept: KeptWindow, cx: &mut App) {
-        let KeptWindow {
-            id,
-            root: _,
-            focus,
-            element_states,
-            next_frame_callbacks,
-            display_observers,
-            focus_listeners,
-            focus_lost_listeners,
-            bounds_observers,
-            appearance_observers,
-            button_layout_observers,
-            visibility_observers,
-            activation_observers,
-            pending_input_observers,
-        } = kept;
-        self.focus = focus;
-        self.rendered_frame.element_states = element_states;
-        self.next_frame_callbacks
-            .borrow_mut()
-            .extend(next_frame_callbacks);
-        self.display_observers = display_observers;
-        self.focus_listeners = focus_listeners;
-        self.focus_lost_listeners = focus_lost_listeners;
-        self.bounds_observers = bounds_observers;
-        self.appearance_observers = appearance_observers;
-        self.button_layout_observers = button_layout_observers;
-        self.visibility_observers = visibility_observers;
-        self.activation_observers = activation_observers;
-        self.pending_input_observers = pending_input_observers;
-        cx.note_window_replaced(id, self.handle.id);
     }
 
     /// Obtain the currently focused [`FocusHandle`]. If no elements are focused, returns `None`.
@@ -2830,7 +2766,9 @@ impl Window {
             return;
         }
 
+        self.end_composition_before_focusing_native_view(handle.id, cx);
         self.focus = Some(handle.id);
+        self.sync_native_view_focus();
         self.focus_generation = self.focus_generation.wrapping_add(1);
         self.clear_pending_keystrokes(cx);
 
@@ -2849,6 +2787,7 @@ impl Window {
             self.focus_generation = self.focus_generation.wrapping_add(1);
         }
         self.focus = None;
+        self.sync_native_view_focus();
         self.refresh();
     }
 
@@ -2945,6 +2884,14 @@ impl Window {
     /// after it has been closed
     pub fn window_bounds(&self) -> WindowBounds {
         self.platform_window.window_bounds()
+    }
+
+    pub(crate) fn last_window_bounds(&self) -> WindowBounds {
+        self.last_window_bounds
+    }
+
+    pub(crate) fn display_id(&self) -> Option<DisplayId> {
+        self.display_id
     }
 
     /// Return the `WindowBounds` excluding insets (Wayland and X11)
@@ -3151,6 +3098,11 @@ impl Window {
         self.on_next_frame(move |_, cx| cx.notify(entity));
     }
 
+    pub(crate) fn advance_scene_animations(&mut self, cx: &App) {
+        let elapsed = cx.background_executor().now() - cx.synced_animation_epoch;
+        self.rendered_frame.scene.advance_animations(elapsed);
+    }
+
     /// Runs all callbacks scheduled via [`Self::on_next_frame`], returning how many ran.
     ///
     /// Tests have no platform frame loop, so this simulates the delivery of the
@@ -3210,6 +3162,8 @@ impl Window {
     pub fn bounds_changed(&mut self, cx: &mut App) {
         self.scale_factor = self.platform_window.scale_factor();
         self.viewport_size = self.platform_window.content_size();
+        self.last_window_bounds = self.platform_window.window_bounds();
+        cx.sync_window_update_entry(self);
         self.mouse_position = self.platform_window.mouse_position();
 
         self.refresh();
@@ -3300,7 +3254,8 @@ impl Window {
     /// to capture what would be rendered without displaying it or requiring the window to be visible.
     #[cfg(any(test, feature = "test-support"))]
     pub fn render_to_image(&self) -> anyhow::Result<image::RgbaImage> {
-        self.platform_window.render_to_image(self.shown_scene())
+        self.platform_window
+            .render_to_image(&self.rendered_frame.scene)
     }
 
     /// Borrows the most recently rendered frame's scene, so benchmarks can validate their
@@ -3316,13 +3271,13 @@ impl Window {
     /// whose bounds don't intersect their content mask are culled at paint time and won't appear.
     #[cfg(any(test, feature = "test-support"))]
     pub fn painted_quads(&self) -> Vec<Quad> {
-        self.shown_scene().quads.clone()
+        self.rendered_frame.scene.quads.clone()
     }
 
     /// Returns the underlines in the most recently rendered frame's scene.
     #[cfg(any(test, feature = "test-support"))]
     pub fn painted_underlines(&self) -> Vec<Underline> {
-        self.shown_scene().underlines.clone()
+        self.rendered_frame.scene.underlines.clone()
     }
 
     /// Set the content size of the window.
@@ -3486,16 +3441,16 @@ impl Window {
         self.a11y.set_window_title(title.to_string());
     }
 
-    /// Quill: the reason Windows shows while this window holds back the end
-    /// of the session, or `None` to stop showing it.
-    pub fn set_shutdown_block_reason(&self, reason: Option<&str>) {
-        self.platform_window.set_shutdown_block_reason(reason);
-    }
-
     /// Sets the position of the macOS traffic light buttons.
     #[cfg(target_os = "macos")]
     pub fn set_traffic_light_position(&self, position: Point<Pixels>) {
         self.platform_window.set_traffic_light_position(position);
+    }
+
+    /// Shows or hides the native macOS titlebar, including the traffic light buttons.
+    #[cfg(target_os = "macos")]
+    pub fn set_native_titlebar_visibility(&self, visible: bool) {
+        self.platform_window.set_native_titlebar_visibility(visible);
     }
 
     /// Sets the application identifier.
@@ -3518,12 +3473,6 @@ impl Window {
     /// On macOS, this sets the window's accessibility document property (AXDocument).
     pub fn set_document_path(&self, path: Option<&std::path::Path>) {
         self.platform_window.set_document_path(path);
-    }
-
-    /// QUILL: the id of the display the window is on, as last seen when the
-    /// window moved, without asking the platform for its display list.
-    pub fn display_id(&self) -> Option<DisplayId> {
-        self.display_id
     }
 
     /// Determine the display on which the window is visible.
@@ -3769,6 +3718,16 @@ impl Window {
         let scale_factor = self.scale_factor();
         let left = floor_to_device_pixel(bounds.left().0, scale_factor);
         let top = floor_to_device_pixel(bounds.top().0, scale_factor);
+        // Rounding outward would turn an empty region into a 1px strip at
+        // fractional positions, so return a zero size instead. Negative
+        // sizes become zero too, because the blurred shadow shader draws a
+        // negative-size hole the same as a positive one.
+        if bounds.is_empty() {
+            return Bounds::new(
+                point(ScaledPixels(left), ScaledPixels(top)),
+                Size::default(),
+            );
+        }
         let right = ceil_to_device_pixel(bounds.right().0, scale_factor).max(left);
         let bottom = ceil_to_device_pixel(bounds.bottom().0, scale_factor).max(top);
         Bounds::from_corners(
@@ -3886,23 +3845,9 @@ impl Window {
         // Set up the per-App arena for element allocation during this draw.
         // This ensures that multiple test Apps have isolated arenas.
         let arena_scope = ElementArenaScope::enter(&cx.element_arena);
-        self.frames_begun += 1;
 
         if self.platform_window.prepare_frame() {
             self.refresh();
-        }
-        let after_patch = mem::take(&mut self.scene_patched);
-        if after_patch {
-            self.next_frame.scene.clear();
-        }
-        if self.only_live_views_changed(cx) {
-            self.patch_live_views(cx);
-            #[cfg(feature = "profiler")]
-            self.end_draw_profile(cx, frame_dirty);
-            return arena_scope.exit(&cx.element_arena);
-        }
-        if after_patch {
-            self.dirty_patched_live_views();
         }
         self.invalidate_entities();
         cx.entities.clear_accessed();
@@ -3927,10 +3872,6 @@ impl Window {
                 self.rendered_frame.input_handlers.push(Some(input_handler));
             }
         }
-        self.next_frame.scene.filtered = self.paint_filter.is_some();
-        self.tooltip_tags.clear();
-        self.update_paint_suppression();
-        self.cover_refused_window();
         if !cx.mode.skip_drawing() {
             self.draw_roots(cx);
             #[cfg(feature = "profiler")]
@@ -3977,15 +3918,15 @@ impl Window {
         }
 
         self.layout_engine.as_mut().unwrap().clear();
-        self.next_frame.finish(&mut self.rendered_frame);
-        // QUILL (glass stage 5): sharp magnifiers draw what is under them again.
-        self.build_sharp_backdrops(cx);
         self.text_system().finish_frame();
+        self.next_frame.finish(&mut self.rendered_frame);
 
         self.invalidator.set_phase(DrawPhase::Focus);
         let previous_focus_path = self.rendered_frame.focus_path();
         let previous_window_active = self.rendered_frame.window_active;
         mem::swap(&mut self.rendered_frame, &mut self.next_frame);
+        self.scene_animation_interval
+            .set(self.rendered_frame.scene.animation_frame_interval());
         self.next_frame.clear();
         let current_focus_path = self.rendered_frame.focus_path();
         let current_window_active = self.rendered_frame.window_active;
@@ -4033,27 +3974,24 @@ impl Window {
         // panel). `Window::focus` suppresses `refresh` while a draw is in progress, so
         // schedule another frame here to render the new focus state and dispatch the
         // resulting focus events.
-        if self.focus != focus_before_listeners || mem::take(&mut self.drag_target_moved) {
+        if self.focus != focus_before_listeners {
             self.refresh();
         }
         self.needs_present.set(true);
 
         #[cfg(feature = "profiler")]
-        self.end_draw_profile(cx, frame_dirty);
+        {
+            self.window_profiler
+                .set_refresh_interval(self.refresh_interval(cx));
+            let draw_duration = self
+                .window_profiler
+                .end_draw(frame_dirty.dirty_at, frame_dirty.invalidations);
+            self.debug_frame_overlay.record_frame(draw_duration);
+        }
 
         // Exit the scope to obtain the arena-clear token this draw owes; the
         // scope's teardown itself happens in `ElementArenaScope::drop`.
         arena_scope.exit(&cx.element_arena)
-    }
-
-    #[cfg(feature = "profiler")]
-    fn end_draw_profile(&mut self, cx: &App, frame_dirty: FrameDirtyAccumulator) {
-        self.window_profiler
-            .set_refresh_interval(self.refresh_interval(cx));
-        let draw_duration = self
-            .window_profiler
-            .end_draw(frame_dirty.dirty_at, frame_dirty.invalidations);
-        self.debug_frame_overlay.record_frame(draw_duration);
     }
 
     fn record_entities_accessed(&mut self, cx: &mut App) {
@@ -4082,7 +4020,7 @@ impl Window {
         let _foreground_turn = profiler::journal::foreground_turn();
         #[cfg(feature = "profiler")]
         let present_start = Instant::now();
-        self.platform_window.draw(self.shown_scene());
+        self.platform_window.draw(&self.rendered_frame.scene);
         #[cfg(feature = "profiler")]
         self.window_profiler.record_present(
             present_start,
@@ -4148,13 +4086,7 @@ impl Window {
 
         self.a11y.sync_active_flag();
         if self.a11y.is_active() {
-            // A cached view replays its part of the last frame's tree; with
-            // none to replay, every view renders.
-            if !self.a11y.begin_frame() {
-                self.refreshing = true;
-            }
-        } else {
-            self.a11y.skip_frame();
+            self.a11y.begin_frame();
         }
 
         let _inspector_width: Pixels = rems(30.0).to_pixels(self.rem_size());
@@ -4215,13 +4147,11 @@ impl Window {
             element.prepaint_as_root(offset, AvailableSpace::min_size(), self, cx);
             active_drag_element = Some(element);
             cx.active_drag = Some(active_drag);
-            self.drag_painted_at = Some(self.mouse_position);
         } else {
             tooltip_element = self.prepaint_tooltip(cx);
         }
 
         self.mouse_hit_test = self.next_frame.hit_test(self.mouse_position);
-        self.note_drag_hover(cx);
 
         // Now actually paint the elements.
         #[cfg(feature = "profiler")]
@@ -4239,29 +4169,7 @@ impl Window {
         } else if let Some(mut drag_element) = active_drag_element {
             drag_element.paint(self, cx);
         } else if let Some(mut tooltip_element) = tooltip_element {
-            // Quill: under a paint filter the tooltip is painted under its
-            // owner's tags, so the filter decides it as it decided the
-            // owner.
-            let tags = self
-                .tooltip_bounds
-                .as_ref()
-                .filter(|_| self.paint_filter.is_some())
-                .and_then(|tooltip| {
-                    self.tooltip_tags
-                        .iter()
-                        .find(|(id, _)| *id == tooltip.id)
-                        .map(|(_, tags)| (tags.clone(), tooltip.bounds))
-                });
-            let pushed = tags.as_ref().map_or(0, |(tags, _)| tags.len());
-            if let Some((tags, bounds)) = tags {
-                for tag in tags {
-                    self.push_a11y_tag(tag, bounds);
-                }
-            }
             tooltip_element.paint(self, cx);
-            for _ in 0..pushed {
-                self.pop_a11y_tag();
-            }
         }
 
         #[cfg(any(feature = "inspector", debug_assertions))]
@@ -4277,13 +4185,10 @@ impl Window {
 
         // a11y may have been activated/deactivated halfway through the frame
         let a11y_active_start_of_frame = self.a11y.is_active();
-        let a11y_system_active_start_of_frame = self.a11y.is_system_active();
         self.a11y.sync_active_flag();
-        let a11y_system_active_end_of_frame = self.a11y.is_system_active();
+        let a11y_active_end_of_frame = self.a11y.is_active();
 
-        // A tree built only because it was forced stays in-process.
-        let should_send_a11y_update =
-            a11y_system_active_start_of_frame && a11y_system_active_end_of_frame;
+        let should_send_a11y_update = a11y_active_start_of_frame && a11y_active_end_of_frame;
 
         if a11y_active_start_of_frame {
             // Harvest frame metadata for the debug dump while the live window
@@ -4488,9 +4393,7 @@ impl Window {
                 });
                 deferred_draw.accessed_entities.extend(accessed_entities);
             } else {
-                let replayed = deferred_draw.paint_range.clone();
-                self.reuse_paint(replayed.clone());
-                self.replay_live_views(&deferred_draw.element_id_stack, &replayed, &paint_start);
+                self.reuse_paint(deferred_draw.paint_range.clone());
             }
             let paint_end = self.paint_index();
             deferred_draw.paint_range = paint_start..paint_end;
@@ -4514,33 +4417,15 @@ impl Window {
             dispatch_tree_index: self.next_frame.dispatch_tree.len(),
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             line_layout_index: self.text_system.layout_index(),
-            a11y_index: self.a11y.index(),
-            focus: self.focus,
         }
-    }
-
-    /// While the accessibility tree is built, whether the focus is not the
-    /// one a cached view's last prepaint saw from start to end. Its focus
-    /// claims were made for that focus, so it renders instead of replaying.
-    /// Focus moved outside a draw refreshes the window anyway; this catches
-    /// a move during one (a view that focuses something as it renders).
-    pub(crate) fn a11y_focus_moved(&self, range: &Range<PrepaintStateIndex>) -> bool {
-        self.a11y.is_active() && (range.start.focus != self.focus || range.end.focus != self.focus)
     }
 
     pub(crate) fn reuse_prepaint(&mut self, range: Range<PrepaintStateIndex>) {
-        let hitboxes =
-            &self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index];
-        for hitbox in hitboxes {
-            if let Some(tag) = self.rendered_frame.hitbox_tags.get(&hitbox.id) {
-                self.next_frame.hitbox_tags.insert(hitbox.id, tag.clone());
-            }
-        }
-        self.next_frame.hitboxes.extend(hitboxes.iter().cloned());
-        if self.a11y.is_active() {
-            self.a11y
-                .replay(range.start.a11y_index..range.end.a11y_index);
-        }
+        self.next_frame.hitboxes.extend(
+            self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index]
+                .iter()
+                .cloned(),
+        );
         self.next_frame.tooltip_requests.extend(
             self.rendered_frame.tooltip_requests
                 [range.start.tooltips_index..range.end.tooltips_index]
@@ -4598,7 +4483,6 @@ impl Window {
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             tab_handle_index: self.next_frame.tab_stops.paint_index(),
             line_layout_index: self.text_system.layout_index(),
-            focus_tags_index: self.next_frame.focus_tags.len(),
         }
     }
 
@@ -4638,10 +4522,6 @@ impl Window {
         self.next_frame.tab_stops.replay(
             &self.rendered_frame.tab_stops.insertion_history
                 [range.start.tab_handle_index..range.end.tab_handle_index],
-        );
-        self.next_frame.focus_tags.extend_from_slice(
-            &self.rendered_frame.focus_tags
-                [range.start.focus_tags_index..range.end.focus_tags_index],
         );
 
         self.text_system
@@ -4757,9 +4637,7 @@ impl Window {
         result
     }
 
-    /// QUILL: draw `f` at `opacity` of the current element opacity, which a
-    /// view drawing another view's content out of its tree has to carry over.
-    pub fn with_element_opacity<R>(
+    pub(crate) fn with_element_opacity<R>(
         &mut self,
         opacity: Option<f32>,
         f: impl FnOnce(&mut Self) -> R,
@@ -4785,10 +4663,8 @@ impl Window {
     pub fn transact<T, U>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, U>) -> Result<T, U> {
         self.invalidator.debug_assert_prepaint();
         let index = self.prepaint_index();
-        let live_views = self.next_frame.live_views.len();
         let result = f(self);
         if result.is_err() {
-            self.next_frame.live_views.truncate(live_views);
             self.next_frame.hitboxes.truncate(index.hitboxes_index);
             self.next_frame
                 .tooltip_requests
@@ -4854,7 +4730,7 @@ impl Window {
     /// Obtain the current element opacity. This method should only be called during the
     /// prepaint phase of element drawing.
     #[inline]
-    pub fn element_opacity(&self) -> f32 {
+    pub(crate) fn element_opacity(&self) -> f32 {
         self.invalidator.debug_assert_paint_or_prepaint();
         self.element_opacity
     }
@@ -5078,28 +4954,20 @@ impl Window {
         });
     }
 
-    /// Creates a new painting layer for the specified bounds. A "layer" is a batch
-    /// of geometry that are non-overlapping and have the same draw order. This is typically used
+    /// Creates a new painting layer. A "layer" is a batch of geometry that are
+    /// non-overlapping and have the same draw order. This is typically used
     /// for performance reasons.
     ///
+    /// Layers painted inside `f` are drawn above this layer, including above
+    /// what `f` paints after them.
+    ///
     /// This method should only be called as part of the paint phase of element drawing.
-    pub fn paint_layer<R>(&mut self, bounds: Bounds<Pixels>, f: impl FnOnce(&mut Self) -> R) -> R {
+    pub fn paint_layer<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         self.invalidator.debug_assert_paint();
 
-        let content_mask = self.content_mask();
-        let clipped_bounds = bounds.intersect(&content_mask.bounds);
-        if !clipped_bounds.is_empty() {
-            self.next_frame
-                .scene
-                .push_layer(self.cover_bounds(clipped_bounds));
-        }
-
+        self.next_frame.scene.push_layer();
         let result = f(self);
-
-        if !clipped_bounds.is_empty() {
-            self.next_frame.scene.pop_layer();
-        }
-
+        self.next_frame.scene.pop_layer();
         result
     }
 
@@ -5119,23 +4987,27 @@ impl Window {
         let scale_factor = self.scale_factor();
         let content_mask = self.snapped_content_mask();
         let opacity = self.element_opacity();
-        let element_bounds = self.cover_bounds(bounds);
-        let element_corner_radii = corner_radii.scale(scale_factor);
         for shadow in shadows {
             if shadow.inset {
                 continue;
             }
-            let shadow_bounds = (bounds + shadow.offset).dilate(shadow.spread_radius);
+            let shape_bounds =
+                self.cover_bounds((bounds + shadow.offset).dilate(shadow.spread_radius));
+            if shape_bounds.is_empty() {
+                continue;
+            }
+            let blur_radius = shadow.blur_radius.scale(scale_factor);
             self.next_frame.scene.insert_primitive(Shadow {
                 order: 0,
-                blur_radius: shadow.blur_radius.scale(scale_factor),
-                bounds: self.cover_bounds(shadow_bounds),
+                blur_radius,
+                // Leave room for the tail of the blur.
+                bounds: shape_bounds.dilate(blur_radius * 3.),
                 content_mask,
-                corner_radii: corner_radii.scale(scale_factor),
+                corner_radii: Corners::default(),
                 color: shadow.color.opacity(opacity),
-                element_bounds,
-                element_corner_radii,
-                inset: 0,
+                shape_bounds,
+                shape_corner_radii: corner_radii.scale(scale_factor),
+                inset: false.into(),
                 pad: 0,
             });
         }
@@ -5174,55 +5046,58 @@ impl Window {
             self.next_frame.scene.insert_primitive(Shadow {
                 order: 0,
                 blur_radius: shadow.blur_radius.scale(scale_factor),
-                bounds: self.cover_bounds(hole),
+                bounds: element_bounds,
                 content_mask,
-                corner_radii: hole_corner_radii.scale(scale_factor),
+                corner_radii: element_corner_radii,
                 color: shadow.color.opacity(opacity),
-                element_bounds,
-                element_corner_radii,
-                inset: 1,
+                shape_bounds: self.cover_bounds(hole),
+                shape_corner_radii: hole_corner_radii.scale(scale_factor),
+                inset: true.into(),
                 pad: 0,
             });
         }
     }
 
     fn largest_border_interior(quad: &Quad) -> Bounds<ScaledPixels> {
-        let radii = &quad.corner_radii;
-        let widths = &quad.border_widths;
-        let edge_radii = Edges {
-            top: radii.top_left.max(radii.top_right),
-            right: radii.top_right.max(radii.bottom_right),
-            bottom: radii.bottom_left.max(radii.bottom_right),
-            left: radii.top_left.max(radii.bottom_left),
-        };
+        let size = quad.bounds.size;
+        let diagonal = (size.width.0 * size.width.0 + size.height.0 * size.height.0).sqrt();
+        if diagonal == 0. {
+            return Bounds::default();
+        }
+        // The interior's corners sit on the corner arcs. Taking the angle along
+        // the arc whose tangent is the quad's aspect ratio stays within 1% of
+        // the largest interior.
+        let cos = size.height.0 / diagonal;
+        let sin = size.width.0 / diagonal;
 
-        let antialias_inset = point(ScaledPixels(1.0), ScaledPixels(1.0));
-        let inset_bounds = |top_left_inset, bottom_right_inset| {
-            Bounds::from_corners(
-                quad.bounds.origin + top_left_inset + antialias_inset,
-                quad.bounds.bottom_right() - bottom_right_inset - antialias_inset,
+        // A corner's inner border edge is a quarter ellipse around the
+        // corner's center, with the border widths taken off its radius.
+        let corner_inset = |radius: ScaledPixels, width_x: ScaledPixels, width_y: ScaledPixels| {
+            point(
+                width_x.max(radius - (radius - width_x) * cos),
+                width_y.max(radius - (radius - width_y) * sin),
             )
         };
 
-        // Rounded corners need only be excluded on one axis. Either candidate
-        // is empty of border pixels, so use the larger interior.
-        let horizontal_band = inset_bounds(
-            point(widths.left, widths.top.max(edge_radii.top)),
-            point(widths.right, widths.bottom.max(edge_radii.bottom)),
-        );
-        let vertical_band = inset_bounds(
-            point(widths.left.max(edge_radii.left), widths.top),
-            point(widths.right.max(edge_radii.right), widths.bottom),
-        );
+        let radii = &quad.corner_radii;
+        let widths = &quad.border_widths;
+        let top_left = corner_inset(radii.top_left, widths.left, widths.top);
+        let top_right = corner_inset(radii.top_right, widths.right, widths.top);
+        let bottom_right = corner_inset(radii.bottom_right, widths.right, widths.bottom);
+        let bottom_left = corner_inset(radii.bottom_left, widths.left, widths.bottom);
 
-        let area = |bounds: &Bounds<ScaledPixels>| {
-            bounds.size.width.0.max(0.) * bounds.size.height.0.max(0.)
-        };
-        if area(&horizontal_band) >= area(&vertical_band) {
-            horizontal_band
-        } else {
-            vertical_band
-        }
+        let antialias_inset = point(ScaledPixels(1.0), ScaledPixels(1.0));
+        Bounds::from_corners(
+            quad.bounds.origin
+                + point(top_left.x.max(bottom_left.x), top_left.y.max(top_right.y))
+                + antialias_inset,
+            quad.bounds.bottom_right()
+                - point(
+                    top_right.x.max(bottom_right.x),
+                    bottom_left.y.max(bottom_right.y),
+                )
+                - antialias_inset,
+        )
     }
 
     /// Paint one or more quads into the scene for the next frame at the current stacking context.
@@ -5250,20 +5125,64 @@ impl Window {
             border_widths: snapped_border_widths,
             border_style: quad.border_style,
         };
+        self.insert_quad(quad);
+    }
 
-        if !quad.background.is_transparent() {
+    fn insert_quad(&mut self, quad: Quad) {
+        let has_background = !quad.background.is_transparent();
+        let has_border =
+            quad.border_widths != Edges::default() && !quad.border_color.is_transparent();
+        if !has_background && !has_border {
+            return;
+        }
+
+        let is_rectangle =
+            quad.border_widths == Edges::default() && quad.corner_radii == Corners::default();
+        if has_background && is_rectangle {
             self.next_frame.scene.insert_primitive(quad);
             return;
         }
 
-        // Splitting a border-only quad around its empty interior avoids shading
-        // every transparent pixel inside large outlines.
+        let plain_border = quad.corner_radii == Corners::default()
+            && quad.border_style == BorderStyle::Solid
+            && (!has_background || quad.border_color.is_opaque());
+
+        // Splitting off the interior leaves only the strips around it for the
+        // border and corner shading.
         let outer_bounds = quad.bounds;
-        let inner_bounds = Self::largest_border_interior(&quad);
+        let inner_bounds = if plain_border {
+            quad.bounds.extend(quad.border_widths.map(|width| -*width))
+        } else {
+            Self::largest_border_interior(&quad)
+        };
+
+        // A plain border's strips can be plain rectangles of the border color.
+        // Otherwise, each strip is the whole quad masked to the strip, so the
+        // border, corners and gradients are still shaded relative to the full quad.
+        let strip_quad = if plain_border {
+            Quad {
+                background: quad.border_color.into(),
+                border_widths: Edges::default(),
+                ..quad
+            }
+        } else {
+            quad
+        };
 
         if inner_bounds.is_empty() {
-            self.next_frame.scene.insert_primitive(quad);
+            self.next_frame.scene.insert_primitive(strip_quad);
             return;
+        }
+
+        if has_background {
+            self.next_frame.scene.insert_primitive(Quad {
+                content_mask: ContentMask {
+                    bounds: quad.content_mask.bounds.intersect(&inner_bounds),
+                },
+                border_widths: Edges::default(),
+                corner_radii: Corners::default(),
+                ..quad
+            });
         }
 
         let strips = [
@@ -5290,77 +5209,31 @@ impl Window {
         ];
 
         for strip in strips {
-            let content_mask_bounds = quad.content_mask.bounds.intersect(&strip);
-            if !content_mask_bounds.is_empty() {
-                self.next_frame.scene.insert_primitive(Quad {
-                    content_mask: ContentMask {
-                        bounds: content_mask_bounds,
-                    },
-                    ..quad
-                });
-            }
+            self.next_frame.scene.insert_primitive(Quad {
+                content_mask: ContentMask {
+                    bounds: quad.content_mask.bounds.intersect(&strip),
+                },
+                ..strip_quad
+            });
         }
-    }
-
-    /// QUILL: paint backdrop glass whose body fills `bounds`, with corners of
-    /// `corner_radius` (clamped to a pill). The glass bends, frosts and
-    /// lights whatever this frame painted under it before; what is painted
-    /// over it afterwards draws on top. The shadow reaches past `bounds`.
-    /// Renderers that can't read the frame draw a rounded quad of the
-    /// glass's colour instead, as does a lens inside a `paint_layer`.
-    ///
-    /// This method should only be called as part of the paint phase of element drawing.
-    pub fn paint_backdrop_lens(
-        &mut self,
-        bounds: Bounds<Pixels>,
-        corner_radius: Pixels,
-        style: &LensStyle,
-    ) {
-        self.invalidator.debug_assert_paint();
-        if bounds.size.width <= px(0.) || bounds.size.height <= px(0.) {
-            return;
-        }
-        let scale_factor = self.scale_factor();
-        let body = self.snap_bounds(bounds);
-        let footprint = self.snap_bounds(style.footprint(bounds));
-        let mut lens = BackdropLens::new(
-            body,
-            corner_radius.scale(scale_factor),
-            footprint,
-            self.snapped_content_mask(),
-            scale_factor,
-            style,
-        );
-        lens.opacity = self.element_opacity();
-        self.next_frame.scene.insert_primitive(lens);
-    }
-
-    /// QUILL (glass effects): the lenses the last drawn frame holds and how
-    /// many bands they take (glass over glass is a second band). A lens
-    /// drawn as its fallback quad does not count. For tests and budgets.
-    pub fn rendered_glass(&self) -> (usize, usize) {
-        let lenses = &self.rendered_frame.scene.lenses;
-        let mut bands: Vec<u32> = lenses.iter().map(|lens| lens.order).collect();
-        bands.sort_unstable();
-        bands.dedup();
-        (lenses.len(), bands.len())
     }
 
     /// Paint the given `Path` into the scene for the next frame at the current z-index.
     ///
     /// This method should only be called as part of the paint phase of element drawing.
-    pub fn paint_path(&mut self, mut path: Path<Pixels>, color: impl Into<Background>) {
+    pub fn paint_path(&mut self, path: Path, color: impl Into<Background>) {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
         let content_mask = self.content_mask();
         let opacity = self.element_opacity();
-        path.content_mask = content_mask;
         let color: Background = color.into();
-        path.color = color.opacity(opacity);
-        self.next_frame
-            .scene
-            .insert_primitive(path.scale(scale_factor));
+        self.next_frame.scene.insert_primitive(PaintedPath::new(
+            path,
+            scale_factor,
+            content_mask,
+            color.opacity(opacity),
+        ));
     }
 
     /// Paint an underline into the scene for the next frame at the current z-index.
@@ -5440,11 +5313,7 @@ impl Window {
             (quantized_origin.y.fract() * SUBPIXEL_VARIANTS_Y as f32) as u8,
         );
         let integer_origin = quantized_origin.map(|c| ScaledPixels(c.trunc()));
-        // QUILL (glass stage 5): inked labels are monochrome, so the renderer can
-        // colour them.
-        let ink = self.glass.ink();
-        let subpixel_rendering =
-            ink.is_none() && self.should_use_subpixel_rendering(font_id, font_size);
+        let subpixel_rendering = self.should_use_subpixel_rendering(font_id, font_size);
         let dilation = self.text_system().glyph_dilation_for_color(color);
         let params = RenderGlyphParams {
             font_id,
@@ -5483,43 +5352,28 @@ impl Window {
                     transformation: TransformationMatrix::unit(),
                 });
             } else {
-                let sprite = MonochromeSprite {
+                self.next_frame.scene.insert_primitive(MonochromeSprite {
                     order: 0,
-                    pad: 0,
+                    animation: SpriteAnimationId::NONE,
                     bounds,
                     content_mask,
                     color: color.opacity(element_opacity),
                     tile,
                     transformation: TransformationMatrix::unit(),
-                };
-                if self.glass.records_glyphs() {
-                    self.next_frame.scene.record_glyph_source(
-                        &sprite.tile,
-                        &sprite.bounds,
-                        crate::scene::GlyphSource::Glyph {
-                            origin,
-                            font_id,
-                            glyph_id,
-                            font_size,
-                            dilation,
-                        },
-                    );
-                }
-                match ink {
-                    Some(ink) => self.next_frame.scene.insert_inked_sprite(sprite, ink),
-                    None => self.next_frame.scene.insert_primitive(sprite),
-                }
+                });
             }
         }
         Ok(())
     }
 
     fn should_use_subpixel_rendering(&self, font_id: FontId, font_size: Pixels) -> bool {
-        if self.platform_window.background_appearance() != WindowBackgroundAppearance::Opaque {
+        // Checked first because it's cheap, while some platforms lock the window to read its
+        // background appearance, and this runs for every glyph.
+        if !self.platform_window.is_subpixel_rendering_supported() {
             return false;
         }
 
-        if !self.platform_window.is_subpixel_rendering_supported() {
+        if self.platform_window.background_appearance() != WindowBackgroundAppearance::Opaque {
             return false;
         }
 
@@ -5581,18 +5435,6 @@ impl Window {
             let content_mask = self.snapped_content_mask();
             let opacity = self.element_opacity();
 
-            if self.glass.records_glyphs() {
-                self.next_frame.scene.record_glyph_source(
-                    &tile,
-                    &bounds,
-                    crate::scene::GlyphSource::Emoji {
-                        origin,
-                        font_id,
-                        glyph_id,
-                        font_size,
-                    },
-                );
-            }
             self.next_frame.scene.insert_primitive(PolychromeSprite {
                 order: 0,
                 pad: 0,
@@ -5616,6 +5458,21 @@ impl Window {
         path: SharedString,
         data: Option<&[u8]>,
         transformation: TransformationMatrix,
+        color: Hsla,
+        cx: &App,
+    ) -> Result<()> {
+        self.paint_animated_svg(bounds, path, data, transformation, None, color, cx)
+    }
+
+    /// Like [`Self::paint_svg`], with an `animation` the window applies before every
+    /// present, so the view isn't re-rendered to advance it.
+    pub(crate) fn paint_animated_svg(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        path: SharedString,
+        data: Option<&[u8]>,
+        transformation: TransformationMatrix,
+        animation: Option<SpriteAnimation>,
         color: Hsla,
         cx: &App,
     ) -> Result<()> {
@@ -5659,29 +5516,20 @@ impl Window {
             .map_origin(|value| ScaledPixels(round_half_toward_zero(value.0)))
             .map_size(|size| size.ceil());
 
-        // QUILL (glass stage 5): icons can be inked and rasterized again too
-        // (only those drawn from a path; inline data is not kept).
-        if self.glass.records_glyphs() && data.is_none() {
-            self.next_frame.scene.record_glyph_source(
-                &tile,
-                &final_bounds,
-                crate::scene::GlyphSource::Svg {
-                    bounds,
-                    path: params.path.clone(),
-                },
-            );
-        }
         let sprite = MonochromeSprite {
             order: 0,
-            pad: 0,
+            animation: SpriteAnimationId::NONE,
             bounds: final_bounds,
             content_mask,
             color: color.opacity(element_opacity),
             tile,
             transformation,
         };
-        match self.glass.ink() {
-            Some(ink) => self.next_frame.scene.insert_inked_sprite(sprite, ink),
+        match animation {
+            Some(animation) => self
+                .next_frame
+                .scene
+                .insert_animated_sprite(sprite, animation),
             None => self.next_frame.scene.insert_primitive(sprite),
         }
 
@@ -5817,26 +5665,6 @@ impl Window {
         });
     }
 
-    /// QUILL: paint CPU surface pixels into the scene for the next frame at
-    /// the current z-index (platforms without CoreVideo).
-    ///
-    /// This method should only be called as part of the paint phase of element drawing.
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    pub fn paint_surface_frame(&mut self, bounds: Bounds<Pixels>, frame: Arc<crate::SurfaceFrame>) {
-        use crate::PaintSurface;
-
-        self.invalidator.debug_assert_paint();
-
-        let bounds = self.snap_bounds(bounds);
-        let content_mask = self.snapped_content_mask();
-        self.next_frame.scene.insert_primitive(PaintSurface {
-            order: 0,
-            bounds,
-            content_mask,
-            frame,
-        });
-    }
-
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {
@@ -5845,58 +5673,10 @@ impl Window {
                 frame_index,
             };
 
-            self.sprite_atlas.remove(&params.clone().into());
+            self.sprite_atlas.remove(&params.into());
         }
 
         Ok(())
-    }
-
-    /// QUILL: how many frames this window has begun drawing, counting the one
-    /// being drawn. Work done while laying out or painting one frame shares
-    /// the number, so a cache can tell one frame's requests from the next.
-    pub fn frame_number(&self) -> u64 {
-        self.frames_begun
-    }
-
-    /// QUILL: how many color emoji glyphs this window's sprite atlas holds.
-    /// GPUI keeps every glyph it rasterized until the window closes.
-    pub fn emoji_glyph_count(&self) -> usize {
-        self.sprite_atlas.emoji_glyph_count()
-    }
-
-    /// QUILL: start dropping the color emoji glyphs this window no longer
-    /// draws. The atlas marks what frames ask for from here on, and the
-    /// next frame redraws every view, cached ones too, so each glyph on
-    /// screen gets marked. Call between frames; pass the result to
-    /// [`Window::sweep_emoji_glyphs`].
-    pub fn begin_emoji_glyph_sweep(&mut self) -> u64 {
-        let mark = self.sprite_atlas.next_use_mark();
-        self.refresh();
-        mark
-    }
-
-    /// QUILL: drop the color emoji glyphs no frame drew since
-    /// [`Window::begin_emoji_glyph_sweep`] returned `mark`; how many went.
-    /// Call once the frame that redrew everything has finished: before it,
-    /// a view replaying its cache may still show a glyph left unmarked.
-    pub fn sweep_emoji_glyphs(&mut self, mark: u64) -> usize {
-        self.sprite_atlas.remove_emoji_glyphs_unused_since(mark)
-    }
-
-    /// QUILL: how many text glyphs this window's sprite atlas holds.
-    pub fn text_glyph_count(&self) -> usize {
-        self.sprite_atlas.text_glyph_count()
-    }
-
-    /// QUILL: [`Window::sweep_emoji_glyphs`] for text glyphs.
-    pub fn sweep_text_glyphs(&mut self, mark: u64) -> usize {
-        self.sprite_atlas.remove_text_glyphs_unused_since(mark)
-    }
-
-    /// QUILL: this window's atlas, for tests that seed it.
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn sprite_atlas(&self) -> &Arc<dyn PlatformAtlas> {
-        &self.sprite_atlas
     }
 
     /// Returns whether every frame of an image is present in the sprite atlas.
@@ -6022,174 +5802,6 @@ impl Window {
         hitbox
     }
 
-    /// Record the [`InteractiveElement::a11y_tag`] of a hitbox inserted this
-    /// frame, for [`Self::hovered_a11y_tags`].
-    pub(crate) fn tag_hitbox(&mut self, id: HitboxId, tag: SharedString) {
-        self.next_frame.hitbox_tags.insert(id, tag);
-    }
-
-    /// The tags ([`InteractiveElement::a11y_tag`]) of the hitboxes under the
-    /// mouse as of the last mouse event, topmost first: the hitboxes a
-    /// mouse event would reach, as [`Hitbox::is_hovered`] sees them. The
-    /// walk ends with the hitboxes that only scroll would reach
-    /// ([`HitboxBehavior::BlockMouseExceptScroll`]) and at an occluding
-    /// hitbox ([`HitboxBehavior::BlockMouse`]), tagged or not, so an
-    /// overlay over a tagged region hides the region's tag.
-    pub fn hovered_a11y_tags(&self) -> Vec<SharedString> {
-        let hit_test = &self.mouse_hit_test;
-        let frame = &self.rendered_frame;
-        let mut tags = Vec::new();
-        for id in hit_test.ids.iter().take(hit_test.hover_hitbox_count) {
-            if let Some(tag) = frame.hitbox_tags.get(id) {
-                tags.push(tag.clone());
-            }
-            let occludes = frame
-                .hitboxes
-                .iter()
-                .any(|hitbox| hitbox.id == *id && hitbox.behavior == HitboxBehavior::BlockMouse);
-            if occludes {
-                break;
-            }
-        }
-        tags
-    }
-
-    /// Whether the focused element registered a text input handler in the
-    /// last frame ([`Self::handle_input`]): typed characters go into a text
-    /// field, not to key bindings alone.
-    pub fn focused_text_input(&self) -> bool {
-        !self.rendered_frame.input_handlers.is_empty()
-    }
-
-    /// The tags ([`InteractiveElement::a11y_tag`]) of the focused element
-    /// and the elements it was painted inside, innermost first, from the
-    /// last frame: what a key event would reach, read the way
-    /// [`Self::hovered_a11y_tags`] reads a click. Recorded when a focused
-    /// element registers a text input handler or tracks its focus handle;
-    /// empty when nothing focused was painted (focus in a deferred draw
-    /// records the tags of that draw's own ancestors only).
-    pub fn focused_a11y_tags(&self) -> Vec<SharedString> {
-        self.rendered_frame
-            .focus_tags
-            .last()
-            .map(|tags| tags.iter().rev().cloned().collect())
-            .unwrap_or_default()
-    }
-
-    /// Paint-time: an element tagged `tag` starts painting (its own
-    /// background and border included). Under a paint filter, an element
-    /// whose tag turns paint off is covered with the filter's `hidden`
-    /// fill over `bounds`, and one whose tag turns it back on gets the
-    /// `shown` fill under it.
-    pub(crate) fn push_a11y_tag(&mut self, tag: SharedString, bounds: Bounds<Pixels>) {
-        let was_hidden = self.next_frame.scene.suppressed;
-        self.a11y_tag_stack.push(tag);
-        self.update_paint_suppression();
-        let hidden = self.next_frame.scene.suppressed;
-        let Some(filter) = self.paint_filter.as_ref() else {
-            return;
-        };
-        let color = match (was_hidden, hidden) {
-            (false, true) => filter.hidden,
-            (true, false) => filter.shown,
-            _ => return,
-        };
-        self.next_frame.scene.suppressed = false;
-        self.paint_quad(fill(bounds, color));
-        self.next_frame.scene.suppressed = hidden;
-    }
-
-    /// Draw-time, under a paint filter that refuses paint outside every
-    /// tagged element: the window starts covered with the `hidden` fill.
-    fn cover_refused_window(&mut self) {
-        let Some(hidden) = self.paint_filter.as_ref().map(|filter| filter.hidden) else {
-            return;
-        };
-        if !self.next_frame.scene.suppressed {
-            return;
-        }
-        let bounds = Bounds::new(Point::default(), self.viewport_size()).scale(self.scale_factor());
-        self.next_frame.scene.suppressed = false;
-        self.next_frame.scene.insert_primitive(Quad {
-            bounds,
-            content_mask: ContentMask { bounds },
-            background: hidden.into(),
-            ..Quad::default()
-        });
-        self.next_frame.scene.suppressed = true;
-    }
-
-    /// Paint-time: the element [`Self::push_a11y_tag`] named is painted.
-    pub(crate) fn pop_a11y_tag(&mut self) {
-        self.a11y_tag_stack.pop();
-        self.update_paint_suppression();
-    }
-
-    fn update_paint_suppression(&mut self) {
-        self.next_frame.scene.suppressed = self
-            .paint_filter
-            .as_ref()
-            .is_some_and(|filter| !(filter.allows)(&self.a11y_tag_stack));
-    }
-
-    /// Draw only what `filter` allows from now on, `None` to draw
-    /// everything again. The filter gets the [`InteractiveElement::a11y_tag`]s
-    /// of the elements being painted, outermost first, and answers whether
-    /// what they paint reaches the scene; anything painted outside every
-    /// tagged element gets an empty list. A tagged element refused while
-    /// its parent was drawn is covered with the filter's `hidden` fill, one
-    /// drawn while its parent was refused gets the `shown` fill under it. A filtered frame renders every
-    /// view again (cached paint was never filtered and is not replayed).
-    /// Meant for one [`Self::draw`] followed by [`Self::capture_frame`]:
-    /// clear it and draw again before the frame is presented.
-    pub fn set_paint_filter(&mut self, filter: Option<PaintFilter>) {
-        self.paint_filter = filter;
-        self.refresh();
-    }
-
-    /// Whether a paint filter is set ([`Self::set_paint_filter`]).
-    pub fn has_paint_filter(&self) -> bool {
-        self.paint_filter.is_some()
-    }
-
-    /// The last drawn frame, rendered offscreen by the window's own
-    /// renderer and read back, in device pixels. Nothing is presented and
-    /// the screen is not read, so no other window can appear in it. An
-    /// error where the platform's renderer has no readback.
-    pub fn capture_frame(&self) -> anyhow::Result<image::RgbaImage> {
-        self.platform_window.capture_image(self.shown_scene())
-    }
-
-    /// Quill, paint-time: the element that owns tooltip `id` is being
-    /// painted. Under a paint filter, keep the tag stack above it, so the
-    /// tooltip is filtered as its owner is (it is drawn later, at the
-    /// root, where the stack is empty).
-    pub(crate) fn record_tooltip_tags(&mut self, id: Option<TooltipId>) {
-        let Some(id) = id else {
-            return;
-        };
-        if self.paint_filter.is_none() {
-            return;
-        }
-        self.tooltip_tags.push((id, self.a11y_tag_stack.clone()));
-    }
-
-    /// Paint-time: the focused element is being painted; keep the tag
-    /// stack above it for [`Self::focused_a11y_tags`].
-    pub(crate) fn record_focus_tags(&mut self) {
-        self.next_frame.focus_tags.push(self.a11y_tag_stack.clone());
-    }
-
-    /// The caret (or the start of the text being composed) of the text
-    /// input the platform types into, in window logical pixels: the
-    /// rectangle the input method's candidate window is placed by.
-    pub fn focused_text_caret(&mut self, cx: &mut App) -> Option<Bounds<Pixels>> {
-        let mut handler = self.platform_window.take_input_handler()?;
-        let bounds = handler.selected_bounds(self, cx);
-        self.platform_window.set_input_handler(handler);
-        bounds
-    }
-
     /// Set a hitbox which will act as a control area of the platform window.
     ///
     /// This method should only be called as part of the paint phase of element drawing.
@@ -6279,7 +5891,6 @@ impl Window {
         self.invalidator.debug_assert_paint();
 
         if focus_handle.is_focused(self) {
-            self.record_focus_tags();
             let cx = self.to_async(cx);
             self.next_frame.input_handlers.push(Some(
                 PlatformInputHandler::new(cx, Box::new(input_handler)).with_focus(focus_handle.id),
@@ -6574,7 +6185,6 @@ impl Window {
                             external_payload_source: None,
                         });
                     }
-                    self.refresh();
                     PlatformInput::MouseMove(MouseMoveEvent {
                         position,
                         pressed_button: Some(MouseButton::Left),
@@ -6660,9 +6270,7 @@ impl Window {
 
         let caused_invalidation = self.invalidator.update_count() > update_count_before;
         if caused_invalidation {
-            self.input_rate_tracker
-                .borrow_mut()
-                .record_input(Instant::now());
+            self.input_rate_tracker.borrow_mut().record_input();
         }
         #[cfg(feature = "profiler")]
         self.window_profiler.end_input(caused_invalidation);
@@ -6846,26 +6454,8 @@ impl Window {
         });
     }
 
-    /// QUILL: a cached view replays `drag_over` styles for the hitboxes it was
-    /// painted under, so when content moves under a still pointer the next
-    /// frame renders every view. Hitbox ids change with each render, so this
-    /// compares their boxes. A frame that refreshed needs no second one.
-    fn note_drag_hover(&mut self, cx: &App) {
-        let hovered = cx.active_drag.is_some().then(|| {
-            self.next_frame
-                .hitbox_bounds(&self.mouse_hit_test)
-                .collect::<SmallVec<_>>()
-        });
-        let previous = mem::replace(&mut self.drag_hovered, hovered);
-        self.drag_target_moved = !self.refreshing && previous.is_some() && previous != self.drag_hovered;
-    }
-
     fn dispatch_mouse_event(&mut self, event: &dyn Any, cx: &mut App) {
-        let hit_test = self.rendered_frame.hit_test(self.mouse_position());
-        // Quill: a drag redraws on a move only when the hovered hitboxes change
-        // (below). The cursor is resolved at the end, after the listeners.
-        let hit_test_changed = hit_test != self.mouse_hit_test;
-        self.mouse_hit_test = hit_test;
+        self.mouse_hit_test = self.rendered_frame.hit_test(self.mouse_position());
 
         #[cfg(any(feature = "inspector", debug_assertions))]
         if self.is_inspector_picking(cx) {
@@ -6902,17 +6492,9 @@ impl Window {
 
         if cx.has_active_drag() {
             if event.is::<MouseMoveEvent>() {
-                // Quill: the ghost is painted on every draw, cached views or
-                // not, so a move only needs a redraw, and a platform update at
-                // the same spot needs nothing. Cached views render again only
-                // for `drag_over` styles, which follow the hovered hitboxes.
-                if hit_test_changed {
-                    self.refresh();
-                } else if self.drag_painted_at != Some(self.mouse_position)
-                    && self.invalidator.not_drawing()
-                {
-                    self.invalidator.set_dirty(true);
-                }
+                // If this was a mouse move event, redraw the window so that the
+                // active drag can follow the mouse cursor.
+                self.refresh();
             } else if event.is::<MouseUpEvent>() {
                 // If this was a mouse up event, cancel the active drag and redraw
                 // the window.
@@ -7137,35 +6719,39 @@ impl Window {
         let started_at = cx.background_executor().now();
         let task = self.spawn(cx, async move |cx| {
             cx.background_executor.timer(remaining).await;
-            cx.update(move |window, cx| {
-                let Some(currently_pending) = window
-                    .pending_input
-                    .take()
-                    .filter(|pending| pending.focus == window.focus)
-                else {
-                    return;
-                };
-
-                let node_id = window.focus_node_id_in_rendered_frame(window.focus);
-                let dispatch_path = window.rendered_frame.dispatch_tree.dispatch_path(node_id);
-
-                let to_replay = window
-                    .rendered_frame
-                    .dispatch_tree
-                    .flush_dispatch(currently_pending.keystrokes, &dispatch_path);
-
-                window.pending_input_changed(cx);
-                window.replay_pending_input(to_replay, cx)
-            })
-            .with_context(|| {
-                format!(
-                    "handling pending input timeout for window {:?}",
-                    cx.window_handle().window_id()
-                )
-            })
-            .log_err();
+            cx.update(move |window, cx| window.flush_pending_input(cx))
+                .with_context(|| {
+                    format!(
+                        "handling pending input timeout for window {:?}",
+                        cx.window_handle().window_id()
+                    )
+                })
+                .log_err();
         });
         (started_at, task)
+    }
+
+    /// Ends a pending multi-key binding as its timeout does, dispatching what
+    /// the keys pressed so far are bound to on their own.
+    fn flush_pending_input(&mut self, cx: &mut App) {
+        let Some(currently_pending) = self
+            .pending_input
+            .take()
+            .filter(|pending| pending.focus == self.focus)
+        else {
+            return;
+        };
+
+        let node_id = self.focus_node_id_in_rendered_frame(self.focus);
+        let dispatch_path = self.rendered_frame.dispatch_tree.dispatch_path(node_id);
+
+        let to_replay = self
+            .rendered_frame
+            .dispatch_tree
+            .flush_dispatch(currently_pending.keystrokes, &dispatch_path);
+
+        self.pending_input_changed(cx);
+        self.replay_pending_input(to_replay, cx)
     }
 
     fn finish_dispatch_key_event(
@@ -7966,43 +7552,6 @@ impl Window {
         self.a11y.debug_tree_json()
     }
 
-    /// Build the accessibility tree every frame whether or not assistive
-    /// technology is connected, so an in-process reader can read it with
-    /// [`Self::a11y_tree_snapshot`]. The tree is not sent to the platform
-    /// while only this asks for it. Turning it on or off redraws the window.
-    pub fn set_a11y_forced(&mut self, on: bool) {
-        if self.a11y.set_forced(on) {
-            self.refresh();
-        }
-    }
-
-    /// Whether [`Self::set_a11y_forced`] is on.
-    pub fn is_a11y_forced(&self) -> bool {
-        self.a11y.is_forced()
-    }
-
-    /// Whether assistive technology asked for the tree this frame. Unlike
-    /// [`Self::is_a11y_active`], a tree forced with [`Self::set_a11y_forced`]
-    /// does not count, so behaviour meant for screen-reader users (focus
-    /// announcements, key handling) can key off this.
-    pub fn is_a11y_system_active(&self) -> bool {
-        self.a11y.is_system_active()
-    }
-
-    /// The accessibility tree of the last frame that built one, with bounds
-    /// in window logical pixels. `None` until a frame built a tree (see
-    /// [`Self::is_a11y_active`] and [`Self::set_a11y_forced`]).
-    pub fn a11y_tree_snapshot(&self) -> Option<A11yTreeSnapshot> {
-        self.a11y.snapshot(self.scale_factor)
-    }
-
-    /// How many frames built an accessibility tree so far (the
-    /// `frame_number` the next [`Self::a11y_tree_snapshot`] carries), without
-    /// copying the tree.
-    pub fn a11y_tree_frame(&self) -> u64 {
-        self.a11y.frame_number()
-    }
-
     /// Register a listener for an accessibility action on a specific node.
     /// The listener will be called when a screen reader requests the given
     /// action on the node identified by `node_id`.
@@ -8019,27 +7568,6 @@ impl Window {
             .entry(node_id)
             .or_default()
             .push((action, Box::new(listener)));
-    }
-
-    /// Test support: handle `action` on `node` as if assistive technology
-    /// asked for it.
-    #[cfg(all(not(target_family = "wasm"), any(test, feature = "test-support")))]
-    pub fn simulate_a11y_action(
-        &mut self,
-        node: accesskit::NodeId,
-        action: accesskit::Action,
-        data: Option<accesskit::ActionData>,
-        cx: &mut App,
-    ) {
-        self.handle_a11y_action(
-            accesskit::ActionRequest {
-                action,
-                target_tree: accesskit::TreeId::ROOT,
-                target_node: node,
-                data,
-            },
-            cx,
-        );
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -8262,24 +7790,22 @@ impl Window {
                 .delta
                 .pixel_delta(px(SCROLL_PIXELS_PER_LAYER / SCROLL_LINES))
                 .y;
-            if let Some(inspector) = self.inspector.clone() {
-                inspector.update(cx, |inspector, _cx| {
-                    if let Some(depth) = inspector.pick_depth.as_mut() {
-                        *depth += f32::from(delta_y) / SCROLL_PIXELS_PER_LAYER;
-                        let max_depth = self.mouse_hit_test.ids.len() as f32 - 0.5;
-                        if *depth < 0.0 {
-                            *depth = 0.0;
-                        } else if *depth > max_depth {
-                            *depth = max_depth;
-                        }
-                        if let Some((_, inspector_id)) =
-                            self.hovered_inspector_hitbox(inspector, &self.rendered_frame)
-                        {
-                            inspector.set_active_element_id(inspector_id, self);
-                        }
+            inspector.update(cx, |inspector, _cx| {
+                if let Some(depth) = inspector.pick_depth.as_mut() {
+                    *depth += f32::from(delta_y) / SCROLL_PIXELS_PER_LAYER;
+                    let max_depth = self.mouse_hit_test.ids.len() as f32 - 0.5;
+                    if *depth < 0.0 {
+                        *depth = 0.0;
+                    } else if *depth > max_depth {
+                        *depth = max_depth;
                     }
-                });
-            }
+                    if let Some((_, inspector_id)) =
+                        self.hovered_inspector_hitbox(inspector, &self.rendered_frame)
+                    {
+                        inspector.set_active_element_id(inspector_id, self);
+                    }
+                }
+            });
         }
     }
 
@@ -9168,6 +8694,34 @@ mod tests {
         }
     }
 
+    /// A stale cache is only visible if the snapshot reports GPUI's cached
+    /// value separately from what the platform reports now.
+    #[gpui::test]
+    fn test_debug_state_reports_cached_and_platform_values(cx: &mut TestAppContext) {
+        use crate::WindowVisibility;
+
+        let window = cx.add_window(|_, _| EmptyView);
+        let window_id = window.window_id().as_u64();
+        let window_state = |cx: &mut TestAppContext| {
+            let state = cx.update(|cx| cx.debug_state());
+            state["windows"]
+                .as_array()
+                .and_then(|windows| windows.iter().find(|window| window["id"] == window_id))
+                .cloned()
+                .expect("the open window is listed")
+        };
+
+        let state = window_state(cx);
+        assert_eq!(state["visibility"]["cached"], "Visible");
+        assert_eq!(state["visibility"]["platform"], "Visible");
+
+        cx.test_window(window.into())
+            .simulate_visibility_change(WindowVisibility::Hidden);
+        let state = window_state(cx);
+        assert_eq!(state["visibility"]["cached"], "Hidden");
+        assert_eq!(state["visibility"]["platform"], "Hidden");
+    }
+
     /// Visibility transitions reach observers exactly once each, with the new
     /// state already stored on the window, and never wake the platform for a
     /// frame: the platform requests one itself when it resumes presenting.
@@ -9324,6 +8878,48 @@ mod tests {
                 Empty
             }
         }
+    }
+
+    #[gpui::test]
+    fn test_window_opened_from_bounds_observer_uses_new_bounds(cx: &mut TestAppContext) {
+        use crate::Subscription;
+
+        struct BoundsObserver {
+            _subscription: Subscription,
+        }
+
+        impl Render for BoundsObserver {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                Empty
+            }
+        }
+
+        let opened_window = Rc::new(Cell::new(None));
+        let window = cx.add_window({
+            let opened_window = opened_window.clone();
+            move |window, cx| BoundsObserver {
+                _subscription: cx.observe_window_bounds(window, move |_, _, cx| {
+                    let handle = cx
+                        .open_window(WindowOptions::default(), |_, cx| cx.new(|_| EmptyView))
+                        .unwrap();
+                    opened_window.set(Some(AnyWindowHandle::from(handle)));
+                }),
+            }
+        });
+        window
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+
+        let new_size = size(px(400.), px(300.));
+        cx.simulate_window_resize(window.into(), new_size);
+
+        let opened_window = opened_window
+            .take()
+            .expect("bounds observer should have opened a window");
+        let opened_size = opened_window
+            .update(cx, |_, window, _| window.bounds().size)
+            .unwrap();
+        assert_eq!(opened_size, new_size);
     }
 
     #[gpui::test]
@@ -9637,6 +9233,50 @@ mod tests {
                 (scale_factor, expected_bounds, resized_size)
             );
         }
+    }
+
+    #[gpui::test]
+    fn test_fullscreen_toggle_reports_current_bounds(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_, _| EmptyView);
+        let handle = AnyWindowHandle::from(window);
+        let notifications = Rc::new(Cell::new(0));
+        window
+            .update(cx, {
+                let notifications = notifications.clone();
+                |_, window, cx| {
+                    cx.observe_window_bounds(window, move |_, _, _| {
+                        notifications.set(notifications.get() + 1)
+                    })
+                    .detach();
+                }
+            })
+            .unwrap();
+        let window_state = |cx: &mut TestAppContext| {
+            cx.update_window(handle, |_, window, _| {
+                (
+                    window.is_fullscreen(),
+                    window.bounds().size,
+                    window.viewport_size(),
+                )
+            })
+            .unwrap()
+        };
+        let initial_size = window_state(cx).1;
+
+        window
+            .update(cx, |_, window, _| window.toggle_fullscreen())
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(window_state(cx), (true, initial_size, initial_size));
+        assert_eq!(notifications.get(), 1);
+
+        let resized_size = size(px(800.), px(600.));
+        window
+            .update(cx, |_, window, _| window.toggle_fullscreen())
+            .unwrap();
+        cx.simulate_window_resize(handle, resized_size);
+        cx.run_until_parked();
+        assert_eq!(window_state(cx), (false, resized_size, resized_size));
     }
 
     /// Platforms that stop requesting frames for idle windows (currently web)
@@ -10563,7 +10203,7 @@ mod tests {
 
     #[gpui::test]
     fn test_underline_exclusions_preserve_device_geometry(cx: &mut TestAppContext) {
-        test_underline_paint_at_scales(cx, |window| {
+        test_paint_at_scales(cx, |window| {
             let (numerator, denominator) = match window.scale_factor() {
                 1.0 => (1, 1),
                 1.25 => (5, 4),
@@ -10672,7 +10312,7 @@ mod tests {
 
     #[gpui::test]
     fn test_underline_exclusions_preserve_helvetica_warning_edge(cx: &mut TestAppContext) {
-        test_underline_paint_at_scales(cx, |window| {
+        test_paint_at_scales(cx, |window| {
             if window.scale_factor() != 2.0 {
                 return;
             }
@@ -10711,7 +10351,7 @@ mod tests {
 
     #[gpui::test]
     fn test_underline_exclusions_preserve_content_mask_and_opacity(cx: &mut TestAppContext) {
-        test_underline_paint_at_scales(cx, |window| {
+        test_paint_at_scales(cx, |window| {
             let scale = window.scale_factor();
             let original_mask = window.content_mask();
             let original_opacity = window.element_opacity();
@@ -10769,7 +10409,7 @@ mod tests {
 
     #[gpui::test]
     fn test_underline_exclusions_adversarial_permutations(cx: &mut TestAppContext) {
-        test_underline_paint_at_scales(cx, |window| {
+        test_paint_at_scales(cx, |window| {
             let style = UnderlineStyle {
                 thickness: px(1.),
                 color: None,
@@ -10813,6 +10453,169 @@ mod tests {
         });
     }
 
+    #[gpui::test]
+    fn test_empty_content_masks_remain_empty_when_snapped(cx: &mut TestAppContext) {
+        test_paint_at_scales(cx, |window| {
+            let viewport = ContentMask {
+                bounds: Bounds::from_corners(point(px(20.), px(20.)), point(px(100.), px(100.))),
+            };
+            for fraction in [0., 0.25, 0.5, 0.75] {
+                for bounds in [
+                    Bounds::new(point(px(30.), px(120. + fraction)), size(px(40.), px(20.))),
+                    Bounds::new(point(px(120. + fraction), px(30.)), size(px(20.), px(40.))),
+                    Bounds::new(
+                        point(px(120. + fraction), px(120. + fraction)),
+                        size(px(20.), px(20.)),
+                    ),
+                    Bounds::new(
+                        point(px(30. + fraction), px(40. + fraction)),
+                        size(px(0.), px(20.)),
+                    ),
+                    Bounds::new(
+                        point(px(30. + fraction), px(40. + fraction)),
+                        size(px(20.), px(0.)),
+                    ),
+                ] {
+                    window.with_content_mask(Some(viewport), |window| {
+                        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                            assert!(window.content_mask().bounds.is_empty());
+                            assert!(
+                                window.snapped_content_mask().bounds.is_empty(),
+                                "scale={}, bounds={bounds:?}",
+                                window.scale_factor(),
+                            );
+                            let count = window.next_frame.scene.len();
+                            window.paint_quad(crate::fill(bounds, crate::red()));
+                            window.paint_quad(crate::outline(
+                                bounds,
+                                crate::red(),
+                                Default::default(),
+                            ));
+                            assert_eq!(window.next_frame.scene.len(), count);
+                        });
+                    });
+                }
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn test_nonempty_content_masks_keep_covering_fractional_edges(cx: &mut TestAppContext) {
+        test_paint_at_scales(cx, |window| {
+            let bounds = Bounds::new(point(px(30.25), px(40.25)), size(px(0.125), px(0.125)));
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                let snapped = window.snapped_content_mask().bounds;
+                let scale = window.scale_factor();
+                assert_eq!(snapped, window.cover_bounds(bounds));
+                assert!(!snapped.is_empty());
+                assert_eq!(snapped.left().0, (30.25 * scale).floor());
+                assert_eq!(snapped.top().0, (40.25 * scale).floor());
+                assert_eq!(snapped.right().0, (30.375 * scale).ceil());
+                assert_eq!(snapped.bottom().0, (40.375 * scale).ceil());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_empty_shadow_bounds_are_not_painted(cx: &mut TestAppContext) {
+        test_paint_at_scales(cx, |window| {
+            let shadow = crate::BoxShadow::new(px(0.25), px(0.5), crate::red()).blur_radius(px(4.));
+            for origin in [point(px(30.25), px(40.25)), point(px(-30.25), px(-40.25))] {
+                for size in [
+                    size(px(20.), px(0.)),
+                    size(px(0.), px(20.)),
+                    size(px(0.), px(0.)),
+                ] {
+                    let bounds = Bounds::new(origin, size);
+                    let count = window.next_frame.scene.len();
+                    window.paint_drop_shadows(
+                        bounds,
+                        Default::default(),
+                        std::slice::from_ref(&shadow),
+                    );
+                    assert_eq!(
+                        window.next_frame.scene.len(),
+                        count,
+                        "scale={}, bounds={bounds:?}",
+                        window.scale_factor()
+                    );
+                    assert!(window.cover_bounds(bounds).is_empty());
+                }
+            }
+            let bounds = Bounds::new(point(px(30.25), px(40.25)), size(px(20.), px(20.)));
+            let collapsed_shadow = shadow.clone().spread_radius(px(-10.));
+            let shape_bounds =
+                (bounds + collapsed_shadow.offset).dilate(collapsed_shadow.spread_radius);
+            let count = window.next_frame.scene.len();
+            window.paint_drop_shadows(bounds, Default::default(), &[collapsed_shadow]);
+            assert_eq!(window.next_frame.scene.len(), count);
+            assert!(window.cover_bounds(shape_bounds).is_empty());
+
+            window.paint_drop_shadows(bounds, Default::default(), &[shadow]);
+            assert_eq!(window.next_frame.scene.len(), count + 1);
+        });
+    }
+
+    #[gpui::test]
+    fn test_collapsed_inset_shadow_hole_is_an_empty_point_on_the_pixel_grid(
+        cx: &mut TestAppContext,
+    ) {
+        test_paint_at_scales(cx, |window| {
+            let bounds = Bounds::new(point(px(30.25), px(40.25)), size(px(20.), px(20.)));
+            for blur_radius in [px(0.), px(4.)] {
+                for spread_radius in [px(10.), px(12.3), px(15.), px(30.)] {
+                    let shadow = crate::BoxShadow::new(px(0.), px(0.), crate::red())
+                        .blur_radius(blur_radius)
+                        .spread_radius(spread_radius)
+                        .inset();
+                    window.next_frame.scene.clear();
+                    window.paint_inset_shadows(bounds, Default::default(), &[shadow]);
+                    let shadows = &window.next_frame.scene.shadows;
+                    assert_eq!(shadows.len(), 1);
+                    let hole = shadows[0].shape_bounds;
+                    let message = format!(
+                        "scale={}, blur={blur_radius:?}, spread={spread_radius:?}, hole={hole:?}",
+                        window.scale_factor()
+                    );
+                    assert_eq!(hole.size, crate::Size::default(), "{message}");
+                    assert_eq!(hole.origin.x.0.fract(), 0., "{message}");
+                    assert_eq!(hole.origin.y.0.fract(), 0., "{message}");
+                }
+            }
+        });
+    }
+
+    struct PaintTestView(Rc<dyn Fn(&mut Window)>);
+
+    impl Render for PaintTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let paint = self.0.clone();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    window.content_mask_stack.push(ContentMask {
+                        bounds: Bounds::from_corners(
+                            point(px(-1000.), px(-1000.)),
+                            point(px(1000.), px(1000.)),
+                        ),
+                    });
+                    paint(window);
+                    window.content_mask_stack.pop();
+                },
+            )
+            .size_full()
+        }
+    }
+
+    fn test_paint_at_scales(cx: &mut TestAppContext, paint: impl Fn(&mut Window) + 'static) {
+        let window = cx.add_window(move |_, _| PaintTestView(Rc::new(paint)));
+        for scale in [1., 1.25, 1.5, 2., 3.] {
+            cx.simulate_window_scale_factor_change(window.into(), scale);
+            cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
+                .unwrap();
+        }
+    }
+
     #[derive(Clone, Copy, PartialEq)]
     enum LongPressResponse {
         PreventDefault,
@@ -10849,40 +10652,6 @@ mod tests {
                     });
                 },
             )
-        }
-    }
-
-    struct UnderlineTestView(Rc<dyn Fn(&mut Window)>);
-
-    impl Render for UnderlineTestView {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            let paint = self.0.clone();
-            canvas(
-                |_, _, _| {},
-                move |_, _, window, _| {
-                    window.content_mask_stack.push(ContentMask {
-                        bounds: Bounds::from_corners(
-                            point(px(-1000.), px(-1000.)),
-                            point(px(1000.), px(1000.)),
-                        ),
-                    });
-                    paint(window);
-                    window.content_mask_stack.pop();
-                },
-            )
-            .size_full()
-        }
-    }
-
-    fn test_underline_paint_at_scales(
-        cx: &mut TestAppContext,
-        paint: impl Fn(&mut Window) + 'static,
-    ) {
-        let window = cx.add_window(move |_, _| UnderlineTestView(Rc::new(paint)));
-        for scale in [1., 1.25, 1.5, 2., 3.] {
-            cx.simulate_window_scale_factor_change(window.into(), scale);
-            cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
-                .unwrap();
         }
     }
 

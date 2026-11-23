@@ -1,13 +1,9 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.10 (Apache-2.0):
-// `ShapedLine` keeps one decoration run inline. See third_party/gpui-pre/QUILL-CHANGES.md.
-mod bidi_paint;
 mod font_fallbacks;
 mod font_features;
 mod line;
 mod line_layout;
 mod line_wrapper;
 
-pub use bidi_paint::*;
 pub use font_fallbacks::*;
 pub use font_features::*;
 pub use line::*;
@@ -685,7 +681,7 @@ impl WindowTextSystem {
             "text argument should not contain newlines"
         );
 
-        let mut decoration_runs = DecorationRuns::new();
+        let mut decoration_runs = SmallVec::<[DecorationRun; 32]>::new();
         for run in runs {
             if let Some(last_run) = decoration_runs.last_mut()
                 && last_run.color == run.color
@@ -735,7 +731,7 @@ impl WindowTextSystem {
         let mut process_line = |line_text: SharedString, line_start, line_end| {
             font_runs.clear();
 
-            let mut decoration_runs = <Vec<DecorationRun>>::with_capacity(32);
+            let mut decoration_runs = <Vec<DecorationRun>>::new();
             let mut run_start = line_start;
             while run_start < line_end {
                 let Some(run) = runs.peek_mut() else {
@@ -853,13 +849,26 @@ impl WindowTextSystem {
     /// Subsets of the line can be styled independently with the `runs` parameter.
     /// Generally, you should prefer to use [`Self::shape_line`] instead, which
     /// can be painted directly.
-    pub fn layout_line(
+    pub fn layout_line<Text>(
         &self,
-        text: &str,
+        text: Text,
         font_size: Pixels,
         runs: &[TextRun],
         force_width: Option<Pixels>,
-    ) -> Arc<LineLayout> {
+    ) -> Arc<LineLayout>
+    where
+        Text: AsRef<str>,
+        SharedString: From<Text>,
+    {
+        let font_runs = self.font_runs(runs);
+        let layout = self
+            .line_layout_cache
+            .layout_line(text, font_size, &font_runs, force_width);
+        self.font_runs_buffer.set(font_runs);
+        layout
+    }
+
+    fn font_runs(&self, runs: &[TextRun]) -> Vec<FontRun> {
         let mut last_run = None::<&TextRun>;
         let mut font_runs = self.font_runs_buffer.take();
         font_runs.clear();
@@ -892,16 +901,7 @@ impl WindowTextSystem {
             }
         }
 
-        let layout = self.line_layout_cache.layout_line(
-            &SharedString::new(text),
-            font_size,
-            &font_runs,
-            force_width,
-        );
-
-        self.font_runs_buffer.set(font_runs);
-
-        layout
+        font_runs
     }
 
     /// Returns the shaped layout width of for the given character, in the given font and size.

@@ -1,6 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `AtlasBackend::insert_image`, `PlatformWindow::capture_image`,
-// `AtlasState::removals` (backdrop glass). See third_party/gpui-pre/QUILL-CHANGES.md.
 mod app_menu;
 mod keyboard;
 mod keystroke;
@@ -212,7 +209,7 @@ impl ActivityGuard {
 #[inline]
 pub fn guess_compositor() -> &'static str {
     if std::env::var_os("ZED_HEADLESS").is_some() {
-        return "Headless";
+        return "headless";
     }
     GraphicalEnvironment::detect().guess_compositor()
 }
@@ -234,6 +231,11 @@ pub struct GraphicalEnvironment {
     pub x11_display: Option<OsString>,
     /// `XDG_RUNTIME_DIR`: the directory containing Wayland sockets.
     pub xdg_runtime_dir: Option<OsString>,
+    /// `XDG_CURRENT_DESKTOP`: the session's desktop environment, such as `ubuntu:GNOME`.
+    ///
+    /// Only reported by [`GraphicalEnvironment::desktop_environment`]; [`GraphicalEnvironment::apply_to`]
+    /// leaves it alone.
+    pub current_desktop: Option<OsString>,
     /// `XDG_ACTIVATION_TOKEN`: lets the first window take focus on Wayland.
     ///
     /// A platform takes this process's token from its environment when it's created, and uses
@@ -275,6 +277,11 @@ impl GraphicalEnvironment {
     /// Does nothing on this platform: programs inherit the session of the process that
     /// starts them.
     pub fn apply_to(&self, _command: &mut std::process::Command) {}
+
+    /// Returns `None`: this platform has no desktop environments to tell apart.
+    pub fn desktop_environment(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The graphical session to connect to. Carries nothing yet on this platform.
@@ -291,6 +298,11 @@ impl GraphicalEnvironment {
 
     /// Does nothing on this platform.
     pub fn apply_to(&self, _command: &mut std::process::Command) {}
+
+    /// Returns `None`: this platform has no desktop environments to tell apart.
+    pub fn desktop_environment(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A display mode for [`App::request_windowing`] to switch to.
@@ -313,6 +325,7 @@ impl GraphicalEnvironment {
             wayland_display: std::env::var_os("WAYLAND_DISPLAY"),
             x11_display: std::env::var_os("DISPLAY"),
             xdg_runtime_dir: std::env::var_os("XDG_RUNTIME_DIR"),
+            current_desktop: std::env::var_os("XDG_CURRENT_DESKTOP"),
             activation_token: None,
         }
     }
@@ -333,6 +346,18 @@ impl GraphicalEnvironment {
         }
     }
 
+    /// Returns the session's desktop environment, if `XDG_CURRENT_DESKTOP` names one.
+    ///
+    /// The value is a colon-separated list ordered from most to least specific,
+    /// such as `ubuntu:GNOME`.
+    pub fn desktop_environment(&self) -> Option<String> {
+        self.current_desktop
+            .as_ref()
+            .and_then(|desktop| desktop.to_str())
+            .filter(|desktop| !desktop.is_empty())
+            .map(str::to_owned)
+    }
+
     /// Returns the compositor this environment selects: Wayland, then X11, then headless.
     ///
     /// Does not attempt to connect to the compositor.
@@ -344,7 +369,7 @@ impl GraphicalEnvironment {
         } else if cfg!(feature = "x11") && is_set(&self.x11_display) {
             "X11"
         } else {
-            "Headless"
+            "headless"
         }
     }
 }
@@ -364,47 +389,6 @@ bitflags::bitflags! {
 }
 
 pub use platform_info::{OperatingSystem, PlatformInfo, PlatformTarget};
-
-/// Quill: the app's answer to a quit the OS started.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuitAnswer {
-    /// The quit goes ahead.
-    Allow,
-    /// The quit is cancelled.
-    Refuse,
-    /// The app is busy further up the stack and cannot be asked now.
-    Later,
-}
-
-/// Quill: how many times a platform asks again, from its event loop, an app
-/// that keeps answering [`QuitAnswer::Later`]. A nested run loop (a modal
-/// panel) can hold the app for as long as it is up, and each ask comes
-/// straight back.
-pub const QUIT_ASKS_AGAIN: u32 = 100;
-
-/// Quill: what a platform does with an answer to a quit it asked about
-/// `asked` times before.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuitStep {
-    /// The quit goes ahead (`true`) or is cancelled.
-    Settled(bool),
-    /// Ask again from the event loop; carry this count to that ask.
-    AskAgain(u32),
-}
-
-impl QuitAnswer {
-    /// The step after this answer. An app still busy after
-    /// [`QUIT_ASKS_AGAIN`] asks refuses the quit, as it would while busy,
-    /// rather than keep the event loop spinning; the user can quit again.
-    pub fn step(self, asked: u32) -> QuitStep {
-        match self {
-            Self::Allow => QuitStep::Settled(true),
-            Self::Refuse => QuitStep::Settled(false),
-            Self::Later if asked < QUIT_ASKS_AGAIN => QuitStep::AskAgain(asked.saturating_add(1)),
-            Self::Later => QuitStep::Settled(false),
-        }
-    }
-}
 
 #[expect(missing_docs)]
 pub trait Platform: 'static {
@@ -505,11 +489,6 @@ pub trait Platform: 'static {
     fn open_with_system(&self, path: &Path);
 
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>);
-    /// Quill: registers the callback asked before a quit the OS started goes
-    /// ahead: a Dock Quit or log out on macOS, the end of the session on
-    /// Windows. `App::quit` never asks. [`QuitAnswer::Later`] makes the
-    /// platform hold the quit and ask again from its event loop.
-    fn on_quit_request(&self, _callback: Box<dyn FnMut() -> QuitAnswer>) {}
     fn on_reopen(&self, callback: Box<dyn FnMut()>);
     /// Registers the callback invoked when the system is about to sleep.
     fn on_system_sleep(&self, callback: Box<dyn FnMut()>);
@@ -524,7 +503,7 @@ pub trait Platform: 'static {
     /// phase changes. See [`AppLifecyclePhase`] for the phase vocabulary and
     /// its mapping onto iOS and Android.
     ///
-    /// Of the desktop platforms only macOS invokes this, with `Active`.
+    /// Desktop platforms never invoke this.
     fn on_app_lifecycle(&self, _callback: Box<dyn FnMut(AppLifecyclePhase)>) {}
 
     /// Registers a callback invoked when the OS signals memory pressure
@@ -558,6 +537,11 @@ pub trait Platform: 'static {
     fn on_app_menu_action(&self, callback: Box<dyn FnMut(&dyn Action)>);
     fn on_will_open_app_menu(&self, callback: Box<dyn FnMut()>);
     fn on_validate_app_menu_command(&self, callback: Box<dyn FnMut(&dyn Action) -> bool>);
+
+    /// Platform-specific diagnostic state, for [`App::debug_state`].
+    fn debug_state(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
 
     fn thermal_state(&self) -> ThermalState;
     fn on_thermal_state_change(&self, callback: Box<dyn FnMut()>);
@@ -595,8 +579,12 @@ pub trait Platform: 'static {
     ///
     /// Best-effort: some platforms cannot retract a notification once shown,
     /// in which case it ages out of the notification center on its own.
-    fn dismiss_system_notification(&self, tag: &str) {
+    /// The task completes after the platform calls return, not after any
+    /// asynchronous work inside the operating system. Dropping it does not
+    /// cancel dismissal.
+    fn dismiss_system_notification(&self, tag: &str) -> Task<()> {
         _ = tag;
+        Task::ready(())
     }
 
     /// Registers the callback invoked when the user activates a system
@@ -1353,6 +1341,10 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn zoom(&self);
     fn toggle_fullscreen(&self);
     fn is_fullscreen(&self) -> bool;
+    /// Platform-specific diagnostic state, for [`App::debug_state`].
+    fn debug_state(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
     fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
         None
     }
@@ -1373,6 +1365,46 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn on_should_close(&self, callback: Box<dyn FnMut() -> bool>);
     fn on_hit_test_window_control(&self, callback: Box<dyn FnMut() -> Option<WindowControlArea>>);
     fn on_close(&self, callback: Box<dyn FnOnce()>);
+
+    /// Adds a platform view beneath the window's rendered content, hidden
+    /// until a drawn scene contains a [`PaintNativeView`](crate::PaintNativeView)
+    /// for it. Dropping the returned value removes the view from the window.
+    /// Returns `None` when the platform cannot composite native views.
+    ///
+    /// # Safety
+    ///
+    /// `view` must point to a live view of the kind this platform embeds,
+    /// which is not in another view hierarchy.
+    unsafe fn attach_native_view(
+        &self,
+        _id: crate::NativeViewId,
+        _view: std::ptr::NonNull<std::ffi::c_void>,
+    ) -> Option<Box<dyn std::any::Any>> {
+        None
+    }
+    /// Gives keyboard input to the native view, or back to the window's own
+    /// content for `None`.
+    fn set_focused_native_view(&self, _id: Option<crate::NativeViewId>) {}
+    /// Registers the callback that decides whether a mouse event at a
+    /// position belongs to a native view instead of the window's content.
+    fn on_hit_test_native_view(
+        &self,
+        _callback: Box<dyn FnMut(Point<Pixels>) -> Option<crate::NativeViewId>>,
+    ) {
+    }
+    /// Registers the callback invoked when the user moves keyboard input to
+    /// a native view through the platform, such as by clicking in it.
+    fn on_native_view_focused(&self, _callback: Box<dyn FnMut(crate::NativeViewId)>) {}
+    /// Registers the callback offered each key press before the native view
+    /// that has keyboard input, which returns whether it used the key.
+    ///
+    /// The native view receives the keys it doesn't use, and the ones the
+    /// view doesn't use either arrive afterwards as ordinary input.
+    fn on_key_down_before_native_view(
+        &self,
+        _callback: Box<dyn FnMut(crate::KeyDownEvent) -> bool>,
+    ) {
+    }
     fn on_appearance_changed(&self, callback: Box<dyn FnMut()>);
     fn on_button_layout_changed(&self, _callback: Box<dyn FnMut()>) {}
     fn draw(&self, scene: &Scene);
@@ -1391,10 +1423,6 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
         false
     }
     fn set_edited(&mut self, _edited: bool) {}
-    /// Quill: the reason Windows shows while this window holds back the end
-    /// of the session, or `None` to stop showing it. Other platforms have no
-    /// such text.
-    fn set_shutdown_block_reason(&self, _reason: Option<&str>) {}
     fn set_document_path(&self, _path: Option<&std::path::Path>) {}
     fn toggle_simple_fullscreen(&self) {}
     fn is_simple_fullscreen(&self) -> bool {
@@ -1402,6 +1430,8 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     }
     #[cfg(target_os = "macos")]
     fn set_traffic_light_position(&self, _position: Point<Pixels>) {}
+    #[cfg(target_os = "macos")]
+    fn set_native_titlebar_visibility(&self, _visible: bool) {}
     fn show_character_palette(&self) {}
     fn titlebar_double_click(&self, _is_resizable: bool, _is_minimizable: bool) {}
     fn on_move_tab_to_new_window(&self, _callback: Box<dyn FnMut()>) {}
@@ -1510,14 +1540,6 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     #[cfg(any(test, feature = "test-support"))]
     fn render_to_image(&self, _scene: &Scene) -> Result<RgbaImage> {
         anyhow::bail!("render_to_image not implemented for this platform")
-    }
-
-    /// Quill: renders `scene` offscreen with this window's renderer and
-    /// reads the pixels back (RGBA, device pixels), without presenting it
-    /// or reading the screen. Backs [`Window::capture_frame`]; built in
-    /// every configuration, unlike [`Self::render_to_image`].
-    fn capture_image(&self, _scene: &Scene) -> Result<image::RgbaImage> {
-        anyhow::bail!("this platform's renderer cannot capture the window")
     }
 }
 
@@ -1727,10 +1749,7 @@ impl PlatformTextSystem for NoopTextSystem {
                 .width
             / metrics.units_per_em as f32;
         let mut glyphs = Vec::new();
-        // QUILL: characters in the order the Unicode Bidirectional Algorithm shows them,
-        // as CoreText, DirectWrite and cosmic-text return them, so tests of right-to-left
-        // text on this stand-in see what the real backends draw.
-        for (ix, c) in visual_chars(text) {
+        for (ix, c) in text.char_indices() {
             if let Some(glyph) = self.glyph_for_char(FontId(0), c) {
                 glyphs.push(ShapedGlyph {
                     id: glyph,
@@ -1774,28 +1793,6 @@ impl PlatformTextSystem for NoopTextSystem {
     ) -> TextRenderingMode {
         TextRenderingMode::Grayscale
     }
-}
-
-/// QUILL: `text`'s characters with their byte indices, left to right on screen (UAX #9,
-/// base direction from the first strong character outside an isolate).
-fn visual_chars(text: &str) -> Vec<(usize, char)> {
-    let info = unicode_bidi::BidiInfo::new(text, None);
-    let mut chars = Vec::with_capacity(text.len());
-    for paragraph in &info.paragraphs {
-        let (levels, runs) = info.visual_runs(paragraph, paragraph.range.clone());
-        for run in runs {
-            let Some(part) = text.get(run.clone()) else {
-                continue;
-            };
-            let indexed = part.char_indices().map(|(ix, c)| (run.start + ix, c));
-            if levels.get(run.start).is_some_and(|level| level.is_rtl()) {
-                chars.extend(indexed.rev());
-            } else {
-                chars.extend(indexed);
-            }
-        }
-    }
-    chars
 }
 
 // Adapted from https://github.com/microsoft/terminal/blob/1283c0f5b99a2961673249fa77c6b986efb5086c/src/renderer/atlas/dwrite.cpp
@@ -1889,35 +1886,6 @@ pub trait PlatformAtlas {
     ) -> Result<Option<AtlasTile>>;
     fn remove(&self, key: &AtlasKey);
 
-    /// QUILL: start a new use mark: tiles asked for from here on carry it,
-    /// for `remove_emoji_glyphs_unused_since`.
-    fn next_use_mark(&self) -> u64 {
-        0
-    }
-
-    /// QUILL: how many color emoji glyphs the atlas holds.
-    fn emoji_glyph_count(&self) -> usize {
-        0
-    }
-
-    /// QUILL: remove the color emoji glyphs nothing asked for since `mark`
-    /// started; how many went. GPUI keeps every glyph it rasterized for
-    /// good, and color emoji are big (4 bytes a pixel, often 64 px and up).
-    fn remove_emoji_glyphs_unused_since(&self, _mark: u64) -> usize {
-        0
-    }
-
-    /// QUILL: how many text (non-emoji) glyphs the atlas holds.
-    fn text_glyph_count(&self) -> usize {
-        0
-    }
-
-    /// QUILL: remove the text glyphs nothing asked for since `mark` started;
-    /// how many went. Their tiles go back to the texture's allocator.
-    fn remove_text_glyphs_unused_since(&self, _mark: u64) -> usize {
-        0
-    }
-
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn contains(&self, _key: &AtlasKey) -> bool {
         false
@@ -1933,68 +1901,21 @@ pub trait AtlasBackend {
         bytes: &[u8],
     ) -> Result<AtlasTile>;
 
-    /// QUILL: insert an image tile. Images come and go while glyphs and
-    /// SVGs stay for good, so a backend that frees a texture once its last
-    /// tile goes keeps images in textures of their own: one long-lived
-    /// glyph in an image texture would keep the whole texture alive.
-    fn insert_image(
-        &mut self,
-        kind: AtlasTextureKind,
-        size: Size<DevicePixels>,
-        bytes: &[u8],
-    ) -> Result<AtlasTile> {
-        self.insert(kind, size, bytes)
-    }
-
     fn remove(&mut self, tile: AtlasTile);
 }
 
 #[doc(hidden)]
 pub struct AtlasState<Backend> {
-    /// Each tile with the use mark it was last asked for under.
-    tiles_by_key: FxHashMap<AtlasKey, (AtlasTile, u64)>,
-    /// QUILL: the current use mark (`next_use_mark`).
-    use_mark: u64,
-    /// QUILL: how many keys are color emoji glyphs.
-    emoji_glyphs: usize,
-    /// QUILL: how many keys are text glyphs.
-    text_glyphs: usize,
+    tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
     pub backend: Backend,
-    /// QUILL (glass stage 5): tiles freed so far. A freed tile's place can take
-    /// another picture under the same tile id, so backdrop glass that
-    /// reuses last frame's copy checks this did not move.
-    removals: u64,
 }
 
 impl<Backend> AtlasState<Backend> {
     pub fn new(backend: Backend) -> Self {
         Self {
             tiles_by_key: FxHashMap::default(),
-            use_mark: 0,
-            emoji_glyphs: 0,
-            text_glyphs: 0,
             backend,
-            removals: 0,
         }
-    }
-
-    /// QUILL (glass stage 5): how many times a tile was freed (or the atlas
-    /// cleared).
-    pub fn removals(&self) -> u64 {
-        self.removals
-    }
-
-    pub fn next_use_mark(&mut self) -> u64 {
-        self.use_mark += 1;
-        self.use_mark
-    }
-
-    pub fn emoji_glyph_count(&self) -> usize {
-        self.emoji_glyphs
-    }
-
-    pub fn text_glyph_count(&self) -> usize {
-        self.text_glyphs
     }
 
     pub fn contains(&self, key: &AtlasKey) -> bool {
@@ -2002,10 +1923,7 @@ impl<Backend> AtlasState<Backend> {
     }
 
     pub fn clear(&mut self, reset_backend: impl FnOnce(&mut Backend)) {
-        self.removals = self.removals.wrapping_add(1);
         self.tiles_by_key.clear();
-        self.emoji_glyphs = 0;
-        self.text_glyphs = 0;
         reset_backend(&mut self.backend);
     }
 }
@@ -2022,91 +1940,26 @@ impl<Backend: AtlasBackend> AtlasState<Backend> {
         key: AtlasKey,
         build: &mut dyn FnMut() -> Result<Option<(Size<DevicePixels>, Cow<'a, [u8]>)>>,
     ) -> Result<Option<AtlasTile>> {
-        let use_mark = self.use_mark;
         match self.tiles_by_key.entry(key) {
-            Entry::Occupied(entry) => {
-                let (tile, used) = entry.into_mut();
-                *used = use_mark;
-                Ok(Some(*tile))
-            }
+            Entry::Occupied(entry) => Ok(Some(*entry.get())),
             Entry::Vacant(entry) => {
                 profiling::scope!("new tile");
                 let Some((size, bytes)) = build()? else {
                     return Ok(None);
                 };
-                let kind = entry.key().texture_kind();
-                // QUILL: images in textures of their own (`insert_image`).
-                let tile = if matches!(entry.key(), AtlasKey::Image(_)) {
-                    self.backend.insert_image(kind, size, &bytes)?
-                } else {
-                    self.backend.insert(kind, size, &bytes)?
-                };
-                match glyph_class(entry.key()) {
-                    Some(GlyphClass::Emoji) => self.emoji_glyphs += 1,
-                    Some(GlyphClass::Text) => self.text_glyphs += 1,
-                    None => {}
-                }
-                entry.insert((tile, use_mark));
+                let tile = self
+                    .backend
+                    .insert(entry.key().texture_kind(), size, &bytes)?;
+                entry.insert(tile);
                 Ok(Some(tile))
             }
         }
     }
 
     pub fn remove(&mut self, key: &AtlasKey) {
-        if let Some((tile, _)) = self.tiles_by_key.remove(key) {
-            self.removals = self.removals.wrapping_add(1);
-            match glyph_class(key) {
-                Some(GlyphClass::Emoji) => self.emoji_glyphs -= 1,
-                Some(GlyphClass::Text) => self.text_glyphs -= 1,
-                None => {}
-            }
+        if let Some(tile) = self.tiles_by_key.remove(key) {
             self.backend.remove(tile);
         }
-    }
-
-    pub fn remove_emoji_glyphs_unused_since(&mut self, mark: u64) -> usize {
-        let count = self.remove_glyphs_unused_since(GlyphClass::Emoji, mark);
-        self.emoji_glyphs -= count;
-        count
-    }
-
-    pub fn remove_text_glyphs_unused_since(&mut self, mark: u64) -> usize {
-        let count = self.remove_glyphs_unused_since(GlyphClass::Text, mark);
-        self.text_glyphs -= count;
-        count
-    }
-
-    fn remove_glyphs_unused_since(&mut self, class: GlyphClass, mark: u64) -> usize {
-        let mut gone = Vec::new();
-        self.tiles_by_key.retain(|key, (tile, used)| {
-            let keep = *used >= mark || glyph_class(key) != Some(class);
-            if !keep {
-                gone.push(*tile);
-            }
-            keep
-        });
-        let count = gone.len();
-        if count > 0 {
-            self.removals = self.removals.wrapping_add(1);
-        }
-        for tile in gone {
-            self.backend.remove(tile);
-        }
-        count
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum GlyphClass {
-    Emoji,
-    Text,
-}
-
-fn glyph_class(key: &AtlasKey) -> Option<GlyphClass> {
-    match key {
-        AtlasKey::Glyph(params) if params.is_emoji => Some(GlyphClass::Emoji),
-        AtlasKey::Glyph(_) => Some(GlyphClass::Text),
-        _ => None,
     }
 }
 
@@ -2161,26 +2014,6 @@ impl PlatformAtlas for HeadlessAtlas {
 
     fn remove(&self, key: &AtlasKey) {
         self.0.lock().remove(key);
-    }
-
-    fn next_use_mark(&self) -> u64 {
-        self.0.lock().next_use_mark()
-    }
-
-    fn emoji_glyph_count(&self) -> usize {
-        self.0.lock().emoji_glyph_count()
-    }
-
-    fn remove_emoji_glyphs_unused_since(&self, mark: u64) -> usize {
-        self.0.lock().remove_emoji_glyphs_unused_since(mark)
-    }
-
-    fn text_glyph_count(&self) -> usize {
-        self.0.lock().text_glyph_count()
-    }
-
-    fn remove_text_glyphs_unused_since(&self, mark: u64) -> usize {
-        self.0.lock().remove_text_glyphs_unused_since(mark)
     }
 
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
@@ -2416,6 +2249,12 @@ impl PlatformInputHandler {
     #[allow(dead_code)]
     pub fn apple_press_and_hold_enabled(&mut self) -> bool {
         self.handler.apple_press_and_hold_enabled()
+    }
+
+    /// Ends a composition from inside an update, where [`Self::unmark_text`]
+    /// cannot borrow the app.
+    pub(crate) fn unmark_text_during_update(&mut self, window: &mut Window, cx: &mut App) {
+        self.handler.unmark_text(window, cx);
     }
 
     pub fn dispatch_input(&mut self, input: &str, window: &mut Window, cx: &mut App) {
@@ -2909,8 +2748,8 @@ pub struct WindowOptions {
     /// Whether the window should be minimized by the user
     pub is_minimizable: bool,
 
-    /// The display to create the window on, if this is None,
-    /// the window will be created on the main display
+    /// The display to create the window on. If neither this nor `window_bounds` is set, the window
+    /// is created on the active window's display. Otherwise, it falls back to the primary display.
     pub display_id: Option<DisplayId>,
 
     /// The appearance of the window background.
@@ -3033,9 +2872,10 @@ impl WindowBounds {
         }
     }
 
-    /// Creates a new window bounds that centers the window on the screen.
-    pub fn centered(size: Size<Pixels>, cx: &App) -> Self {
-        WindowBounds::Windowed(Bounds::centered(None, size, cx))
+    /// Creates window bounds centered on the given display, or the primary display if none is
+    /// provided.
+    pub fn centered(display_id: Option<DisplayId>, size: Size<Pixels>, cx: &App) -> Self {
+        WindowBounds::Windowed(Bounds::centered(display_id, size, cx))
     }
 }
 
@@ -3260,7 +3100,9 @@ impl From<&str> for PromptButton {
 }
 
 /// The style of the cursor (pointer)
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, EnumIter,
+)]
 pub enum CursorStyle {
     /// The default cursor
     #[default]

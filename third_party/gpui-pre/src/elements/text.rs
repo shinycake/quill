@@ -1,5 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// a tooltip is filtered under its owner's tags. See third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{
     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
@@ -168,14 +166,6 @@ macro_rules! text {
     }};
 }
 
-impl IntoElement for Text {
-    type Element = Self;
-    #[inline]
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for Text {
     type RequestLayoutState = TextLayout;
     type PrepaintState = ();
@@ -273,7 +263,7 @@ impl Element for &'static str {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let state = TextLayout::default();
-        let layout_id = state.layout(SharedString::from(*self), None, window, cx);
+        let layout_id = state.layout(SharedString::new_static(self), None, window, cx);
         (layout_id, state)
     }
 
@@ -300,14 +290,6 @@ impl Element for &'static str {
         cx: &mut App,
     ) {
         text_layout.paint(self, window, cx)
-    }
-}
-
-impl IntoElement for &'static str {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 
@@ -374,14 +356,6 @@ impl Element for SharedString {
         cx: &mut App,
     ) {
         text_layout.paint(self.as_ref(), window, cx)
-    }
-}
-
-impl IntoElement for SharedString {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 
@@ -603,14 +577,6 @@ impl Element for StyledText {
     }
 }
 
-impl IntoElement for StyledText {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 /// The Layout for TextElement. This can be used to map indices to pixels and vice versa.
 #[derive(Default, Clone)]
 pub struct TextLayout(Rc<RefCell<Option<TextLayoutInner>>>);
@@ -702,8 +668,11 @@ impl TextLayout {
                     return size;
                 }
 
-                let mut line_wrapper = cx.text_system().line_wrapper(text_style.font(), font_size);
                 let (text, runs) = if let Some(truncate_width) = truncate_width {
+                    // Taking a wrapper from the pool locks it twice and moves its
+                    // character width cache around, so only do it when truncating.
+                    let mut line_wrapper =
+                        cx.text_system().line_wrapper(text_style.font(), font_size);
                     if let Some(max_lines) = text_style.line_clamp
                         && let Some(wrap_width) = wrap_width
                     {
@@ -1168,8 +1137,6 @@ impl Element for InteractiveText {
     ) {
         let current_view = window.current_view();
         let text_layout = self.text.layout().clone();
-        // Quill: its tooltip is filtered under the tags above it.
-        window.record_tooltip_tags(self.tooltip_id);
         window.with_element_state::<InteractiveTextState, _>(
             global_id.unwrap(),
             |interactive_state, window| {
@@ -1306,14 +1273,6 @@ impl Element for InteractiveText {
                 ((), interactive_state)
             },
         );
-    }
-}
-
-impl IntoElement for InteractiveText {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 

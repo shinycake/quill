@@ -1,9 +1,3 @@
-// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `SurfaceFrame` (RGBA16F and NV12, `YuvColor`) and the non-Apple `PaintSurface::frame`;
-// primitives a window's paint filter refuses never enter the scene; a replayed
-// range enters the bounds tree once; backdrop glass (`BackdropLens`, banded
-// orders; stage 5: frame plans, label inks, re-rendered backdrops).
-// See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
 
@@ -11,29 +5,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels,
-    Point, Radians, ScaledPixels, Size, bounds_tree::BoundsTree, point,
+    AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, HitboxId, Hsla,
+    NativeViewId, Path, PathTiles, Pixels, Point, Radians, ScaledPixels, Size, TimedTransformation,
+    bounds_tree::BoundsTree,
 };
-mod backdrop_frame;
-mod backdrop_lens;
-mod backdrop_sharp;
-pub use backdrop_frame::*;
-pub(crate) use backdrop_frame::{UnderItem, primitives_under_ranked};
-pub use backdrop_lens::*;
-pub use backdrop_sharp::SharpBackdrop;
-pub(crate) use backdrop_sharp::{GlyphKey, GlyphSource, SlotSpace};
-
+use smallvec::SmallVec;
 use std::{
-    fmt::Debug,
-    iter::Peekable,
-    mem,
-    ops::{Add, Range, Sub},
-    slice,
+    collections::VecDeque, fmt::Debug, iter::Peekable, ops::Range, rc::Rc, slice, time::Duration,
 };
-
-#[allow(non_camel_case_types, unused)]
-#[expect(missing_docs)]
-pub type PathVertex_ScaledPixels = PathVertex<ScaledPixels>;
 
 #[expect(missing_docs)]
 pub type DrawOrder = u32;
@@ -52,44 +31,40 @@ impl From<bool> for PaddedBool32 {
     }
 }
 
+impl PaddedBool32 {
+    /// The wrapped boolean.
+    pub fn as_bool(self) -> bool {
+        self.0 != 0
+    }
+}
+
+struct Layer {
+    primitives: SmallVec<[Range<usize>; 1]>,
+    bounds: Bounds<ScaledPixels>,
+    max_kind: PrimitiveKind,
+    max_shared_kind: PrimitiveKind,
+    /// Whether a native view was painted in the layer, which then can't be
+    /// drawn as one: what was painted after the view has to cover it.
+    has_native_view: bool,
+}
+
 #[derive(Default)]
 #[expect(missing_docs)]
 pub struct Scene {
     pub(crate) paint_operations: Vec<PaintOperation>,
     primitive_bounds: BoundsTree<ScaledPixels>,
-    layer_stack: Vec<DrawOrder>,
+    layer_stack: Vec<usize>,
+    layers: VecDeque<Layer>,
     pub shadows: Vec<Shadow>,
     pub quads: Vec<Quad>,
-    pub paths: Vec<Path<ScaledPixels>>,
+    pub paths: Vec<PaintedPath>,
     pub underlines: Vec<Underline>,
     pub monochrome_sprites: Vec<MonochromeSprite>,
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
-    /// Quill: backdrop glass, drawn over what the frame holds under it.
-    pub lenses: Vec<BackdropLens>,
-    /// QUILL (glass stage 5): the lens and colours of each inked label. After
-    /// `finish`, an inked `MonochromeSprite` has `pad` = its entry + 1.
-    pub inks: Vec<LensInkEntry>,
-    /// QUILL (glass stage 5): the inks labels were painted with; an inked
-    /// sprite's `pad` is its request + 1 until `finish`.
-    pub(crate) ink_requests: Vec<LensInk>,
-    /// QUILL (glass stage 5): what lies under each `LensDetail::Rendered` lens,
-    /// drawn again finer (`Window` builds them as the frame ends).
-    pub sharp_backdrops: Vec<SharpBackdrop>,
-    /// QUILL (glass stage 5): how to rasterize sprites again, recorded while a
-    /// window has re-rendered backdrops.
-    pub(crate) glyph_sources: collections::FxHashMap<GlyphKey, GlyphSource>,
-    /// Quill: the sort keys of `finish`, kept so it allocates nothing once
-    /// the scene has grown.
-    sort_keys: Vec<(u64, u32)>,
-    /// Quill: the window's paint filter refuses the tags being painted
-    /// now, so primitives inserted meanwhile are dropped
-    /// (`Window::set_paint_filter`).
-    pub(crate) suppressed: bool,
-    /// Quill: this scene is drawn under a paint filter, so cached
-    /// primitives are not replayed (they were never filtered).
-    pub(crate) filtered: bool,
+    pub native_views: Vec<PaintNativeView>,
+    animations: Vec<SpriteAnimation>,
 }
 
 #[expect(missing_docs)]
@@ -98,6 +73,7 @@ impl Scene {
         self.paint_operations.clear();
         self.primitive_bounds.clear();
         self.layer_stack.clear();
+        self.layers.clear();
         self.paths.clear();
         self.shadows.clear();
         self.quads.clear();
@@ -106,360 +82,284 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
-        self.lenses.clear();
-        self.inks.clear();
-        self.ink_requests.clear();
-        self.sharp_backdrops.clear();
-        self.glyph_sources.clear();
-        self.sort_keys.clear();
-        self.suppressed = false;
-        self.filtered = false;
+        self.native_views.clear();
+        self.animations.clear();
+    }
+
+    /// Inserts a sprite that [`Self::advance_animations`] keeps moving. The
+    /// sprite's color is taken as its color before the animation's alpha.
+    pub(crate) fn insert_animated_sprite(
+        &mut self,
+        mut sprite: MonochromeSprite,
+        mut animation: SpriteAnimation,
+    ) {
+        sprite.animation = SpriteAnimationId(self.animations.len() as u32);
+        animation.base_color = sprite.color;
+        if self.try_insert_primitive(sprite.into()) {
+            self.animations.push(animation);
+        }
+    }
+
+    /// How long the window may wait between presents of this scene while only
+    /// its animations need a frame: `None` when nothing in it animates, and
+    /// zero when an animation wants every frame.
+    pub(crate) fn animation_frame_interval(&self) -> Option<Duration> {
+        self.animations
+            .iter()
+            .map(|animation| {
+                animation
+                    .transformation
+                    .min_frame_interval()
+                    .unwrap_or_default()
+            })
+            .min()
+    }
+
+    /// Moves every animated sprite to its pose at `elapsed` time on the app's
+    /// synced animation clock, without the scene being rebuilt.
+    pub(crate) fn advance_animations(&mut self, elapsed: Duration) {
+        for animation in &self.animations {
+            let Some(sprite) = self.monochrome_sprites.get_mut(animation.sprite_index) else {
+                continue;
+            };
+            let pose = animation.transformation.at(elapsed);
+            sprite.transformation = pose.into_matrix(animation.center, animation.scale_factor);
+            sprite.color = animation.base_color.opacity(pose.alpha_factor());
+        }
     }
 
     pub fn len(&self) -> usize {
         self.paint_operations.len()
     }
 
-    pub fn push_layer(&mut self, bounds: Bounds<ScaledPixels>) {
-        let order = self.primitive_bounds.insert(bounds);
-        self.layer_stack.push(order);
-        self.paint_operations
-            .push(PaintOperation::StartLayer(bounds));
+    pub fn push_layer(&mut self) {
+        self.layer_stack.push(self.layers.len());
+        self.layers.push_back(Layer {
+            primitives: SmallVec::new(),
+            bounds: Bounds::default(),
+            max_kind: PrimitiveKind::Shadow,
+            max_shared_kind: PrimitiveKind::NativeView,
+            has_native_view: false,
+        });
+        self.paint_operations.push(PaintOperation::StartLayer);
     }
 
     pub fn pop_layer(&mut self) {
         self.layer_stack.pop();
+        if self.layer_stack.is_empty() {
+            while let Some(layer) = self.layers.pop_front() {
+                self.insert_layer(layer);
+            }
+        }
         self.paint_operations.push(PaintOperation::EndLayer);
     }
 
-    pub fn insert_primitive(&mut self, primitive: impl Into<Primitive>) {
-        if self.suppressed {
+    fn insert_layer(&mut self, layer: Layer) {
+        if layer.primitives.is_empty() {
             return;
         }
-        let primitive = primitive.into();
-        let clipped_bounds = primitive.clipped_bounds();
-
-        if clipped_bounds.is_empty() {
+        if layer.has_native_view {
+            self.insert_layer_around_native_views(layer);
             return;
         }
-
-        if let Primitive::Lens(lens) = primitive {
-            self.insert_lens(lens, clipped_bounds);
-            return;
-        }
-
-        let order = self
-            .layer_stack
-            .last()
-            .copied()
-            .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
-        self.push_primitive(primitive, order);
-    }
-
-    /// QUILL: a lens takes the next band above everything it covers, so it
-    /// is drawn after what is under it and every lens with no glass under
-    /// it shares one batch. Inside a paint layer (one order for all) or
-    /// above the last band it can't be ordered so, and draws as its
-    /// fallback quad.
-    fn insert_lens(&mut self, lens: Box<BackdropLens>, clipped_bounds: Bounds<ScaledPixels>) {
-        let order = if self.layer_stack.is_empty() {
+        let order =
             self.primitive_bounds
-                .insert_band(clipped_bounds, LENS_BAND_BITS)
-        } else {
-            None
-        };
-        match order {
-            Some(order) => self.push_primitive(Primitive::Lens(lens), order),
-            None => self.insert_primitive(lens.fallback_quad()),
+                .insert(layer.bounds, layer.max_kind, layer.max_shared_kind);
+        for index in layer.primitives.into_iter().flatten() {
+            if let PaintOperation::Primitive(primitive) = &self.paint_operations[index] {
+                let primitive = primitive.clone();
+                self.push_primitive(primitive, order);
+            }
         }
     }
 
-    fn push_primitive(&mut self, mut primitive: Primitive, order: DrawOrder) {
-        match &mut primitive {
-            Primitive::Shadow(shadow) => {
-                shadow.order = order;
-                self.shadows.push(*shadow);
+    /// Inserts a layer that a native view was painted in.
+    ///
+    /// A layer's primitives share one place in the drawing order, where they
+    /// are drawn by kind and not in the order they were painted. A native
+    /// view erases what is drawn before it, so the layer is inserted in parts:
+    /// what was painted before each view, the view, and what was painted after.
+    fn insert_layer_around_native_views(&mut self, layer: Layer) {
+        let mut part = Vec::new();
+        for index in layer.primitives.into_iter().flatten() {
+            let PaintOperation::Primitive(primitive) = &self.paint_operations[index] else {
+                continue;
+            };
+            let primitive = primitive.clone();
+            if primitive.kind() == PrimitiveKind::NativeView {
+                self.insert_layer_part(std::mem::take(&mut part));
+                self.insert_layer_part(vec![primitive]);
+            } else {
+                part.push(primitive);
             }
-            Primitive::Quad(quad) => {
-                quad.order = order;
-                self.quads.push(*quad);
+        }
+        self.insert_layer_part(part);
+    }
+
+    fn insert_layer_part(&mut self, primitives: Vec<Primitive>) {
+        let Some(first) = primitives.first() else {
+            return;
+        };
+        let mut bounds = first.clipped_bounds();
+        let mut max_kind = PrimitiveKind::Shadow;
+        let mut max_shared_kind = PrimitiveKind::NativeView;
+        for primitive in &primitives {
+            let kind = primitive.kind();
+            bounds = bounds.join(&primitive.clipped_bounds());
+            max_kind = max_kind.max(kind);
+            max_shared_kind = max_shared_kind.min(kind.max_shared_kind());
+        }
+        let order = self
+            .primitive_bounds
+            .insert(bounds, max_kind, max_shared_kind);
+        for primitive in primitives {
+            self.push_primitive(primitive, order);
+        }
+    }
+
+    pub fn insert_primitive(&mut self, primitive: impl Into<Primitive>) {
+        self.try_insert_primitive(primitive.into());
+    }
+
+    /// Returns whether the primitive was kept, rather than clipped away.
+    fn try_insert_primitive(&mut self, primitive: Primitive) -> bool {
+        let clipped_bounds = primitive.clipped_bounds();
+        if clipped_bounds.is_empty() {
+            return false;
+        }
+
+        let kind = primitive.kind();
+        if let Some(&layer) = self.layer_stack.last()
+            && let Some(layer) = self.layers.get_mut(layer)
+        {
+            layer.bounds = layer.bounds.join(&clipped_bounds);
+            layer.max_kind = layer.max_kind.max(kind);
+            layer.max_shared_kind = layer.max_shared_kind.min(kind.max_shared_kind());
+            layer.has_native_view |= kind == PrimitiveKind::NativeView;
+            let index = self.paint_operations.len();
+            match layer.primitives.last_mut() {
+                Some(range) if range.end == index => range.end += 1,
+                _ => layer.primitives.push(index..index + 1),
             }
-            Primitive::Path(path) => {
-                path.order = order;
-                path.id = PathId(self.paths.len());
-                self.paths.push(path.clone());
-            }
-            Primitive::Underline(underline) => {
-                underline.order = order;
-                self.underlines.push(*underline);
-            }
-            Primitive::MonochromeSprite(sprite) => {
-                sprite.order = order;
-                self.monochrome_sprites.push(*sprite);
-            }
-            Primitive::SubpixelSprite(sprite) => {
-                sprite.order = order;
-                self.subpixel_sprites.push(*sprite);
-            }
-            Primitive::PolychromeSprite(sprite) => {
-                sprite.order = order;
-                self.polychrome_sprites.push(*sprite);
-            }
-            Primitive::Surface(surface) => {
-                surface.order = order;
-                self.surfaces.push(surface.clone());
-            }
-            Primitive::Lens(lens) => {
-                lens.order = order;
-                lens.id = u32::try_from(self.lenses.len()).unwrap_or(u32::MAX);
-                self.lenses.push(**lens);
-            }
+        } else {
+            let order = self
+                .primitive_bounds
+                .insert(clipped_bounds, kind, kind.max_shared_kind());
+            self.push_primitive(primitive.clone(), order);
         }
         self.paint_operations
             .push(PaintOperation::Primitive(primitive));
+        true
+    }
+
+    fn push_primitive(&mut self, primitive: Primitive, order: DrawOrder) {
+        match primitive {
+            Primitive::Shadow(shadow) => self.shadows.push(Shadow { order, ..shadow }),
+            Primitive::Quad(quad) => self.quads.push(Quad { order, ..quad }),
+            Primitive::Path(mut path) => {
+                path.order = order;
+                self.paths.push(path);
+            }
+            Primitive::Underline(underline) => {
+                self.underlines.push(Underline { order, ..underline })
+            }
+            Primitive::MonochromeSprite(sprite) => self
+                .monochrome_sprites
+                .push(MonochromeSprite { order, ..sprite }),
+            Primitive::SubpixelSprite(sprite) => self
+                .subpixel_sprites
+                .push(SubpixelSprite { order, ..sprite }),
+            Primitive::PolychromeSprite(sprite) => self
+                .polychrome_sprites
+                .push(PolychromeSprite { order, ..sprite }),
+            Primitive::Surface(mut surface) => {
+                surface.order = order;
+                self.surfaces.push(surface);
+            }
+            Primitive::NativeView(native_view) => self.native_views.push(PaintNativeView {
+                order,
+                ..native_view
+            }),
+        }
     }
 
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
-        if self.filtered {
-            return;
-        }
-        let operations = &prev_scene.paint_operations[range];
-        // QUILL: a lens is banded against what is under it now, so a range
-        // holding one goes in primitive by primitive.
-        let has_lens = operations
-            .iter()
-            .any(|operation| matches!(operation, PaintOperation::Primitive(Primitive::Lens(_))));
-        if self.suppressed || !self.layer_stack.is_empty() || has_lens {
-            self.repaint_operations(operations, prev_scene);
-        } else {
-            self.replay_as_one(operations, prev_scene);
-        }
-    }
-
-    fn repaint_operations(&mut self, operations: &[PaintOperation], prev_scene: &Scene) {
-        for operation in operations {
+        for operation in &prev_scene.paint_operations[range] {
             match operation {
-                // QUILL (glass stage 5): an inked label keeps its ink, and a
-                // glyph keeps how to rasterize it again.
-                PaintOperation::Primitive(Primitive::MonochromeSprite(sprite)) => {
-                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
-                    let ink = sprite
-                        .pad
-                        .checked_sub(1)
-                        .and_then(|i| prev_scene.ink_requests.get(i as usize));
-                    match ink {
-                        Some(ink) => self.insert_inked_sprite(
-                            MonochromeSprite { pad: 0, ..*sprite },
-                            *ink,
-                        ),
-                        None => self.insert_primitive(MonochromeSprite { pad: 0, ..*sprite }),
+                PaintOperation::Primitive(primitive) => {
+                    // Animation ids index the scene they were inserted into.
+                    if let Primitive::MonochromeSprite(sprite) = primitive
+                        && let Some(animation) =
+                            prev_scene.animations.get(sprite.animation.0 as usize)
+                    {
+                        self.insert_animated_sprite(*sprite, *animation);
+                    } else {
+                        self.insert_primitive(primitive.clone());
                     }
                 }
-                PaintOperation::Primitive(Primitive::PolychromeSprite(sprite)) => {
-                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
-                    self.insert_primitive(*sprite);
-                }
-                PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
-                PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
+                PaintOperation::StartLayer => self.push_layer(),
                 PaintOperation::EndLayer => self.pop_layer(),
             }
         }
     }
 
-    fn replay_as_one(&mut self, operations: &[PaintOperation], prev_scene: &Scene) {
-        let extent = operations
-            .iter()
-            .filter_map(|operation| match operation {
-                PaintOperation::Primitive(primitive) => Some((
-                    primitive.clipped_bounds(),
-                    primitive.order(),
-                    primitive.order(),
-                )),
-                PaintOperation::StartLayer(_) | PaintOperation::EndLayer => None,
-            })
-            .reduce(|(bounds, lowest, highest), (next, low, high)| {
-                (bounds.union(&next), lowest.min(low), highest.max(high))
-            });
-        let shift = extent.map_or(0, |(bounds, lowest, highest)| {
-            self.primitive_bounds
-                .insert_span(bounds, highest - lowest)
-                .wrapping_sub(lowest)
-        });
-        for operation in operations {
-            match operation {
-                // QUILL (glass stage 5): an inked label keeps its ink, and a
-                // glyph keeps how to rasterize it again.
-                PaintOperation::Primitive(Primitive::MonochromeSprite(sprite)) => {
-                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
-                    let pad = sprite
-                        .pad
-                        .checked_sub(1)
-                        .and_then(|i| prev_scene.ink_requests.get(i as usize))
-                        .map_or(0, |ink| self.ink_request(*ink));
-                    self.push_primitive(
-                        Primitive::MonochromeSprite(MonochromeSprite { pad, ..*sprite }),
-                        sprite.order.wrapping_add(shift),
-                    );
-                }
-                PaintOperation::Primitive(Primitive::PolychromeSprite(sprite)) => {
-                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
-                    self.push_primitive(
-                        Primitive::PolychromeSprite(*sprite),
-                        sprite.order.wrapping_add(shift),
-                    );
-                }
-                PaintOperation::Primitive(primitive) => {
-                    self.push_primitive(primitive.clone(), primitive.order().wrapping_add(shift));
-                }
-                PaintOperation::StartLayer(bounds) => {
-                    self.paint_operations
-                        .push(PaintOperation::StartLayer(*bounds));
-                }
-                PaintOperation::EndLayer => self.paint_operations.push(PaintOperation::EndLayer),
-            }
-        }
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn refuse_paint_for_test(&mut self, filtered: bool, suppressed: bool) {
-        self.filtered = filtered;
-        self.suppressed = suppressed;
-    }
-
     pub fn finish(&mut self) {
-        let keys = &mut self.sort_keys;
-        sort_primitives(&mut self.shadows, keys, |shadow| u64::from(shadow.order));
-        sort_primitives(&mut self.quads, keys, |quad| u64::from(quad.order));
-        sort_primitives(&mut self.paths, keys, |path| u64::from(path.order));
-        sort_primitives(&mut self.underlines, keys, |underline| {
-            u64::from(underline.order)
+        debug_assert!(self.layer_stack.is_empty(), "unbalanced scene layers");
+        let keys = &mut Vec::new();
+        sort_in_place(&mut self.shadows, keys, |shadow| (shadow.order, 0));
+        sort_in_place(&mut self.quads, keys, |quad| (quad.order, 0));
+        self.paths.sort_by_key(|path| path.order);
+        sort_in_place(&mut self.underlines, keys, |underline| (underline.order, 0));
+        sort_in_place(&mut self.monochrome_sprites, keys, |sprite| {
+            (sprite.order, sprite.tile.texture_id.index)
         });
-        sort_primitives(&mut self.monochrome_sprites, keys, |sprite| {
-            sprite_sort_key(sprite.order, &sprite.tile)
+        sort_in_place(&mut self.subpixel_sprites, keys, |sprite| {
+            (sprite.order, sprite.tile.texture_id.index)
         });
-        sort_primitives(&mut self.subpixel_sprites, keys, |sprite| {
-            sprite_sort_key(sprite.order, &sprite.tile)
+        sort_in_place(&mut self.polychrome_sprites, keys, |sprite| {
+            (sprite.order, sprite.tile.texture_id.index)
         });
-        sort_primitives(&mut self.polychrome_sprites, keys, |sprite| {
-            sprite_sort_key(sprite.order, &sprite.tile)
-        });
-        sort_primitives(&mut self.surfaces, keys, |surface| u64::from(surface.order));
-        sort_primitives(&mut self.lenses, keys, |lens| u64::from(lens.order));
-        self.resolve_inks();
-    }
+        self.surfaces.sort_by_key(|surface| surface.order);
+        self.native_views
+            .sort_by_key(|native_view| native_view.order);
+        self.keep_first_painted_native_views();
 
-    /// QUILL (glass stage 5): paints a label sprite whose colour the renderer
-    /// picks from the glass under it (`ink`). Where there is no glass, or
-    /// the renderer can't ink it, it draws in its own colour.
-    pub fn insert_inked_sprite(&mut self, mut sprite: MonochromeSprite, ink: LensInk) {
-        if self.suppressed {
-            return;
-        }
-        sprite.pad = self.ink_request(ink);
-        self.insert_primitive(sprite);
-    }
-
-    /// The `pad` of a sprite inked with `ink`: its request + 1.
-    fn ink_request(&mut self, ink: LensInk) -> u32 {
-        let request = match self.ink_requests.last() {
-            Some(last) if *last == ink => self.ink_requests.len(),
-            _ => {
-                self.ink_requests.push(ink);
-                self.ink_requests.len()
+        // Sorting moved the sprites, so animations learn where theirs ended up.
+        if !self.animations.is_empty() {
+            for (index, sprite) in self.monochrome_sprites.iter().enumerate() {
+                if let Some(animation) = self.animations.get_mut(sprite.animation.0 as usize) {
+                    animation.sprite_index = index;
+                }
             }
-        };
-        u32::try_from(request).unwrap_or(0)
+        }
     }
 
-    /// Each inked label's lens: the highest lens below it whose glass holds
-    /// its centre. Rewrites the sprites' `pad` from request to entry.
-    fn resolve_inks(&mut self) {
-        self.inks.clear();
-        if self.ink_requests.is_empty() {
-            return;
-        }
-        let glass: Vec<(DrawOrder, Bounds<ScaledPixels>)> = self
-            .lenses
-            .iter()
-            .map(|lens| (lens.order, lens.glass_bounds()))
-            .collect();
-        let mut entries: collections::FxHashMap<(u32, u32), u32> = Default::default();
-        for sprite in &mut self.monochrome_sprites {
-            let Some(request) = sprite.pad.checked_sub(1) else {
-                continue;
-            };
-            let Some(ink) = self.ink_requests.get(request as usize).copied() else {
-                sprite.pad = 0;
-                continue;
-            };
-            let center = sprite.bounds.center();
-            let lens = glass
+    /// Drops every occurrence of a native view but the one painted first,
+    /// because a platform view can only be in one place.
+    ///
+    /// That is the occurrence whose hitbox takes the view's mouse input. It
+    /// isn't always the first in the drawing order, which depends on what each
+    /// occurrence overlaps.
+    fn keep_first_painted_native_views(&mut self) {
+        let native_views = &self.native_views;
+        let is_repeated = native_views.iter().enumerate().any(|(index, native_view)| {
+            native_views[..index]
                 .iter()
-                .rposition(|(order, bounds)| *order < sprite.order && bounds.contains(&center))
-                .and_then(|i| u32::try_from(i).ok())
-                .unwrap_or(LensInkEntry::NO_LENS);
-            let inks = &mut self.inks;
-            let entry = *entries.entry((request, lens)).or_insert_with(|| {
-                inks.push(LensInkEntry { lens, ink });
-                u32::try_from(inks.len()).unwrap_or(0)
-            });
-            sprite.pad = entry;
-        }
-    }
-
-    /// QUILL (glass stage 5): a hash of an inked sprite's colours (0 if it is not
-    /// inked), after `finish`.
-    pub(crate) fn ink_hash(&self, sprite: &MonochromeSprite) -> u64 {
-        use std::hash::{DefaultHasher, Hasher};
-        let Some(entry) = sprite
-            .pad
-            .checked_sub(1)
-            .and_then(|i| self.inks.get(i as usize))
-        else {
-            return 0;
-        };
-        let mut hasher = DefaultHasher::new();
-        for color in [entry.ink.on_light, entry.ink.on_dark] {
-            for v in [color.h, color.s, color.l, color.a] {
-                hasher.write_u32(v.to_bits());
-            }
-        }
-        hasher.write_u32(entry.lens);
-        hasher.finish()
-    }
-
-    /// QUILL (glass stage 5): records how to rasterize the sprite just painted at
-    /// `tile` and `bounds` again.
-    pub(crate) fn record_glyph_source(
-        &mut self,
-        tile: &AtlasTile,
-        bounds: &Bounds<ScaledPixels>,
-        source: GlyphSource,
-    ) {
-        self.glyph_sources
-            .insert(GlyphKey::new(tile, bounds), source);
-    }
-
-    pub(crate) fn glyph_source(
-        &self,
-        tile: &AtlasTile,
-        bounds: &Bounds<ScaledPixels>,
-    ) -> Option<&GlyphSource> {
-        self.glyph_sources.get(&GlyphKey::new(tile, bounds))
-    }
-
-    fn copy_glyph_source(
-        &mut self,
-        prev_scene: &Scene,
-        tile: &AtlasTile,
-        bounds: &Bounds<ScaledPixels>,
-    ) {
-        if prev_scene.glyph_sources.is_empty() {
+                .any(|earlier| earlier.id == native_view.id)
+        });
+        if !is_repeated {
             return;
         }
-        if let Some(source) = prev_scene.glyph_source(tile, bounds) {
-            self.record_glyph_source(tile, bounds, source.clone());
+        let mut first_painted: Vec<(NativeViewId, HitboxId)> = Vec::new();
+        for operation in &self.paint_operations {
+            if let PaintOperation::Primitive(Primitive::NativeView(native_view)) = operation
+                && !first_painted.iter().any(|(id, _)| *id == native_view.id)
+            {
+                first_painted.push((native_view.id, native_view.hitbox_id));
+            }
         }
+        self.native_views
+            .retain(|native_view| first_painted.contains(&(native_view.id, native_view.hitbox_id)));
     }
 
     #[cfg_attr(
@@ -487,42 +387,61 @@ impl Scene {
             polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
             surfaces_start: 0,
             surfaces_iter: self.surfaces.iter().peekable(),
-            lenses_start: 0,
-            lenses_iter: self.lenses.iter().peekable(),
+            native_views_start: 0,
+            native_views_iter: self.native_views.iter().peekable(),
         }
     }
 }
 
-fn sprite_sort_key(order: DrawOrder, tile: &AtlasTile) -> u64 {
-    u64::from(order) << 32 | u64::from(tile.texture_id.index)
-}
-
-/// QUILL: a stable sort by `key` that moves the primitives only once their
-/// places are known. `sort_by_key` needed a scratch buffer of whole structs on
-/// each frame, for a list that often comes in order already.
-fn sort_primitives<T>(primitives: &mut [T], keys: &mut Vec<(u64, u32)>, key: impl Fn(&T) -> u64) {
+/// Sorts small `(key, index)` pairs instead of the primitives themselves, then moves each
+/// primitive into place once. Primitives are large, so a comparison sort that shuffles them
+/// directly spends most of its time copying. Ties keep insertion order, as `sort_by_key`
+/// does, because the index is part of what is sorted.
+fn sort_in_place<T: Copy>(
+    primitives: &mut [T],
+    keys: &mut Vec<(u64, u32)>,
+    key: impl Fn(&T) -> (u32, u32),
+) {
     if primitives.is_sorted_by_key(&key) {
         return;
     }
     keys.clear();
-    keys.extend(
-        primitives
-            .iter()
-            .zip(0u32..)
-            .map(|(primitive, at)| (key(primitive), at)),
-    );
+    keys.extend(primitives.iter().enumerate().map(|(index, primitive)| {
+        let (major, minor) = key(primitive);
+        ((major as u64) << 32 | minor as u64, index as u32)
+    }));
     keys.sort_unstable();
+
+    // `keys[target].1` is the source index for `target`. Follow each cycle of that
+    // permutation, marking visited slots by pointing them at themselves.
     for start in 0..primitives.len() {
-        let mut slot = start;
-        while let Some(entry) = keys.get_mut(slot) {
-            let source = mem::replace(&mut entry.1, slot as u32) as usize;
+        if keys[start].1 as usize == start {
+            continue;
+        }
+        let displaced = primitives[start];
+        let mut target = start;
+        loop {
+            let source = keys[target].1 as usize;
+            keys[target].1 = target as u32;
             if source == start {
+                primitives[target] = displaced;
                 break;
             }
-            primitives.swap(slot, source);
-            slot = source;
+            primitives[target] = primitives[source];
+            target = source;
         }
     }
+}
+
+/// The depth step between consecutive quads in a frame with `quad_count` quads.
+pub fn quad_depth_scale(quad_count: usize) -> f32 {
+    let denominator = (quad_count.min((1 << 24) - 1) + 1).next_power_of_two();
+    1.0 / denominator as f32
+}
+
+/// Maps a quad's index in [`Scene::quads`] to depth, with greater values closer.
+pub fn quad_depth(quad_id: u32, scale: f32) -> f32 {
+    ((quad_id + 1) as f32 * scale).min(1.0)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Default)]
@@ -543,12 +462,29 @@ pub(crate) enum PrimitiveKind {
     SubpixelSprite,
     PolychromeSprite,
     Surface,
-    Lens,
+    NativeView,
+}
+
+impl PrimitiveKind {
+    /// We guarantee that overlapping primitives are drawn in paint order.
+    /// But, to improve GPU draw batching, the renderer sorts primitives that
+    /// share a draw order by kind, then by atlas texture, and only then in
+    /// paint order. So, a primitive can only share the draw order of the
+    /// topmost primitive it overlaps if that primitive's kind is at most the
+    /// one returned here. Otherwise, it needs a new draw order.
+    fn max_shared_kind(self) -> Self {
+        match self {
+            Self::MonochromeSprite => Self::Underline,
+            Self::SubpixelSprite => Self::MonochromeSprite,
+            Self::PolychromeSprite => Self::SubpixelSprite,
+            kind => kind,
+        }
+    }
 }
 
 pub(crate) enum PaintOperation {
     Primitive(Primitive),
-    StartLayer(Bounds<ScaledPixels>),
+    StartLayer,
     EndLayer,
 }
 
@@ -557,19 +493,31 @@ pub(crate) enum PaintOperation {
 pub enum Primitive {
     Shadow(Shadow),
     Quad(Quad),
-    Path(Path<ScaledPixels>),
+    Path(PaintedPath),
     Underline(Underline),
     MonochromeSprite(MonochromeSprite),
     SubpixelSprite(SubpixelSprite),
     PolychromeSprite(PolychromeSprite),
     Surface(PaintSurface),
-    /// QUILL: backdrop glass, boxed so the rare lens does not grow every
-    /// primitive the frame records.
-    Lens(Box<BackdropLens>),
+    NativeView(PaintNativeView),
 }
 
 #[expect(missing_docs)]
 impl Primitive {
+    pub(crate) fn kind(&self) -> PrimitiveKind {
+        match self {
+            Primitive::Shadow(_) => PrimitiveKind::Shadow,
+            Primitive::Quad(_) => PrimitiveKind::Quad,
+            Primitive::Path(_) => PrimitiveKind::Path,
+            Primitive::Underline(_) => PrimitiveKind::Underline,
+            Primitive::MonochromeSprite(_) => PrimitiveKind::MonochromeSprite,
+            Primitive::SubpixelSprite(_) => PrimitiveKind::SubpixelSprite,
+            Primitive::PolychromeSprite(_) => PrimitiveKind::PolychromeSprite,
+            Primitive::Surface(_) => PrimitiveKind::Surface,
+            Primitive::NativeView(_) => PrimitiveKind::NativeView,
+        }
+    }
+
     pub fn bounds(&self) -> &Bounds<ScaledPixels> {
         match self {
             Primitive::Shadow(shadow) => &shadow.bounds,
@@ -580,50 +528,35 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.bounds,
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
             Primitive::Surface(surface) => &surface.bounds,
-            Primitive::Lens(lens) => &lens.bounds,
+            Primitive::NativeView(native_view) => &native_view.bounds,
         }
+    }
+
+    fn transformation(&self) -> TransformationMatrix {
+        match self {
+            Primitive::MonochromeSprite(sprite) => sprite.transformation,
+            Primitive::SubpixelSprite(sprite) => sprite.transformation,
+            _ => TransformationMatrix::unit(),
+        }
+    }
+
+    fn clipped_bounds(&self) -> Bounds<ScaledPixels> {
+        self.transformation()
+            .transform_bounds(*self.bounds())
+            .intersect(&self.content_mask().bounds)
     }
 
     pub fn content_mask(&self) -> &ContentMask<ScaledPixels> {
         match self {
             Primitive::Shadow(shadow) => &shadow.content_mask,
             Primitive::Quad(quad) => &quad.content_mask,
-            Primitive::Path(path) => &path.content_mask,
+            Primitive::Path(path) => &path.paint.content_mask,
             Primitive::Underline(underline) => &underline.content_mask,
             Primitive::MonochromeSprite(sprite) => &sprite.content_mask,
             Primitive::SubpixelSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Surface(surface) => &surface.content_mask,
-            Primitive::Lens(lens) => &lens.content_mask,
-        }
-    }
-
-    /// QUILL: the box the primitive draws in, which for a drop shadow reaches
-    /// as far as its blur (the shaders' margin). Draw order goes by this box,
-    /// so a tail sorts the same painted or replayed.
-    pub fn painted_bounds(&self) -> Bounds<ScaledPixels> {
-        match self {
-            Primitive::Shadow(shadow) if shadow.inset != 0 => shadow.element_bounds,
-            Primitive::Shadow(shadow) => shadow.bounds.dilate(shadow.blur_radius * 3.),
-            primitive => *primitive.bounds(),
-        }
-    }
-
-    fn clipped_bounds(&self) -> Bounds<ScaledPixels> {
-        self.painted_bounds().intersect(&self.content_mask().bounds)
-    }
-
-    fn order(&self) -> DrawOrder {
-        match self {
-            Primitive::Shadow(shadow) => shadow.order,
-            Primitive::Quad(quad) => quad.order,
-            Primitive::Path(path) => path.order,
-            Primitive::Underline(underline) => underline.order,
-            Primitive::MonochromeSprite(sprite) => sprite.order,
-            Primitive::SubpixelSprite(sprite) => sprite.order,
-            Primitive::PolychromeSprite(sprite) => sprite.order,
-            Primitive::Surface(surface) => surface.order,
-            Primitive::Lens(lens) => lens.order,
+            Primitive::NativeView(native_view) => &native_view.content_mask,
         }
     }
 }
@@ -641,7 +574,7 @@ struct BatchIterator<'a> {
     quads_start: usize,
     quads_iter: Peekable<slice::Iter<'a, Quad>>,
     paths_start: usize,
-    paths_iter: Peekable<slice::Iter<'a, Path<ScaledPixels>>>,
+    paths_iter: Peekable<slice::Iter<'a, PaintedPath>>,
     underlines_start: usize,
     underlines_iter: Peekable<slice::Iter<'a, Underline>>,
     monochrome_sprites_start: usize,
@@ -652,8 +585,8 @@ struct BatchIterator<'a> {
     polychrome_sprites_iter: Peekable<slice::Iter<'a, PolychromeSprite>>,
     surfaces_start: usize,
     surfaces_iter: Peekable<slice::Iter<'a, PaintSurface>>,
-    lenses_start: usize,
-    lenses_iter: Peekable<slice::Iter<'a, BackdropLens>>,
+    native_views_start: usize,
+    native_views_iter: Peekable<slice::Iter<'a, PaintNativeView>>,
 }
 
 impl<'a> Iterator for BatchIterator<'a> {
@@ -666,7 +599,10 @@ impl<'a> Iterator for BatchIterator<'a> {
                 PrimitiveKind::Shadow,
             ),
             (self.quads_iter.peek().map(|q| q.order), PrimitiveKind::Quad),
-            (self.paths_iter.peek().map(|q| q.order), PrimitiveKind::Path),
+            (
+                self.paths_iter.peek().map(|path| path.order),
+                PrimitiveKind::Path,
+            ),
             (
                 self.underlines_iter.peek().map(|u| u.order),
                 PrimitiveKind::Underline,
@@ -688,8 +624,10 @@ impl<'a> Iterator for BatchIterator<'a> {
                 PrimitiveKind::Surface,
             ),
             (
-                self.lenses_iter.peek().map(|lens| lens.order),
-                PrimitiveKind::Lens,
+                self.native_views_iter
+                    .peek()
+                    .map(|native_view| native_view.order),
+                PrimitiveKind::NativeView,
             ),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
@@ -836,23 +774,21 @@ impl<'a> Iterator for BatchIterator<'a> {
                 self.surfaces_start = surfaces_end;
                 Some(PrimitiveBatch::Surfaces(surfaces_start..surfaces_end))
             }
-            PrimitiveKind::Lens => {
-                let lenses_start = self.lenses_start;
-                let mut lenses_end = lenses_start + 1;
-                // A batch is one band: a lens in a higher band covers one of
-                // these, so it needs a copy of the frame they are drawn into.
-                let band = self.lenses_iter.next().map(|lens| lens.order);
+            PrimitiveKind::NativeView => {
+                let native_views_start = self.native_views_start;
+                let mut native_views_end = native_views_start + 1;
+                self.native_views_iter.next();
                 while self
-                    .lenses_iter
-                    .next_if(|lens| {
-                        Some(lens.order) == band && (lens.order, batch_kind) < max_order_and_kind
-                    })
+                    .native_views_iter
+                    .next_if(|native_view| (native_view.order, batch_kind) < max_order_and_kind)
                     .is_some()
                 {
-                    lenses_end += 1;
+                    native_views_end += 1;
                 }
-                self.lenses_start = lenses_end;
-                Some(PrimitiveBatch::Lenses(lenses_start..lenses_end))
+                self.native_views_start = native_views_end;
+                Some(PrimitiveBatch::NativeViews(
+                    native_views_start..native_views_end,
+                ))
             }
         }
     }
@@ -886,9 +822,7 @@ pub enum PrimitiveBatch {
         range: Range<usize>,
     },
     Surfaces(Range<usize>),
-    /// QUILL: backdrop glass. Lenses of one batch share an order, so none
-    /// covers another.
-    Lenses(Range<usize>),
+    NativeViews(Range<usize>),
 }
 
 impl PrimitiveBatch {
@@ -921,7 +855,7 @@ impl PrimitiveBatch {
                 )
             }
             Self::Surfaces(range) => format!("surfaces ({})", range.len()),
-            Self::Lenses(range) => format!("lenses ({})", range.len()),
+            Self::NativeViews(range) => format!("native views ({})", range.len()),
         }
     }
 }
@@ -975,10 +909,9 @@ pub struct Shadow {
     pub corner_radii: Corners<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub color: Hsla,
-    pub element_bounds: Bounds<ScaledPixels>,
-    pub element_corner_radii: Corners<ScaledPixels>,
-    /// 0 = drop shadow (rendered outside the element), 1 = inset shadow (rendered inside).
-    pub inset: u32,
+    pub shape_bounds: Bounds<ScaledPixels>,
+    pub shape_corner_radii: Corners<ScaledPixels>,
+    pub inset: PaddedBool32,
     pub pad: u32, // align to 8 bytes
 }
 
@@ -1083,6 +1016,31 @@ impl TransformationMatrix {
         }
     }
 
+    /// The smallest bounds that contain `bounds` once it is transformed.
+    pub(crate) fn transform_bounds(&self, bounds: Bounds<ScaledPixels>) -> Bounds<ScaledPixels> {
+        if *self == Self::unit() {
+            return bounds;
+        }
+        let [[xx, xy], [yx, yy]] = self.rotation_scale;
+        let [translate_x, translate_y] = self.translation;
+        let corners = [
+            bounds.origin,
+            bounds.top_right(),
+            bounds.bottom_left(),
+            bounds.bottom_right(),
+        ]
+        .map(|corner| {
+            Point::new(
+                ScaledPixels(xx * corner.x.0 + xy * corner.y.0 + translate_x),
+                ScaledPixels(yx * corner.x.0 + yy * corner.y.0 + translate_y),
+            )
+        });
+        let [first, rest @ ..] = corners;
+        let top_left = rest.iter().fold(first, |min, corner| min.min(corner));
+        let bottom_right = rest.iter().fold(first, |max, corner| max.max(corner));
+        Bounds::from_corners(top_left, bottom_right)
+    }
+
     /// Apply transformation to a point, mainly useful for debugging
     pub fn apply(&self, point: Point<Pixels>) -> Point<Pixels> {
         let input = [point.x.0, point.y.0];
@@ -1107,12 +1065,58 @@ impl Default for TransformationMatrix {
 #[expect(missing_docs)]
 pub struct MonochromeSprite {
     pub order: DrawOrder,
-    pub pad: u32,
+    pub animation: SpriteAnimationId,
     pub tile: AtlasTile,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub color: Hsla,
     pub transformation: TransformationMatrix,
+}
+
+/// Refers to an animation of the scene a sprite is inserted into.
+///
+/// A single `u32` so it fits the sprite's existing padding and leaves the
+/// instance layout unchanged on every backend; renderers ignore it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct SpriteAnimationId(u32);
+
+impl SpriteAnimationId {
+    /// No animation.
+    pub const NONE: Self = Self(u32::MAX);
+}
+
+impl Default for SpriteAnimationId {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+/// A [`TimedTransformation`] the window applies to a sprite right before
+/// every present, so the scene can be presented again without being redrawn.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct SpriteAnimation {
+    transformation: TimedTransformation,
+    center: Point<Pixels>,
+    scale_factor: f32,
+    base_color: Hsla,
+    sprite_index: usize,
+}
+
+impl SpriteAnimation {
+    pub(crate) fn new(
+        transformation: TimedTransformation,
+        center: Point<Pixels>,
+        scale_factor: f32,
+    ) -> Self {
+        Self {
+            transformation,
+            center,
+            scale_factor,
+            base_color: Hsla::default(),
+            sprite_index: usize::MAX,
+        }
+    }
 }
 
 impl From<MonochromeSprite> for Primitive {
@@ -1168,312 +1172,6 @@ pub struct PaintSurface {
     pub content_mask: ContentMask<ScaledPixels>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     pub image_buffer: objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>,
-    /// QUILL: CPU pixels where CoreVideo doesn't exist.
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    pub frame: std::sync::Arc<SurfaceFrame>,
-}
-
-/// QUILL: the pixel layout of a `SurfaceFrame`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SurfaceFormat {
-    /// Four little-endian IEEE half floats per pixel (R, G, B, A), linear
-    /// extended sRGB, premultiplied alpha: an HDR still.
-    Rgba16Float,
-    /// 8-bit 4:2:0 YUV, bi-planar: `width * height` luma bytes, then
-    /// `height / 2` rows of `width / 2` interleaved (Cb, Cr) pairs. Both
-    /// sides are even. Opaque; the frame's [`YuvColor`] says how its
-    /// samples map to RGB. A video picture as most decoders produce it.
-    Nv12,
-}
-
-impl SurfaceFormat {
-    /// Bytes a tightly packed `width` x `height` frame of this format
-    /// holds (`w * h * 8` for RGBA16F, `w * h * 3 / 2` for NV12).
-    pub fn byte_len(self, width: u32, height: u32) -> Result<usize, SurfaceFrameError> {
-        if width == 0 || height == 0 {
-            return Err(SurfaceFrameError::Empty);
-        }
-        let pixels = (width as usize)
-            .checked_mul(height as usize)
-            .ok_or(SurfaceFrameError::TooLarge)?;
-        match self {
-            SurfaceFormat::Rgba16Float => pixels.checked_mul(8).ok_or(SurfaceFrameError::TooLarge),
-            SurfaceFormat::Nv12 => {
-                if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
-                    return Err(SurfaceFrameError::OddSize { width, height });
-                }
-                // Luma, plus a quarter as many chroma pairs of two bytes.
-                pixels
-                    .checked_add(pixels / 2)
-                    .ok_or(SurfaceFrameError::TooLarge)
-            }
-        }
-    }
-}
-
-/// QUILL: why [`SurfaceFrame::new`] refused its pixels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SurfaceFrameError {
-    /// A side is zero.
-    Empty,
-    /// NV12 needs even sides (its chroma is half the size on each axis).
-    OddSize {
-        /// The frame's width.
-        width: u32,
-        /// The frame's height.
-        height: u32,
-    },
-    /// The byte count overflows.
-    TooLarge,
-    /// The buffer is not exactly as long as the format and size say.
-    Length {
-        /// What the format and size need.
-        expected: usize,
-        /// What the buffer holds.
-        actual: usize,
-    },
-}
-
-impl std::fmt::Display for SurfaceFrameError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SurfaceFrameError::Empty => f.write_str("empty surface frame"),
-            SurfaceFrameError::OddSize { width, height } => {
-                write!(f, "NV12 frame of {width}x{height} has an odd side")
-            }
-            SurfaceFrameError::TooLarge => f.write_str("surface frame too large"),
-            SurfaceFrameError::Length { expected, actual } => {
-                write!(f, "surface frame has {actual} bytes, expected {expected}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SurfaceFrameError {}
-
-/// QUILL: the matrix a YUV frame's samples were encoded with.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum YuvMatrix {
-    /// ITU-R BT.601 (standard definition).
-    Bt601,
-    /// ITU-R BT.709 (high definition).
-    #[default]
-    Bt709,
-}
-
-/// QUILL: how a YUV frame's samples map to RGB.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct YuvColor {
-    /// The encoding matrix.
-    pub matrix: YuvMatrix,
-    /// Full range (luma 0-255, "JPEG"); otherwise limited (luma 16-235,
-    /// chroma 16-240, "TV"), which is what video almost always is.
-    pub full_range: bool,
-}
-
-impl YuvColor {
-    /// The affine map from sampled (Y, Cb, Cr) in 0..1 (an 8-bit sample
-    /// over 255, as a UNORM texture reads it) to gamma-encoded R'G'B' in
-    /// 0..1 (clamp afterwards): `rgb[i] = rows[i][0] * y + rows[i][1] * cb
-    /// + rows[i][2] * cr + rows[i][3]`. Renderers upload these rows, so
-    /// the matrix and range are picked here, in one place.
-    pub fn rgb_rows(self) -> [[f32; 4]; 3] {
-        let (kr, kb) = match self.matrix {
-            YuvMatrix::Bt601 => (0.299_f32, 0.114_f32),
-            YuvMatrix::Bt709 => (0.2126_f32, 0.0722_f32),
-        };
-        let kg = 1.0 - kr - kb;
-        // Y' = (y - y0) * ys and C' = (c - c0) * cs.
-        let (y0, ys, cs) = if self.full_range {
-            (0.0, 1.0, 1.0)
-        } else {
-            (16.0 / 255.0, 255.0 / 219.0, 255.0 / 224.0)
-        };
-        let c0 = 128.0 / 255.0;
-        let r_cr = 2.0 * (1.0 - kr) * cs;
-        let g_cb = -2.0 * kb * (1.0 - kb) / kg * cs;
-        let g_cr = -2.0 * kr * (1.0 - kr) / kg * cs;
-        let b_cb = 2.0 * (1.0 - kb) * cs;
-        let offset = |cb: f32, cr: f32| -y0 * ys - c0 * (cb + cr);
-        [
-            [ys, 0.0, r_cr, offset(0.0, r_cr)],
-            [ys, g_cb, g_cr, offset(g_cb, g_cr)],
-            [ys, b_cb, 0.0, offset(b_cb, 0.0)],
-        ]
-    }
-}
-
-/// QUILL: pixels a renderer uploads to a texture and draws like a
-/// CoreVideo surface. The renderer may cache the upload by `id`, so a
-/// frame's pixels never change; its HDR headroom may.
-///
-/// Which platforms draw them: Windows (the vendored DirectX renderer)
-/// draws both formats, Linux (the vendored gpui-pre-wgpu renderer) draws
-/// NV12, and macOS draws CoreVideo buffers instead. The
-/// renderer reports each frame's [`SurfaceDrawState`]; a producer replaces
-/// a refused frame with an image.
-#[derive(Debug)]
-pub struct SurfaceFrame {
-    id: u64,
-    width: u32,
-    height: u32,
-    format: SurfaceFormat,
-    bytes: std::sync::Arc<[u8]>,
-    /// How YUV samples map to RGB (YUV formats only).
-    yuv: YuvColor,
-    /// f32 bits of the display headroom to tone-map to (1.0 = SDR).
-    headroom: std::sync::atomic::AtomicU32,
-    /// [`SurfaceDrawState`]: 0 pending, 1 drawn, 2 refused.
-    draw_state: std::sync::atomic::AtomicU8,
-}
-
-impl SurfaceFrame {
-    /// A frame of `width` x `height` tightly packed pixels. Refused when
-    /// `bytes` is not exactly [`SurfaceFormat::byte_len`] long or the
-    /// format can't have that size (a zero side, or an odd one for NV12).
-    pub fn new(
-        width: u32,
-        height: u32,
-        format: SurfaceFormat,
-        bytes: std::sync::Arc<[u8]>,
-    ) -> Result<Self, SurfaceFrameError> {
-        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let expected = format.byte_len(width, height)?;
-        if bytes.len() != expected {
-            return Err(SurfaceFrameError::Length {
-                expected,
-                actual: bytes.len(),
-            });
-        }
-        Ok(Self {
-            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            width,
-            height,
-            format,
-            bytes,
-            yuv: YuvColor::default(),
-            headroom: std::sync::atomic::AtomicU32::new(1.0_f32.to_bits()),
-            draw_state: std::sync::atomic::AtomicU8::new(0),
-        })
-    }
-
-    /// The same frame with `yuv` as its colour (YUV formats).
-    pub fn with_yuv(mut self, yuv: YuvColor) -> Self {
-        self.yuv = yuv;
-        self
-    }
-
-    /// How YUV samples map to RGB.
-    pub fn yuv(&self) -> YuvColor {
-        self.yuv
-    }
-
-    /// NV12: the luma plane (`width * height` bytes) and the interleaved
-    /// chroma plane (`width * height / 2` bytes). `None` for other formats.
-    pub fn nv12_planes(&self) -> Option<(&[u8], &[u8])> {
-        if self.format != SurfaceFormat::Nv12 {
-            return None;
-        }
-        let luma = (self.width as usize).checked_mul(self.height as usize)?;
-        let (y, uv) = self.bytes.split_at_checked(luma)?;
-        (uv.len() == luma / 2).then_some((y, uv))
-    }
-
-    /// Unique per frame; a renderer's texture cache key.
-    pub fn id(&self) -> u64 {
-        self.id
-    }
-
-    /// Width in pixels.
-    pub fn width(&self) -> u32 {
-        self.width
-    }
-
-    /// Height in pixels.
-    pub fn height(&self) -> u32 {
-        self.height
-    }
-
-    /// Pixel layout.
-    pub fn format(&self) -> SurfaceFormat {
-        self.format
-    }
-
-    /// Tightly packed rows of pixels.
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    /// The display headroom to tone-map to (at least 1.0).
-    pub fn headroom(&self) -> f32 {
-        let headroom = f32::from_bits(self.headroom.load(std::sync::atomic::Ordering::Relaxed));
-        if headroom.is_finite() {
-            headroom.max(1.0)
-        } else {
-            1.0
-        }
-    }
-
-    /// Set the display headroom to tone-map to.
-    pub fn set_headroom(&self, headroom: f32) {
-        self.headroom
-            .store(headroom.to_bits(), std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// What the renderer last did with the frame (renderers that draw
-    /// this format report it; see [`SurfaceDrawState`]).
-    pub fn draw_state(&self) -> SurfaceDrawState {
-        match self.draw_state.load(std::sync::atomic::Ordering::Relaxed) {
-            1 => SurfaceDrawState::Drawn,
-            2 => SurfaceDrawState::Refused,
-            _ => SurfaceDrawState::Pending,
-        }
-    }
-
-    /// Renderer: the frame is on screen.
-    pub fn mark_drawn(&self) {
-        // A refusal stays: the producer replaces the frame.
-        let _ = self.draw_state.compare_exchange(
-            0,
-            1,
-            std::sync::atomic::Ordering::Relaxed,
-            std::sync::atomic::Ordering::Relaxed,
-        );
-    }
-
-    /// Renderer: the frame could not be drawn (its textures failed, or the
-    /// pipeline is missing); the producer should show it another way.
-    pub fn mark_refused(&self) {
-        self.draw_state
-            .store(2, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-/// QUILL: what a renderer did with a [`SurfaceFrame`], so its producer can
-/// replace a frame this window can't draw (with an image) without a
-/// process-wide switch: each window's renderer answers for itself.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SurfaceDrawState {
-    /// Not drawn yet.
-    Pending,
-    /// Drawn at least once.
-    Drawn,
-    /// The renderer could not draw it.
-    Refused,
-}
-
-impl PartialEq for SurfaceFrame {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for SurfaceFrame {}
-
-impl From<BackdropLens> for Primitive {
-    fn from(lens: BackdropLens) -> Self {
-        Primitive::Lens(Box::new(lens))
-    }
 }
 
 impl From<PaintSurface> for Primitive {
@@ -1482,171 +1180,296 @@ impl From<PaintSurface> for Primitive {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[expect(missing_docs)]
-pub struct PathId(pub usize);
+/// Where a platform view shows through the scene.
+///
+/// The view sits beneath the window's rendered content, so the renderer
+/// erases everything painted earlier within these bounds, and everything
+/// painted later covers the view. The view is therefore treated as opaque.
+#[derive(Clone, Copy, Debug)]
+pub struct PaintNativeView {
+    /// The view's position among the scene's other primitives.
+    pub order: DrawOrder,
+    /// The view these bounds belong to.
+    pub id: NativeViewId,
+    /// The hitbox that decides whether a mouse position reaches the view.
+    pub hitbox_id: HitboxId,
+    /// Where the view is laid out, before clipping.
+    pub bounds: Bounds<ScaledPixels>,
+    /// The clip applied to the view.
+    pub content_mask: ContentMask<ScaledPixels>,
+    /// The color to show where the view has not caught up with these bounds,
+    /// or a transparent color for none.
+    pub background: Hsla,
+}
 
-/// A line made up of a series of vertices and control points.
+impl From<PaintNativeView> for Primitive {
+    fn from(native_view: PaintNativeView) -> Self {
+        Primitive::NativeView(native_view)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
+#[expect(missing_docs)]
+pub struct PathCurve {
+    pub p0: Point<f32>,
+    pub p1: Point<f32>,
+    pub a: Point<f32>,
+    pub b: Point<f32>,
+    pub sign: f32,
+    pub pad: u32, // align to 8 bytes
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+#[expect(missing_docs)]
+pub struct PathPaint {
+    /// The path's bounds, in device pixels.
+    pub bounds: Bounds<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    pub color: Background,
+    pub even_odd: PaddedBool32,
+    pub pad: u32, // align to 8 bytes
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
+#[expect(missing_docs)]
+pub struct PathTile {
+    pub paint: u32,
+    pub curve_start: u32,
+    pub curve_count: u32,
+    pub backdrop: i32,
+    pub top_left: Point<f32>,
+    pub bottom_right: Point<f32>,
+    pub reference: Point<f32>,
+    pub curves_top_left: Point<f32>,
+    pub curves_bottom_right: Point<f32>,
+}
+
 #[derive(Clone, Debug)]
 #[expect(missing_docs)]
-pub struct Path<P: Clone + Debug + Default + PartialEq> {
-    pub id: PathId,
-    pub order: DrawOrder,
-    pub bounds: Bounds<P>,
-    pub content_mask: ContentMask<P>,
-    pub vertices: Vec<PathVertex<P>>,
-    pub color: Background,
-    start: Point<P>,
-    current: Point<P>,
-    contour_count: usize,
+pub struct PaintedPath {
+    order: DrawOrder,
+    bounds: Bounds<ScaledPixels>,
+    tiles: Rc<PathTiles>,
+    paint: PathPaint,
 }
 
-impl Path<Pixels> {
-    /// Create a new path with the given starting point.
-    pub fn new(start: Point<Pixels>) -> Self {
+#[expect(missing_docs)]
+impl PaintedPath {
+    /// Bins `path` into tiles, to be filled with `color` within `content_mask`.
+    pub fn new(
+        path: Path,
+        scale_factor: f32,
+        content_mask: ContentMask<Pixels>,
+        color: Background,
+    ) -> Self {
+        let content_mask = content_mask.scale(scale_factor);
+        let mut tiles = path.bin(scale_factor);
+        tiles.retain_visible(content_mask.bounds);
+        let paint = PathPaint {
+            bounds: tiles.bounds(),
+            content_mask,
+            color,
+            even_odd: path.even_odd().into(),
+            pad: 0,
+        };
         Self {
-            id: PathId(0),
-            order: DrawOrder::default(),
-            vertices: Vec::new(),
-            start,
-            current: start,
-            bounds: Bounds {
-                origin: start,
-                size: Default::default(),
-            },
-            content_mask: Default::default(),
-            color: Default::default(),
-            contour_count: 0,
+            order: 0,
+            bounds: tiles.painted_bounds(),
+            tiles: Rc::new(tiles),
+            paint,
         }
     }
 
-    /// Scale this path by the given factor.
-    pub fn scale(&self, factor: f32) -> Path<ScaledPixels> {
-        Path {
-            id: self.id,
-            order: self.order,
-            bounds: self.bounds.scale(factor),
-            content_mask: self.content_mask.scale(factor),
-            vertices: self
-                .vertices
-                .iter()
-                .map(|vertex| vertex.scale(factor))
-                .collect(),
-            start: self.start.map(|start| start.scale(factor)),
-            current: self.current.scale(factor),
-            contour_count: self.contour_count,
-            color: self.color,
-        }
+    pub fn tile_count(&self) -> usize {
+        self.tiles.tiles().len()
     }
 
-    /// Move the start, current point to the given point.
-    pub fn move_to(&mut self, to: Point<Pixels>) {
-        self.contour_count += 1;
-        self.start = to;
-        self.current = to;
-    }
-
-    /// Draw a straight line from the current point to the given point.
-    pub fn line_to(&mut self, to: Point<Pixels>) {
-        self.contour_count += 1;
-        if self.contour_count > 1 {
-            self.push_triangle(
-                (self.start, self.current, to),
-                (point(0., 1.), point(0., 1.), point(0., 1.)),
-            );
-        }
-        self.current = to;
-    }
-
-    /// Draw a curve from the current point to the given point, using the given control point.
-    pub fn curve_to(&mut self, to: Point<Pixels>, ctrl: Point<Pixels>) {
-        self.contour_count += 1;
-        if self.contour_count > 1 {
-            self.push_triangle(
-                (self.start, self.current, to),
-                (point(0., 1.), point(0., 1.), point(0., 1.)),
-            );
-        }
-
-        self.push_triangle(
-            (self.current, ctrl, to),
-            (point(0., 0.), point(0.5, 0.), point(1., 1.)),
-        );
-        self.current = to;
-    }
-
-    /// Push a triangle to the Path.
-    pub fn push_triangle(
-        &mut self,
-        xy: (Point<Pixels>, Point<Pixels>, Point<Pixels>),
-        st: (Point<f32>, Point<f32>, Point<f32>),
+    pub fn append_to(
+        &self,
+        paints: &mut Vec<PathPaint>,
+        curves: &mut Vec<PathCurve>,
+        tiles: &mut Vec<PathTile>,
     ) {
-        self.bounds = self
-            .bounds
-            .union(&Bounds {
-                origin: xy.0,
-                size: Default::default(),
-            })
-            .union(&Bounds {
-                origin: xy.1,
-                size: Default::default(),
-            })
-            .union(&Bounds {
-                origin: xy.2,
-                size: Default::default(),
-            });
-
-        self.vertices.push(PathVertex {
-            xy_position: xy.0,
-            st_position: st.0,
-            content_mask: Default::default(),
-        });
-        self.vertices.push(PathVertex {
-            xy_position: xy.1,
-            st_position: st.1,
-            content_mask: Default::default(),
-        });
-        self.vertices.push(PathVertex {
-            xy_position: xy.2,
-            st_position: st.2,
-            content_mask: Default::default(),
-        });
+        let paint_index = paints.len() as u32;
+        let curve_start = curves.len() as u32;
+        paints.push(self.paint);
+        curves.extend_from_slice(self.tiles.curves());
+        tiles.extend(self.tiles.tiles().iter().map(|tile| PathTile {
+            paint: paint_index,
+            curve_start: curve_start + tile.curve_start,
+            ..*tile
+        }));
     }
 }
 
-impl<T> Path<T>
-where
-    T: Clone + Debug + Default + PartialEq + PartialOrd + Add<T, Output = T> + Sub<Output = T>,
-{
-    #[allow(unused)]
-    #[expect(missing_docs)]
-    pub fn clipped_bounds(&self) -> Bounds<T> {
-        self.bounds.intersect(&self.content_mask.bounds)
-    }
-}
-
-impl From<Path<ScaledPixels>> for Primitive {
-    fn from(path: Path<ScaledPixels>) -> Self {
+impl From<PaintedPath> for Primitive {
+    fn from(path: PaintedPath) -> Self {
         Primitive::Path(path)
     }
 }
 
-#[derive(Clone, Debug)]
-#[repr(C)]
-#[expect(missing_docs)]
-pub struct PathVertex<P: Clone + Debug + Default + PartialEq> {
-    pub xy_position: Point<P>,
-    pub st_position: Point<f32>,
-    pub content_mask: ContentMask<P>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{point, size};
 
-#[expect(missing_docs)]
-impl PathVertex<Pixels> {
-    pub fn scale(&self, factor: f32) -> PathVertex<ScaledPixels> {
-        PathVertex {
-            xy_position: self.xy_position.scale(factor),
-            st_position: self.st_position,
-            content_mask: self.content_mask.scale(factor),
+    fn square(x: f32) -> Bounds<ScaledPixels> {
+        Bounds {
+            origin: point(ScaledPixels(x), ScaledPixels(0.)),
+            size: size(ScaledPixels(10.), ScaledPixels(10.)),
         }
+    }
+
+    fn quad(x: f32) -> Quad {
+        Quad {
+            bounds: square(x),
+            content_mask: ContentMask { bounds: square(x) },
+            ..Default::default()
+        }
+    }
+
+    fn underline(x: f32) -> Underline {
+        Underline {
+            order: 0,
+            pad: 0,
+            bounds: square(x),
+            content_mask: ContentMask { bounds: square(x) },
+            color: Hsla::default(),
+            thickness: ScaledPixels(1.),
+            wavy: false.into(),
+        }
+    }
+
+    fn batch_labels(scene: &mut Scene) -> Vec<String> {
+        scene.finish();
+        scene.batches().map(|batch| batch.label()).collect()
+    }
+
+    #[test]
+    fn a_native_view_in_a_layer_is_covered_by_what_the_layer_paints_after_it() {
+        let mut scene = Scene::default();
+        scene.push_layer();
+        scene.insert_primitive(quad(0.));
+        scene.insert_primitive(PaintNativeView {
+            order: 0,
+            id: NativeViewId::for_test(1),
+            hitbox_id: HitboxId::placeholder(),
+            bounds: square(0.),
+            content_mask: ContentMask { bounds: square(0.) },
+            background: Hsla::default(),
+        });
+        scene.insert_primitive(quad(0.));
+        // A quad beside the view shares nothing with it, so it isn't held back.
+        scene.insert_primitive(quad(20.));
+        scene.pop_layer();
+        assert_eq!(
+            batch_labels(&mut scene),
+            ["quads (1)", "native views (1)", "quads (2)"]
+        );
+    }
+
+    #[test]
+    fn a_native_view_painted_twice_is_kept_where_it_was_painted_first() {
+        let native_view = |hitbox_id: HitboxId, x: f32| PaintNativeView {
+            order: 0,
+            id: NativeViewId::for_test(1),
+            hitbox_id,
+            bounds: square(x),
+            content_mask: ContentMask { bounds: square(x) },
+            background: Hsla::default(),
+        };
+        let first_hitbox = HitboxId::placeholder();
+        let second_hitbox = first_hitbox.next();
+        let mut scene = Scene::default();
+        // The quad can't be drawn with the underline it covers, so the first
+        // occurrence, painted over both, is drawn after the second, which
+        // overlaps nothing.
+        scene.insert_primitive(underline(0.));
+        scene.insert_primitive(quad(0.));
+        scene.insert_primitive(native_view(first_hitbox, 0.));
+        scene.insert_primitive(native_view(second_hitbox, 20.));
+        scene.finish();
+
+        let shown = scene
+            .native_views
+            .iter()
+            .map(|native_view| native_view.bounds)
+            .collect::<Vec<_>>();
+        assert_eq!(shown, [square(0.)]);
+    }
+
+    #[test]
+    fn layers_are_drawn_in_paint_order() {
+        // A quad painted after a layer goes above it.
+        let mut scene = Scene::default();
+        scene.insert_primitive(quad(0.));
+        scene.push_layer();
+        scene.insert_primitive(underline(0.));
+        scene.insert_primitive(underline(5.));
+        scene.pop_layer();
+        scene.insert_primitive(quad(5.));
+        assert_eq!(
+            batch_labels(&mut scene),
+            ["quads (1)", "underlines (2)", "quads (1)"]
+        );
+
+        // A layer goes above the layer painted before it.
+        let mut scene = Scene::default();
+        scene.push_layer();
+        scene.insert_primitive(underline(0.));
+        scene.pop_layer();
+        scene.push_layer();
+        scene.insert_primitive(quad(5.));
+        scene.pop_layer();
+        assert_eq!(batch_labels(&mut scene), ["underlines (1)", "quads (1)"]);
+    }
+
+    #[test]
+    fn nested_layers_are_drawn_above_their_parents() {
+        // A layer has one draw order, so what it paints after a nested layer
+        // still goes below that layer.
+        let mut scene = Scene::default();
+        scene.push_layer();
+        scene.insert_primitive(underline(0.));
+        scene.push_layer();
+        scene.insert_primitive(quad(5.));
+        scene.pop_layer();
+        scene.insert_primitive(underline(5.));
+        scene.pop_layer();
+        assert_eq!(batch_labels(&mut scene), ["underlines (2)", "quads (1)"]);
+
+        // The same holds when the nested layer shares its parent's order.
+        let mut scene = Scene::default();
+        scene.push_layer();
+        scene.insert_primitive(quad(0.));
+        scene.push_layer();
+        scene.insert_primitive(quad(5.));
+        scene.pop_layer();
+        scene.insert_primitive(quad(8.));
+        scene.pop_layer();
+        assert_eq!(batch_labels(&mut scene), ["quads (3)"]);
+        assert_eq!(
+            scene
+                .quads
+                .iter()
+                .map(|quad| quad.bounds)
+                .collect::<Vec<_>>(),
+            [square(0.), square(8.), square(5.)]
+        );
+
+        // A layer goes above the layers nested in the layer before it.
+        let mut scene = Scene::default();
+        scene.push_layer();
+        scene.push_layer();
+        scene.insert_primitive(underline(0.));
+        scene.pop_layer();
+        scene.pop_layer();
+        scene.push_layer();
+        scene.insert_primitive(quad(5.));
+        scene.pop_layer();
+        assert_eq!(batch_labels(&mut scene), ["underlines (1)", "quads (1)"]);
     }
 }

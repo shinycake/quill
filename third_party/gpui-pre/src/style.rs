@@ -7,8 +7,7 @@ use std::{
 use crate::{
     AbsoluteLength, App, Background, BackgroundTag, BorderStyle, Bounds, ContentMask, Corners,
     CornersRefinement, CursorStyle, DefiniteLength, DevicePixels, Edges, EdgesRefinement, Font,
-    FontFallbacks, FontFeatures, FontStyle, FontWeight, GridLocation, Hsla, Length, LensStyle,
-    Pixels, Point,
+    FontFallbacks, FontFeatures, FontStyle, FontWeight, GridLocation, Hsla, Length, Pixels, Point,
     PointRefinement, Rgba, SharedString, Size, SizeRefinement, Styled, TextRun, Window, black, phi,
     point, px, quad, rems, size,
 };
@@ -291,13 +290,6 @@ pub struct Style {
 
     /// Box shadow of the element
     pub box_shadow: Vec<BoxShadow>,
-
-    /// QUILL (backdrop glass): a slab of glass under the element's fill,
-    /// drawn from what the window painted behind it
-    /// (`Window::paint_backdrop_lens` with the element's bounds and corner
-    /// radius). Boxed: every `Div` carries a style, and builders keep
-    /// several on the stack. See third_party/gpui-pre/QUILL-CHANGES.md.
-    pub backdrop_glass: Option<Box<LensStyle>>,
 
     /// The text style of this element
     #[refineable]
@@ -718,10 +710,6 @@ impl Style {
 
         window.paint_drop_shadows(bounds, corner_radii, &self.box_shadow);
 
-        if let Some(lens) = &self.backdrop_glass {
-            window.paint_backdrop_lens(bounds, corner_radii.top_left, lens);
-        }
-
         let background_color = self.background.as_ref().and_then(Fill::color);
         if background_color.is_some_and(|color| !color.is_transparent()) {
             let mut border_color = match background_color {
@@ -818,7 +806,6 @@ impl Default for Style {
             border_style: BorderStyle::default(),
             corner_radii: Corners::default(),
             box_shadow: Default::default(),
-            backdrop_glass: None,
             text: TextStyleRefinement::default(),
             mouse_cursor: None,
             opacity: None,

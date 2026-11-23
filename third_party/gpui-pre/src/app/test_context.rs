@@ -1,12 +1,13 @@
 use crate::{
     Action, AnyView, AnyWindowHandle, App, AppCell, AppContext, AsyncApp, AvailableSpace,
-    BackgroundExecutor, BorrowAppContext, Bounds, Capslock, ClipboardItem, DisplayId, DrawPhase,
-    Drawable, Element, Empty, EntityId, EventEmitter, ForegroundExecutor, Global, InputEvent,
-    Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Platform, PlatformTextSystem, Point, Render, Result, SharedString, Size,
-    SystemNotification, SystemNotificationResponse, Task, TestDispatcher, TestPlatform,
-    TestScreenCaptureSource, TestWindow, TextSystem, VisualContext, Window, WindowBounds,
-    WindowHandle, WindowOptions, WindowVisibility, app::GpuiMode, window::ElementArenaScope,
+    BackgroundExecutor, BorrowAppContext, Bounds, Capslock, ClipboardItem, Decorations, DisplayId,
+    DrawPhase, Drawable, Element, Empty, EntityId, EventEmitter, ForegroundExecutor, Global,
+    InputEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Platform, PlatformTextSystem, Point, Render, Result,
+    SharedString, Size, SystemNotification, SystemNotificationResponse, Task, TestDispatcher,
+    TestPlatform, TestScreenCaptureSource, TestWindow, TextSystem, VisualContext, Window,
+    WindowBounds, WindowHandle, WindowOptions, WindowVisibility, app::GpuiMode,
+    window::ElementArenaScope,
 };
 use anyhow::{anyhow, bail};
 use futures::{Stream, StreamExt, channel::oneshot};
@@ -14,6 +15,19 @@ use futures::{Stream, StreamExt, channel::oneshot};
 use std::{
     cell::RefCell, future::Future, ops::Deref, path::PathBuf, rc::Rc, sync::Arc, time::Duration,
 };
+
+pub(crate) fn test_window(app: &AppCell, window: AnyWindowHandle) -> TestWindow {
+    app.borrow_mut()
+        .windows
+        .get_mut(window.id)
+        .expect("window not found")
+        .as_deref_mut()
+        .expect("window is being updated")
+        .platform_window
+        .as_test()
+        .expect("window is not a TestWindow")
+        .clone()
+}
 
 /// A TestAppContext is provided to tests created with `#[gpui::test]`, it provides
 /// an implementation of `Context` with additional methods that are useful in tests.
@@ -245,21 +259,6 @@ impl TestAppContext {
         self.app.borrow_mut().shutdown();
     }
 
-    /// Quill: the OS asks to quit. Returns the app's answer, as the platform
-    /// would hear it from [`App::on_quit_request`].
-    pub fn simulate_quit_request(&self) -> crate::QuitAnswer {
-        let callback = self.test_platform.quit_request_callback.borrow_mut().take();
-        let Some(mut callback) = callback else {
-            return crate::QuitAnswer::Allow;
-        };
-        let allowed = callback();
-        self.test_platform
-            .quit_request_callback
-            .borrow_mut()
-            .get_or_insert(callback);
-        allowed
-    }
-
     /// Register cleanup to run when the test ends.
     pub fn on_quit(&mut self, f: impl FnOnce() + 'static) {
         self.on_quit.borrow_mut().push(Box::new(f));
@@ -482,22 +481,6 @@ impl TestAppContext {
         self.test_window(window_handle).simulate_resize(size);
     }
 
-    /// Simulates the user moving the window's top left corner to `origin`
-    /// (Quill).
-    pub fn simulate_window_move(&self, window_handle: AnyWindowHandle, origin: Point<Pixels>) {
-        self.test_window(window_handle).simulate_move(origin);
-    }
-
-    /// Simulates the window moving to the display `display_id` (Quill).
-    pub fn simulate_window_move_to_display(
-        &self,
-        window_handle: AnyWindowHandle,
-        display_id: DisplayId,
-    ) {
-        self.test_window(window_handle)
-            .simulate_move_to_display(display_id);
-    }
-
     /// Simulates a change in whether the platform is presenting the window.
     pub fn simulate_window_visibility_change(
         &self,
@@ -506,6 +489,16 @@ impl TestAppContext {
     ) {
         self.test_window(window_handle)
             .simulate_visibility_change(visibility);
+    }
+
+    /// Simulates the platform changing how the window is decorated.
+    pub fn simulate_window_decorations_change(
+        &self,
+        window_handle: AnyWindowHandle,
+        decorations: Decorations,
+    ) {
+        self.test_window(window_handle)
+            .simulate_decorations_change(decorations);
     }
 
     /// Simulates connecting a display.
@@ -690,17 +683,7 @@ impl TestAppContext {
 
     /// Returns the `TestWindow` backing the given handle.
     pub(crate) fn test_window(&self, window: AnyWindowHandle) -> TestWindow {
-        self.app
-            .borrow_mut()
-            .windows
-            .get_mut(window.id)
-            .unwrap()
-            .as_deref_mut()
-            .unwrap()
-            .platform_window
-            .as_test()
-            .unwrap()
-            .clone()
+        test_window(&self.app, window)
     }
 
     /// Returns a stream of notifications whenever the Entity is updated.
@@ -1444,7 +1427,7 @@ mod tests {
             }]
         );
 
-        cx.update(|cx| cx.dismiss_system_notification("thread-1"));
+        cx.update(|cx| cx.dismiss_system_notification("thread-1").detach());
         assert!(cx.delivered_system_notifications().is_empty());
         assert_eq!(cx.dismissed_system_notifications(), ["thread-1"]);
     }
@@ -1519,7 +1502,7 @@ mod tests {
                 actions: Vec::new(),
             });
             cx.on_system_notification_response(|response, cx| {
-                cx.dismiss_system_notification(&response.tag);
+                cx.dismiss_system_notification(&response.tag).detach();
             });
         });
 

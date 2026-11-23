@@ -49,7 +49,7 @@ use std::{
 /// Elements form a tree and are laid out according to web-based layout rules, as implemented by Taffy.
 /// You can create custom elements by implementing this trait, see the module-level documentation
 /// for more details.
-pub trait Element: 'static + IntoElement {
+pub trait Element: 'static + Sized {
     /// The type of state returned from [`Element::request_layout`]. A mutable reference to this state is subsequently
     /// provided to [`Element::prepaint`] and [`Element::paint`].
     type RequestLayoutState: 'static;
@@ -120,12 +120,6 @@ pub trait Element: 'static + IntoElement {
     /// See the [accessibility guide](crate::_accessibility) for an overview.
     fn write_a11y_info(&self, _node: &mut accesskit::Node) {}
 
-    /// The tag an in-process reader of the tree sees on this element's node
-    /// ([`InteractiveElement::a11y_tag`]). Never sent to the platform.
-    fn a11y_tag(&self) -> Option<crate::SharedString> {
-        None
-    }
-
     /// Add synthetic child nodes to an [`Element`] that has an
     /// [`.id()`][Element::id] and a [`.role()`][Element::a11y_role].
     ///
@@ -144,7 +138,15 @@ pub trait Element: 'static + IntoElement {
 
     /// Convert this element into a dynamically-typed [`AnyElement`].
     fn into_any(self) -> AnyElement {
-        AnyElement::new(self)
+        AnyElement::new_please_call_into_any_to_avoid_double_box(self)
+    }
+}
+
+impl<T: Element> IntoElement for T {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
     }
 }
 
@@ -445,15 +447,6 @@ impl<E: Element> Drawable<E> {
                             });
                             self.element.write_a11y_info(&mut node);
                             window.a11y.node_bounds.insert(node_id, bounds);
-                            // Only here, under `a11y_role`: a tag on an
-                            // element without a role has no node to ride
-                            // and never reaches the tree. It still tags
-                            // the element's hitbox and the tag stack, so
-                            // readers of pointer and focus tags see it; a
-                            // tag meant for the tree needs a role.
-                            if let Some(tag) = self.element.a11y_tag() {
-                                window.a11y.node_tags.insert(node_id, tag);
-                            }
                             pushed_a11y_node = window.a11y.nodes.push(node_id, node);
                             #[cfg(debug_assertions)]
                             if pushed_a11y_node {
@@ -665,7 +658,12 @@ where
 pub struct AnyElement(ArenaBox<dyn ElementObject>);
 
 impl AnyElement {
-    pub(crate) fn new<E>(element: E) -> Self
+    /// Boxes `element` into an `AnyElement`, erasing its concrete type.
+    ///
+    /// This always allocates and always adds a level of boxing, even when `element` is
+    /// already an [`AnyElement`], which would nest one `AnyElement` inside another. Call
+    /// [`Element::into_any`] instead; it skips the wrapper for `AnyElement` itself.
+    fn new_please_call_into_any_to_avoid_double_box<E>(element: E) -> Self
     where
         E: 'static + Element,
         E::RequestLayoutState: Any,
@@ -787,30 +785,14 @@ impl Element for AnyElement {
     ) {
         self.paint(window, cx);
     }
-}
 
-impl IntoElement for AnyElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-
-    fn into_any_element(self) -> AnyElement {
+    fn into_any(self) -> AnyElement {
         self
     }
 }
 
 /// The empty element, which renders nothing.
 pub struct Empty;
-
-impl IntoElement for Empty {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl Element for Empty {
     type RequestLayoutState = ();

@@ -49,15 +49,14 @@ use crate::{
     AnyWindowHandle, AppContext, AppLifecyclePhase, Arena, ArenaBox, Asset, AssetSource,
     BackgroundExecutor, Bounds, ClipboardItem, ClipboardReadError, CursorStyle, DispatchPhase,
     DisplayChanges, DisplayEvent, DisplayId, EventEmitter, ExternalDragPayload, FocusHandle,
-    FocusMap, ForegroundExecutor, Global, KeptWindow, KeyBinding, KeyContext, Keymap, Keystroke,
-    LayoutId,
+    FocusMap, ForegroundExecutor, Global, KeyBinding, KeyContext, Keymap, Keystroke, LayoutId,
     Menu, MenuItem, MissingGlyph, OwnedMenu, PathPromptOptions, Pixels, Platform, PlatformDisplay,
     PlatformKeyboardLayout, PlatformKeyboardMapper, Point, PowerMode, Priority, PromptBuilder,
     PromptButton, PromptHandle, PromptLevel, Render, RenderImage, RenderablePromptHandle,
     Reservation, ScreenCaptureSource, SharedString, SubscriberSet, Subscription, SvgRenderer,
     SystemNotification, SystemNotificationResponse, Task, TextRenderingMode, TextSystem,
-    ThermalState, Window, WindowAppearance, WindowButtonLayout, WindowHandle, WindowId,
-    WindowInvalidator, WindowingRequest,
+    ThermalState, Window, WindowAppearance, WindowBounds, WindowButtonLayout, WindowHandle,
+    WindowId, WindowInvalidator, WindowingRequest,
     colors::{Colors, GlobalColors},
     hash, init_app_menus,
 };
@@ -915,7 +914,6 @@ pub struct App {
     pub(crate) keyboard_layout_observers: SingleSubscriberSet<Handler>,
     missing_glyph_callback: Rc<MissingGlyphCallbackSlot>,
     pub(crate) thermal_state_observers: SingleSubscriberSet<Handler>,
-    pub(crate) power_mode_observers: SingleSubscriberSet<Handler>,
     pub(crate) display_observers: SingleSubscriberSet<DisplayHandler>,
     /// The connected displays, as of the platform's last display change
     /// notification.
@@ -929,10 +927,6 @@ pub struct App {
     pub(crate) quit_observers: SingleSubscriberSet<QuitHandler>,
     pub(crate) restart_observers: SingleSubscriberSet<Handler>,
     pub(crate) window_closed_observers: SingleSubscriberSet<WindowClosedHandler>,
-    /// Quill: closed windows kept for a replacement ([`Window::keep_when_closed`]).
-    kept_windows: FxHashMap<WindowId, KeptWindow>,
-    /// Quill: closed windows and the windows that took them over.
-    replaced_windows: FxHashMap<WindowId, WindowId>,
 
     /// Per-App element arena. This isolates element allocations between different
     /// App instances (important for tests where multiple Apps run concurrently).
@@ -977,14 +971,13 @@ pub struct App {
     pub(crate) name: Option<&'static str>,
     pub(crate) text_rendering_mode: Rc<Cell<TextRenderingMode>>,
 
-    pub(crate) window_update_stack: Vec<WindowId>,
+    pub(crate) window_update_stack: Vec<WindowUpdateEntry>,
     pub(crate) mode: GpuiMode,
     pub(crate) cursor_hide_mode: CursorHideMode,
     pub(crate) reduce_motion: bool,
     /// Origin of the shared clock that phase-locks synced repeating animations.
     pub(crate) synced_animation_epoch: Instant,
     power_mode: PowerMode,
-    low_power_frame_cap: bool,
     /// Whether the app was created by [`Application::new_inaccessible`]. No
     /// accesskit APIs will be called when this flag is set.
     pub(crate) accessibility_force_disabled: bool,
@@ -998,8 +991,14 @@ pub struct App {
     _ref_counts: Arc<RwLock<EntityRefCounts>>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct WindowUpdateEntry {
+    window_id: WindowId,
+    bounds: WindowBounds,
+    display_id: Option<DisplayId>,
+}
+
 impl App {
-    #[allow(clippy::new_ret_no_self)]
     pub(crate) fn new_app(
         platform: Rc<dyn Platform>,
         asset_source: Arc<dyn AssetSource>,
@@ -1071,7 +1070,6 @@ impl App {
                 keyboard_layout_observers: SingleSubscriberSet::new(),
                 missing_glyph_callback: Rc::default(),
                 thermal_state_observers: SingleSubscriberSet::new(),
-                power_mode_observers: SingleSubscriberSet::new(),
                 display_observers: SingleSubscriberSet::new(),
                 displays: read_displays(platform.as_ref()),
                 system_sleep_observers: SingleSubscriberSet::new(),
@@ -1084,8 +1082,6 @@ impl App {
                 restart_path: None,
                 restart_arguments: Vec::new(),
                 window_closed_observers: SingleSubscriberSet::new(),
-                kept_windows: FxHashMap::default(),
-                replaced_windows: FxHashMap::default(),
                 layout_id_buffer: Default::default(),
                 propagate_event: true,
                 prompt_builder: Some(PromptBuilder::Default),
@@ -1099,7 +1095,6 @@ impl App {
                 reduce_motion: false,
                 synced_animation_epoch,
                 power_mode,
-                low_power_frame_cap: true,
                 accessibility_force_disabled: false,
 
                 #[cfg(any(test, feature = "test-support", debug_assertions))]
@@ -1204,34 +1199,11 @@ impl App {
 
         platform.on_power_mode_change(Box::new({
             let app = Rc::downgrade(&app);
-            let foreground = platform.foreground_executor();
-            let background = platform.background_executor();
             move || {
-                // Quill: a platform can report this from a nested message
-                // pump, with the app borrowed, so the callback leaves the
-                // app alone and the task waits until it is free.
-                let app = app.clone();
-                let background = background.clone();
-                foreground
-                    .spawn(async move {
-                        loop {
-                            let Some(app) = app.upgrade() else {
-                                return;
-                            };
-                            if app.app.try_borrow_mut().is_ok() {
-                                app.borrow_mut().update(|cx| {
-                                    cx.power_mode = cx.platform.power_mode();
-                                    cx.power_mode_observers
-                                        .clone()
-                                        .retain(move |callback| (callback)(cx));
-                                });
-                                return;
-                            }
-                            drop(app);
-                            background.timer(Duration::from_millis(10)).await;
-                        }
-                    })
-                    .detach();
+                if let Some(app) = app.upgrade() {
+                    let power_mode = app.borrow().platform.power_mode();
+                    app.borrow_mut().power_mode = power_mode;
+                }
             }
         }));
 
@@ -1287,83 +1259,6 @@ impl App {
     #[cfg(any(test, gpui_leak_detection))]
     pub fn assert_no_new_leaks(&self, snapshot: &LeakDetectorSnapshot) {
         self.entities.assert_no_new_leaks(snapshot)
-    }
-
-    /// How many entities of each type are alive, by type name. Unlike
-    /// [`assert_no_new_leaks`](Self::assert_no_new_leaks) it needs no leak
-    /// detection build, so a test can check that closing a surface lets go
-    /// of everything opening it made.
-    #[cfg(feature = "test-support")]
-    pub fn live_entity_counts(&self) -> std::collections::BTreeMap<&'static str, usize> {
-        self.entities.live_counts()
-    }
-
-    /// How many subscriptions the app holds, by kind: a subscription
-    /// detached onto an emitter that outlives what made it stays here.
-    #[cfg(feature = "test-support")]
-    pub fn live_subscription_counts(&self) -> std::collections::BTreeMap<&'static str, usize> {
-        let mut counts = std::collections::BTreeMap::new();
-        counts.insert("observers", self.observers.subscriber_count());
-        counts.insert("event_listeners", self.event_listeners.subscriber_count());
-        counts.insert(
-            "release_listeners",
-            self.release_listeners.subscriber_count(),
-        );
-        counts.insert("global_observers", self.global_observers.subscriber_count());
-        counts.insert(
-            "new_entity_observers",
-            self.new_entity_observers.subscriber_count(),
-        );
-        counts.insert(
-            "keystroke_observers",
-            self.keystroke_observers.subscriber_count(),
-        );
-        counts.insert(
-            "keystroke_interceptors",
-            self.keystroke_interceptors.subscriber_count(),
-        );
-        counts.insert(
-            "window_closed_observers",
-            self.window_closed_observers.subscriber_count(),
-        );
-        counts.insert(
-            "keyboard_layout_observers",
-            self.keyboard_layout_observers.subscriber_count(),
-        );
-        counts.insert(
-            "thermal_state_observers",
-            self.thermal_state_observers.subscriber_count(),
-        );
-        counts.insert(
-            "power_mode_observers",
-            self.power_mode_observers.subscriber_count(),
-        );
-        counts.insert(
-            "display_observers",
-            self.display_observers.subscriber_count(),
-        );
-        counts.insert(
-            "system_sleep_observers",
-            self.system_sleep_observers.subscriber_count(),
-        );
-        counts.insert(
-            "system_wake_observers",
-            self.system_wake_observers.subscriber_count(),
-        );
-        counts.insert(
-            "app_lifecycle_observers",
-            self.app_lifecycle_observers.subscriber_count(),
-        );
-        counts.insert(
-            "memory_warning_observers",
-            self.memory_warning_observers.subscriber_count(),
-        );
-        counts.insert("quit_observers", self.quit_observers.subscriber_count());
-        counts.insert(
-            "restart_observers",
-            self.restart_observers.subscriber_count(),
-        );
-        counts
     }
 
     /// Without leak detection compiled in, this records nothing.
@@ -1427,9 +1322,6 @@ impl App {
         self.foreground_executor.spawn(futures).detach();
 
         self.quitting = false;
-        // QUILL: macOS exits right after this, so `Application::run` never
-        // returns and code after it never runs.
-        log::logger().flush();
     }
 
     /// Get the id of the current keyboard layout
@@ -1456,27 +1348,6 @@ impl App {
     /// Gracefully quit the application via the platform's standard routine.
     pub fn quit(&self) {
         self.platform.quit();
-    }
-
-    /// Quill: `callback` decides whether a quit the OS started goes ahead:
-    /// a Dock Quit or log out on macOS, the end of the session on Windows.
-    /// [`App::quit`] never asks. A request that finds the app borrowed is
-    /// held and asked again from the event loop, never let through unasked.
-    pub fn on_quit_request(&self, mut callback: impl FnMut(&mut App) -> bool + 'static) {
-        let this = self.this.clone();
-        self.platform.on_quit_request(Box::new(move || {
-            let Some(app) = this.upgrade() else {
-                return crate::QuitAnswer::Allow;
-            };
-            let Ok(mut cx) = app.try_borrow_mut() else {
-                return crate::QuitAnswer::Later;
-            };
-            if cx.update(|cx| callback(cx)) {
-                crate::QuitAnswer::Allow
-            } else {
-                crate::QuitAnswer::Refuse
-            }
-        }));
     }
 
     /// Switches the platform between headless and windowed modes.
@@ -1629,27 +1500,6 @@ impl App {
             .insert(window_handle.id, tracked_entities);
     }
 
-    /// Quill: [`Self::record_entities_accessed`] for a frame that replaces
-    /// nothing the window last drew: what it read joins what is tracked.
-    pub(crate) fn add_entities_accessed(
-        &mut self,
-        window_handle: AnyWindowHandle,
-        invalidator: WindowInvalidator,
-        entities: &FxHashSet<EntityId>,
-    ) {
-        let tracked = self.tracked_entities.entry(window_handle.id).or_default();
-        for entity in entities {
-            if tracked.insert(*entity) {
-                self.window_invalidators_by_entity
-                    .entry(*entity)
-                    .or_default()
-                    .insert(window_handle.id, invalidator.clone());
-                self.current_window_by_entity
-                    .insert(*entity, window_handle.id);
-            }
-        }
-    }
-
     pub(crate) fn new_observer(&mut self, key: EntityId, value: Handler) -> Subscription {
         let (subscription, activate) = self.observers.insert_pending(key, value);
         self.defer(move |_| activate());
@@ -1755,6 +1605,40 @@ impl App {
         self.platform.active_window()
     }
 
+    /// Returns the display containing the window that is currently focused at the platform level.
+    pub fn active_display(&self) -> Option<Rc<dyn PlatformDisplay>> {
+        let (display_id, _) = self.active_window_placement()?;
+        self.find_display(display_id?)
+    }
+
+    pub(crate) fn active_window_placement(&self) -> Option<(Option<DisplayId>, WindowBounds)> {
+        let window_id = self.active_window()?.window_id();
+
+        if let Some(state) = self
+            .window_update_stack
+            .iter()
+            .rev()
+            .find(|state| state.window_id == window_id)
+        {
+            return Some((state.display_id, state.bounds));
+        }
+
+        let window = self.windows.get(window_id)?.as_ref()?;
+        Some((window.display_id(), window.last_window_bounds()))
+    }
+
+    pub(crate) fn sync_window_update_entry(&mut self, window: &Window) {
+        if let Some(state) = self
+            .window_update_stack
+            .iter_mut()
+            .rev()
+            .find(|state| state.window_id == window.handle.id)
+        {
+            state.bounds = window.last_window_bounds();
+            state.display_id = window.display_id();
+        }
+    }
+
     /// Opens a new window with the given option and the root view returned by the given function.
     /// The function is invoked with a `Window`, which can be used to interact with window-specific
     /// functionality.
@@ -1768,7 +1652,11 @@ impl App {
             let handle = WindowHandle::new(id);
             match Window::new(handle.into(), options, cx) {
                 Ok(mut window) => {
-                    cx.window_update_stack.push(id);
+                    cx.window_update_stack.push(WindowUpdateEntry {
+                        window_id: id,
+                        bounds: window.last_window_bounds(),
+                        display_id: window.display_id(),
+                    });
                     let root_view = build_root_view(&mut window, cx);
                     cx.window_update_stack.pop();
                     window.root.replace(root_view.into());
@@ -1843,6 +1731,66 @@ impl App {
             .cloned()
     }
 
+    /// Returns a diagnostic snapshot of app, display, and window state.
+    ///
+    /// This is for inspecting a running app that is misbehaving in a way that
+    /// is hard to reproduce. The layout is not stable and varies by platform;
+    /// do not parse it for program logic. A window that is being updated when
+    /// this is called is listed by ID only.
+    pub fn debug_state(&self) -> serde_json::Value {
+        let displays = self
+            .platform
+            .displays()
+            .into_iter()
+            .map(|display| {
+                serde_json::json!({
+                    "id": u64::from(display.id()),
+                    "uuid": display.uuid().ok().map(|uuid| uuid.to_string()),
+                    "bounds": display.bounds(),
+                    "visible_bounds": display.visible_bounds(),
+                    "refresh_interval_seconds": display
+                        .refresh_interval()
+                        .map(|interval| interval.as_secs_f64()),
+                })
+            })
+            .collect::<Vec<_>>();
+        let windows = self
+            .windows
+            .iter()
+            .map(|(window_id, window)| match window {
+                Some(window) => window.debug_state(),
+                None => serde_json::json!({ "id": window_id.as_u64(), "updating": true }),
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "compositor": self.platform.compositor_name(),
+            "thermal_state": format!("{:?}", self.platform.thermal_state()),
+            "power_mode": {
+                "cached": format!("{:?}", self.power_mode),
+                "platform": format!("{:?}", self.platform.power_mode()),
+            },
+            "window_appearance": format!("{:?}", self.platform.window_appearance()),
+            "cursor_visible": self.platform.is_cursor_visible(),
+            "active_window_id": self
+                .platform
+                .active_window()
+                .map(|handle| handle.window_id().as_u64()),
+            "window_stack": self.platform.window_stack().map(|stack| {
+                stack
+                    .into_iter()
+                    .map(|handle| handle.window_id().as_u64())
+                    .collect::<Vec<_>>()
+            }),
+            "primary_display_id": self
+                .platform
+                .primary_display()
+                .map(|display| u64::from(display.id())),
+            "displays": displays,
+            "windows": windows,
+            "platform": self.platform.debug_state(),
+        })
+    }
+
     /// Returns the current thermal state of the system.
     pub fn thermal_state(&self) -> ThermalState {
         self.platform.thermal_state()
@@ -1859,18 +1807,6 @@ impl App {
         F: 'static + FnMut(&mut App),
     {
         self.thermal_state_observers.insert(Box::new(move |cx| {
-            callback(cx);
-            true
-        }))
-    }
-
-    /// Quill: invokes a handler when the operating system's power mode
-    /// changes.
-    pub fn on_power_mode_change<F>(&self, mut callback: F) -> Subscription
-    where
-        F: 'static + FnMut(&mut App),
-    {
-        self.power_mode_observers.insert(Box::new(move |cx| {
             callback(cx);
             true
         }))
@@ -1947,10 +1883,9 @@ impl App {
         }))
     }
 
-    /// Observes application lifecycle changes. Of the desktop platforms only
-    /// macOS emits any: `Active` when the application becomes active. On iOS
-    /// these currently describe the single connected scene, not individual
-    /// windows.
+    /// Observes mobile application lifecycle changes. Desktop platforms do not
+    /// emit these events. On iOS these currently describe the single connected
+    /// scene, not individual windows.
     ///
     /// Save important changes incrementally: neither disconnection nor quit is
     /// guaranteed before the system terminates a backgrounded application.
@@ -2031,21 +1966,6 @@ impl App {
     /// when the platform cannot determine it.
     pub fn power_mode(&self) -> PowerMode {
         self.power_mode
-    }
-
-    /// Quill: whether low power mode caps frame rates
-    /// (`WindowOptions::low_power_frame_interval`).
-    pub fn set_low_power_frame_cap(&mut self, capped: bool) {
-        self.low_power_frame_cap = capped;
-    }
-
-    /// The power mode frame pacing follows.
-    pub(crate) fn frame_power_mode(&self) -> PowerMode {
-        if self.power_mode == PowerMode::LowPower && !self.low_power_frame_cap {
-            PowerMode::Balanced
-        } else {
-            self.power_mode
-        }
     }
 
     /// Writes data to the platform clipboard.
@@ -2164,8 +2084,11 @@ impl App {
     ///
     /// Best-effort: some platforms cannot retract a notification once shown,
     /// in which case it ages out of the notification center on its own.
-    pub fn dismiss_system_notification(&self, tag: &str) {
-        self.platform.dismiss_system_notification(tag);
+    /// The task completes after the platform calls return, not after any
+    /// asynchronous work inside the operating system. Dropping it does not
+    /// cancel dismissal.
+    pub fn dismiss_system_notification(&self, tag: &str) -> Task<()> {
+        self.platform.dismiss_system_notification(tag)
     }
 
     /// Registers the handler invoked when the user activates a system
@@ -2551,22 +2474,6 @@ impl App {
         result.context("window not found")
     }
 
-    /// Quill: what a closed window left, for [`Window::take_over`]. It holds
-    /// the root view alive until taken and dropped, so an `on_window_closed`
-    /// observer takes it whether or not it will reopen the window.
-    pub fn take_kept_window(&mut self, id: WindowId) -> Option<KeptWindow> {
-        self.kept_windows.remove(&id)
-    }
-
-    pub(crate) fn note_window_replaced(&mut self, old: WindowId, new: WindowId) {
-        for target in self.replaced_windows.values_mut() {
-            if *target == old {
-                *target = new;
-            }
-        }
-        self.replaced_windows.insert(old, new);
-    }
-
     /// Creates an `AsyncApp`, which can be cloned and has a static lifetime
     /// so it can be held across `await` points.
     pub fn to_async(&self) -> AsyncApp {
@@ -2660,7 +2567,6 @@ impl App {
     /// Spawns the future returned by the given function on the main thread with
     /// the given priority. The closure will be invoked with [AsyncApp], which
     /// allows the application state to be accessed across await points.
-    #[track_caller]
     pub fn spawn_with_priority<AsyncFn, R>(&self, priority: Priority, f: AsyncFn) -> Task<R>
     where
         AsyncFn: AsyncFnOnce(&mut AsyncApp) -> R + 'static,
@@ -3204,14 +3110,6 @@ impl App {
         self.active_drag.is_some()
     }
 
-    /// Is the thing being dragged a `T`? (Quill: tells a lifted message
-    /// drag from a file or text drag by its payload.)
-    pub fn active_drag_is<T: 'static>(&self) -> bool {
-        self.active_drag
-            .as_ref()
-            .is_some_and(|drag| (*drag.value).is::<T>())
-    }
-
     /// Gets the cursor style of the currently active drag operation.
     pub fn active_drag_cursor_style(&self) -> Option<CursorStyle> {
         self.active_drag.as_ref().and_then(|drag| drag.cursor_style)
@@ -3466,11 +3364,6 @@ impl App {
         update: &mut dyn FnMut(Option<(AnyView, &mut Window, &mut App)>),
     ) {
         self.update(|cx| {
-            let window_id = cx
-                .replaced_windows
-                .get(&window_id)
-                .copied()
-                .unwrap_or(window_id);
             let Some(mut window) = cx.windows.get_mut(window_id).and_then(Option::take) else {
                 update(None);
                 return;
@@ -3478,7 +3371,11 @@ impl App {
 
             let root_view = window.root.clone().unwrap();
 
-            cx.window_update_stack.push(window.handle.id);
+            cx.window_update_stack.push(WindowUpdateEntry {
+                window_id: window.handle.id,
+                bounds: window.last_window_bounds(),
+                display_id: window.display_id(),
+            });
             update(Some((root_view, &mut window, cx)));
             fn trail(window_id: WindowId, window: Box<Window>, cx: &mut App) -> Option<()> {
                 cx.window_update_stack.pop();
@@ -3498,10 +3395,6 @@ impl App {
                                 cx.current_window_by_entity.remove(&entity_id);
                             }
                         }
-                    }
-
-                    if window.keep_when_closed {
-                        cx.kept_windows.insert(window_id, window.into_kept());
                     }
 
                     cx.window_closed_observers.clone().retain(|callback| {
@@ -3567,7 +3460,7 @@ impl AppContext for App {
             cx.push_effect(Effect::EntityCreated {
                 entity: handle.into_any(),
                 tid: TypeId::of::<T>(),
-                window: cx.window_update_stack.last().cloned(),
+                window: cx.window_update_stack.last().map(|state| state.window_id),
             });
 
             cx.entities.insert(slot, entity)

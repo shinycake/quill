@@ -19,12 +19,12 @@ use crate::{
     Action, AnyDrag, AnyElement, AnyTooltip, AnyView, App, BackGestureEvent, Bounds, ClickEvent,
     DispatchPhase, Display, Element, ElementId, Entity, EntityId, ExternalDragPayload,
     ExternalDragPayloadSource, FileDropEvent, FocusHandle, Global, GlobalElementId, Hitbox,
-    HitboxBehavior, HitboxId, InspectorElementId, IntoElement, IsZero, KeyContext, KeyDownEvent,
-    KeyUpEvent, KeyboardButton, KeyboardClickEvent, LayoutId, LongPressEvent,
-    ModifiersChangedEvent, MouseButton, MouseClickEvent, MouseDownEvent, MouseExitEvent,
-    MouseMoveEvent, MousePressureEvent, MouseUpEvent, OngoingScroll, Overflow, ParentElement,
-    PinchEvent, Pixels, Point, Render, ScrollEvent, SharedString, Size, Style, StyleRefinement,
-    Styled, Task, TooltipId, TouchPhase, Visibility, Window, WindowControlArea, point, px, size,
+    HitboxBehavior, HitboxId, InspectorElementId, IsZero, KeyContext, KeyDownEvent, KeyUpEvent,
+    KeyboardButton, KeyboardClickEvent, LayoutId, LongPressEvent, ModifiersChangedEvent,
+    MouseButton, MouseClickEvent, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
+    MousePressureEvent, MouseUpEvent, OngoingScroll, Overflow, ParentElement, PinchEvent, Pixels,
+    Point, Render, ScrollEvent, SharedString, Size, Style, StyleRefinement, Styled, Task,
+    TooltipId, TouchPhase, Visibility, Window, WindowControlArea, point, px, size,
 };
 use collections::HashMap;
 use gpui_util::ResultExt;
@@ -655,23 +655,7 @@ impl Interactivity {
                 constructor(value.downcast_ref().unwrap(), offset, window, cx).into()
             }),
             external_payload: None,
-            start_distance: DRAG_THRESHOLD,
         });
-    }
-
-    /// Sets how far (Manhattan distance, in pixels) the pointer must move
-    /// with the button down before this element's drag starts; the default
-    /// is 2. A press that moves less stays a click. Must be called after
-    /// [`Self::on_drag`]. Quill patch.
-    pub fn drag_start_distance(&mut self, distance: Pixels)
-    where
-        Self: Sized,
-    {
-        let Some(drag_listener) = self.drag_listener.as_mut() else {
-            debug_assert!(false, "drag_start_distance must be called after on_drag");
-            return;
-        };
-        drag_listener.start_distance = f64::from(distance);
     }
 
     /// Registers a callback resolving a payload to offer the platform if a drag started by this
@@ -1391,17 +1375,6 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         self
     }
 
-    /// Tag this element for an in-process reader of the accessibility tree
-    /// ([`crate::Window::a11y_tree_snapshot`]). The tag rides the element's
-    /// node in the snapshot and its hitbox
-    /// ([`crate::Window::hovered_a11y_tags`]); it is never sent to the
-    /// platform adapter, so assistive technology does not see it. An element
-    /// with a tag always gets a hitbox.
-    fn a11y_tag(mut self, tag: impl Into<SharedString>) -> Self {
-        self.interactivity().aria.tag = Some(tag.into());
-        self
-    }
-
     /// Set the accessible label for this element.
     fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
         self.interactivity().aria.label = Some(label.into());
@@ -1705,16 +1678,6 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         self
     }
 
-    /// Sets how far the pointer must move before the drag of [`Self::on_drag`]
-    /// starts. The fluent API equivalent to [`Interactivity::drag_start_distance`].
-    fn drag_start_distance(mut self, distance: Pixels) -> Self
-    where
-        Self: Sized,
-    {
-        self.interactivity().drag_start_distance(distance);
-        self
-    }
-
     /// Registers a callback resolving a payload to offer the platform if a drag started by this
     /// element leaves the window. It is invoked at most once per drag gesture, when the pointer
     /// exits the viewport. Must be called after [`Self::on_drag`], with the same dragged value
@@ -1850,7 +1813,6 @@ pub(crate) struct DragListener {
     value: Arc<dyn Any>,
     render: Box<dyn Fn(&dyn Any, Point<Pixels>, &mut Window, &mut App) -> AnyView + 'static>,
     external_payload: Option<ExternalDragPayloadResolver>,
-    start_distance: f64,
 }
 
 type ExternalDragPayloadResolver =
@@ -1880,8 +1842,14 @@ pub(crate) type ActionListener =
 /// Construct a new [`Div`] element
 #[track_caller]
 pub fn div() -> Div {
+    #[allow(unused_mut)]
+    let mut interactivity = InteractivityBox::new();
+    #[cfg(any(feature = "inspector", debug_assertions))]
+    {
+        interactivity.source_location = Some(core::panic::Location::caller());
+    }
     Div {
-        interactivity: Interactivity::new(),
+        interactivity,
         children: SmallVec::default(),
         prepaint_listener: None,
         image_cache: None,
@@ -1889,9 +1857,55 @@ pub fn div() -> Div {
     }
 }
 
+/// Where a [`Div`]'s [`Interactivity`] lives. Divs built while a frame is drawn, which is
+/// nearly all of them, use the element arena so they don't each cost a heap allocation;
+/// the arena outlives every element built during the frame.
+enum InteractivityBox {
+    Arena(crate::ArenaBox<Interactivity>),
+    Heap(Box<Interactivity>),
+}
+
+impl InteractivityBox {
+    /// Builds the `Interactivity` in place, since moving one in would copy over a kilobyte.
+    #[inline]
+    fn new() -> Self {
+        if crate::window::draw_in_progress() {
+            Self::Arena(crate::window::with_element_arena(|arena| {
+                arena.alloc(Interactivity::default)
+            }))
+        } else {
+            Self::Heap(Box::default())
+        }
+    }
+}
+
+impl std::ops::Deref for InteractivityBox {
+    type Target = Interactivity;
+
+    #[inline]
+    fn deref(&self) -> &Interactivity {
+        match self {
+            Self::Arena(interactivity) => interactivity,
+            Self::Heap(interactivity) => interactivity,
+        }
+    }
+}
+
+impl std::ops::DerefMut for InteractivityBox {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Interactivity {
+        match self {
+            Self::Arena(interactivity) => interactivity,
+            Self::Heap(interactivity) => interactivity,
+        }
+    }
+}
+
 /// A [`Div`] element, the all-in-one element for building complex UIs in GPUI
 pub struct Div {
-    interactivity: Interactivity,
+    // Kept out of line because builder methods move the `Div` by value on every call,
+    // and `Interactivity` is over a kilobyte.
+    interactivity: InteractivityBox,
     children: SmallVec<[StackSafe<AnyElement>; 2]>,
     prepaint_listener: Option<Box<dyn Fn(Vec<Bounds<Pixels>>, &mut Window, &mut App) + 'static>>,
     image_cache: Option<Box<dyn ImageCacheProvider>>,
@@ -2002,10 +2016,6 @@ impl Element for Div {
         self.interactivity.write_a11y_info(node);
     }
 
-    fn a11y_tag(&self) -> Option<SharedString> {
-        self.interactivity.aria.tag.clone()
-    }
-
     fn a11y_synthetic_children(
         &mut self,
         _prepaint: &mut Self::PrepaintState,
@@ -2104,10 +2114,6 @@ impl Element for Div {
             (child_max - child_min).into()
         };
 
-        if let Some(scroll_handle) = self.interactivity.tracked_scroll_handle.as_ref() {
-            scroll_handle.scroll_to_active_item();
-        }
-
         self.interactivity.prepaint(
             global_id,
             inspector_id,
@@ -2186,19 +2192,9 @@ impl Element for Div {
     }
 }
 
-impl IntoElement for Div {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 #[derive(Default)]
 pub(crate) struct AriaProperties {
     pub(crate) author_id: Option<SharedString>,
-    /// [`InteractiveElement::a11y_tag`]: for in-process readers only.
-    pub(crate) tag: Option<SharedString>,
     pub(crate) label: Option<SharedString>,
     pub(crate) description: Option<SharedString>,
     pub(crate) keyshortcuts: Option<SharedString>,
@@ -2428,12 +2424,10 @@ impl Interactivity {
                     if focus_handle.is_focused(window) {
                         window.a11y.set_focus(node_id);
                     }
-                } else if focus_handle.is_focused(window)
-                    && !window.a11y.focus_nearest_focusable_ancestor()
-                {
+                } else if focus_handle.is_focused(window) {
                     // Focusable, but with no element id it can't have an
-                    // accessibility node, and no focusable node encloses it,
-                    // so screen readers fall back to the whole window.
+                    // accessibility node, so screen readers fall back to the
+                    // whole window.
                     window
                         .a11y
                         .note_focus_without_node(focus_handle.id, "it has no element id");
@@ -2485,11 +2479,7 @@ impl Interactivity {
                         style.overflow_mask(bounds, window.rem_size()),
                         |window| {
                             let hitbox = if self.should_insert_hitbox(&style, window, cx) {
-                                let hitbox = window.insert_hitbox(bounds, self.hitbox_behavior);
-                                if let Some(tag) = &self.aria.tag {
-                                    window.tag_hitbox(hitbox.id, tag.clone());
-                                }
-                                Some(hitbox)
+                                Some(window.insert_hitbox(bounds, self.hitbox_behavior))
                             } else {
                                 None
                             };
@@ -2508,8 +2498,7 @@ impl Interactivity {
     }
 
     fn should_insert_hitbox(&self, style: &Style, window: &Window, cx: &App) -> bool {
-        self.aria.tag.is_some()
-            || self.hitbox_behavior != HitboxBehavior::Normal
+        self.hitbox_behavior != HitboxBehavior::Normal
             || self.window_control.is_some()
             || style.mouse_cursor.is_some()
             || self.group.is_some()
@@ -2550,14 +2539,22 @@ impl Interactivity {
 
         if let Some(scroll_offset) = self.scroll_offset.as_ref() {
             let mut scroll_to_bottom = false;
-            let mut tracked_scroll_handle = self
+            if let Some(scroll_handle) = self.tracked_scroll_handle.as_ref() {
+                {
+                    let mut scroll_handle_state = scroll_handle.0.borrow_mut();
+                    scroll_handle_state.overflow = style.overflow;
+                    // Scrolling to an item needs this frame's bounds and overflow.
+                    // What the handle remembers is from the last frame, and is
+                    // empty the first time the element is drawn.
+                    scroll_handle_state.bounds = bounds;
+                    scroll_to_bottom = mem::take(&mut scroll_handle_state.scroll_to_bottom);
+                }
+                scroll_handle.scroll_to_active_item();
+            }
+            let tracked_scroll_handle = self
                 .tracked_scroll_handle
                 .as_ref()
                 .map(|handle| handle.0.borrow_mut());
-            if let Some(scroll_handle_state) = tracked_scroll_handle.as_deref_mut() {
-                scroll_handle_state.overflow = style.overflow;
-                scroll_to_bottom = mem::take(&mut scroll_handle_state.scroll_to_bottom);
-            }
 
             let rem_size = window.rem_size();
             // Taffy lays the box out with the padding snapped to the device pixel
@@ -2646,16 +2643,6 @@ impl Interactivity {
                     tab_group = self.tab_index;
                 }
 
-                // The tag spans this element's own background and border
-                // and its children's paint: the focused element records it
-                // (`Window::focused_a11y_tags`) and a paint filter reads it
-                // (`Window::set_paint_filter`).
-                let tagged = self.aria.tag.is_some();
-                if let Some(tag) = &self.aria.tag {
-                    window.push_a11y_tag(tag.clone(), bounds);
-                }
-                // Quill: its tooltip is filtered under these tags.
-                window.record_tooltip_tags(self.tooltip_id);
                 window.with_element_opacity(style.opacity, |window| {
                     style.paint(bounds, window, cx, |window: &mut Window, cx: &mut App| {
                         window.with_text_style(style.text_style().cloned(), |window| {
@@ -2673,9 +2660,6 @@ impl Interactivity {
                                         // to the first item in the whole window instead of its own.
                                         if let Some(focus_handle) = &self.tracked_focus_handle {
                                             window.next_frame.tab_stops.insert(focus_handle);
-                                            if focus_handle.is_focused(window) {
-                                                window.record_focus_tags();
-                                            }
                                         }
                                         if let Some(hitbox) = hitbox {
                                             #[cfg(debug_assertions)]
@@ -2750,9 +2734,6 @@ impl Interactivity {
                         });
                     });
                 });
-                if tagged {
-                    window.pop_a11y_tag();
-                }
 
                 ((), element_state)
             },
@@ -3107,13 +3088,7 @@ impl Interactivity {
                         let mut pending_mouse_down = pending_mouse_down.borrow_mut();
                         if let Some(mouse_down) = pending_mouse_down.clone()
                             && !cx.has_active_drag()
-                            && drag_listener.as_ref().is_some_and(|listener| {
-                                {
-                                    let moved = event.position - mouse_down.position;
-                                    f64::from(moved.x.abs() + moved.y.abs())
-                                        > listener.start_distance
-                                }
-                            })
+                            && (event.position - mouse_down.position).magnitude() > DRAG_THRESHOLD
                             && let Some(listener) = drag_listener.take()
                             && mouse_down.button == MouseButton::Left
                         {
@@ -4250,10 +4225,6 @@ where
         self.element.write_a11y_info(node);
     }
 
-    fn a11y_tag(&self) -> Option<SharedString> {
-        self.element.a11y_tag()
-    }
-
     fn a11y_synthetic_children(
         &mut self,
         prepaint: &mut Self::PrepaintState,
@@ -4304,17 +4275,6 @@ where
             window,
             cx,
         );
-    }
-}
-
-impl<E> IntoElement for Stateful<E>
-where
-    E: Element,
-{
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 
@@ -4580,8 +4540,9 @@ impl ScrollHandle {
 mod tests {
     use super::*;
     use crate::{
-        AnyWindowHandle, AppContext as _, Context, GestureTuning, InputEvent, Keystroke,
-        MouseMoveEvent, TestAppContext, TouchEvent, TouchId, canvas, util::FluentBuilder as _,
+        AnyWindowHandle, AppContext as _, Context, GestureTuning, InputEvent, IntoElement,
+        Keystroke, MouseMoveEvent, TestAppContext, TouchEvent, TouchId, canvas,
+        util::FluentBuilder as _,
     };
     use std::{cell::Cell, rc::Weak};
 
@@ -4923,14 +4884,6 @@ mod tests {
     struct TooltipCaptureElement {
         child: AnyElement,
         captured_active_tooltip: CapturedActiveTooltip,
-    }
-
-    impl IntoElement for TooltipCaptureElement {
-        type Element = Self;
-
-        fn into_element(self) -> Self::Element {
-            self
-        }
     }
 
     impl Element for TooltipCaptureElement {
@@ -5827,6 +5780,48 @@ mod tests {
             .unwrap();
 
         assert_eq!(scroll_handle.max_offset().y, px(0.));
+    }
+
+    #[gpui::test]
+    fn test_scrolls_to_an_item_requested_before_the_first_frame(cx: &mut TestAppContext) {
+        struct Strip {
+            scroll_handle: ScrollHandle,
+        }
+
+        impl Render for Strip {
+            fn render(
+                &mut self,
+                _window: &mut Window,
+                _cx: &mut Context<Self>,
+            ) -> impl IntoElement {
+                div().size_full().child(
+                    div()
+                        .id("strip")
+                        .flex()
+                        .h(px(20.))
+                        .w(px(100.))
+                        .overflow_x_scroll()
+                        .track_scroll(&self.scroll_handle)
+                        .children((0..5).map(|_| div().flex_none().w(px(40.)).h_full())),
+                )
+            }
+        }
+
+        // The handle has never been drawn, so it knows neither its element's
+        // bounds nor that the element scrolls.
+        let scroll_handle = ScrollHandle::new();
+        scroll_handle.scroll_to_item(4);
+        let window: AnyWindowHandle = cx
+            .add_window({
+                let scroll_handle = scroll_handle.clone();
+                move |_, _| Strip { scroll_handle }
+            })
+            .into();
+        cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx))
+            .unwrap();
+
+        // Five 40px items in a 100px strip: the last one ends at 200px.
+        assert_eq!(scroll_handle.offset().x, px(-100.));
     }
 
     struct ContentSizedGrid;
