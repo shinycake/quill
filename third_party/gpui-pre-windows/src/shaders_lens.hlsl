@@ -416,9 +416,10 @@ float4 lens_fragment(LensFragmentInput input): SV_Target {
     float top = (1.0 - lens_step(-0.05, 0.75, ny)) * (1.0 - nx * 0.12) * top_refl * 0.6 + top_base;
     glass *= float3(lens_dim(1.0 - top), lens_dim(1.0 - top), lens_dim(1.0 - 0.72 * top));
 
-    // Frosted resting state.
+    // Frosted resting state. QUILL (glass effects): `edge_clear` thins the
+    // frost across the rim band (`LensTune::rim_frost`).
     if (clear) {
-        glass = lerp(glass, color.rgb, lens.frost);
+        glass = lerp(glass, color.rgb, lens.frost * (1.0 - edge * lens.edge_clear));
     }
 
     // Inner shading: just inside the rim, a wide band on the left, a deep ring.

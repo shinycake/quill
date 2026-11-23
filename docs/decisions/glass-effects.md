@@ -1,7 +1,7 @@
 # Glass effects: the switch, the rules and the surfaces
 
 Settings › Appearance › **Glass effects** (tagged Experimental, off by
-default) turns Quill's floating surfaces into frosted glass drawn by the
+default) turns Quill's floating surfaces into clear glass drawn by the
 backdrop lens primitive (docs/decisions/backdrop-glass.md). With the switch
 off Quill draws exactly what it drew before: no lens primitive, no pipeline,
 no atlas and no readable frame.
@@ -65,17 +65,44 @@ never get glass (Apple's rule: glass is for controls above content).
 
 ## Recipes
 
-Every look is in `src/ui/glass/recipes.rs`. Larger surfaces carry more tint:
-menus 0.86 frost, panels 0.90, floating controls 0.84, media text plates
-0.55, media icons 0.45 (over black, with white labels). The test beside it
-settles each recipe over pure black and pure white, in the light and dark
-themes, and requires 4.5:1 for primary and secondary text and 3:1 for
-icon-only roles. High contrast never draws glass.
+Every look is in `src/ui/glass/recipes.rs`, and there is one look: clear
+glass. Idan picked it from three candidates on 2026-11-23, after the first
+recipes (one heavy frost from edge to edge, 0.84 to 0.90) read as frosted
+rather than liquid.
+
+- **The rim band is clear.** The lens primitive gained
+  `LensTune::rim_frost`, which thins the frost across the rim band on every
+  backend (Metal, Vulkan/GL, DirectX). The rim shows the backdrop bent
+  (a 10 px radial pull on slabs, edge refraction on buttons), saturated
+  (2.0) and nearly sharp, with a lit edge.
+- **The middle, where labels sit, carries a light tint over a strong blur**
+  (14 px). Its frost is 0.78 (light) and 0.68 (dark) of what the flat
+  black-and-white rule would need: 0.65 for light menus, 0.49 for dark.
+  Media glass keeps the full rule (0.44 behind icons, 0.56 behind text),
+  since a video frame can be flat white.
+- Light glass draws the theme's hairline border so it doesn't melt into a
+  light window; dark glass and media glass draw a faint white one. Menus
+  and panels cast a tight shadow (softness 10, offset 4). The chat-list
+  bar keeps its rim light low, or its lower edge reads as a neon line.
+
+The contrast test beside the recipes holds the limits in both themes:
+
+| Backdrop | Primary text | Secondary text and icons |
+| --- | --- | --- |
+| Mid grey (what the blur makes of mixed content) | 4.5:1 | 3:1 |
+| Flat pure black or pure white | 3:1 | not held |
+| Media glass over flat pure black or white | 4.5:1 (icons 3:1) | 3:1 |
+
+This is weaker than the plan's original rule (4.5:1 over flat black and
+white everywhere), and the trade is known: grey secondary text, such as
+the "Sent yesterday" line in a menu, gets faint when light glass sits over
+a nearly black photo, and dark glass over a flat white area drops primary
+text to about 3.4:1. High contrast and Reduce Transparency never draw
+glass.
 
 When glass can't be drawn (a lens inside a paint layer, past the last band,
 or an unreadable frame) the lens draws its fallback quad in the glass
-colour. At 0.86 frost the fallback is about 94% opaque, close to the solid
-popover.
+colour.
 
 ## Not done, and why
 
@@ -84,8 +111,8 @@ popover.
 - **Rim light that follows the pointer** and the **96% scale-in** when a
   menu opens: GPUI has no element scale, and the rim light needs a pointer
   feed into every lens; both are polish for later.
-- **A separate scroll edge fade** under the header: the bar's frosted
-  lower edge already softens the rows passing under it.
+- **A separate scroll edge fade** under the header: the bar's clear,
+  bending lower edge already marks where the rows pass under it.
 - **Underline folder tabs** keep their underline: there is no capsule to
   turn into glass.
 - **Picture-in-picture** has no filled control to turn into glass.
@@ -99,7 +126,10 @@ Measured 2026-11-22 on Idan's M-series Mac (macOS 27), release build with
 the command buffer's `GPUEndTime - GPUStartTime` per frame
 (`QUILL_GPU_PROBE=1`, `gpui-pre-apple`), first 30 frames skipped; CPU is
 the frame profiler's draw histogram. Every comparison ran in ABBA order
-(off, on, on, off), twice. These are relative numbers for this decision,
+(off, on, on, off), twice. The runs used the first, frosted recipes; the
+clear look keeps the same lenses and bands and a smaller blur (14 px
+against 18 to 22), so its cost should not be higher, but it was not
+measured again. These are relative numbers for this decision,
 not public claims.
 
 | Situation | Budget | Result |

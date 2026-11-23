@@ -382,9 +382,10 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
     let top = (1.0 - lens_step(-0.05, 0.75, ny)) * (1.0 - nx * 0.12) * top_refl * 0.6 + top_base;
     glass *= vec3<f32>(lens_dim(1.0 - top), lens_dim(1.0 - top), lens_dim(1.0 - 0.72 * top));
 
-    // Frosted resting state.
+    // Frosted resting state. QUILL (glass effects): `edge_clear` thins the
+    // frost across the rim band (`LensTune::rim_frost`).
     if (clear) {
-        glass = mix(glass, color.rgb, lens.frost);
+        glass = mix(glass, color.rgb, lens.frost * (1.0 - edge * lens.edge_clear));
     }
 
     // Inner shading: just inside the rim, a wide band on the left, a deep ring.

@@ -83,7 +83,9 @@ pub struct LensBorder {
 /// Multipliers on the default look; 1.0 everywhere is the default, except
 /// `bend_curve` (1.6). `frost_edge` multiplies the frost's blur at the rim
 /// (the source shader's `uFrostEdge`): above 1 the frost thickens towards
-/// the edge, below 1 it clears.
+/// the edge, below 1 it clears. `rim_frost` multiplies the frost itself
+/// across the rim band of clear glass (1 = even frost, 0 = a clear rim
+/// that shows the bent backdrop around a frosted middle).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub struct LensTune {
@@ -97,6 +99,7 @@ pub struct LensTune {
     pub bend_depth: f32,
     pub saturation: f32,
     pub frost_edge: f32,
+    pub rim_frost: f32,
 }
 
 impl Default for LensTune {
@@ -112,6 +115,7 @@ impl Default for LensTune {
             bend_depth: 1.0,
             saturation: 1.0,
             frost_edge: 1.0,
+            rim_frost: 1.0,
         }
     }
 }
@@ -419,6 +423,7 @@ impl BackdropLens {
                 blur_mix,
             } => {
                 lens.frost = frost;
+                lens.edge_clear = (1.0 - style.tune.rim_frost).clamp(0.0, 1.0);
                 lens.blur = blur.0.max(0.0);
                 lens.blur_mix = blur_mix;
                 match bend {

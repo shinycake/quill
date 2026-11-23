@@ -1,14 +1,11 @@
 //! Every glass look Quill draws, in one place. A surface names its role;
 //! the optics (tint, frost, bend, rim, shadow) live here, so the whole app
-//! is tuned in this file. The contrast test beside it holds the limits:
-//! over a pure black and a pure white backdrop, primary text on each recipe
-//! keeps 4.5:1 and secondary text and icons keep 3:1
-//! (docs/decisions/glass-effects.md, "Recipes").
+//! is tuned in this file.
 //!
-//! The presets follow quill-tools/gpui-liquid-glass (a port of
-//! bilalgursen/liquid-glass, MIT): the frosted card for menus, panels and
-//! bars, the clear button for controls and media, the tinted button for the
-//! one prominent action.
+//! The look is clear glass: the rim band shows the backdrop bent, saturated
+//! and lit, and the middle, where labels sit, carries a light tint over a
+//! strong blur. The contrast test beside it holds the limits
+//! (docs/decisions/glass-effects.md, "Recipes").
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::theme::ThemeColor;
@@ -39,46 +36,169 @@ pub(crate) enum GlassRole {
     Selection,
 }
 
-/// Frost (how much of the tint covers the backdrop) per recipe. Larger
-/// surfaces carry more tint to stay legible.
-const MENU_FROST: f32 = 0.86;
-const PANEL_FROST: f32 = 0.90;
-const CONTROL_FROST: f32 = 0.84;
-const MEDIA_ICON_FROST: f32 = 0.45;
-const MEDIA_TEXT_FROST: f32 = 0.55;
-const BAR_FROST: f32 = 0.84;
-
-/// The look of `role` in a theme.
-pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
-    match role {
-        GlassRole::Menu => floating(slab(colors.popover, MENU_FROST, 18.0, 4.0, 0.12), colors),
-        GlassRole::Panel => floating(slab(colors.popover, PANEL_FROST, 22.0, 6.0, 0.14), colors),
-        GlassRole::Bar => LensStyle {
-            shadow: 0.0,
-            ..slab(colors.sidebar, BAR_FROST, 18.0, 8.0, 0.0)
-        },
-        GlassRole::Control => button(colors.background, CONTROL_FROST, 4.0),
-        GlassRole::MediaIcon => button(black(), MEDIA_ICON_FROST, 6.0),
-        GlassRole::MediaText => LensStyle {
-            shadow: 0.0,
-            ..slab(black(), MEDIA_TEXT_FROST, 10.0, 8.0, 0.0)
-        },
-        GlassRole::Selection => button(colors.background, CONTROL_FROST, 4.0),
+/// The frost each role would need in the middle for its labels to keep
+/// 4.5:1 (secondary text and icons 3:1) over a flat pure black and pure
+/// white backdrop, rounded up from what the recipe test finds.
+fn floor(role: GlassRole, dark: bool) -> f32 {
+    match (role, dark) {
+        (GlassRole::MediaIcon, _) => 0.44,
+        (GlassRole::MediaText, _) => 0.56,
+        (GlassRole::Bar, false) => 0.85,
+        (_, false) => 0.83,
+        (_, true) => 0.72,
     }
 }
 
-/// A menu or panel floating over the window: a tight shadow and the
-/// theme's hairline edge, like the solid popover, so the glass reads as a
-/// crisp card instead of a haze.
-fn floating(style: LensStyle, colors: &ThemeColor) -> LensStyle {
-    LensStyle {
+/// The middle's frost as a share of the floor, in the light and dark
+/// themes. Below 1 the glass is clearer than the flat black-and-white rule
+/// allows; the strong blur averages mixed content behind the labels
+/// instead, and the recipe test holds the rule over that average (a mid
+/// grey). Light glass needs a little more for its grey secondary text.
+/// Media glass keeps the whole floor: a video frame can be flat white.
+const MIDDLE_LIGHT: f32 = 0.78;
+const MIDDLE_DARK: f32 = 0.68;
+/// The frost across the rim band, as a share of the middle's: the rim
+/// shows the bent backdrop.
+const RIM_FROST: f32 = 0.1;
+/// The frost's blur, and the share of it across the rim band (low keeps
+/// the bent backdrop crisp there).
+const BLUR: f32 = 14.0;
+const RIM_BLUR: f32 = 0.15;
+/// Backdrop saturation (vibrancy) before the frost covers it.
+const SATURATION: f32 = 2.0;
+/// Bevel of slabs (menus, panels, the bar); the clear rim band is about a
+/// third of it.
+const BEVEL: f32 = 22.0;
+/// How far the rim pulls the backdrop in.
+const BEND: f32 = 10.0;
+/// Rim light and fresnel strength.
+const RIM: f32 = 1.6;
+/// Alpha of the light hairline inside the edge of dark glass.
+const HAIRLINE: f32 = 0.24;
+
+fn is_dark(colors: &ThemeColor) -> bool {
+    colors.background.l < 0.5
+}
+
+fn is_media(role: GlassRole) -> bool {
+    matches!(role, GlassRole::MediaIcon | GlassRole::MediaText)
+}
+
+/// The middle's frost for `role` in a theme.
+fn middle_frost(role: GlassRole, dark: bool) -> f32 {
+    let share = match (is_media(role), dark) {
+        (true, _) => 1.0,
+        (false, false) => MIDDLE_LIGHT,
+        (false, true) => MIDDLE_DARK,
+    };
+    floor(role, dark) * share
+}
+
+/// The look of `role` in a theme.
+pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
+    let dark = is_dark(colors);
+    let frost = middle_frost(role, dark);
+    // Dark glass and glass over media take a light hairline (the lit
+    // edge); light glass takes the theme's border, or it melts into a
+    // light window.
+    let hairline = LensBorder {
+        color: if dark || is_media(role) {
+            Hsla {
+                a: HAIRLINE,
+                ..gpui_kit::white()
+            }
+        } else {
+            colors.border
+        },
+        width: px(1.0),
+    };
+    let tune = LensTune {
+        rim: RIM,
+        fresnel: RIM,
+        inner: 0.35,
+        reflection: 0.0,
+        caustic: 0.0,
+        bend_curve: 2.2,
+        saturation: SATURATION,
+        frost_edge: RIM_BLUR,
+        rim_frost: RIM_FROST,
+        ..LensTune::default()
+    };
+    let slab = |tint: Hsla, shadow: f32| LensStyle {
+        unit: 1.0,
+        bevel: BEVEL,
+        band: None,
+        shadow,
         shadow_softness: 10.0,
-        shadow_offset: 3.0,
-        border: Some(LensBorder {
-            color: colors.border,
-            width: px(1.0),
-        }),
-        ..style
+        shadow_offset: 4.0,
+        strength: 1.0,
+        color: opaque(tint),
+        surface: opaque(tint),
+        material: LensMaterial::Clear {
+            bend: LensBend::Radial { amount: px(BEND) },
+            frost,
+            blur: px(BLUR),
+            blur_mix: 1.0,
+        },
+        border: Some(hairline),
+        tune,
+        light: point(0.0, -1.0),
+        light_mix: 0.0,
+        droplet: None,
+        blob: None,
+        detail: LensDetail::Copied,
+    };
+    // A clear dome sized by the button's height, bending the backdrop at
+    // its rim.
+    let dome = |tint: Hsla| LensStyle {
+        unit: 0.0,
+        bevel: LENS_DESIGN_HEIGHT * 0.42,
+        band: None,
+        shadow: 0.10,
+        shadow_softness: 14.0,
+        shadow_offset: 5.0,
+        strength: 1.0,
+        color: opaque(tint),
+        surface: opaque(tint),
+        material: LensMaterial::Clear {
+            bend: LensBend::Edge {
+                refract: 40.0 + BEND,
+                magnify: 0.0,
+                dispersion: 0.12,
+                blur_center: 0.6,
+                blur_edge: 1.6,
+            },
+            frost,
+            blur: px(BLUR * 0.5),
+            blur_mix: 1.0,
+        },
+        border: Some(hairline),
+        tune,
+        light: point(0.0, -1.0),
+        light_mix: 0.0,
+        droplet: None,
+        blob: None,
+        detail: LensDetail::Copied,
+    };
+    match role {
+        GlassRole::Menu | GlassRole::Panel => slab(colors.popover, 0.12),
+        // Only the bar's lower edge shows: a quiet rim, or its light
+        // reads as a neon line across the list.
+        GlassRole::Bar => LensStyle {
+            border: None,
+            tune: LensTune {
+                rim: 0.35,
+                fresnel: 0.35,
+                ..tune
+            },
+            ..slab(colors.sidebar, 0.0)
+        },
+        GlassRole::MediaText => LensStyle {
+            border: None,
+            ..slab(black(), 0.0)
+        },
+        GlassRole::Control | GlassRole::Selection => dome(colors.background),
+        GlassRole::MediaIcon => dome(black()),
     }
 }
 
@@ -94,82 +214,6 @@ fn black() -> Hsla {
 
 fn opaque(color: Hsla) -> Hsla {
     Hsla { a: 1.0, ..color }
-}
-
-/// No top reflection and no caustic: both darken or tint the middle, where
-/// the labels sit, and the contrast arithmetic counts only the frost.
-fn quiet_tune() -> LensTune {
-    LensTune {
-        reflection: 0.0,
-        caustic: 0.0,
-        inner: 0.5,
-        ..LensTune::default()
-    }
-}
-
-/// The frosted card: a heavy frost of `tint` with a soft blur, bent only at
-/// the rim (so text behind never ripples through rows), a rim light and a
-/// drop shadow. Lengths are logical pixels.
-fn slab(tint: Hsla, frost: f32, blur: f32, bevel: f32, shadow: f32) -> LensStyle {
-    LensStyle {
-        unit: 1.0,
-        bevel,
-        band: None,
-        shadow,
-        shadow_softness: 22.0,
-        shadow_offset: 8.0,
-        strength: 0.6,
-        color: opaque(tint),
-        surface: opaque(tint),
-        material: LensMaterial::Clear {
-            bend: LensBend::Radial { amount: px(3.0) },
-            frost,
-            blur: px(blur),
-            blur_mix: 1.0,
-        },
-        border: None,
-        tune: quiet_tune(),
-        light: point(0.0, -1.0),
-        light_mix: 0.0,
-        droplet: None,
-        blob: None,
-        detail: LensDetail::Copied,
-    }
-}
-
-/// The clear button: a dome that bends the backdrop at its rim, frosted
-/// with `tint`. Sized by the button's height.
-fn button(tint: Hsla, frost: f32, blur: f32) -> LensStyle {
-    LensStyle {
-        unit: 0.0,
-        bevel: LENS_DESIGN_HEIGHT * 0.42,
-        band: None,
-        shadow: 0.10,
-        shadow_softness: 24.0,
-        shadow_offset: 12.0,
-        strength: 0.8,
-        color: opaque(tint),
-        surface: opaque(tint),
-        material: LensMaterial::Clear {
-            bend: LensBend::Edge {
-                refract: 30.0,
-                magnify: 0.0,
-                dispersion: 0.06,
-                blur_center: 1.0,
-                blur_edge: 2.2,
-            },
-            frost,
-            blur: px(blur),
-            blur_mix: 1.0,
-        },
-        border: None,
-        tune: quiet_tune(),
-        light: point(0.0, -1.0),
-        light_mix: 0.0,
-        droplet: None,
-        blob: None,
-        detail: LensDetail::Copied,
-    }
 }
 
 /// The selection while it slides: `travel` (0 at rest, 1 a whole tab

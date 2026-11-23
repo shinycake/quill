@@ -721,3 +721,7 @@ Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`):
 - `src/window.rs`: `Window::rendered_glass`, the lenses of the last drawn
   frame and how many bands they take, for Quill's glass tests and budget
   checks.
+- `src/scene/backdrop_lens.rs` and the three lens shaders (Metal, WGSL,
+  HLSL): `LensTune::rim_frost` (default 1, no change) thins the frost of
+  clear glass across the rim band, carried in the lens's `edge_clear`
+  field, which clear glass did not use. The GPU struct is unchanged.

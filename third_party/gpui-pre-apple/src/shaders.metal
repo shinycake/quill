@@ -1717,9 +1717,11 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
   glass *= float3(lens_dim(1.0 - top), lens_dim(1.0 - top),
                   lens_dim(1.0 - 0.72 * top));
 
-  // Frosted resting state.
+  // Frosted resting state. QUILL (glass effects): `edge_clear` thins the
+  // frost across the rim band (`LensTune::rim_frost`), so the rim shows
+  // the bent backdrop while the middle keeps its tint.
   if (clear) {
-    glass = mix(glass, color.rgb, lens.frost);
+    glass = mix(glass, color.rgb, lens.frost * (1.0 - edge * lens.edge_clear));
   }
 
   // Inner shading: just inside the rim, a wide band on the left, a deep ring.
