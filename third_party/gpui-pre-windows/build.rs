@@ -1,7 +1,4 @@
 #![allow(clippy::disallowed_methods, reason = "build scripts are exempt")]
-// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// compiles the `hdr_surface` and `yuv_surface` shaders, and the backdrop glass's
-// `lens` and `lens_downsample` from shaders_lens.hlsl. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 
 fn main() {
     #[cfg(not(all(target_os = "windows", not(debug_assertions))))]
@@ -24,15 +21,11 @@ mod shader_compilation {
     };
 
     pub fn compile_shaders() {
-        let source_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("src");
-        let shader_path = source_dir.join("shaders.hlsl");
-        // QUILL: the glass compiles from its own file (which includes
-        // shaders.hlsl), so it can't break the other shaders.
-        let lens_shader_path = source_dir.join("shaders_lens.hlsl");
+        let shader_path =
+            PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("src/shaders.hlsl");
         let out_dir = std::env::var("OUT_DIR").unwrap();
 
         println!("cargo:rerun-if-changed={}", shader_path.display());
-        println!("cargo:rerun-if-changed={}", lens_shader_path.display());
 
         // Check if fxc.exe is available
         let fxc_path = find_fxc_compiler();
@@ -40,16 +33,13 @@ mod shader_compilation {
         // Define all modules
         let modules = [
             "quad",
+            "opaque_quad",
             "shadow",
-            "path_rasterization",
-            "path_sprite",
+            "path_tile",
             "underline",
             "monochrome_sprite",
             "subpixel_sprite",
             "polychrome_sprite",
-            // QUILL: HDR stills and NV12 video pictures.
-            "hdr_surface",
-            "yuv_surface",
         ];
 
         let rust_binding_path = format!("{}/shaders_bytes.rs", out_dir);
@@ -63,15 +53,6 @@ mod shader_compilation {
                 &out_dir,
                 &fxc_path,
                 shader_path.to_str().unwrap(),
-                &rust_binding_path,
-            );
-        }
-        for module in ["lens", "lens_downsample"] {
-            compile_shader_for_module(
-                module,
-                &out_dir,
-                &fxc_path,
-                lens_shader_path.to_str().unwrap(),
                 &rust_binding_path,
             );
         }
