@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
+// inline text-input actions, typed-text responses and a picture attachment,
+// through `notification_extras`. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 //! System notifications through the `UNUserNotificationCenter` API.
 //!
 //! Everything here runs lazily: nothing touches the notification center (and
@@ -11,6 +14,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::mpsc::{Sender, channel};
 
@@ -24,21 +28,42 @@ use gpui::{
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{Bool, ProtocolObject};
 use objc2::{AnyThread, DefinedClass, define_class, msg_send};
-use objc2_foundation::{NSArray, NSBundle, NSError, NSObject, NSObjectProtocol, NSSet, NSString};
+use objc2_foundation::{
+    NSArray, NSBundle, NSError, NSObject, NSObjectProtocol, NSSet, NSString, NSURL,
+};
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationAction,
-    UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions,
-    UNNotificationDefaultActionIdentifier, UNNotificationPresentationOptions,
-    UNNotificationRequest, UNNotificationResponse, UNUserNotificationCenter,
+    UNNotificationActionOptions, UNNotificationAttachment, UNNotificationCategory,
+    UNNotificationCategoryOptions, UNNotificationDefaultActionIdentifier,
+    UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
+    UNTextInputNotificationAction, UNTextInputNotificationResponse, UNUserNotificationCenter,
     UNUserNotificationCenterDelegate,
 };
+
+use crate::notification_extras::{
+    NotificationExtras, TextInputAction, store_reply_text, take_notification_extras,
+};
+
+/// The actions of one notification category: the buttons, and which of them
+/// is a text field (Quill).
+type CategoryKey = (Vec<SystemNotificationAction>, Option<TextInputAction>);
 
 type ResponseCallback = Rc<RefCell<Option<Box<dyn FnMut(SystemNotificationResponse)>>>>;
 
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(crate) enum NotificationCommand {
-    Show(SystemNotification),
+    Show(SystemNotification, NotificationExtras),
     Dismiss(SharedString),
+}
+
+impl NotificationCommand {
+    /// Quill: posts `notification` with the sender image and the inline reply
+    /// field registered for its tag, taken now so a later registration for
+    /// the same tag is not picked up by this post.
+    pub(crate) fn show(notification: SystemNotification) -> Self {
+        let extras = take_notification_extras(&notification.tag);
+        Self::Show(notification, extras)
+    }
 }
 
 pub(crate) struct SystemNotificationState {
@@ -128,7 +153,9 @@ impl SystemNotificationState {
                 let mut center = autoreleasepool(|_| NotificationCenter::new());
                 for (command, completed) in pending_commands {
                     autoreleasepool(|_| match command {
-                        NotificationCommand::Show(notification) => center.show(notification),
+                        NotificationCommand::Show(notification, extras) => {
+                            center.show(notification, extras)
+                        }
                         NotificationCommand::Dismiss(tag) => center.dismiss(&tag),
                     });
                     // The caller may stop waiting without cancelling the operation.
@@ -164,8 +191,7 @@ struct NotificationCenter {
     /// The union of every action set registered so far. Categories are shared
     /// by notifications with identical actions because macOS replaces the
     /// entire registered set whenever a category is added.
-    categories:
-        HashMap<Vec<SystemNotificationAction>, (SharedString, Retained<UNNotificationCategory>)>,
+    categories: HashMap<CategoryKey, (SharedString, Retained<UNNotificationCategory>)>,
     authorization_requested: bool,
 }
 
@@ -202,15 +228,23 @@ impl NotificationCenter {
             );
     }
 
-    fn show(&mut self, notification: SystemNotification) {
+    fn show(&mut self, notification: SystemNotification, extras: NotificationExtras) {
         self.request_authorization();
 
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(&notification.title));
         content.setBody(&NSString::from_str(&notification.body));
         if !notification.actions.is_empty() {
-            let category_identifier = self.register_category(&notification.actions);
+            let category_identifier =
+                self.register_category(&notification.actions, extras.text_input);
             content.setCategoryIdentifier(&NSString::from_str(&category_identifier));
+        }
+        // Quill: the system shows one attachment: the message's photo when
+        // there is one, else the sender's picture.
+        if let Some(image) = extras.photo.or(extras.image)
+            && let Some(attachment) = image_attachment(&image)
+        {
+            content.setAttachments(&NSArray::from_retained_slice(&[attachment]));
         }
 
         // A nil trigger delivers immediately. Reusing the tag as the request
@@ -235,8 +269,13 @@ impl NotificationCenter {
             .addNotificationRequest_withCompletionHandler(&request, Some(&completion));
     }
 
-    fn register_category(&mut self, actions: &[SystemNotificationAction]) -> SharedString {
-        if let Some((identifier, _category)) = self.categories.get(actions) {
+    fn register_category(
+        &mut self,
+        actions: &[SystemNotificationAction],
+        text_input: Option<TextInputAction>,
+    ) -> SharedString {
+        let key: CategoryKey = (actions.to_vec(), text_input);
+        if let Some((identifier, _category)) = self.categories.get(&key) {
             return identifier.clone();
         }
 
@@ -247,6 +286,18 @@ impl NotificationCenter {
         let platform_actions: Vec<Retained<UNNotificationAction>> = actions
             .iter()
             .map(|action| {
+                // Quill: the reply button opens a text field; its response
+                // is a `UNTextInputNotificationResponse` with the same id.
+                if let Some(input) = key.1.as_ref().filter(|input| input.action_id == action.id) {
+                    let text_action = UNTextInputNotificationAction::actionWithIdentifier_title_options_textInputButtonTitle_textInputPlaceholder(
+                        &NSString::from_str(&action.id),
+                        &NSString::from_str(&action.label),
+                        UNNotificationActionOptions::empty(),
+                        &NSString::from_str(&input.send_label),
+                        &NSString::from_str(&input.placeholder),
+                    );
+                    return Retained::into_super(text_action);
+                }
                 UNNotificationAction::actionWithIdentifier_title_options(
                     &NSString::from_str(&action.id),
                     &NSString::from_str(&action.label),
@@ -262,8 +313,7 @@ impl NotificationCenter {
                 UNNotificationCategoryOptions::empty(),
             );
 
-        self.categories
-            .insert(actions.to_vec(), (identifier.clone(), category));
+        self.categories.insert(key, (identifier.clone(), category));
         let all: Vec<Retained<UNNotificationCategory>> = self
             .categories
             .values()
@@ -280,6 +330,49 @@ impl NotificationCenter {
             .removePendingNotificationRequestsWithIdentifiers(&identifiers);
         self.center
             .removeDeliveredNotificationsWithIdentifiers(&identifiers);
+    }
+}
+
+/// Quill: a notification attachment showing the picture at `image`. The
+/// system moves an attached file into its own store, so the picture is copied
+/// to a temporary file first and the application's copy stays where it is.
+/// The copy keeps the extension, which the system reads the format from. A
+/// copy the center refuses is removed again.
+fn image_attachment(image: &Path) -> Option<Retained<UNNotificationAttachment>> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let extension = image
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("png");
+    let copy = std::env::temp_dir().join(format!(
+        "gpui-notification-{}-{nanos}.{extension}",
+        std::process::id()
+    ));
+    if let Err(error) = std::fs::copy(image, &copy) {
+        log::warn!("failed to copy the system notification image: {error}");
+        return None;
+    }
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&copy.to_string_lossy()));
+    // SAFETY: `options` is nil, which the API allows.
+    let attachment = unsafe {
+        UNNotificationAttachment::attachmentWithIdentifier_URL_options_error(
+            &NSString::from_str("image"),
+            &url,
+            None,
+        )
+    };
+    match attachment {
+        Ok(attachment) => Some(attachment),
+        Err(error) => {
+            log::warn!(
+                "system notification image rejected: {}",
+                error.localizedDescription()
+            );
+            let _ = std::fs::remove_file(&copy);
+            None
+        }
     }
 }
 
@@ -309,6 +402,12 @@ define_class!(
         ) {
             let tag = response.notification().request().identifier().to_string();
             let action = response.actionIdentifier();
+            // Quill: a response from the inline reply field carries the typed
+            // text; park it under the tag for the application's handler.
+            if let Some(text_response) = response.downcast_ref::<UNTextInputNotificationResponse>()
+            {
+                store_reply_text(&tag, text_response.userText().to_string());
+            }
             // The other well-known identifier, `UNNotificationDismissActionIdentifier`,
             // is only delivered for categories opting into dismiss callbacks,
             // which we never request.
@@ -377,7 +476,7 @@ mod tests {
             state.send(
                 &cx.foreground_executor,
                 &cx.background_executor,
-                NotificationCommand::Show(notification.clone()),
+                NotificationCommand::Show(notification.clone(), NotificationExtras::default()),
             ),
             state.send(
                 &cx.foreground_executor,
@@ -387,7 +486,7 @@ mod tests {
             state.send(
                 &cx.foreground_executor,
                 &cx.background_executor,
-                NotificationCommand::Show(notification.clone()),
+                NotificationCommand::Show(notification.clone(), NotificationExtras::default()),
             ),
         ];
         for task in &mut tasks {
@@ -398,9 +497,9 @@ mod tests {
         assert_eq!(
             commands,
             vec![
-                NotificationCommand::Show(notification.clone()),
+                NotificationCommand::Show(notification.clone(), NotificationExtras::default()),
                 NotificationCommand::Dismiss("thread".into()),
-                NotificationCommand::Show(notification),
+                NotificationCommand::Show(notification, NotificationExtras::default()),
             ]
         );
         for completed in completions {

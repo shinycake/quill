@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
+// adds the notification_extras module and `present_timing`. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 #![cfg(target_os = "macos")]
 //! macOS platform implementation for GPUI.
 //!
@@ -8,6 +10,8 @@ mod display;
 mod display_link;
 mod events;
 mod keyboard;
+mod link_pace;
+pub mod notification_extras;
 mod pasteboard;
 mod system_notifications;
 
@@ -26,6 +30,8 @@ pub mod metal_renderer {
 mod platform;
 mod window;
 mod window_appearance;
+mod staged_load;
+mod writing_tools;
 
 use objc2::{
     Encode, Encoding, RefEncode,
@@ -43,6 +49,61 @@ pub(crate) use platform::*;
 pub(crate) use window::*;
 
 pub use platform::MacPlatform;
+pub use window::is_exiting_fullscreen;
+pub use writing_tools::after_writing_tools_load;
+
+/// Quill: when the next frame drawn on display `display_id` (a
+/// `DisplayId` as `u64`) is shown, as an `Instant` and in Mach host ticks,
+/// and the display's refresh period, both as its display link reports them.
+pub fn present_timing(
+    display_id: u64,
+) -> (
+    Option<(scheduler::Instant, u64)>,
+    Option<std::time::Duration>,
+) {
+    match u32::try_from(display_id) {
+        Ok(display_id) => display_link::present_timing(display_id),
+        Err(_) => (None, None),
+    }
+}
+
+/// Quill: glyph bitmaps kept between launches (`gpui_apple::glyph_cache`).
+#[cfg(feature = "font-kit")]
+pub use gpui_apple::glyph_cache;
+/// Quill: line layouts kept between launches (`gpui_apple::line_cache`).
+#[cfg(feature = "font-kit")]
+pub use gpui_apple::line_cache;
+
+static PRESENT_HOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+
+/// Quill: `hook` runs on the main thread each time a window has handed a
+/// frame to the compositor, so the app can time its launch to the first
+/// frames that reach the screen. The first hook set stays.
+pub fn on_frame_presented(hook: fn()) {
+    let _ = PRESENT_HOOK.set(hook);
+}
+
+pub(crate) fn frame_presented() {
+    if let Some(hook) = PRESENT_HOOK.get() {
+        hook();
+    }
+}
+
+static LAUNCH_MARK_HOOK: std::sync::OnceLock<fn(&'static str)> = std::sync::OnceLock::new();
+
+/// Quill: `hook` gets the names of AppKit launch steps as they happen
+/// (`ns_run`, `will_finish`, `did_finish`, `window_ordered`, `writing_tools`,
+/// `first_display`, and `first_key` and `first_text` when the first key event
+/// and the first inserted text reach a window), for launch timing. The first hook set stays.
+pub fn on_launch_mark(hook: fn(&'static str)) {
+    let _ = LAUNCH_MARK_HOOK.set(hook);
+}
+
+pub(crate) fn launch_mark(label: &'static str) {
+    if let Some(hook) = LAUNCH_MARK_HOOK.get() {
+        hook(label);
+    }
+}
 
 trait BoolExt {
     fn to_objc(self) -> Bool;
