@@ -61,6 +61,10 @@ version = "1.0.86"
 version = "=0.3.14"
 package = "gpui-pre-collections"
 
+[target.'cfg(target_os = "windows")'.dependencies.panic_guard]
+path = "../../crates/panic-guard"
+package = "quill-panic-guard"
+
 [target.'cfg(target_os = "windows")'.dependencies.dunce]
 version = "1.0"
 
@@ -140,6 +144,9 @@ features = [
     "const_new",
 ]
 
+[target.'cfg(target_os = "windows")'.dependencies.unicode-bidi]
+version = "0.3.18"
+
 [target.'cfg(target_os = "windows")'.dependencies.uuid]
 version = "1.1"
 features = [
@@ -161,14 +168,17 @@ features = [
     "Win32_System_Ole",
     "Win32_System_Threading",
     "Win32_System_Variant",
+    "Win32_System_Shutdown",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
     "Data_Xml_Dom",
+    "Foundation_Collections",
     "UI_Notifications",
     "UI_ViewManagement",
     "Wdk_System_SystemServices",
+    "Win32_Devices_Display",
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Direct3D_Fxc",
     "Win32_Graphics_DirectComposition",

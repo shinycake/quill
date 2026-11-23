@@ -1,3 +1,7 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
+// scRGB output for HDR stills (`to_output`, the `hdr_surface` shaders), NV12 video
+// pictures (the `yuv_surface` shaders). See
+// third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #include "alpha_correction.hlsl"
 
 cbuffer GlobalParams: register(b0) {
@@ -7,7 +11,11 @@ cbuffer GlobalParams: register(b0) {
     float subpixel_enhanced_contrast;
     uint is_bgr;
     float depth_scale;
-    uint2 global_pad;
+    // QUILL: 1 while the swap chain is scRGB (R16G16B16A16_FLOAT, linear,
+    // 1.0 = 80 nits) for an HDR still; `output_scale` is the user's SDR
+    // white in those units.
+    uint hdr_output;
+    float output_scale;
 };
 
 cbuffer BatchParams: register(b1) {
@@ -123,6 +131,13 @@ float4 distance_from_clip_rect_impl(float2 position, Bounds clip_bounds) {
     return float4(tl.x, br.x, tl.y, br.y);
 }
 
+// QUILL: the vertex's distance inside each edge of the clip rect, for an
+// untransformed quad (HDR and NV12 surfaces, glass). 0.3.14 dropped this
+// helper from upstream's shaders.
+float4 distance_from_clip_rect(float2 unit_vertex, Bounds bounds, Bounds clip_bounds) {
+    return distance_from_clip_rect_impl(unit_vertex * bounds.size + bounds.origin, clip_bounds);
+}
+
 float4 distance_from_clip_rect_transformed(float2 unit_vertex, Bounds bounds, Bounds clip_bounds, TransformationMatrix transformation) {
     float2 position = unit_vertex * bounds.size + bounds.origin;
     float2 transformed = mul(position, transformation.rotation_scale) + transformation.translation;
@@ -154,6 +169,50 @@ float3 linear_to_srgb(float3 color) {
 // Convert sRGB to linear RGB
 float3 srgb_to_linear(float3 color) {
     return pow(color, float3(2.2, 2.2, 2.2));
+}
+
+// QUILL: the exact sRGB curves, mirrored for negative values (extended
+// range keeps out-of-gamut colours as negatives).
+float3 srgb_decode_exact(float3 value) {
+    float3 magnitude = abs(value);
+    float3 linear_part = magnitude / 12.92;
+    float3 curve_part = pow((magnitude + 0.055) / 1.055, 2.4);
+    float3 decoded = float3(
+        magnitude.r <= 0.04045 ? linear_part.r : curve_part.r,
+        magnitude.g <= 0.04045 ? linear_part.g : curve_part.g,
+        magnitude.b <= 0.04045 ? linear_part.b : curve_part.b);
+    return sign(value) * decoded;
+}
+
+float3 srgb_encode_exact(float3 value) {
+    float3 magnitude = abs(value);
+    float3 linear_part = magnitude * 12.92;
+    float3 curve_part = 1.055 * pow(magnitude, 1.0 / 2.4) - 0.055;
+    float3 encoded = float3(
+        magnitude.r <= 0.0031308 ? linear_part.r : curve_part.r,
+        magnitude.g <= 0.0031308 ? linear_part.g : curve_part.g,
+        magnitude.b <= 0.0031308 ? linear_part.b : curve_part.b);
+    return sign(value) * encoded;
+}
+
+// QUILL: what a pixel shader writes to the swap chain. In SDR the
+// sRGB-encoded colour as is; in scRGB the same colour linearized and
+// scaled to the user's SDR white, so the UI looks as it does in SDR.
+float4 to_output(float4 color) {
+    if (hdr_output == 0u) {
+        return color;
+    }
+    return float4(srgb_decode_exact(color.rgb) * output_scale, color.a);
+}
+
+// As `to_output`, for premultiplied colours.
+float4 to_output_premultiplied(float4 color) {
+    if (hdr_output == 0u || color.a <= 0.0) {
+        return color;
+    }
+    // An 8-bit intermediate can round a channel a step above its alpha.
+    float3 straight = saturate(color.rgb / color.a);
+    return float4(srgb_decode_exact(straight) * output_scale * color.a, color.a);
 }
 
 /// Hsla to sRGB conversion.
@@ -534,7 +593,9 @@ QuadFragmentInput quad_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_
     uint quad_id = batch_start_index + instance_id;
     Quad quad = quads[quad_id];
 
-    if (is_opaque_rectangle(quad)) {
+    // QUILL: a zero depth scale is a frame drawn without the opaque pre-pass
+    // (a frame with glass), so this pass draws every quad.
+    if (depth_scale > 0.0 && is_opaque_rectangle(quad)) {
         QuadFragmentInput culled = (QuadFragmentInput)0;
         culled.position = CULLED_POSITION;
         return culled;
@@ -556,7 +617,7 @@ QuadFragmentInput quad_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_
     return output;
 }
 
-float4 quad_fragment(QuadFragmentInput input): SV_Target {
+float4 quad_fragment_impl(QuadFragmentInput input){
     if ((input.quad_id & SIMPLE_PRIMITIVE_FLAG) != 0u) {
         return input.background.color0;
     }
@@ -866,7 +927,7 @@ OpaqueQuadFragmentInput opaque_quad_vertex(uint vertex_id: SV_VertexID, uint ins
     return output;
 }
 
-float4 opaque_quad_fragment(OpaqueQuadFragmentInput input): SV_Target {
+float4 opaque_quad_fragment_impl(OpaqueQuadFragmentInput input){
     return input.color;
 }
 
@@ -981,7 +1042,7 @@ ShadowFragmentInput shadow_vertex(uint vertex_id: SV_VertexID, uint instance_id:
     return output;
 }
 
-float4 shadow_fragment(ShadowFragmentInput input): SV_TARGET {
+float4 shadow_fragment_impl(ShadowFragmentInput input){
     Shadow shadow = shadows[input.shadow_id];
 
     float alpha;
@@ -1139,7 +1200,7 @@ void correct_for_endpoint(float2 endpoint, float step, float2 reference, float2 
     }
 }
 
-float4 path_tile_fragment(PathTileFragmentInput input): SV_Target {
+float4 path_tile_fragment_impl(PathTileFragmentInput input){
     float2 center = floor(input.position.xy) + 0.5;
     if (input.background.tag == 0u
         && (any(center < input.curve_box.xy) || any(center > input.curve_box.zw))) {
@@ -1220,7 +1281,7 @@ UnderlineFragmentInput underline_vertex(uint vertex_id: SV_VertexID, uint instan
     return output;
 }
 
-float4 underline_fragment(UnderlineFragmentInput input): SV_Target {
+float4 underline_fragment_impl(UnderlineFragmentInput input){
     const float WAVE_FREQUENCY = 2.0;
     const float WAVE_HEIGHT_RATIO = 0.8;
 
@@ -1290,7 +1351,7 @@ MonochromeSpriteFragmentInput monochrome_sprite_vertex(uint vertex_id: SV_Vertex
     return output;
 }
 
-float4 monochrome_sprite_fragment(MonochromeSpriteFragmentInput input): SV_Target {
+float4 monochrome_sprite_fragment_impl(MonochromeSpriteFragmentInput input){
     float sample = t_sprite.Sample(s_sprite, input.tile_position).r;
     float alpha_corrected = apply_contrast_and_gamma_correction(sample, input.color.rgb, grayscale_enhanced_contrast, gamma_ratios);
     return float4(input.color.rgb, input.color.a * alpha_corrected);
@@ -1308,7 +1369,8 @@ SubpixelSpriteFragmentOutput subpixel_sprite_fragment(MonochromeSpriteFragmentIn
     float3 alpha_corrected = apply_contrast_and_gamma_correction3(sample, input.color.rgb, subpixel_enhanced_contrast, gamma_ratios);
 
     SubpixelSpriteFragmentOutput output;
-    output.foreground = float4(input.color.rgb, 1.0f);
+    // QUILL: scRGB output while an HDR still shows.
+    output.foreground = to_output(float4(input.color.rgb, 1.0f));
     output.alpha = float4(input.color.a * alpha_corrected, 1.0f);
     return output;
 }
@@ -1356,7 +1418,7 @@ PolychromeSpriteFragmentInput polychrome_sprite_vertex(uint vertex_id: SV_Vertex
     return output;
 }
 
-float4 polychrome_sprite_fragment(PolychromeSpriteFragmentInput input): SV_Target {
+float4 polychrome_sprite_fragment_impl(PolychromeSpriteFragmentInput input){
     float4 color = t_sprite.Sample(s_sprite, input.tile_position);
     if ((input.sprite_id & SIMPLE_PRIMITIVE_FLAG) != 0u) {
         return float4(color.rgb, color.a * input.opacity);
@@ -1369,4 +1431,168 @@ float4 polychrome_sprite_fragment(PolychromeSpriteFragmentInput input): SV_Targe
     float distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);
     color.a *= input.opacity * saturate(0.5 - distance);
     return color;
+}
+
+/*
+**
+**              QUILL: output conversion for an scRGB swap chain
+**
+*/
+
+float4 quad_fragment(QuadFragmentInput input): SV_Target {
+    return to_output(quad_fragment_impl(input));
+}
+
+float4 opaque_quad_fragment(OpaqueQuadFragmentInput input): SV_Target {
+    return to_output(opaque_quad_fragment_impl(input));
+}
+
+float4 shadow_fragment(ShadowFragmentInput input): SV_TARGET {
+    return to_output(shadow_fragment_impl(input));
+}
+
+float4 path_tile_fragment(PathTileFragmentInput input): SV_Target {
+    return to_output(path_tile_fragment_impl(input));
+}
+
+float4 underline_fragment(UnderlineFragmentInput input): SV_Target {
+    return to_output(underline_fragment_impl(input));
+}
+
+float4 monochrome_sprite_fragment(MonochromeSpriteFragmentInput input): SV_Target {
+    return to_output(monochrome_sprite_fragment_impl(input));
+}
+
+float4 polychrome_sprite_fragment(PolychromeSpriteFragmentInput input): SV_Target {
+    return to_output(polychrome_sprite_fragment_impl(input));
+}
+
+/*
+**
+**              QUILL: HDR surfaces
+**
+*/
+
+// A still in linear extended sRGB, premultiplied, uploaded from a
+// `SurfaceFrame` (R16G16B16A16_FLOAT), drawn over `bounds`.
+struct HdrSurface {
+    Bounds bounds;
+    Bounds content_mask;
+    float headroom;
+    uint3 pad;
+};
+
+struct HdrSurfaceVertexOutput {
+    nointerpolation uint surface_id: TEXCOORD0;
+    float4 position: SV_Position;
+    float2 texture_coords: TEXCOORD1;
+    float4 clip_distance: SV_ClipDistance;
+};
+
+struct HdrSurfaceFragmentInput {
+    nointerpolation uint surface_id: TEXCOORD0;
+    float4 position: SV_Position;
+    float2 texture_coords: TEXCOORD1;
+};
+
+StructuredBuffer<HdrSurface> hdr_surfaces: register(t1);
+
+HdrSurfaceVertexOutput hdr_surface_vertex(uint vertex_id: SV_VertexID, uint surface_id: SV_InstanceID) {
+    float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
+    HdrSurface surface = hdr_surfaces[surface_id];
+
+    HdrSurfaceVertexOutput output;
+    output.surface_id = surface_id;
+    output.position = to_device_position(unit_vertex, surface.bounds);
+    output.texture_coords = unit_vertex;
+    output.clip_distance = distance_from_clip_rect(unit_vertex, surface.bounds, surface.content_mask);
+    return output;
+}
+
+// Identity up to 80% of the headroom, then a smooth roll-off that reaches
+// the headroom only at infinity (slope 1 at the knee). Twin of
+// `hdr_tone_map` in Quill's `src/ui/hdr_image/tone_map.rs` and of the
+// Metal shader's.
+float hdr_tone_map(float x, float headroom) {
+    float knee = 0.8 * headroom;
+    if (x <= knee) {
+        return x;
+    }
+    float span = headroom - knee;
+    float over = x - knee;
+    return knee + span * (over / (over + span));
+}
+
+float4 hdr_surface_fragment(HdrSurfaceFragmentInput input): SV_Target {
+    HdrSurface surface = hdr_surfaces[input.surface_id];
+    float4 color = t_sprite.Sample(s_sprite, input.texture_coords);
+    float alpha = color.a;
+    float3 rgb = alpha > 0.0 ? color.rgb / alpha : float3(0.0, 0.0, 0.0);
+    if (hdr_output == 0u) {
+        // An 8-bit swap chain is a passing frame (HDR switching on or
+        // off): clip to SDR white.
+        return float4(srgb_encode_exact(saturate(rgb)), alpha);
+    }
+    float peak = max(max(rgb.r, rgb.g), rgb.b);
+    if (peak > 0.0) {
+        rgb *= hdr_tone_map(peak, max(surface.headroom, 1.0)) / peak;
+    }
+    // Linear, 1.0 = SDR white, to scRGB.
+    return float4(rgb * output_scale, alpha);
+}
+
+/*
+**
+**              QUILL: YUV surfaces
+**
+*/
+
+// A video picture uploaded from an NV12 `SurfaceFrame`: luma in `t_sprite`
+// (R8_UNORM), interleaved chroma in `t_chroma` (R8G8_UNORM, half size),
+// drawn opaque over `bounds`. `r_row`, `g_row` and `b_row` are the frame's
+// `YuvColor::rgb_rows` (its BT.601/BT.709 matrix and full/limited range):
+// each channel is `dot(row, (y, cb, cr, 1))`, gamma-encoded like an image.
+struct YuvSurface {
+    Bounds bounds;
+    Bounds content_mask;
+    float4 r_row;
+    float4 g_row;
+    float4 b_row;
+};
+
+struct YuvSurfaceVertexOutput {
+    nointerpolation uint surface_id: TEXCOORD0;
+    float4 position: SV_Position;
+    float2 texture_coords: TEXCOORD1;
+    float4 clip_distance: SV_ClipDistance;
+};
+
+struct YuvSurfaceFragmentInput {
+    nointerpolation uint surface_id: TEXCOORD0;
+    float4 position: SV_Position;
+    float2 texture_coords: TEXCOORD1;
+};
+
+StructuredBuffer<YuvSurface> yuv_surfaces: register(t1);
+Texture2D<float4> t_chroma: register(t2);
+
+YuvSurfaceVertexOutput yuv_surface_vertex(uint vertex_id: SV_VertexID, uint surface_id: SV_InstanceID) {
+    float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
+    YuvSurface surface = yuv_surfaces[surface_id];
+
+    YuvSurfaceVertexOutput output;
+    output.surface_id = surface_id;
+    output.position = to_device_position(unit_vertex, surface.bounds);
+    output.texture_coords = unit_vertex;
+    output.clip_distance = distance_from_clip_rect(unit_vertex, surface.bounds, surface.content_mask);
+    return output;
+}
+
+float4 yuv_surface_fragment(YuvSurfaceFragmentInput input): SV_Target {
+    YuvSurface surface = yuv_surfaces[input.surface_id];
+    float luma = t_sprite.Sample(s_sprite, input.texture_coords).r;
+    float2 chroma = t_chroma.Sample(s_sprite, input.texture_coords).rg;
+    float4 yuv = float4(luma, chroma.x, chroma.y, 1.0);
+    float3 rgb = saturate(float3(dot(surface.r_row, yuv), dot(surface.g_row, yuv), dot(surface.b_row, yuv)));
+    return to_output(float4(rgb, 1.0));
 }

@@ -1,6 +1,7 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
+// device creation and device-loss retries no longer panic. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use anyhow::{Context, Result};
 use gpui_util::ResultExt;
-use itertools::Itertools;
 use windows::Win32::{
     Foundation::HMODULE,
     Graphics::{
@@ -15,24 +16,24 @@ use windows::Win32::{
         },
         Dxgi::{
             CreateDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG, DXGI_CREATE_FACTORY_FLAGS,
-            IDXGIAdapter1, IDXGIFactory6,
+            DXGI_ERROR_NOT_FOUND, IDXGIAdapter1, IDXGIFactory6,
         },
     },
 };
 use windows::core::Interface;
 
 pub(crate) fn try_to_recover_from_device_lost<T>(mut f: impl FnMut() -> Result<T>) -> Result<T> {
-    (0..5)
-        .map(|i| {
-            if i > 0 {
-                // Add a small delay before retrying
-                std::thread::sleep(std::time::Duration::from_millis(100 + i * 10));
-            }
-            f()
-        })
-        .find_or_last(Result::is_ok)
-        .unwrap()
-        .context("DirectXRenderer failed to recover from lost device after multiple attempts")
+    // Quill: a loop instead of upstream's `find_or_last(..).unwrap()`.
+    let mut result = f();
+    for i in 1..5 {
+        if result.is_ok() {
+            break;
+        }
+        // Add a small delay before retrying
+        std::thread::sleep(std::time::Duration::from_millis(100 + i * 10));
+        result = f();
+    }
+    result.context("DirectXRenderer failed to recover from lost device after multiple attempts")
 }
 
 #[derive(Clone)]
@@ -60,7 +61,7 @@ impl DirectXDevices {
             D3D_FEATURE_LEVEL_10_1 => {
                 log::info!("Created device with Direct3D 10.1 feature level.")
             }
-            _ => unreachable!(),
+            other => log::info!("Created device with Direct3D feature level {:#x}.", other.0),
         }
 
         Ok(Self {
@@ -112,8 +113,23 @@ fn get_adapter(
     ID3D11DeviceContext,
     D3D_FEATURE_LEVEL,
 )> {
+    // Quill: the search ends at DXGI_ERROR_NOT_FOUND instead of returning it,
+    // and an adapter that fails is skipped, so the error names the last reason.
+    let mut last_error = None;
     for adapter_index in 0.. {
-        let adapter: IDXGIAdapter1 = unsafe { dxgi_factory.EnumAdapters(adapter_index)?.cast()? };
+        let adapter = match unsafe { dxgi_factory.EnumAdapters(adapter_index) } {
+            Ok(adapter) => adapter,
+            Err(error) if error.code() == DXGI_ERROR_NOT_FOUND => break,
+            Err(error) => return Err(error).context("Enumerating GPU adapters"),
+        };
+        let adapter: IDXGIAdapter1 = match adapter.cast() {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                log::warn!("Skipping GPU adapter {adapter_index}: {error}");
+                last_error = Some(anyhow::Error::from(error));
+                continue;
+            }
+        };
         if let Ok(desc) = unsafe { adapter.GetDesc1() } {
             let gpu_name = String::from_utf16_lossy(&desc.Description)
                 .trim_matches(char::from(0))
@@ -124,19 +140,31 @@ fn get_adapter(
         // the device if it does.
         let mut context: Option<ID3D11DeviceContext> = None;
         let mut feature_level = D3D_FEATURE_LEVEL::default();
-        if let Some(device) = get_device(
+        match get_device(
             &adapter,
             Some(&mut context),
             Some(&mut feature_level),
             debug_layer_available,
-        )
-        .log_err()
-        {
-            return Ok((adapter, device, context.unwrap(), feature_level));
+        ) {
+            Ok(device) => match context {
+                Some(context) => return Ok((adapter, device, context, feature_level)),
+                None => {
+                    last_error = Some(anyhow::anyhow!(
+                        "D3D11CreateDevice succeeded without a device context"
+                    ))
+                }
+            },
+            Err(error) => {
+                log::warn!("Skipping GPU adapter {adapter_index}: {error:#}");
+                last_error = Some(error);
+            }
         }
     }
 
-    unreachable!()
+    Err(match last_error {
+        Some(last) => anyhow::anyhow!("No GPU adapter supports Direct3D 11: {last:#}"),
+        None => anyhow::anyhow!("No GPU adapter supports Direct3D 11"),
+    })
 }
 
 #[inline]
@@ -170,7 +198,7 @@ fn get_device(
             context,
         )?;
     }
-    let device = device.unwrap();
+    let device = device.context("D3D11CreateDevice succeeded without a device")?;
     let mut data = D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS::default();
     unsafe {
         device

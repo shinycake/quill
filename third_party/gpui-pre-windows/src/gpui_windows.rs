@@ -1,3 +1,7 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
+// adds the frame_idle, gpui_message, notification_extras, native_frame, hdr_output,
+// refresh_interval, surface_support, window_list, timer_queue, timer_step and timer_thread
+// modules. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #![cfg(target_os = "windows")]
 
 mod clipboard;
@@ -11,13 +15,24 @@ mod directx_renderer;
 mod dispatcher;
 mod display;
 mod events;
+mod frame_idle;
+mod gpui_message;
+pub mod hdr_output;
 mod keyboard;
+pub mod native_frame;
+pub mod notification_extras;
 mod platform;
+mod refresh_interval;
+mod surface_support;
 mod system_notifications;
 mod system_settings;
+mod timer_queue;
+mod timer_step;
+mod timer_thread;
 mod util;
 mod vsync;
 mod window;
+mod window_list;
 mod wrapper;
 
 pub(crate) use clipboard::*;
@@ -29,6 +44,8 @@ pub(crate) use directx_renderer::*;
 pub(crate) use dispatcher::*;
 pub(crate) use display::*;
 pub(crate) use events::*;
+pub(crate) use frame_idle::*;
+pub(crate) use gpui_message::*;
 pub(crate) use keyboard::*;
 pub(crate) use platform::*;
 pub(crate) use system_notifications::*;
@@ -39,5 +56,11 @@ pub(crate) use window::*;
 pub(crate) use wrapper::*;
 
 pub use platform::WindowsPlatform;
+
+/// QUILL: the DirectWrite text system on its own, without a window, so
+/// `crates/text-conformance` can check its layout against the other backends.
+pub fn shaping_text_system() -> anyhow::Result<std::sync::Arc<dyn gpui::PlatformTextSystem>> {
+    Ok(std::sync::Arc::new(DirectWriteTextSystem::new()?))
+}
 
 pub(crate) use windows::Win32::Foundation::HWND;
