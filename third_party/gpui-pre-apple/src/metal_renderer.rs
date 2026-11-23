@@ -1,11 +1,15 @@
 // Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
-// window capture renders the scene offscreen and reads it back. See third_party/gpui-pre-apple/QUILL-CHANGES.md.
+// window capture renders the scene offscreen and reads it back; backdrop glass
+// (`metal_renderer/lens.rs`). See third_party/gpui-pre-apple/QUILL-CHANGES.md.
 use crate::metal_atlas::MetalAtlas;
+
+mod lens;
+pub use lens::{LensDownsampleIndex, LensDownsampleSlot, LensInputIndex, LensSlot};
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
 use gpui::{
-    AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, PaintSurface, Path, Point,
-    PrimitiveBatch, ScaledPixels, Scene, Size, point, size,
+    AtlasTextureId, BackdropLens, Background, Bounds, ContentMask, DevicePixels, PaintSurface,
+    Path, Point, PrimitiveBatch, ScaledPixels, Scene, Size, point, size,
 };
 use image::RgbaImage;
 use objc2::{Message, rc::Retained, runtime::ProtocolObject};
@@ -191,6 +195,10 @@ pub struct MetalRenderer {
     /// QUILL: when each drawable of the layer's pool, known by its
     /// IOSurface, was last handed out (`trim_spare_drawables`).
     drawables_handed_out: Vec<(usize, Instant)>,
+    /// QUILL: backdrop glass's pipelines and atlas (`lens.rs`).
+    lens: lens::LensState,
+    /// QUILL: whether the layer hands out drawables glass can read.
+    drawable_reads: lens::DrawableReads,
 }
 
 #[repr(C)]
@@ -515,6 +523,8 @@ impl MetalRenderer {
             #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
             headless_render_target: None,
             drawables_handed_out: Vec::new(),
+            lens: lens::LensState::default(),
+            drawable_reads: lens::DrawableReads::default(),
         })
     }
 
@@ -607,9 +617,14 @@ impl MetalRenderer {
     /// allocates a fresh drawable.
     pub fn release_idle_drawables(&mut self) {
         self.drawables_handed_out.clear();
+        // QUILL: the glass atlas goes too, and the drawables the pool
+        // allocates next are framebuffer-only again until glass is drawn.
+        self.lens.release();
+        self.drawable_reads = lens::DrawableReads::FramebufferOnly;
         let Some(layer) = &self.layer else {
             return;
         };
+        Self::follow_drawable_reads(layer, self.drawable_reads);
         let size = layer.drawableSize();
         if size.width <= 1.0 || size.height <= 1.0 {
             return;
@@ -762,6 +777,10 @@ impl MetalRenderer {
         };
         // QUILL: free spares a burst left before taking the next drawable.
         self.trim_spare_drawables();
+        // QUILL: glass reads the drawable back, so a frame with lenses asks
+        // the layer for readable drawables (`lens::DrawableReads`).
+        self.drawable_reads = self.drawable_reads.after_frame(scene.lenses.len());
+        Self::follow_drawable_reads(&layer, self.drawable_reads);
         let drawable = match &mut self.display_link_mode {
             DisplayLinkMode::Attached { drawable } => {
                 let Some(drawable) = drawable.take() else {
@@ -775,7 +794,9 @@ impl MetalRenderer {
                 layer.nextDrawable()
             }
         };
-        let Some(drawable) = drawable.and_then(|drawable| self.usable_drawable(&layer, drawable))
+        let Some(drawable) = drawable
+            .and_then(|drawable| self.usable_drawable(&layer, drawable))
+            .map(|drawable| self.readable_drawable(&layer, drawable, !scene.lenses.is_empty()))
         else {
             log::error!(
                 "failed to retrieve next drawable, drawable size: {:?}",
@@ -827,6 +848,32 @@ impl MetalRenderer {
         layer.nextDrawable()
     }
 
+    /// QUILL: the layer's drawables are readable while glass is drawn.
+    /// Debug builds with `test-support` keep them readable throughout, for
+    /// captures.
+    fn follow_drawable_reads(layer: &CAMetalLayer, reads: lens::DrawableReads) {
+        let framebuffer_only =
+            !reads.readable() && !cfg!(all(feature = "test-support", debug_assertions));
+        if layer.framebufferOnly() != framebuffer_only {
+            layer.setFramebufferOnly(framebuffer_only);
+        }
+    }
+
+    /// QUILL: a frame with glass needs a drawable it can read. One handed
+    /// out before the layer turned readable (a display link's) is swapped
+    /// for the layer's next; when none comes, the glass draws flat.
+    fn readable_drawable(
+        &self,
+        layer: &CAMetalLayer,
+        drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
+        has_glass: bool,
+    ) -> Retained<ProtocolObject<dyn CAMetalDrawable>> {
+        if !has_glass || !drawable.texture().isFramebufferOnly() {
+            return drawable;
+        }
+        layer.nextDrawable().unwrap_or(drawable)
+    }
+
     fn render_frame(
         &mut self,
         scene: &Scene,
@@ -842,7 +889,15 @@ impl MetalRenderer {
             &self.instance_buffer_pool,
             self.is_unified_memory,
         )?;
-        let instance_bindings = write_instances(scene, &mut writer).with_context(|| {
+        // QUILL: the frame's glass is planned first: which lens backdrops
+        // are copied, kept from last frame or drawn again sharper, and
+        // where inked labels read them.
+        let glass = self
+            .plan_glass(scene, texture, &mut writer)
+            .inspect_err(|error| log::error!("glass draws flat: {error:#}"))
+            .ok()
+            .flatten();
+        let instance_bindings = write_instances(scene, &mut writer, glass.as_ref()).with_context(|| {
             format!(
                 "writing instance data: {} paths, {} shadows, {} quads, {} underlines, {} mono, {} poly, {} surfaces",
                 scene.paths.len(),
@@ -855,21 +910,44 @@ impl MetalRenderer {
             )
         })?;
         let mut surface_textures = Vec::new();
-        let command_buffer = self.draw_primitives_to_texture(
-            scene,
-            &instance_bindings,
-            &mut writer,
-            texture,
-            viewport_size,
-            &mut surface_textures,
-        )?;
+        // QUILL: what this frame copies is kept for the next one first; a
+        // batch that fails to fill its slots, or a frame that fails, forgets
+        // it again.
+        match &glass {
+            Some(glass) => self.lens.keep(glass),
+            None => self.lens.forget(),
+        }
+        let command_buffer = self
+            .draw_primitives_to_texture(
+                scene,
+                &instance_bindings,
+                &mut writer,
+                texture,
+                viewport_size,
+                &mut surface_textures,
+                glass.as_ref(),
+            )
+            .inspect_err(|_| self.lens.forget())?;
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
         let frame_resources = Cell::new(Some((writer.finish(), surface_textures)));
+        if let Some(glass) = &glass {
+            glass.commit_renders();
+        }
+        // QUILL (glass effects): `QUILL_GPU_PROBE=1` prints each frame's GPU
+        // time and its lens count to stderr ("GLASSGPU main <ms> <lenses>"),
+        // for the budget table in docs/decisions/glass-effects.md.
+        let probe_lenses = gpu_probe_on().then_some(scene.lenses.len());
         let block = RcBlock::new(
-            move |_: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+            move |buffer: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
                 if let Some((instance_buffer, _surface_textures)) = frame_resources.take() {
                     instance_buffer_pool.lock().release(instance_buffer);
+                }
+                if let Some(lenses) = probe_lenses {
+                    // SAFETY: Metal passes the completed, live command buffer.
+                    let buffer = unsafe { buffer.as_ref() };
+                    let ms = (buffer.GPUEndTime() - buffer.GPUStartTime()) * 1000.0;
+                    eprintln!("GLASSGPU main {ms:.4} {lenses}");
                 }
             },
         );
@@ -1059,6 +1137,7 @@ impl MetalRenderer {
         texture: &ProtocolObject<dyn MTLTexture>,
         viewport_size: Size<DevicePixels>,
         surface_textures: &mut Vec<CFRetained<CVMetalTexture>>,
+        glass: Option<&lens::GlassFrame>,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let command_queue = self.command_queue.clone();
         let command_buffer = command_queue
@@ -1083,9 +1162,12 @@ impl MetalRenderer {
                 PrimitiveBatch::Shadows(range) => {
                     self.draw_shadows(range, instance_bindings, viewport_size, &command_encoder)
                 }
-                PrimitiveBatch::Quads(range) => {
-                    self.draw_quads(range, instance_bindings, viewport_size, &command_encoder)
-                }
+                PrimitiveBatch::Quads(range) => self.draw_quads(
+                    range,
+                    &instance_bindings.quads,
+                    viewport_size,
+                    &command_encoder,
+                ),
                 PrimitiveBatch::Paths(range) => {
                     let paths = &scene.paths[range];
                     command_encoder.endEncoding();
@@ -1147,6 +1229,18 @@ impl MetalRenderer {
                         command_encoder.endEncoding();
                         return Err(error);
                     }
+                }
+                PrimitiveBatch::Lenses(range) => {
+                    self.draw_lenses(
+                        glass,
+                        range,
+                        instance_bindings,
+                        writer,
+                        texture,
+                        viewport_size,
+                        &command_buffer,
+                        &mut command_encoder,
+                    )?;
                 }
                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),
             }
@@ -1289,7 +1383,7 @@ impl MetalRenderer {
     fn draw_quads(
         &self,
         quads: Range<usize>,
-        instance_bindings: &InstanceBindings,
+        binding: &InstanceBinding,
         viewport_size: Size<DevicePixels>,
         command_encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
     ) {
@@ -1307,13 +1401,13 @@ impl MetalRenderer {
                 QuadInputIndex::Vertices as usize,
             );
             command_encoder.setVertexBuffer_offset_atIndex(
-                Some(&instance_bindings.quads.buffer),
-                instance_bindings.quads.offset,
+                Some(&binding.buffer),
+                binding.offset,
                 QuadInputIndex::Quads as usize,
             );
             command_encoder.setFragmentBuffer_offset_atIndex(
-                Some(&instance_bindings.quads.buffer),
-                instance_bindings.quads.offset,
+                Some(&binding.buffer),
+                binding.offset,
                 QuadInputIndex::Quads as usize,
             );
             command_encoder.setVertexBytes_length_atIndex(
@@ -1504,6 +1598,18 @@ impl MetalRenderer {
             command_encoder.setFragmentTexture_atIndex(
                 Some(&texture),
                 SpriteInputIndex::AtlasTexture as usize,
+            );
+            // QUILL (glass stage 5): inked labels read the lens atlas; without
+            // one the sprite atlas stands in and is never sampled (every
+            // record then says the glass drew flat).
+            command_encoder.setVertexBuffer_offset_atIndex(
+                Some(&instance_bindings.lens_inks.buffer),
+                instance_bindings.lens_inks.offset,
+                SpriteInputIndex::Inks as usize,
+            );
+            command_encoder.setVertexTexture_atIndex(
+                Some(instance_bindings.lens_atlas.as_deref().unwrap_or(&texture)),
+                SpriteInputIndex::LensAtlas as usize,
             );
             command_encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
                 MTLPrimitiveType::Triangle,
@@ -2110,10 +2216,23 @@ struct InstanceBindings {
     monochrome_sprites: InstanceBinding,
     polychrome_sprites: InstanceBinding,
     surfaces: InstanceBinding,
+    /// QUILL: each lens's fallback quad, for batches that draw flat.
+    lens_fallbacks: InstanceBinding,
+    /// QUILL (glass stage 5): where each inked label reads its glass, and the
+    /// atlas it reads (`None` when the frame's glass draws flat).
+    lens_inks: InstanceBinding,
+    lens_atlas: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
 }
 
-fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<InstanceBindings> {
+fn write_instances(
+    scene: &Scene,
+    writer: &mut InstanceBufferWriter,
+    glass: Option<&lens::GlassFrame>,
+) -> Result<InstanceBindings> {
+    let inks = gpui::lens_ink_instances(scene, glass.map(|glass| &glass.plan));
     Ok(InstanceBindings {
+        lens_inks: writer.write(&inks)?,
+        lens_atlas: glass.map(|glass| glass.atlas().clone()),
         quads: writer.write(&scene.quads)?,
         shadows: writer.write(&scene.shadows)?,
         underlines: writer.write(&scene.underlines)?,
@@ -2123,6 +2242,7 @@ fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<I
             bounds: surface.bounds,
             content_mask: surface.content_mask,
         }))?,
+        lens_fallbacks: writer.write_iter(scene.lenses.iter().map(BackdropLens::fallback_quad))?,
     })
 }
 
@@ -2291,6 +2411,9 @@ enum SpriteInputIndex {
     ViewportSize = 2,
     AtlasTextureSize = 3,
     AtlasTexture = 4,
+    /// QUILL (glass stage 5): inked labels' records and the lens atlas.
+    Inks = 5,
+    LensAtlas = 6,
 }
 
 #[repr(C)]
@@ -2733,4 +2856,11 @@ mod tests {
         assert_eq!(command_buffer.status(), MTLCommandBufferStatus::Completed);
         assert_eq!(read_texture_to_image(&target_texture).unwrap(), image);
     }
+}
+
+/// QUILL (glass effects): whether `QUILL_GPU_PROBE` asks for per-frame GPU
+/// times. Read once.
+fn gpu_probe_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("QUILL_GPU_PROBE").is_ok_and(|value| value == "1"))
 }

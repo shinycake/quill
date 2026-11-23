@@ -155,6 +155,11 @@ impl QuillApp {
         }
         self.sync_omarchy_watch(cx);
         crate::ui::reduce_motion_probe::apply(cx);
+        crate::ui::glass::set_choice(
+            self.appearance.material,
+            hc || super::chat_theme::high_contrast(),
+            cx,
+        );
         // Quill's themes and high contrast take the single accent of old.
         let accent = quill::system_accent::effective(
             self.appearance.accent_rgb,

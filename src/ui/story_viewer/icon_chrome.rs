@@ -422,8 +422,11 @@ impl QuillApp {
         };
         Some(
             edge.child(
-                icon_button(id, icon, label, chrome::over_media(cx))
-                    .on_click(cx.listener(move |this, _, _, cx| this.step_story_viewer(delta, cx))),
+                crate::ui::glass::media_glass_button(
+                    icon_button(id, icon, label, chrome::over_media(cx)),
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.step_story_viewer(delta, cx))),
             )
             .into_any_element(),
         )

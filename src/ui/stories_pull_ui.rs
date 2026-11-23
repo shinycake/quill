@@ -136,7 +136,12 @@ impl QuillApp {
 
     /// The strip drawn into the gap a pull opens above the list. It sits
     /// just above the list's top, so the list's own displacement reveals it.
-    pub(super) fn story_pull_gap(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// `inset` is the list's top padding (a glass header floats over it).
+    pub(super) fn story_pull_gap(
+        &mut self,
+        inset: Pixels,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if self.stories.strip.pull.expanded()
             || !self.story_strip_available()
             || self.stories.strip.bounce.get().offset <= 0.
@@ -146,7 +151,7 @@ impl QuillApp {
         Some(
             div()
                 .absolute()
-                .top(px(-metrics::FULL_HEIGHT))
+                .top(inset - px(metrics::FULL_HEIGHT))
                 .left_0()
                 .w_full()
                 .child(self.story_strip_element(cx))

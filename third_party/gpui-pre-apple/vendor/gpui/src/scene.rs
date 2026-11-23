@@ -763,6 +763,90 @@ impl From<PolychromeSprite> for Primitive {
     }
 }
 
+/// QUILL: mirror of gpui-pre's `BackdropLens` (`src/scene/backdrop_lens.rs`),
+/// read by `build.rs` for the shader header. Keep the fields in step.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct BackdropLens {
+    pub order: DrawOrder,
+    pub material: u32,
+    pub bounds: Bounds<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    pub body: Bounds<ScaledPixels>,
+    pub corner_radius: ScaledPixels,
+    pub scale_factor: f32,
+    pub unit: f32,
+    pub bevel: f32,
+    pub band: f32,
+    pub shadow: f32,
+    pub shadow_softness: f32,
+    pub shadow_offset: f32,
+    pub strength: f32,
+    pub opacity: f32,
+    pub color: Hsla,
+    pub surface: Hsla,
+    pub bend: u32,
+    pub refract: f32,
+    pub magnify: f32,
+    pub dispersion: f32,
+    pub blur_center: f32,
+    pub blur_edge: f32,
+    pub frost: f32,
+    pub blur: f32,
+    pub blur_mix: f32,
+    pub radial_amount: f32,
+    pub edge_clear: f32,
+    pub border_color: Hsla,
+    pub border_width: f32,
+    pub tune_rim: f32,
+    pub tune_rim_width: f32,
+    pub tune_fresnel: f32,
+    pub tune_inner: f32,
+    pub tune_reflection: f32,
+    pub tune_caustic: f32,
+    pub tune_bend_curve: f32,
+    pub tune_bend_depth: f32,
+    pub tune_saturation: f32,
+    pub light_x: f32,
+    pub light_y: f32,
+    pub light_mix: f32,
+    pub id: u32,
+    pub density: u32,
+    pub drop_x: f32,
+    pub drop_r: f32,
+    pub drop_k: f32,
+    pub blob_x: f32,
+    pub blob_y: f32,
+    pub blob_hx: f32,
+    pub blob_hy: f32,
+    pub blob_r: f32,
+    pub blob_k: f32,
+    pub neck_x: f32,
+    pub neck_w: f32,
+    pub tune_frost_edge: f32,
+}
+
+/// QUILL (glass stage 5): mirror of gpui-pre's `LensInkInstance`
+/// (`src/scene/backdrop_frame.rs`), for the shader header.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct LensInkInstance {
+    pub copy_x: f32,
+    pub copy_y: f32,
+    pub copy_w: f32,
+    pub copy_h: f32,
+    pub slot_x: f32,
+    pub slot_y: f32,
+    pub density: f32,
+    pub sampled: f32,
+    pub glass_luma: f32,
+    pub cover: f32,
+    pub active: f32,
+    pub pad: f32,
+    pub on_light: Hsla,
+    pub on_dark: Hsla,
+}
+
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub struct PaintSurface {

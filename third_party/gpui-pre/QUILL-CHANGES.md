@@ -632,3 +632,96 @@ Changed by the Quill project in 2026 (`docs/decisions/rtl-sweep.md`):
   `paint_line` and `paint_line_background` use. Upstream reordered the whole
   line and then wrapped the visual order, so the rows of a wrapped Hebrew
   paragraph read bottom to top.
+
+## Backdrop glass (stage 1)
+
+Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
+
+- `src/scene/backdrop_lens.rs` (new): `BackdropLens`, a scene primitive for
+  liquid glass that bends, frosts and lights what the frame drew under it,
+  and `LensStyle` (with `LensMaterial`, `LensBend`, `LensBorder`,
+  `LensTune`), the look a caller asks for. `BackdropLens::fallback_quad` is
+  the rounded quad of the glass's colour that renderers which can't read the
+  frame draw instead.
+- `src/scene.rs`: `Primitive::Lens` (boxed, so the rare lens does not grow
+  every recorded primitive), `PrimitiveKind::Lens`, `PrimitiveBatch::Lenses`
+  and `Scene::lenses`. A lens takes the next band (a multiple of 2^24) above
+  every order it intersects, so it draws after what it covers, lenses with no
+  glass under them share one batch, and what is painted over a lens draws
+  above it. A lens inside a paint layer, or above the last band, is inserted
+  as its fallback quad. A replayed range that holds a lens is repainted
+  operation by operation, so the lens is banded against what is under it in
+  the new frame.
+- `src/bounds_tree.rs`: `insert_band`, the banded insert (computed in `u64`,
+  `None` past `u32::MAX`); `insert_span` and it share `insert_ordered`.
+- `src/window.rs`: `Window::paint_backdrop_lens(bounds, corner_radius,
+  &LensStyle)`.
+- Stage 3: `src/scene/backdrop_lens.rs` holds the atlas packing every
+  renderer shares, moved out of the Metal and wgpu renderers:
+  `LensPacking::pack` shelves a batch's footprints, clipped to the target,
+  into slots aligned to `LENS_ATLAS_ALIGN` with `LENS_ATLAS_GUTTER` between
+  them (`LensCopy` per lens), and `LENS_ATLAS_LEVELS` is the atlas's mip
+  count. Its tests are in Quill's `src/ui/backdrop_lens_tests.rs`.
+
+## Backdrop glass (stage 5)
+
+Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`,
+"What stage 5 adds"). Ported from quill-tools/gpui-liquid-glass 0.3.0,
+whose `gpui-patches/` carry the same change against crates.io GPUI.
+
+- `src/scene/backdrop_frame.rs` (new): one plan per frame for every lens
+  (`LensReuse::plan` gives a `LensFrame` of `LensSlotPlan`s), so each lens
+  keeps its own atlas slot for the whole frame. A lens whose last copy
+  still holds its footprint, over the same primitives (hashed without
+  their draw order), reuses the slot and skips the copy and the blur.
+  Anything that changes under the copied region copies again: a primitive
+  added, removed, moved, recoloured or reordered, a surface, a freed
+  sprite-atlas tile, a new atlas, a new target size. Glass under glass
+  counts as that lens, the region it read and what lay there; a label
+  inked from some glass counts with what that glass holds. The renderers
+  forget the plan before drawing and keep it only after a frame drew every
+  batch as planned. Also `LensInk`, `LensInkEntry` and
+  `lens_ink_instances`, the shader records for inked labels.
+- `src/scene/backdrop_sharp.rs` (new) and `src/window/backdrop_glass.rs`
+  (new): `LensDetail::Rendered { density }` records the primitives under a
+  lens again as a sub-scene at `density` texels per device pixel, glyphs
+  and icons rasterized again at that scale (`SharpBackdrop`). A lens with a
+  path or a surface under it copies instead. Glyph sources are recorded
+  only while a frame has such a lens, so other frames pay nothing.
+- `src/scene.rs`, `src/window.rs`: `Scene::inks`, `Scene::sharp_backdrops`,
+  `Scene::insert_inked_sprite`, `Window::with_lens_ink` (labels painted
+  inside carry their two inks in `MonochromeSprite::pad` and draw in
+  grayscale antialiasing), and each lens's id and density. A replayed
+  range carries its inks and glyph sources over.
+- `src/scene/backdrop_lens.rs`: `LensDroplet`, `LensBlob` and `LensNeck`
+  (shapes melted into the body with a smooth union, in the same lens),
+  `LensTune::frost_edge`, `LensDetail`, `LensCopy::density` and
+  `BackdropLens::glass_bounds`.
+- `src/platform.rs`: `AtlasState::removals`, counted on every freed tile
+  and every clear.
+- Tests: Quill's `src/ui/backdrop_lens_tests.rs` (reuse, inks, droplet
+  bounds, density); the full reuse suite is in gpui-liquid-glass's
+  `tests/reuse.rs`.
+
+## Backdrop glass as a style
+
+Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`):
+
+- `src/style.rs`: `Style::backdrop_glass: Option<Box<LensStyle>>` (boxed so every `Div` stays small on the builders' stack). `Style::paint`
+  calls `Window::paint_backdrop_lens` with the element's bounds and its
+  top-left corner radius after the drop shadows and before the fill, so a
+  `div` (and anything else styled through `Styled`) can be glass without a
+  child element to position and order. The element's own fill, border and
+  shadow still paint; a glass surface leaves them unset.
+- `src/styled.rs`: `Styled::backdrop_glass(Option<LensStyle>)`; `None` adds
+  nothing.
+- `src/scene/backdrop_lens.rs`: `LensStyle` and the types inside it derive
+  `Serialize`, `Deserialize` and `JsonSchema`, which `StyleRefinement`
+  needs.
+- `src/window.rs`: `Window::rendered_glass`, the lenses of the last drawn
+  frame and how many bands they take, for Quill's glass tests and budget
+  checks.
+- `src/scene/backdrop_lens.rs` and the three lens shaders (Metal, WGSL,
+  HLSL): `LensTune::rim_frost` (default 1, no change) thins the frost of
+  clear glass across the rim band, carried in the lens's `edge_clear`
+  field, which clear glass did not use. The GPU struct is unchanged.

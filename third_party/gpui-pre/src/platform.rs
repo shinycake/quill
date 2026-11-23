@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `AtlasBackend::insert_image`, `PlatformWindow::capture_image`. See third_party/gpui-pre/QUILL-CHANGES.md.
+// `AtlasBackend::insert_image`, `PlatformWindow::capture_image`,
+// `AtlasState::removals` (backdrop glass). See third_party/gpui-pre/QUILL-CHANGES.md.
 mod app_menu;
 mod keyboard;
 mod keystroke;
@@ -1959,6 +1960,10 @@ pub struct AtlasState<Backend> {
     /// QUILL: how many keys are text glyphs.
     text_glyphs: usize,
     pub backend: Backend,
+    /// QUILL (glass stage 5): tiles freed so far. A freed tile's place can take
+    /// another picture under the same tile id, so backdrop glass that
+    /// reuses last frame's copy checks this did not move.
+    removals: u64,
 }
 
 impl<Backend> AtlasState<Backend> {
@@ -1969,7 +1974,14 @@ impl<Backend> AtlasState<Backend> {
             emoji_glyphs: 0,
             text_glyphs: 0,
             backend,
+            removals: 0,
         }
+    }
+
+    /// QUILL (glass stage 5): how many times a tile was freed (or the atlas
+    /// cleared).
+    pub fn removals(&self) -> u64 {
+        self.removals
     }
 
     pub fn next_use_mark(&mut self) -> u64 {
@@ -1990,6 +2002,7 @@ impl<Backend> AtlasState<Backend> {
     }
 
     pub fn clear(&mut self, reset_backend: impl FnOnce(&mut Backend)) {
+        self.removals = self.removals.wrapping_add(1);
         self.tiles_by_key.clear();
         self.emoji_glyphs = 0;
         self.text_glyphs = 0;
@@ -2041,6 +2054,7 @@ impl<Backend: AtlasBackend> AtlasState<Backend> {
 
     pub fn remove(&mut self, key: &AtlasKey) {
         if let Some((tile, _)) = self.tiles_by_key.remove(key) {
+            self.removals = self.removals.wrapping_add(1);
             match glyph_class(key) {
                 Some(GlyphClass::Emoji) => self.emoji_glyphs -= 1,
                 Some(GlyphClass::Text) => self.text_glyphs -= 1,
@@ -2072,6 +2086,9 @@ impl<Backend: AtlasBackend> AtlasState<Backend> {
             keep
         });
         let count = gone.len();
+        if count > 0 {
+            self.removals = self.removals.wrapping_add(1);
+        }
         for tile in gone {
             self.backend.remove(tile);
         }

@@ -4,20 +4,26 @@
 //! as a stuck focus ring.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 
 pub(crate) trait MenuSurface: Styled + Sized {
-    /// Rounded popover surface with the theme's border and a shadow.
+    /// Rounded popover surface with the theme's border and a shadow, or
+    /// glass while glass effects are on (`ui/glass`). The glass keeps a
+    /// clear hairline where the border was, so rows sit where they do on
+    /// the solid surface.
     fn menu_surface(self, cx: &App) -> Self {
         let theme = cx.theme();
         self.rounded_md()
             .border_1()
-            .border_color(theme.border)
-            .bg(theme.popover)
             .text_color(theme.popover_foreground)
-            .shadow_lg()
+            .glass_or(GlassRole::Menu, cx, |this| {
+                this.border_color(theme.border)
+                    .bg(theme.popover)
+                    .shadow_lg()
+            })
     }
 }
 

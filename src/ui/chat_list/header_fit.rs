@@ -118,6 +118,7 @@ impl QuillApp {
         TabBar::new("list-tabs")
             .w_full()
             .segmented()
+            .glass_selection()
             .with_size(self.control_size())
             .selected_index(selected)
             .child(tab(IconName::MessageCircle, tr(keys::RECENT_CHATS)))

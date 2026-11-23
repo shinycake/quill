@@ -22,6 +22,7 @@
 //! at a quarter of the window in whole lines, and scrolls past that.
 
 use super::*;
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use crate::ui::message_text::{RichTextSource, custom_emoji_paths, measure_rich_text};
 use crate::ui::motion::Glide;
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -410,7 +411,9 @@ impl QuillApp {
                 plate
                     .w(px(layout.plate_w))
                     .rounded(cx.theme().radius_lg)
-                    .bg(crate::ui::video_player::controls::panel_background())
+                    .glass_or(GlassRole::MediaText, cx, |plate| {
+                        plate.bg(crate::ui::video_player::controls::panel_background())
+                    })
             })
             .max_w_full()
             .px(rems(PLATE_PAD_X_REM))

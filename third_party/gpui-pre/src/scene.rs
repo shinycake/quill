@@ -1,7 +1,8 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
 // `SurfaceFrame` (RGBA16F and NV12, `YuvColor`) and the non-Apple `PaintSurface::frame`;
 // primitives a window's paint filter refuses never enter the scene; a replayed
-// range enters the bounds tree once.
+// range enters the bounds tree once; backdrop glass (`BackdropLens`, banded
+// orders; stage 5: frame plans, label inks, re-rendered backdrops).
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
@@ -13,6 +14,15 @@ use crate::{
     AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels,
     Point, Radians, ScaledPixels, Size, bounds_tree::BoundsTree, point,
 };
+mod backdrop_frame;
+mod backdrop_lens;
+mod backdrop_sharp;
+pub use backdrop_frame::*;
+pub(crate) use backdrop_frame::{UnderItem, primitives_under_ranked};
+pub use backdrop_lens::*;
+pub use backdrop_sharp::SharpBackdrop;
+pub(crate) use backdrop_sharp::{GlyphKey, GlyphSource, SlotSpace};
+
 use std::{
     fmt::Debug,
     iter::Peekable,
@@ -56,6 +66,20 @@ pub struct Scene {
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
+    /// Quill: backdrop glass, drawn over what the frame holds under it.
+    pub lenses: Vec<BackdropLens>,
+    /// QUILL (glass stage 5): the lens and colours of each inked label. After
+    /// `finish`, an inked `MonochromeSprite` has `pad` = its entry + 1.
+    pub inks: Vec<LensInkEntry>,
+    /// QUILL (glass stage 5): the inks labels were painted with; an inked
+    /// sprite's `pad` is its request + 1 until `finish`.
+    pub(crate) ink_requests: Vec<LensInk>,
+    /// QUILL (glass stage 5): what lies under each `LensDetail::Rendered` lens,
+    /// drawn again finer (`Window` builds them as the frame ends).
+    pub sharp_backdrops: Vec<SharpBackdrop>,
+    /// QUILL (glass stage 5): how to rasterize sprites again, recorded while a
+    /// window has re-rendered backdrops.
+    pub(crate) glyph_sources: collections::FxHashMap<GlyphKey, GlyphSource>,
     /// Quill: the sort keys of `finish`, kept so it allocates nothing once
     /// the scene has grown.
     sort_keys: Vec<(u64, u32)>,
@@ -82,6 +106,11 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.lenses.clear();
+        self.inks.clear();
+        self.ink_requests.clear();
+        self.sharp_backdrops.clear();
+        self.glyph_sources.clear();
         self.sort_keys.clear();
         self.suppressed = false;
         self.filtered = false;
@@ -114,12 +143,35 @@ impl Scene {
             return;
         }
 
+        if let Primitive::Lens(lens) = primitive {
+            self.insert_lens(lens, clipped_bounds);
+            return;
+        }
+
         let order = self
             .layer_stack
             .last()
             .copied()
             .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
         self.push_primitive(primitive, order);
+    }
+
+    /// QUILL: a lens takes the next band above everything it covers, so it
+    /// is drawn after what is under it and every lens with no glass under
+    /// it shares one batch. Inside a paint layer (one order for all) or
+    /// above the last band it can't be ordered so, and draws as its
+    /// fallback quad.
+    fn insert_lens(&mut self, lens: Box<BackdropLens>, clipped_bounds: Bounds<ScaledPixels>) {
+        let order = if self.layer_stack.is_empty() {
+            self.primitive_bounds
+                .insert_band(clipped_bounds, LENS_BAND_BITS)
+        } else {
+            None
+        };
+        match order {
+            Some(order) => self.push_primitive(Primitive::Lens(lens), order),
+            None => self.insert_primitive(lens.fallback_quad()),
+        }
     }
 
     fn push_primitive(&mut self, mut primitive: Primitive, order: DrawOrder) {
@@ -157,6 +209,11 @@ impl Scene {
                 surface.order = order;
                 self.surfaces.push(surface.clone());
             }
+            Primitive::Lens(lens) => {
+                lens.order = order;
+                lens.id = u32::try_from(self.lenses.len()).unwrap_or(u32::MAX);
+                self.lenses.push(**lens);
+            }
         }
         self.paint_operations
             .push(PaintOperation::Primitive(primitive));
@@ -167,16 +224,41 @@ impl Scene {
             return;
         }
         let operations = &prev_scene.paint_operations[range];
-        if self.suppressed || !self.layer_stack.is_empty() {
-            self.repaint_operations(operations);
+        // QUILL: a lens is banded against what is under it now, so a range
+        // holding one goes in primitive by primitive.
+        let has_lens = operations
+            .iter()
+            .any(|operation| matches!(operation, PaintOperation::Primitive(Primitive::Lens(_))));
+        if self.suppressed || !self.layer_stack.is_empty() || has_lens {
+            self.repaint_operations(operations, prev_scene);
         } else {
-            self.replay_as_one(operations);
+            self.replay_as_one(operations, prev_scene);
         }
     }
 
-    fn repaint_operations(&mut self, operations: &[PaintOperation]) {
+    fn repaint_operations(&mut self, operations: &[PaintOperation], prev_scene: &Scene) {
         for operation in operations {
             match operation {
+                // QUILL (glass stage 5): an inked label keeps its ink, and a
+                // glyph keeps how to rasterize it again.
+                PaintOperation::Primitive(Primitive::MonochromeSprite(sprite)) => {
+                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
+                    let ink = sprite
+                        .pad
+                        .checked_sub(1)
+                        .and_then(|i| prev_scene.ink_requests.get(i as usize));
+                    match ink {
+                        Some(ink) => self.insert_inked_sprite(
+                            MonochromeSprite { pad: 0, ..*sprite },
+                            *ink,
+                        ),
+                        None => self.insert_primitive(MonochromeSprite { pad: 0, ..*sprite }),
+                    }
+                }
+                PaintOperation::Primitive(Primitive::PolychromeSprite(sprite)) => {
+                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
+                    self.insert_primitive(*sprite);
+                }
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
                 PaintOperation::EndLayer => self.pop_layer(),
@@ -184,13 +266,15 @@ impl Scene {
         }
     }
 
-    fn replay_as_one(&mut self, operations: &[PaintOperation]) {
+    fn replay_as_one(&mut self, operations: &[PaintOperation], prev_scene: &Scene) {
         let extent = operations
             .iter()
             .filter_map(|operation| match operation {
-                PaintOperation::Primitive(primitive) => {
-                    Some((primitive.clipped_bounds(), primitive.order(), primitive.order()))
-                }
+                PaintOperation::Primitive(primitive) => Some((
+                    primitive.clipped_bounds(),
+                    primitive.order(),
+                    primitive.order(),
+                )),
                 PaintOperation::StartLayer(_) | PaintOperation::EndLayer => None,
             })
             .reduce(|(bounds, lowest, highest), (next, low, high)| {
@@ -203,6 +287,27 @@ impl Scene {
         });
         for operation in operations {
             match operation {
+                // QUILL (glass stage 5): an inked label keeps its ink, and a
+                // glyph keeps how to rasterize it again.
+                PaintOperation::Primitive(Primitive::MonochromeSprite(sprite)) => {
+                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
+                    let pad = sprite
+                        .pad
+                        .checked_sub(1)
+                        .and_then(|i| prev_scene.ink_requests.get(i as usize))
+                        .map_or(0, |ink| self.ink_request(*ink));
+                    self.push_primitive(
+                        Primitive::MonochromeSprite(MonochromeSprite { pad, ..*sprite }),
+                        sprite.order.wrapping_add(shift),
+                    );
+                }
+                PaintOperation::Primitive(Primitive::PolychromeSprite(sprite)) => {
+                    self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
+                    self.push_primitive(
+                        Primitive::PolychromeSprite(*sprite),
+                        sprite.order.wrapping_add(shift),
+                    );
+                }
                 PaintOperation::Primitive(primitive) => {
                     self.push_primitive(primitive.clone(), primitive.order().wrapping_add(shift));
                 }
@@ -238,9 +343,123 @@ impl Scene {
         sort_primitives(&mut self.polychrome_sprites, keys, |sprite| {
             sprite_sort_key(sprite.order, &sprite.tile)
         });
-        sort_primitives(&mut self.surfaces, keys, |surface| {
-            u64::from(surface.order)
-        });
+        sort_primitives(&mut self.surfaces, keys, |surface| u64::from(surface.order));
+        sort_primitives(&mut self.lenses, keys, |lens| u64::from(lens.order));
+        self.resolve_inks();
+    }
+
+    /// QUILL (glass stage 5): paints a label sprite whose colour the renderer
+    /// picks from the glass under it (`ink`). Where there is no glass, or
+    /// the renderer can't ink it, it draws in its own colour.
+    pub fn insert_inked_sprite(&mut self, mut sprite: MonochromeSprite, ink: LensInk) {
+        if self.suppressed {
+            return;
+        }
+        sprite.pad = self.ink_request(ink);
+        self.insert_primitive(sprite);
+    }
+
+    /// The `pad` of a sprite inked with `ink`: its request + 1.
+    fn ink_request(&mut self, ink: LensInk) -> u32 {
+        let request = match self.ink_requests.last() {
+            Some(last) if *last == ink => self.ink_requests.len(),
+            _ => {
+                self.ink_requests.push(ink);
+                self.ink_requests.len()
+            }
+        };
+        u32::try_from(request).unwrap_or(0)
+    }
+
+    /// Each inked label's lens: the highest lens below it whose glass holds
+    /// its centre. Rewrites the sprites' `pad` from request to entry.
+    fn resolve_inks(&mut self) {
+        self.inks.clear();
+        if self.ink_requests.is_empty() {
+            return;
+        }
+        let glass: Vec<(DrawOrder, Bounds<ScaledPixels>)> = self
+            .lenses
+            .iter()
+            .map(|lens| (lens.order, lens.glass_bounds()))
+            .collect();
+        let mut entries: collections::FxHashMap<(u32, u32), u32> = Default::default();
+        for sprite in &mut self.monochrome_sprites {
+            let Some(request) = sprite.pad.checked_sub(1) else {
+                continue;
+            };
+            let Some(ink) = self.ink_requests.get(request as usize).copied() else {
+                sprite.pad = 0;
+                continue;
+            };
+            let center = sprite.bounds.center();
+            let lens = glass
+                .iter()
+                .rposition(|(order, bounds)| *order < sprite.order && bounds.contains(&center))
+                .and_then(|i| u32::try_from(i).ok())
+                .unwrap_or(LensInkEntry::NO_LENS);
+            let inks = &mut self.inks;
+            let entry = *entries.entry((request, lens)).or_insert_with(|| {
+                inks.push(LensInkEntry { lens, ink });
+                u32::try_from(inks.len()).unwrap_or(0)
+            });
+            sprite.pad = entry;
+        }
+    }
+
+    /// QUILL (glass stage 5): a hash of an inked sprite's colours (0 if it is not
+    /// inked), after `finish`.
+    pub(crate) fn ink_hash(&self, sprite: &MonochromeSprite) -> u64 {
+        use std::hash::{DefaultHasher, Hasher};
+        let Some(entry) = sprite
+            .pad
+            .checked_sub(1)
+            .and_then(|i| self.inks.get(i as usize))
+        else {
+            return 0;
+        };
+        let mut hasher = DefaultHasher::new();
+        for color in [entry.ink.on_light, entry.ink.on_dark] {
+            for v in [color.h, color.s, color.l, color.a] {
+                hasher.write_u32(v.to_bits());
+            }
+        }
+        hasher.write_u32(entry.lens);
+        hasher.finish()
+    }
+
+    /// QUILL (glass stage 5): records how to rasterize the sprite just painted at
+    /// `tile` and `bounds` again.
+    pub(crate) fn record_glyph_source(
+        &mut self,
+        tile: &AtlasTile,
+        bounds: &Bounds<ScaledPixels>,
+        source: GlyphSource,
+    ) {
+        self.glyph_sources
+            .insert(GlyphKey::new(tile, bounds), source);
+    }
+
+    pub(crate) fn glyph_source(
+        &self,
+        tile: &AtlasTile,
+        bounds: &Bounds<ScaledPixels>,
+    ) -> Option<&GlyphSource> {
+        self.glyph_sources.get(&GlyphKey::new(tile, bounds))
+    }
+
+    fn copy_glyph_source(
+        &mut self,
+        prev_scene: &Scene,
+        tile: &AtlasTile,
+        bounds: &Bounds<ScaledPixels>,
+    ) {
+        if prev_scene.glyph_sources.is_empty() {
+            return;
+        }
+        if let Some(source) = prev_scene.glyph_source(tile, bounds) {
+            self.record_glyph_source(tile, bounds, source.clone());
+        }
     }
 
     #[cfg_attr(
@@ -268,6 +487,8 @@ impl Scene {
             polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
             surfaces_start: 0,
             surfaces_iter: self.surfaces.iter().peekable(),
+            lenses_start: 0,
+            lenses_iter: self.lenses.iter().peekable(),
         }
     }
 }
@@ -322,6 +543,7 @@ pub(crate) enum PrimitiveKind {
     SubpixelSprite,
     PolychromeSprite,
     Surface,
+    Lens,
 }
 
 pub(crate) enum PaintOperation {
@@ -341,6 +563,9 @@ pub enum Primitive {
     SubpixelSprite(SubpixelSprite),
     PolychromeSprite(PolychromeSprite),
     Surface(PaintSurface),
+    /// QUILL: backdrop glass, boxed so the rare lens does not grow every
+    /// primitive the frame records.
+    Lens(Box<BackdropLens>),
 }
 
 #[expect(missing_docs)]
@@ -355,6 +580,7 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.bounds,
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
             Primitive::Surface(surface) => &surface.bounds,
+            Primitive::Lens(lens) => &lens.bounds,
         }
     }
 
@@ -368,6 +594,7 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Surface(surface) => &surface.content_mask,
+            Primitive::Lens(lens) => &lens.content_mask,
         }
     }
 
@@ -383,8 +610,7 @@ impl Primitive {
     }
 
     fn clipped_bounds(&self) -> Bounds<ScaledPixels> {
-        self.painted_bounds()
-            .intersect(&self.content_mask().bounds)
+        self.painted_bounds().intersect(&self.content_mask().bounds)
     }
 
     fn order(&self) -> DrawOrder {
@@ -397,6 +623,7 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => sprite.order,
             Primitive::PolychromeSprite(sprite) => sprite.order,
             Primitive::Surface(surface) => surface.order,
+            Primitive::Lens(lens) => lens.order,
         }
     }
 }
@@ -425,6 +652,8 @@ struct BatchIterator<'a> {
     polychrome_sprites_iter: Peekable<slice::Iter<'a, PolychromeSprite>>,
     surfaces_start: usize,
     surfaces_iter: Peekable<slice::Iter<'a, PaintSurface>>,
+    lenses_start: usize,
+    lenses_iter: Peekable<slice::Iter<'a, BackdropLens>>,
 }
 
 impl<'a> Iterator for BatchIterator<'a> {
@@ -457,6 +686,10 @@ impl<'a> Iterator for BatchIterator<'a> {
             (
                 self.surfaces_iter.peek().map(|s| s.order),
                 PrimitiveKind::Surface,
+            ),
+            (
+                self.lenses_iter.peek().map(|lens| lens.order),
+                PrimitiveKind::Lens,
             ),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
@@ -603,6 +836,24 @@ impl<'a> Iterator for BatchIterator<'a> {
                 self.surfaces_start = surfaces_end;
                 Some(PrimitiveBatch::Surfaces(surfaces_start..surfaces_end))
             }
+            PrimitiveKind::Lens => {
+                let lenses_start = self.lenses_start;
+                let mut lenses_end = lenses_start + 1;
+                // A batch is one band: a lens in a higher band covers one of
+                // these, so it needs a copy of the frame they are drawn into.
+                let band = self.lenses_iter.next().map(|lens| lens.order);
+                while self
+                    .lenses_iter
+                    .next_if(|lens| {
+                        Some(lens.order) == band && (lens.order, batch_kind) < max_order_and_kind
+                    })
+                    .is_some()
+                {
+                    lenses_end += 1;
+                }
+                self.lenses_start = lenses_end;
+                Some(PrimitiveBatch::Lenses(lenses_start..lenses_end))
+            }
         }
     }
 }
@@ -635,6 +886,9 @@ pub enum PrimitiveBatch {
         range: Range<usize>,
     },
     Surfaces(Range<usize>),
+    /// QUILL: backdrop glass. Lenses of one batch share an order, so none
+    /// covers another.
+    Lenses(Range<usize>),
 }
 
 impl PrimitiveBatch {
@@ -667,6 +921,7 @@ impl PrimitiveBatch {
                 )
             }
             Self::Surfaces(range) => format!("surfaces ({})", range.len()),
+            Self::Lenses(range) => format!("lenses ({})", range.len()),
         }
     }
 }
@@ -1152,7 +1407,11 @@ impl SurfaceFrame {
     /// The display headroom to tone-map to (at least 1.0).
     pub fn headroom(&self) -> f32 {
         let headroom = f32::from_bits(self.headroom.load(std::sync::atomic::Ordering::Relaxed));
-        if headroom.is_finite() { headroom.max(1.0) } else { 1.0 }
+        if headroom.is_finite() {
+            headroom.max(1.0)
+        } else {
+            1.0
+        }
     }
 
     /// Set the display headroom to tone-map to.
@@ -1210,6 +1469,12 @@ impl PartialEq for SurfaceFrame {
 }
 
 impl Eq for SurfaceFrame {}
+
+impl From<BackdropLens> for Primitive {
+    fn from(lens: BackdropLens) -> Self {
+        Primitive::Lens(Box::new(lens))
+    }
+}
 
 impl From<PaintSurface> for Primitive {
     fn from(surface: PaintSurface) -> Self {

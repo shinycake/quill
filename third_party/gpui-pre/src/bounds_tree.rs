@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.10 (Apache-2.0):
-// `insert_span`, one box standing for a range of orderings.
+// `insert_span`, one box standing for a range of orderings; `insert_band`,
+// banded orderings for backdrop glass.
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{Bounds, Half};
 use std::{
@@ -129,7 +130,23 @@ where
         let max_intersecting = self.find_max_ordering(&new_bounds);
         let ordering = max_intersecting.saturating_add(1);
         let last_ordering = ordering.saturating_add(orderings_after_first);
+        self.insert_ordered(new_bounds, last_ordering);
+        ordering
+    }
 
+    /// QUILL: inserts `new_bounds` at the next multiple of `1 << band_bits`
+    /// above every ordering it intersects, so boxes inserted this way that
+    /// cover nothing banded share one ordering. `None` (and nothing
+    /// inserted) when that multiple is past `u32::MAX`.
+    pub fn insert_band(&mut self, new_bounds: Bounds<U>, band_bits: u32) -> Option<u32> {
+        let max_intersecting = self.find_max_ordering(&new_bounds);
+        let band = (u64::from(max_intersecting >> band_bits) + 1) << band_bits;
+        let ordering = u32::try_from(band).ok()?;
+        self.insert_ordered(new_bounds, ordering);
+        Some(ordering)
+    }
+
+    fn insert_ordered(&mut self, new_bounds: Bounds<U>, last_ordering: u32) {
         // Insert the new leaf
         let new_leaf_idx = self.insert_leaf(new_bounds, last_ordering);
 
@@ -139,8 +156,6 @@ where
             Some(old_idx) if self.nodes[old_idx].max_order < last_ordering => Some(new_leaf_idx),
             some => some,
         };
-
-        ordering
     }
 
     /// Finds the maximum ordering among all bounds that intersect with the query.

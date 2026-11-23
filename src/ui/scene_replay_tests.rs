@@ -122,9 +122,11 @@ fn primitive(kind: Kind, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             wavy: false.into(),
         }
         .into(),
+        // A monochrome sprite's `pad` carries a label's ink (backdrop
+        // glass), so its tag is its tile id.
         Kind::MonochromeSprite => MonochromeSprite {
             order: 0,
-            pad: tag,
+            pad: 0,
             tile: tile(tag),
             bounds,
             content_mask,
@@ -256,7 +258,11 @@ fn drawn(scene: &Scene) -> Vec<u32> {
                 tags.extend(scene.underlines[range].iter().map(|line| line.pad));
             }
             PrimitiveBatch::MonochromeSprites { range, .. } => {
-                tags.extend(scene.monochrome_sprites[range].iter().map(|s| s.pad));
+                tags.extend(
+                    scene.monochrome_sprites[range]
+                        .iter()
+                        .map(|s| s.tile.tile_id.0),
+                );
             }
             PrimitiveBatch::SubpixelSprites { range, .. } => {
                 tags.extend(scene.subpixel_sprites[range].iter().map(|s| s.pad));
@@ -264,7 +270,7 @@ fn drawn(scene: &Scene) -> Vec<u32> {
             PrimitiveBatch::PolychromeSprites { range, .. } => {
                 tags.extend(scene.polychrome_sprites[range].iter().map(|s| s.pad));
             }
-            PrimitiveBatch::Surfaces(_) => {}
+            PrimitiveBatch::Surfaces(_) | PrimitiveBatch::Lenses(_) => {}
         }
     }
     tags
@@ -284,10 +290,10 @@ fn tag_of(primitive: &Primitive) -> u32 {
         Primitive::Quad(quad) => quad_tag(quad),
         Primitive::Path(path) => path_tag(path),
         Primitive::Underline(line) => line.pad,
-        Primitive::MonochromeSprite(sprite) => sprite.pad,
+        Primitive::MonochromeSprite(sprite) => sprite.tile.tile_id.0,
         Primitive::SubpixelSprite(sprite) => sprite.pad,
         Primitive::PolychromeSprite(sprite) => sprite.pad,
-        Primitive::Surface(_) => 0,
+        Primitive::Surface(_) | Primitive::Lens(_) => 0,
     }
 }
 
@@ -331,7 +337,12 @@ fn orders(scene: &Scene) -> HashMap<u32, u32> {
         .map(|quad| (quad_tag(quad), quad.order))
         .chain(scene.shadows.iter().map(|s| (s.pad, s.order)))
         .chain(scene.underlines.iter().map(|s| (s.pad, s.order)))
-        .chain(scene.monochrome_sprites.iter().map(|s| (s.pad, s.order)))
+        .chain(
+            scene
+                .monochrome_sprites
+                .iter()
+                .map(|s| (s.tile.tile_id.0, s.order)),
+        )
         .chain(scene.subpixel_sprites.iter().map(|s| (s.pad, s.order)))
         .chain(scene.polychrome_sprites.iter().map(|s| (s.pad, s.order)))
         .chain(scene.paths.iter().map(|path| (path_tag(path), path.order)))
@@ -673,7 +684,13 @@ fn finish_sorts_by_order_and_keeps_paint_order_among_equals() {
         let mut sprites: Vec<_> = scene
             .monochrome_sprites
             .iter()
-            .map(|sprite| (sprite.order, sprite.tile.texture_id.index, sprite.pad))
+            .map(|sprite| {
+                (
+                    sprite.order,
+                    sprite.tile.texture_id.index,
+                    sprite.tile.tile_id.0,
+                )
+            })
             .collect();
         quads.sort_by_key(|&(order, _)| order);
         sprites.sort_by_key(|&(order, texture, _)| (order, texture));
@@ -688,7 +705,13 @@ fn finish_sorts_by_order_and_keeps_paint_order_among_equals() {
         let sorted_sprites: Vec<_> = scene
             .monochrome_sprites
             .iter()
-            .map(|sprite| (sprite.order, sprite.tile.texture_id.index, sprite.pad))
+            .map(|sprite| {
+                (
+                    sprite.order,
+                    sprite.tile.texture_id.index,
+                    sprite.tile.tile_id.0,
+                )
+            })
             .collect();
         assert_eq!(sorted_quads, quads, "case {case}");
         assert_eq!(sorted_sprites, sprites, "case {case}");

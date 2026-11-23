@@ -1,6 +1,7 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
 // `Window::paint_surface_frame`; the paint filter and `Window::capture_frame`;
-// `Window::frame_number`.
+// `Window::frame_number`; `Window::paint_backdrop_lens`; inked labels and
+// re-rendered backdrops for glass (`window/backdrop_glass.rs`).
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
@@ -13,12 +14,13 @@ use crate::taffy::TaffyLayoutEngine;
 use crate::input_rate::InputRateTracker;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow,
+    AsyncWindowContext, AtlasTile, AvailableSpace, BackdropLens, Background, BorderStyle, Bounds,
+    BoxShadow,
     Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
     DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity,
     EntityId, EventEmitter, FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs,
     Hsla, InputHandler, InputPreference, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent,
-    Keystroke, KeystrokeEvent, LayoutId, LineLayoutIndex, Modifiers, ModifiersChangedEvent,
+    Keystroke, KeystrokeEvent, LayoutId, LensStyle, LineLayoutIndex, Modifiers, ModifiersChangedEvent,
     MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent, Path, Pixels,
     PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
     PolychromeSprite, Priority, PromptButton, PromptLevel, Quad, Render, RenderGlyphParams,
@@ -73,6 +75,7 @@ use std::{
 use uuid::Uuid;
 
 pub(crate) mod a11y;
+mod backdrop_glass;
 mod live_views;
 mod prompts;
 
@@ -1323,6 +1326,9 @@ pub struct Window {
     sprite_atlas: Arc<dyn PlatformAtlas>,
     text_system: Rc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
+    /// QUILL (glass stage 5): the ink of labels painted now (`with_lens_ink`),
+    /// and whether glyphs record how to rasterize them again.
+    glass: backdrop_glass::GlassPaint,
     rem_size: Pixels,
     /// The stack of override values for the window's rem size.
     ///
@@ -2432,6 +2438,7 @@ impl Window {
             sprite_atlas,
             text_system,
             text_rendering_mode: cx.text_rendering_mode.clone(),
+            glass: Default::default(),
             rem_size: px(16.),
             rem_size_override_stack: SmallVec::new(),
             viewport_size: content_size,
@@ -3970,8 +3977,10 @@ impl Window {
         }
 
         self.layout_engine.as_mut().unwrap().clear();
-        self.text_system().finish_frame();
         self.next_frame.finish(&mut self.rendered_frame);
+        // QUILL (glass stage 5): sharp magnifiers draw what is under them again.
+        self.build_sharp_backdrops(cx);
+        self.text_system().finish_frame();
 
         self.invalidator.set_phase(DrawPhase::Focus);
         let previous_focus_path = self.rendered_frame.focus_path();
@@ -5293,6 +5302,50 @@ impl Window {
         }
     }
 
+    /// QUILL: paint backdrop glass whose body fills `bounds`, with corners of
+    /// `corner_radius` (clamped to a pill). The glass bends, frosts and
+    /// lights whatever this frame painted under it before; what is painted
+    /// over it afterwards draws on top. The shadow reaches past `bounds`.
+    /// Renderers that can't read the frame draw a rounded quad of the
+    /// glass's colour instead, as does a lens inside a `paint_layer`.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_backdrop_lens(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radius: Pixels,
+        style: &LensStyle,
+    ) {
+        self.invalidator.debug_assert_paint();
+        if bounds.size.width <= px(0.) || bounds.size.height <= px(0.) {
+            return;
+        }
+        let scale_factor = self.scale_factor();
+        let body = self.snap_bounds(bounds);
+        let footprint = self.snap_bounds(style.footprint(bounds));
+        let mut lens = BackdropLens::new(
+            body,
+            corner_radius.scale(scale_factor),
+            footprint,
+            self.snapped_content_mask(),
+            scale_factor,
+            style,
+        );
+        lens.opacity = self.element_opacity();
+        self.next_frame.scene.insert_primitive(lens);
+    }
+
+    /// QUILL (glass effects): the lenses the last drawn frame holds and how
+    /// many bands they take (glass over glass is a second band). A lens
+    /// drawn as its fallback quad does not count. For tests and budgets.
+    pub fn rendered_glass(&self) -> (usize, usize) {
+        let lenses = &self.rendered_frame.scene.lenses;
+        let mut bands: Vec<u32> = lenses.iter().map(|lens| lens.order).collect();
+        bands.sort_unstable();
+        bands.dedup();
+        (lenses.len(), bands.len())
+    }
+
     /// Paint the given `Path` into the scene for the next frame at the current z-index.
     ///
     /// This method should only be called as part of the paint phase of element drawing.
@@ -5387,7 +5440,11 @@ impl Window {
             (quantized_origin.y.fract() * SUBPIXEL_VARIANTS_Y as f32) as u8,
         );
         let integer_origin = quantized_origin.map(|c| ScaledPixels(c.trunc()));
-        let subpixel_rendering = self.should_use_subpixel_rendering(font_id, font_size);
+        // QUILL (glass stage 5): inked labels are monochrome, so the renderer can
+        // colour them.
+        let ink = self.glass.ink();
+        let subpixel_rendering =
+            ink.is_none() && self.should_use_subpixel_rendering(font_id, font_size);
         let dilation = self.text_system().glyph_dilation_for_color(color);
         let params = RenderGlyphParams {
             font_id,
@@ -5426,7 +5483,7 @@ impl Window {
                     transformation: TransformationMatrix::unit(),
                 });
             } else {
-                self.next_frame.scene.insert_primitive(MonochromeSprite {
+                let sprite = MonochromeSprite {
                     order: 0,
                     pad: 0,
                     bounds,
@@ -5434,7 +5491,24 @@ impl Window {
                     color: color.opacity(element_opacity),
                     tile,
                     transformation: TransformationMatrix::unit(),
-                });
+                };
+                if self.glass.records_glyphs() {
+                    self.next_frame.scene.record_glyph_source(
+                        &sprite.tile,
+                        &sprite.bounds,
+                        crate::scene::GlyphSource::Glyph {
+                            origin,
+                            font_id,
+                            glyph_id,
+                            font_size,
+                            dilation,
+                        },
+                    );
+                }
+                match ink {
+                    Some(ink) => self.next_frame.scene.insert_inked_sprite(sprite, ink),
+                    None => self.next_frame.scene.insert_primitive(sprite),
+                }
             }
         }
         Ok(())
@@ -5507,6 +5581,18 @@ impl Window {
             let content_mask = self.snapped_content_mask();
             let opacity = self.element_opacity();
 
+            if self.glass.records_glyphs() {
+                self.next_frame.scene.record_glyph_source(
+                    &tile,
+                    &bounds,
+                    crate::scene::GlyphSource::Emoji {
+                        origin,
+                        font_id,
+                        glyph_id,
+                        font_size,
+                    },
+                );
+            }
             self.next_frame.scene.insert_primitive(PolychromeSprite {
                 order: 0,
                 pad: 0,
@@ -5573,7 +5659,19 @@ impl Window {
             .map_origin(|value| ScaledPixels(round_half_toward_zero(value.0)))
             .map_size(|size| size.ceil());
 
-        self.next_frame.scene.insert_primitive(MonochromeSprite {
+        // QUILL (glass stage 5): icons can be inked and rasterized again too
+        // (only those drawn from a path; inline data is not kept).
+        if self.glass.records_glyphs() && data.is_none() {
+            self.next_frame.scene.record_glyph_source(
+                &tile,
+                &final_bounds,
+                crate::scene::GlyphSource::Svg {
+                    bounds,
+                    path: params.path.clone(),
+                },
+            );
+        }
+        let sprite = MonochromeSprite {
             order: 0,
             pad: 0,
             bounds: final_bounds,
@@ -5581,7 +5679,11 @@ impl Window {
             color: color.opacity(element_opacity),
             tile,
             transformation,
-        });
+        };
+        match self.glass.ink() {
+            Some(ink) => self.next_frame.scene.insert_inked_sprite(sprite, ink),
+            None => self.next_frame.scene.insert_primitive(sprite),
+        }
 
         Ok(())
     }

@@ -1,7 +1,8 @@
 // Modified for gpui-pre (snapshot of zed@d2a4fb6): adapt device queues and sRGB detection to wgpu 30.0.1.
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back; NV12 video
-// surfaces (`yuv_surfaces`). See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
+// surfaces (`yuv_surfaces`); backdrop glass (`wgpu_renderer/lens.rs`).
+// See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
 use crate::device_recovery::{
     install_once_built, Adapters, Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
 };
@@ -11,8 +12,8 @@ use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
 use collections::FxHashMap;
 use gpui::{
-    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, Path, Point, PrimitiveBatch,
-    ScaledPixels, Scene, Size, get_gamma_correction_ratios,
+    AtlasTextureId, BackdropLens, Background, Bounds, DevicePixels, GpuSpecs, Path, Point,
+    PrimitiveBatch, ScaledPixels, Scene, Size, get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -24,6 +25,8 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
+
+mod lens;
 
 const MAX_INSTANCE_BUFFER_SIZE: u64 = 256 * 1024 * 1024;
 
@@ -139,6 +142,8 @@ struct InstanceBindings {
     monochrome_sprites: InstanceBinding,
     subpixel_sprites: InstanceBinding,
     polychrome_sprites: InstanceBinding,
+    /// QUILL: each lens's fallback quad, for batches that draw flat.
+    lens_fallbacks: InstanceBinding,
 }
 
 struct WgpuBindGroupLayouts {
@@ -202,6 +207,8 @@ struct WgpuResources {
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
     yuv_surfaces: YuvSurfaces,
+    /// QUILL: backdrop glass's pipelines, atlas and frame copy (`lens.rs`).
+    lens: lens::LensState,
 }
 
 struct CachedTextureBindGroup {
@@ -470,8 +477,13 @@ impl WgpuRenderer {
             );
         }
 
+        // QUILL: backdrop glass copies from the frame it draws into, so the
+        // surface is readable wherever it can be (Vulkan, as a rule). One
+        // that can't be (OpenGL) draws frames with glass through a copy
+        // (`lens.rs`).
+        let readable = surface_caps.usages & wgpu::TextureUsages::COPY_SRC;
         let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | readable,
             format: surface_format,
             color_space: wgpu::SurfaceColorSpace::Auto,
             width: clamped_width.max(1),
@@ -1077,6 +1089,8 @@ impl WgpuRenderer {
         // in draw() after we confirm the surface is healthy. This avoids
         // panics when the device/surface is in an invalid state during resize.
         resources.invalidate_intermediate_textures();
+        // QUILL: the glass's atlas and frame copy are sized for the old frame.
+        resources.lens.release();
 
         if let RendererState::Ready { surface, core } = &self.state {
             surface.configure(&core.resources.device, &self.surface_config);
@@ -1224,18 +1238,19 @@ impl WgpuRenderer {
             width: DevicePixels(frame.texture.width() as i32),
             height: DevicePixels(frame.texture.height() as i32),
         };
-        let frame_view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
         let premultiplied_alpha =
             self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
-        if let Err(error) = core.render_frame(
-            scene,
-            &frame_view,
-            size,
-            premultiplied_alpha,
-            wgpu::Color::TRANSPARENT,
-        ) {
+        // QUILL: glass reads the frame back; a surface that can't be read
+        // gets the frame drawn into a copy it then shows (`lens.rs`).
+        let clear = wgpu::Color::TRANSPARENT;
+        let lenses = scene.lenses.len();
+        let drawn = match core.glass_frame(lenses, &frame.texture, premultiplied_alpha) {
+            Some(copy) => core
+                .render_frame(scene, &copy, size, premultiplied_alpha, clear)
+                .and_then(|_| core.copy_frame(&copy, &frame.texture, premultiplied_alpha)),
+            None => core.render_frame(scene, &frame.texture, size, premultiplied_alpha, clear),
+        };
+        if let Err(error) = drawn {
             log::error!("{error:#}");
             return false;
         }
@@ -1283,14 +1298,13 @@ impl WgpuRenderer {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let size = Size {
             width: DevicePixels(i32::try_from(width).unwrap_or(i32::MAX)),
             height: DevicePixels(i32::try_from(height).unwrap_or(i32::MAX)),
         };
         core.render_frame(
             scene,
-            &view,
+            &texture,
             size,
             premultiplied_alpha,
             wgpu::Color::TRANSPARENT,
@@ -1523,6 +1537,7 @@ impl WgpuRendererCore {
                 path_msaa_texture: None,
                 path_msaa_view: None,
                 yuv_surfaces,
+                lens: lens::LensState::default(),
             },
             atlas,
             path_globals_offset,
@@ -1587,7 +1602,7 @@ impl WgpuRendererCore {
     fn render_frame(
         &mut self,
         scene: &Scene,
-        target_view: &wgpu::TextureView,
+        target: &wgpu::Texture,
         size: Size<DevicePixels>,
         premultiplied_alpha: bool,
         clear_color: wgpu::Color,
@@ -1638,7 +1653,7 @@ impl WgpuRendererCore {
             bytemuck::bytes_of(&gamma_params),
         );
 
-        self.record_frame(scene, target_view, clear_color)
+        self.record_frame(scene, target, premultiplied_alpha, clear_color)
             .inspect_err(|_| {
                 // Queue writes are staged before encoding; flush them even if the frame fails.
                 self.resources.queue.submit(std::iter::empty());
@@ -1648,9 +1663,18 @@ impl WgpuRendererCore {
     fn record_frame(
         &mut self,
         scene: &Scene,
-        frame_view: &wgpu::TextureView,
+        target: &wgpu::Texture,
+        premultiplied_alpha: bool,
         clear_color: wgpu::Color,
     ) -> Result<wgpu::SubmissionIndex> {
+        let frame_view = &target.create_view(&wgpu::TextureViewDescriptor::default());
+        self.release_idle_lens_atlas(scene.lenses.len());
+        // QUILL: the frame's slots, planned before anything is drawn. What
+        // the atlas holds counts as unknown until the frame is submitted
+        // with every batch drawn as planned.
+        let glass = self.plan_glass(scene, target, premultiplied_alpha);
+        self.resources.lens.forget();
+        let mut glass_drawn = lens::GlassDrawn::AsPlanned;
         let mut instance_offset = 0;
         let instance_bindings = self
             .write_instances(scene, &mut instance_offset)
@@ -1786,6 +1810,52 @@ impl WgpuRendererCore {
                             &mut pass,
                         )?;
                     }
+                    PrimitiveBatch::Lenses(range) => {
+                        // QUILL: glass ends the pass, copies and blurs what
+                        // is under it and resumes (`lens.rs`); else the
+                        // batch draws as its fallback quads.
+                        let lenses = scene.lenses.get(range.clone()).unwrap_or_default();
+                        let plan = match &glass {
+                            Some(glass) => self
+                                .plan_lenses(glass, lenses, range.clone(), &mut instance_offset)
+                                .unwrap_or_else(|error| {
+                                    log::error!("glass draws flat: {error:#}");
+                                    None
+                                }),
+                            None => None,
+                        };
+                        let Some(plan) = plan else {
+                            glass_drawn = lens::GlassDrawn::Flat;
+                            self.draw_instances(
+                                &instance_bindings.lens_fallbacks,
+                                &self.resources().pipelines.quads,
+                                instance_range(range),
+                                &mut pass,
+                            );
+                            continue;
+                        };
+                        // Slots that still hold last frame's backdrop need
+                        // no copy, and a batch of only those keeps the pass.
+                        if plan.copies_backdrop() {
+                            drop(pass);
+                            plan.copy_backdrop(&mut encoder, target);
+                            pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                label: Some("main_pass_after_glass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: frame_view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Load,
+                                        store: wgpu::StoreOp::Store,
+                                    },
+                                    depth_slice: None,
+                                })],
+                                depth_stencil_attachment: None,
+                                ..Default::default()
+                            });
+                        }
+                        self.draw_glass(&plan, &mut pass);
+                    }
                     PrimitiveBatch::Surfaces(range) => {
                         let resources = self.resources();
                         resources.yuv_surfaces.draw(
@@ -1804,6 +1874,9 @@ impl WgpuRendererCore {
             .queue
             .submit(std::iter::once(encoder.finish()));
         self.resources.yuv_surfaces.end_frame();
+        if let (Some(glass), lens::GlassDrawn::AsPlanned) = (&glass, glass_drawn) {
+            self.resources.lens.keep(glass);
+        }
         Ok(submission)
     }
 
@@ -1842,6 +1915,15 @@ impl WgpuRendererCore {
                 "polychrome_sprites_bind_group",
                 instance_offset,
                 &scene.polychrome_sprites,
+            )?,
+            lens_fallbacks: self.write_instance_binding(
+                "lens_fallbacks_bind_group",
+                instance_offset,
+                &scene
+                    .lenses
+                    .iter()
+                    .map(BackdropLens::fallback_quad)
+                    .collect::<Vec<_>>(),
             )?,
         })
     }
@@ -2093,6 +2175,44 @@ impl WgpuRendererCore {
         instance_offset: &mut u64,
         instances: &[T],
     ) -> Result<InstanceBinding> {
+        let (offset, size, first_instance) =
+            self.write_instance_data(instance_offset, instances)?;
+        let resources = self.resources();
+        let bind_group = resources
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &resources.bind_group_layouts.instances,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: match &resources.instance_data {
+                        InstanceData::Storage(buffer) => {
+                            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer,
+                                offset,
+                                size: NonZeroU64::new(size),
+                            })
+                        }
+                        InstanceData::Texture { view, .. } => {
+                            wgpu::BindingResource::TextureView(view)
+                        }
+                    },
+                }],
+            });
+        Ok(InstanceBinding {
+            bind_group,
+            first_instance,
+        })
+    }
+
+    /// Writes `instances` into the frame's instance data and returns where:
+    /// the offset and size of the allocation, and the index of its first
+    /// instance (see [`InstanceBinding::first_instance`]).
+    fn write_instance_data<T>(
+        &mut self,
+        instance_offset: &mut u64,
+        instances: &[T],
+    ) -> Result<(u64, u64, u32)> {
         let data = unsafe { Self::instance_bytes(instances) };
         // wgpu rejects zero-sized bindings, so empty primitive arrays still
         // reserve the 16-byte minimum.
@@ -2133,31 +2253,7 @@ impl WgpuRendererCore {
                 }
             }
         }
-        let bind_group = resources
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(label),
-                layout: &resources.bind_group_layouts.instances,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: match &resources.instance_data {
-                        InstanceData::Storage(buffer) => {
-                            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer,
-                                offset,
-                                size: NonZeroU64::new(size),
-                            })
-                        }
-                        InstanceData::Texture { view, .. } => {
-                            wgpu::BindingResource::TextureView(view)
-                        }
-                    },
-                }],
-            });
-        Ok(InstanceBinding {
-            bind_group,
-            first_instance,
-        })
+        Ok((offset, size, first_instance))
     }
 
     fn write_instance_texture(resources: &WgpuResources, offset: u64, data: &[u8]) {
@@ -2744,7 +2840,6 @@ fn gave_up(target: Target) -> Recovery {
 ))]
 struct HeadlessRenderTarget {
     texture: wgpu::Texture,
-    view: wgpu::TextureView,
 }
 
 #[cfg(all(
@@ -2834,8 +2929,7 @@ impl WgpuHeadlessRenderer {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.render_target = Some(HeadlessRenderTarget { texture, view });
+        self.render_target = Some(HeadlessRenderTarget { texture });
         Ok(())
     }
 
@@ -2863,14 +2957,14 @@ impl WgpuHeadlessRenderer {
     fn render(&mut self, scene: &Scene, size: Size<DevicePixels>) -> anyhow::Result<()> {
         self.check_gpu_errors()?;
         self.ensure_render_target(size)?;
-        let view = self
+        let texture = self
             .render_target
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Headless render target was not created"))?
-            .view
+            .texture
             .clone();
         self.core
-            .render_frame(scene, &view, size, false, wgpu::Color::BLACK)?;
+            .render_frame(scene, &texture, size, false, wgpu::Color::BLACK)?;
         Ok(())
     }
 

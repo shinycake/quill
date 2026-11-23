@@ -15,3 +15,4 @@ Checklist::others_can_mark_tasks_as_done TDLib's checklist.others_can_mark_tasks
 ChecklistDraft::others_can_mark_tasks_as_done the frozen "Allow Others to Mark As Done" setting of the new checklist; not a stage
 ReceivedGift::is_saved TDLib's receivedGift.is_saved: whether the gift is shown on the profile page, the server's own setting, flipped only after the server confirmed toggleGiftIsSaved; not a stage of anything Quill runs
 Step::started the one-shot answer of a wheel call (a pull began this call): returned to the caller, merged per call, never stored, so it is no stage
+Readings::saving_power a snapshot of what the OS reports (battery saver or heat) for quill::glass::resolve, not a stage of anything

@@ -579,3 +579,48 @@ a glyph finds its index, a right-to-left line runs backwards in typing order,
 and a one-direction line is as wide as DirectWrite's own layout of it. A
 cluster that lies past a run's glyphs logs a warning before the rest of the
 run is dropped.
+
+## Backdrop glass
+
+Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
+
+- Stage 1: `src/directx_renderer.rs` drew `PrimitiveBatch::Lenses` as each
+  lens's fallback quad (`BackdropLens::fallback_quad`): the quads are
+  uploaded after the scene's own quads and drawn by the quad pipeline.
+- Stage 3, real glass, as gpui-pre-apple's `metal_renderer/lens.rs` and
+  gpui-pre-wgpu's `wgpu_renderer/lens.rs` draw it:
+  - `src/backdrop_glass.rs` (new): a lens batch unbinds the back buffer,
+    copies each footprint out of it (`CopySubresourceRegion`; the flip-model
+    back buffer has one sample) into a pooled five-level atlas in the back
+    buffer's format (scRGB half floats too), packed by gpui-pre's
+    `LensPacking::pack`. Four dual-Kawase downsamples fill the levels (a
+    render target and a shader view per level), the back buffer and the
+    frame's viewport are bound again and the lenses draw from the whole
+    chain. The pipelines are built on the first frame with glass; when they
+    fail, glass draws flat (the fallback quads) for the rest of the
+    renderer's life, logged once. The atlas goes after the first frame
+    without glass; everything lives in `DirectXRenderPipelines`, so a device
+    loss drops it with the device. A multisampled back buffer, footprints
+    larger than an atlas (16384, or 8192 on feature level 10) and a draw
+    error fall back to the quads.
+  - `src/shaders_lens.hlsl` (new, includes `shaders.hlsl`): `lens_vertex` /
+    `lens_fragment`, a port of `fs_lens` in gpui-pre-wgpu's
+    `shaders_lens.wgsl`, and `lens_downsample_vertex` /
+    `lens_downsample_fragment`. In HDR the backdrop is read back from scRGB
+    to the sRGB-encoded colour the optics work in, and the result goes
+    through `to_output` like every other shader. It compiles from its own
+    file, so an error in it can't break the other shaders.
+  - `src/directx_renderer.rs`: the `Lenses` arm calls `draw_lenses` and
+    draws the fallback quads when it says so; `ShaderModule::Lens` and
+    `LensDownsample`, and `ShaderModule::file` (debug builds compile each
+    module from its own file); a WARP test that the glass shaders build.
+  - `build.rs`: compiles `lens` and `lens_downsample` from
+    `shaders_lens.hlsl` in release builds.
+- Stage 5: `src/backdrop_glass.rs` and `src/directx_renderer.rs` draw from
+  gpui-pre's frame plan: a lens batch copies and blurs only its fresh
+  slots, and the plan is kept only after a frame in which every batch drew
+  as planned (`GlassDrawn`). `src/shaders_lens.hlsl`: gooey shapes, frost
+  towards the rim and the magnifier's finer read, as in the WGSL; the HDR
+  read-back and `to_output` are unchanged. `src/directx_atlas.rs`:
+  `DirectXAtlas::removals`. Inked labels draw in their own colour here and
+  re-rendered backdrops copy the frame like any lens.

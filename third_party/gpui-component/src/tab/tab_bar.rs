@@ -61,6 +61,8 @@ pub struct TabBar {
     menu: bool,
     max_width: Option<Pixels>,
     on_click: Option<Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>>,
+    /// QUILL (glass effects): whether the segmented selection may be glass.
+    glass_selection: bool,
 }
 
 impl TabBar {
@@ -78,6 +80,7 @@ impl TabBar {
             variant: TabVariant::default(),
             size: Size::default(),
             last_empty_space: div().w_3().into_any_element(),
+            glass_selection: false,
             selected_index: None,
             on_click: None,
             menu: false,
@@ -106,6 +109,13 @@ impl TabBar {
     /// Set the Tab variant to Segmented, all children will inherit the variant.
     pub fn segmented(mut self) -> Self {
         self.variant = TabVariant::Segmented;
+        self
+    }
+
+    /// QUILL (glass effects): let the app draw the segmented selection as
+    /// glass (`popover_glass`), for a tab bar that floats over content.
+    pub fn glass_selection(mut self) -> Self {
+        self.glass_selection = true;
         self
     }
 
@@ -267,6 +277,18 @@ impl TabBar {
         let inner_height = variant.inner_height(size);
         let inner_radius = variant.inner_radius(size, cx);
 
+        // QUILL (glass effects): the segmented selection can be glass that
+        // clears while it slides (`popover_glass`).
+        let travel = ((left - to_left).abs() / to_width.max(px(1.))).clamp(0., 1.);
+        let selection_glass = self
+            .glass_selection
+            .then(|| {
+                crate::popover_glass::popover_glass(
+                    crate::popover_glass::PopoverGlassSurface::TabSelection { travel },
+                    cx,
+                )
+            })
+            .flatten();
         let indicator = div()
             .absolute()
             .top_0()
@@ -278,9 +300,13 @@ impl TabBar {
                     div()
                         .w_full()
                         .h(inner_height)
-                        .bg(cx.theme().tokens.background)
                         .rounded(inner_radius)
-                        .shadow(raised_shadow()),
+                        .map(|pill| match selection_glass {
+                            Some(lens) => pill.backdrop_glass(Some(lens)),
+                            None => pill
+                                .bg(cx.theme().tokens.background)
+                                .shadow(raised_shadow()),
+                        }),
                 ),
                 TabVariant::Pill => el.flex().items_center().child(
                     div()

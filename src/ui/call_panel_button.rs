@@ -42,7 +42,7 @@ pub(super) fn call_button(
             div()
                 .size(px(44.))
                 .rounded_full()
-                .bg(bg)
+                .when(style != ButtonLook::Plain, |this| this.bg(bg))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -71,6 +71,20 @@ pub(super) fn call_button(
                         .into_any_element()
                     };
                     this.relative().child(ring)
+                })
+                .map(|disc| {
+                    // The plain wash becomes glass with glass effects on;
+                    // the coloured states keep their fill.
+                    if style == ButtonLook::Plain {
+                        crate::ui::glass::GlassFill::new(
+                            disc,
+                            crate::ui::glass::GlassRole::MediaIcon,
+                            bg,
+                        )
+                        .into_any_element()
+                    } else {
+                        disc.into_any_element()
+                    }
                 }),
         )
         .child(

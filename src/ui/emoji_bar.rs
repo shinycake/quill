@@ -9,6 +9,7 @@
 //! for Premium users, who are the only ones who can send them.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -462,9 +463,11 @@ impl QuillApp {
             .w_full()
             .rounded_lg()
             .border_1()
-            .border_color(theme.border)
-            .bg(theme.popover)
-            .shadow_md()
+            .glass_or(GlassRole::Panel, cx, |this| {
+                this.border_color(theme.border)
+                    .bg(theme.popover)
+                    .shadow_md()
+            })
             // Floats over the history: a click between the tiles must not
             // reach the media under the bar.
             .block_mouse_except_scroll()

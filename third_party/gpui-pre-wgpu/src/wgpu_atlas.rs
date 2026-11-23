@@ -1,7 +1,8 @@
 // Modified for gpui-pre (snapshot of zed@d2a4fb6): adapt device queues and sRGB detection to wgpu 30.0.1.
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // images in textures of their own; uploads without a copy; a spare texture for
-// pictures larger than an atlas texture. See QUILL-CHANGES.md.
+// pictures larger than an atlas texture; `WgpuAtlas::removals` for backdrop
+// glass. See QUILL-CHANGES.md.
 use anyhow::{Context as _, Result};
 use etagere::{BucketedAtlasAllocator, size2};
 use gpui::{
@@ -98,6 +99,11 @@ impl WgpuAtlas {
             context.queue.clone(),
             context.color_texture_format(),
         )
+    }
+
+    /// QUILL (glass stage 5): tiles freed so far (`AtlasState::removals`).
+    pub(crate) fn removals(&self) -> u64 {
+        self.0.lock().removals()
     }
 
     /// A frame starts: spares not taken lately, or that no playing clip

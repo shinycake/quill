@@ -4,6 +4,7 @@
 //! state (`ui/toast_queue.rs`); this file only wires them to the frame.
 
 use super::*;
+use crate::ui::glass::{GlassRole, GlassSurface as _};
 use crate::ui::status_note::{NoteClick, NoteKind, StatusNote};
 use crate::ui::surface_reveal;
 use gpui_kit::TestSupportExt;
@@ -223,14 +224,17 @@ impl QuillApp {
                     .py_1p5()
                     .rounded_xl()
                     .border_1()
-                    .border_color(if error {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().border
+                    .when(error, |this| this.border_color(cx.theme().danger))
+                    .glass_or(GlassRole::Panel, cx, |this| {
+                        this.border_color(if error {
+                            cx.theme().danger
+                        } else {
+                            cx.theme().border
+                        })
+                        .bg(cx.theme().popover)
+                        .shadow_md()
                     })
-                    .bg(cx.theme().popover)
                     .text_color(cx.theme().popover_foreground)
-                    .shadow_md()
                     .text_sm()
                     .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                         this.hover_status_toast(*hovered, cx);

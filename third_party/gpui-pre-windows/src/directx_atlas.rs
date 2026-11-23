@@ -1,6 +1,7 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // `QUILL_TRACE_VIDEO` upload lines for large images; images in textures of
-// their own. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// their own; `DirectXAtlas::removals` for backdrop glass. See
+// third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use etagere::BucketedAtlasAllocator;
 use parking_lot::Mutex;
 use windows::Win32::Graphics::{
@@ -38,6 +39,11 @@ struct DirectXAtlasTexture {
 }
 
 impl DirectXAtlas {
+    /// QUILL (glass stage 5): tiles freed so far (`AtlasState::removals`).
+    pub(crate) fn removals(&self) -> u64 {
+        self.0.lock().removals()
+    }
+
     pub(crate) fn new(device: &ID3D11Device, device_context: &ID3D11DeviceContext) -> Self {
         DirectXAtlas(Mutex::new(AtlasState::new(DirectXAtlasTextures {
             device: device.clone(),
