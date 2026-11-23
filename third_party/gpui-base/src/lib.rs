@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-base 0.7.3 (Apache-2.0):
+// bidirectional text support in the input engine. See third_party/gpui-base/QUILL-CHANGES.md.
 //! Behavior and infrastructure foundations for GPUI applications.
 //!
 //! Primitives deliberately avoid presentation styles. Layout, positioning,
@@ -172,7 +174,7 @@ pub use resizable::{
     resizable_panel, resize_handle, v_resizable,
 };
 pub use root::{Root, RootPlugin};
-pub use scroll_bounce::{ScrollBounce, ScrollBounceMotion};
+pub use scroll_bounce::{ScrollBounce, ScrollBounceDisplacement, ScrollBounceMotion};
 pub use scrollable_mask::{
     HorizontalScrollClaim, RoundedFrameCover, ScrollableMask, last_horizontal_scroll_claim,
 };
@@ -200,10 +202,10 @@ pub use text::{
     TextViewState, TextViewStyle, html, markdown, markdown_ast,
 };
 pub use text_selection::{
-    TextSelection, TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint,
-    TextSelectionEvent, TextSelectionHandle, TextSelectionLayer, TextSelectionProjection,
-    TextSelectionRegistration, TextSelectionRun, TextSelectionScopeId, TextSelectionSnapshot,
-    TextSelectionWindowPoints, TouchHandleLayout,
+    RunGeometry, TextSelection, TextSelectionContentKey, TextSelectionCoverage,
+    TextSelectionEndpoint, TextSelectionEvent, TextSelectionHandle, TextSelectionLayer,
+    TextSelectionProjection, TextSelectionRegistration, TextSelectionRun, TextSelectionScopeId,
+    TextSelectionSnapshot, TextSelectionWindowPoints, TouchHandleLayout,
 };
 pub use theme::{PlotTheme, ResizableTheme, ScrollbarTheme, Theme, ThemeAppearance};
 pub use theme_tokens::{

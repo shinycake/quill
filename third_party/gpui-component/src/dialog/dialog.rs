@@ -13,7 +13,7 @@ use gpui_base::{ElementExt as _, LogicalStyledExt as _, TextSelectionScopeId, mo
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme as _, IconName, Sizable as _, StyledExt, TITLE_BAR_HEIGHT, WindowExt as _,
+    ActiveTheme as _, IconName, Sizable as _, StyledExt, WindowExt as _,
     animation::cubic_bezier,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::{DialogContent, DialogDispatchAnchor, DialogTitle},
@@ -341,6 +341,8 @@ pub struct Dialog {
     pub(crate) selection_scope: TextSelectionScopeId,
     pub(crate) motion: Option<DialogMotion>,
     pub(crate) id: usize,
+    /// QUILL: see [`Dialog::wrap_surface`].
+    surface_wrap: Option<Box<dyn FnOnce(AnyElement) -> AnyElement>>,
 }
 
 pub(crate) fn overlay_color(overlay: bool, cx: &App) -> Hsla {
@@ -390,7 +392,18 @@ impl Dialog {
             button_props: DialogButtonProps::default(),
             motion: None,
             id: 0,
+            surface_wrap: None,
         }
+    }
+
+    /// QUILL: wrap the dialog's surface (everything it shows above the
+    /// backdrop) in `wrap`. The base dialog lays the surface out in place
+    /// but prepaints and paints it in a deferred pass, after the rest of the
+    /// window, so an element that sets something up for its subtree while
+    /// it draws (an image cache) has to sit inside the surface to cover it.
+    pub fn wrap_surface(mut self, wrap: impl FnOnce(AnyElement) -> AnyElement + 'static) -> Self {
+        self.surface_wrap = Some(Box::new(wrap));
+        self
     }
 
     /// Sets the trigger element for the dialog.
@@ -724,6 +737,11 @@ impl RenderOnce for Dialog {
             .iter()
             .rposition(|dialog| !dialog.closing);
         let is_topmost = !closing && topmost == Some(layer_ix);
+        let surface_wrap = self.surface_wrap.take();
+        let wrap_surface = move |surface: AnyElement| match surface_wrap {
+            Some(wrap) => wrap(surface),
+            None => surface,
+        };
 
         anchored()
             .position(point(window_paddings.left, window_paddings.top))
@@ -755,7 +773,7 @@ impl RenderOnce for Dialog {
                             .focus_handle(self.focus_handle.clone())
                             .close_on_escape(self.props.keyboard && !closing)
                             .close_on_backdrop_press(self.props.overlay_closable && !closing)
-                            .dismiss_below_y(TITLE_BAR_HEIGHT)
+                            .dismiss_below_y(cx.theme().title_bar_height)
                             .when(self.props.overlay && !closing, |this| {
                                 this.backdrop(
                                     div()
@@ -920,9 +938,9 @@ impl RenderOnce for Dialog {
                                                     window_paddings.top + margin,
                                                 );
                                                 surface.progress = visibility;
-                                                surface.into_any_element()
+                                                wrap_surface(surface.into_any_element())
                                             } else {
-                                                surface.into_any_element()
+                                                wrap_surface(surface.into_any_element())
                                             }
                                         }),
                                 )

@@ -111,6 +111,13 @@ pub trait WindowExt: Sized {
     /// Closes the last active Dialog.
     fn close_dialog(&mut self, cx: &mut App);
 
+    /// The id of the newest active Dialog, to close that one later with
+    /// [`WindowExt::close_dialog_by_id`] whatever opened above it.
+    fn last_dialog_id(&mut self, cx: &mut App) -> Option<usize>;
+
+    /// Closes the Dialog `id` names and no other; false when it is gone.
+    fn close_dialog_by_id(&mut self, id: usize, cx: &mut App) -> bool;
+
     /// Closes all active Dialogs.
     fn close_all_dialogs(&mut self, cx: &mut App);
 
@@ -204,6 +211,18 @@ impl WindowExt for Window {
     fn close_dialog(&mut self, cx: &mut App) {
         WindowState::update(self, cx, |root, window, cx| {
             root.close_dialog(window, cx);
+        })
+    }
+
+    #[inline]
+    fn last_dialog_id(&mut self, cx: &mut App) -> Option<usize> {
+        WindowState::read(self, cx).last_dialog_id()
+    }
+
+    #[inline]
+    fn close_dialog_by_id(&mut self, id: usize, cx: &mut App) -> bool {
+        WindowState::update(self, cx, |root, window, cx| {
+            root.close_dialog_by_id(id, window, cx)
         })
     }
 

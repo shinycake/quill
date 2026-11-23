@@ -33,15 +33,20 @@ pub(super) fn resolve_default_font(cx: &mut App) {
     if cx.global::<super::Theme>().font_family != SYSTEM_UI_FONT {
         return;
     }
-    let installed = installed_font_names(cx);
-    if installed.is_empty() {
+    // QUILL: only the web starts with no font, so only there is the
+    // installed list read before resolving. Elsewhere the list, which takes
+    // tens of milliseconds to build, is read only when the system font fell
+    // back to another family, and theme init no longer waits for it.
+    if cfg!(target_family = "wasm") && installed_font_names(cx).is_empty() {
         return;
     }
     let text_system = cx.text_system();
     let resolved = text_system
         .get_font_for_id(text_system.resolve_font(&font(SYSTEM_UI_FONT)))
         .map(|font| font.family);
-    let Some(family) = substitute(SYSTEM_UI_FONT, resolved.as_deref(), installed) else {
+    let Some(family) = substitute(SYSTEM_UI_FONT, resolved.as_deref(), || {
+        installed_font_names(cx)
+    }) else {
         return;
     };
     tracing::info!("UI font {SYSTEM_UI_FONT:?} resolves to {family:?}, naming it on the theme.");
@@ -49,14 +54,15 @@ pub(super) fn resolve_default_font(cx: &mut App) {
 }
 
 /// The family to name instead of `requested`: the one GPUI resolved it to,
-/// when that is a different, installed family.
-fn substitute(
+/// when that is a different, installed family. `installed` is only listed
+/// when the families differ.
+fn substitute<'a>(
     requested: &str,
     resolved: Option<&str>,
-    installed: &[String],
+    installed: impl FnOnce() -> &'a [String],
 ) -> Option<SharedString> {
     let resolved = resolved.filter(|resolved| *resolved != requested)?;
-    installed
+    installed()
         .iter()
         .any(|name| name == resolved)
         .then(|| resolved.to_string().into())
@@ -74,7 +80,7 @@ mod tests {
     fn keeps_the_system_font_when_it_resolves_to_itself() {
         let installed = names(&["Noto Sans", ".SystemUIFont"]);
         assert_eq!(
-            substitute(".SystemUIFont", Some(".SystemUIFont"), &installed),
+            substitute(".SystemUIFont", Some(".SystemUIFont"), || &installed),
             None
         );
     }
@@ -83,7 +89,7 @@ mod tests {
     fn names_the_installed_family_the_system_font_fell_back_to() {
         let installed = names(&["Noto Sans", "DejaVu Sans"]);
         assert_eq!(
-            substitute(".SystemUIFont", Some("Noto Sans"), &installed),
+            substitute(".SystemUIFont", Some("Noto Sans"), || &installed),
             Some(SharedString::from("Noto Sans"))
         );
     }
@@ -92,9 +98,21 @@ mod tests {
     fn keeps_the_system_font_when_the_resolved_family_is_not_installed() {
         let installed = Vec::new();
         assert_eq!(
-            substitute(".SystemUIFont", Some("Noto Sans"), &installed),
+            substitute(".SystemUIFont", Some("Noto Sans"), || &installed),
             None
         );
-        assert_eq!(substitute(".SystemUIFont", None, &installed), None);
+        assert_eq!(substitute(".SystemUIFont", None, || &installed), None);
+    }
+
+    #[test]
+    fn lists_no_fonts_when_the_system_font_resolves_to_itself() {
+        let listed = std::cell::Cell::new(false);
+        let installed = Vec::new();
+        let substituted = substitute(".SystemUIFont", Some(".SystemUIFont"), || {
+            listed.set(true);
+            &installed
+        });
+        assert_eq!(substituted, None);
+        assert!(!listed.get());
     }
 }

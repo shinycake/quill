@@ -28,6 +28,7 @@ mod system_font;
 mod theme_color;
 
 pub use color::*;
+pub use mono_font::{installed_font_names, prefetch_installed_font_names};
 pub use motion::*;
 pub use registry::*;
 pub use schema::*;
@@ -54,6 +55,10 @@ impl ActiveTheme for App {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_title_bar_height() -> Pixels {
+    crate::TITLE_BAR_HEIGHT
 }
 
 /// The radius that rounds a shape as far as its own size allows, giving a
@@ -216,6 +221,12 @@ pub struct Theme {
     /// Show the scrollbar mode, default: Scrolling
     #[serde(alias = "scrollbar_show")]
     pub scrollbar_mode: ScrollbarMode,
+    /// How tall every [`crate::TitleBar`] is drawn, default
+    /// [`crate::TITLE_BAR_HEIGHT`]. A dialog's backdrop leaves it alone, and
+    /// sheets and notifications keep clear of it: change it with
+    /// [`Theme::set_title_bar_height`], which moves them too.
+    #[serde(skip, default = "default_title_bar_height")]
+    pub title_bar_height: Pixels,
     /// The notification setting.
     #[serde(skip)]
     pub notification: NotificationSettings,
@@ -270,6 +281,16 @@ impl Theme {
     #[inline(always)]
     pub fn global_mut(cx: &mut App) -> &mut Theme {
         cx.global_mut::<Theme>()
+    }
+
+    /// Draws title bars `height` tall. The sheet's top margin and the
+    /// notifications' top margin, which clear the title bar, move by the same
+    /// amount, so a margin the app set itself keeps its distance from the bar.
+    pub fn set_title_bar_height(&mut self, height: Pixels) {
+        let shift = height - self.title_bar_height;
+        self.title_bar_height = height;
+        self.sheet.margin_top += shift;
+        self.notification.margins.top += shift;
     }
 
     /// Edits the global theme and keeps every copy of it in step.
@@ -786,6 +807,22 @@ mod semantic_token_tests {
         assert!(shadows.md.is_empty());
         assert!(shadows.lg.is_empty());
     }
+
+    #[test]
+    fn a_shorter_title_bar_moves_sheets_and_notifications_up_with_it() {
+        let mut theme = Theme::default();
+        let sheet = theme.sheet.margin_top;
+        let notifications = theme.notification.margins.top;
+        assert_eq!(theme.title_bar_height, crate::TITLE_BAR_HEIGHT);
+
+        theme.set_title_bar_height(crate::TITLE_BAR_HEIGHT - px(8.));
+        assert_eq!(theme.sheet.margin_top, sheet - px(8.));
+        assert_eq!(theme.notification.margins.top, notifications - px(8.));
+
+        theme.set_title_bar_height(crate::TITLE_BAR_HEIGHT);
+        assert_eq!(theme.sheet.margin_top, sheet);
+        assert_eq!(theme.notification.margins.top, notifications);
+    }
 }
 
 impl From<&ThemeColor> for Theme {
@@ -803,6 +840,7 @@ impl From<&ThemeColor> for Theme {
             shadow: true,
             focus_ring: true,
             scrollbar_mode: ScrollbarMode::default(),
+            title_bar_height: crate::TITLE_BAR_HEIGHT,
             notification: NotificationSettings::default(),
             list: ListSettings::default(),
             colors: *colors,

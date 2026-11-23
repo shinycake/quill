@@ -145,6 +145,11 @@ impl BlinkCursor {
         self.visible
     }
 
+    /// Whether a blink cycle is running: started and not stopped since.
+    pub(crate) fn is_blinking(&self) -> bool {
+        self.last_activity.is_some()
+    }
+
     fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         if self.visible != visible {
             self.visible = visible;

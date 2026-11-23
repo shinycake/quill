@@ -418,6 +418,13 @@ impl Render for Notification {
         };
         let has_icon = icon.is_some();
         let placement = self.placement.unwrap_or(cx.theme().notification.placement);
+        // QUILL (glass effects): glass replaces the card's fill, border and
+        // shadow; the lens draws its own rim and shadow.
+        let glass = crate::popover_glass::popover_glass(
+            crate::popover_glass::PopoverGlassSurface::Toast,
+            cx,
+        );
+        let solid = glass.is_none();
 
         BaseToast::new("notification")
             .transition_status(transition_status)
@@ -427,11 +434,15 @@ impl Render for Notification {
             .occlude()
             .relative()
             .w_full()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().tokens.popover)
             .rounded(cx.theme().radius_lg)
-            .shadow(toast_shadow(1.))
+            .map(|this| match glass {
+                Some(lens) => this.backdrop_glass(Some(lens)),
+                None => this
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().tokens.popover)
+                    .shadow(toast_shadow(1.)),
+            })
             .py_3p5()
             .px_4()
             .gap_3()
@@ -500,7 +511,9 @@ impl Render for Notification {
                 move |this, delta| {
                     if closing {
                         let opacity = 1. - delta;
-                        let that = this.opacity(opacity).shadow(toast_shadow(opacity.powi(3)));
+                        let that = this
+                            .opacity(opacity)
+                            .when(solid, |this| this.shadow(toast_shadow(opacity.powi(3))));
                         let y_offset = match placement {
                             Anchor::TopLeft | Anchor::TopRight | Anchor::TopCenter => {
                                 -delta * NOTIFICATION_TRANSITION_OFFSET
@@ -533,7 +546,7 @@ impl Render for Notification {
                         // threshold, which popped.
                         this.top(px(0.) + y_offset)
                             .opacity(opacity)
-                            .shadow(toast_shadow(opacity.powi(3)))
+                            .when(solid, |this| this.shadow(toast_shadow(opacity.powi(3))))
                     }
                 },
             )

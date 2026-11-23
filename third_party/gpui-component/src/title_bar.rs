@@ -386,7 +386,7 @@ impl RenderOnce for TitleBar {
                 .when(is_linux, |this| this.flex_row())
                 .items_center()
                 .justify_between()
-                .h(TITLE_BAR_HEIGHT)
+                .h(cx.theme().title_bar_height)
                 // macOS draws its traffic lights on the left whatever the
                 // direction; elsewhere the padding is on the start edge.
                 .map(|this| {

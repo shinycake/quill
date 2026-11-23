@@ -1,7 +1,7 @@
 use crate::{ActiveTheme, Disableable, StyledExt, h_flex};
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    MouseMoveEvent, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
     StyleRefinement, Styled, Window, accesskit::Toggled, prelude::FluentBuilder as _,
 };
 use gpui_base::{LogicalStyledExt as _, TestSupportExt as _};
@@ -17,6 +17,10 @@ pub(crate) struct MenuItemElement {
     checked: Option<bool>,
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
+    on_mouse_move: Option<Box<dyn Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static>>,
+    /// Whether the pointer over the item lights it. Off while the menu's
+    /// pointer heads for an open submenu across this item (`SubmenuAim`).
+    lit_by_pointer: bool,
     children: SmallVec<[AnyElement; 2]>,
 }
 
@@ -33,6 +37,8 @@ impl MenuItemElement {
             checked: None,
             on_click: None,
             on_hover: None,
+            on_mouse_move: None,
+            lit_by_pointer: true,
             children: SmallVec::new(),
         }
     }
@@ -76,6 +82,23 @@ impl MenuItemElement {
     #[allow(unused)]
     pub fn on_hover(mut self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_hover = Some(Box::new(handler));
+        self
+    }
+}
+
+impl MenuItemElement {
+    /// Set a handler for each pointer move over the MenuItem.
+    pub(crate) fn on_mouse_move(
+        mut self,
+        handler: impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_mouse_move = Some(Box::new(handler));
+        self
+    }
+
+    /// Whether the pointer over the item lights it (on by default).
+    pub(crate) fn lit_by_pointer(mut self, lit: bool) -> Self {
+        self.lit_by_pointer = lit;
         self
     }
 }
@@ -127,13 +150,18 @@ impl RenderOnce for MenuItemElement {
             .when_some(self.on_hover, |this, on_hover| {
                 this.on_hover(move |hovered, window, cx| (on_hover)(hovered, window, cx))
             })
+            .when_some(self.on_mouse_move, |this, on_mouse_move| {
+                this.on_mouse_move(move |event, window, cx| (on_mouse_move)(event, window, cx))
+            })
             .when(!self.disabled, |this| {
                 // Not `group_hover` on the item's own group: GPUI styles an
                 // element before registering its group, and that fallback keeps
                 // the pointer's item lit after a key moves the highlight away.
-                this.hover(|this| {
-                    this.bg(cx.theme().tokens.accent)
-                        .text_color(cx.theme().accent_foreground)
+                this.when(self.lit_by_pointer, |this| {
+                    this.hover(|this| {
+                        this.bg(cx.theme().tokens.accent)
+                            .text_color(cx.theme().accent_foreground)
+                    })
                 })
                 .when(self.selected, |this| {
                     this.bg(cx.theme().tokens.accent)
