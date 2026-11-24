@@ -48,7 +48,8 @@ impl BotsPurpose {
             | Self::SetBotAbout { .. }
             | Self::SetBotPhoto { .. }
             | Self::CheckBotUsername
-            | Self::CreateBot => RequestKind::UserAction,
+            | Self::CreateBot
+            | Self::InviteUsersToBot => RequestKind::UserAction,
         }
     }
 }

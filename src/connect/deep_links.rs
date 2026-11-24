@@ -444,6 +444,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             | DeepLinkAction::OpenVideoChat { domain, .. }
             | DeepLinkAction::ShareGame { domain, .. }
             | DeepLinkAction::AddBot { domain, .. }
+            | DeepLinkAction::InviteToBot { domain }
             | DeepLinkAction::OpenWebAppLink { domain, .. }
             | DeepLinkAction::OpenMainWebApp { domain, .. }
             | DeepLinkAction::OpenAttachmentBot { domain, .. }

@@ -23,6 +23,14 @@ pub enum ChatActionBar {
         is_channel: bool,
         request_date: i32,
     },
+    /// TDLib 1.8.71: a chat with a bot the user was invited to by
+    /// `inviter_user_id`; `owner_user_id` owns the bot (0 if unknown).
+    /// Block the bot, or report the inviter with `reportChat`.
+    BotInvite {
+        can_unarchive: bool,
+        inviter_user_id: i64,
+        owner_user_id: i64,
+    },
 }
 
 impl ChatActionBar {
@@ -60,6 +68,17 @@ pub(crate) fn parse_chat_action_bar(value: Option<&Value>) -> Option<ChatActionB
         "chatActionBarReportAddBlock" => Some(ChatActionBar::ReportAddBlock { can_unarchive }),
         "chatActionBarAddContact" => Some(ChatActionBar::AddContact),
         "chatActionBarSharePhoneNumber" => Some(ChatActionBar::SharePhoneNumber),
+        "chatActionBarBotInvite" => Some(ChatActionBar::BotInvite {
+            can_unarchive,
+            inviter_user_id: value
+                .get("inviter_user_id")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            owner_user_id: value
+                .get("owner_user_id")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+        }),
         "chatActionBarJoinRequest" => Some(ChatActionBar::JoinRequest {
             title: value
                 .get("title")

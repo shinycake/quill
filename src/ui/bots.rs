@@ -635,7 +635,7 @@ impl QuillApp {
             if blocked {
                 tr(keys::Q_MEDIA_UNBLOCK_BOT)
             } else {
-                tr(keys::Q_MEDIA_BLOCK_BOT)
+                tr(keys::NEW_CONTACT_BLOCK_BOT)
             },
             cx.listener(move |this, _, _, cx| {
                 this.open_group_confirm(

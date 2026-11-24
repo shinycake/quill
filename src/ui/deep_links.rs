@@ -411,6 +411,7 @@ impl QuillApp {
             action,
             DeepLinkAction::ShareGame { .. }
                 | DeepLinkAction::AddBot { .. }
+                | DeepLinkAction::InviteToBot { .. }
                 | DeepLinkAction::OpenWebAppLink { .. }
                 | DeepLinkAction::OpenMainWebApp { .. }
                 | DeepLinkAction::OpenAttachmentBot { .. }

@@ -735,3 +735,14 @@
 "qll_people_topic_info_posted" = "Posted";
 "qll_people_topic_info_started_by" = "Started by";
 "qll_people_topic_info_started" = "Started";
+
+"lng_bot_invite_title" = "Invite to Bot";
+"lng_bot_invite_button" = "Invite";
+"lng_bot_invite_limit#one" = "You can invite up to {count} user at a time.";
+"lng_bot_invite_limit#other" = "You can invite up to {count} users at a time.";
+"lng_bot_invite_sent_one" = "Invitation sent.";
+"lng_bot_invite_sent_many" = "Invitations sent.";
+"lng_bot_invite_already_one" = "{user} already has a chat with this bot.";
+"lng_bot_invite_already_many" = "The chosen users already have a chat with this bot.";
+"lng_bot_invite_failed" = "None of the chosen users could be invited.";
+"lng_profile_invite_to_bot" = "Invite to Bot";

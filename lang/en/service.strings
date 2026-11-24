@@ -122,6 +122,8 @@
 "lng_action_gift_for_ton#one" = "{count} Gram";
 "lng_action_gift_for_ton#other" = "{count} Grams";
 "lng_action_gift_refunded" = "This gift was downgraded because a request to refund the payment related to this gift was made, and the money was returned.";
+"lng_action_bot_invited_you" = "{user} invited you to this bot.";
+"lng_action_bot_invited_user" = "{from} was invited by {user}.";
 "lng_action_gift_offer_incoming" = "An offer to buy this gift for {amount}.";
 "lng_action_gift_offer_you" = "You offered {cost} for {name}.";
 "lng_action_gift_offer_state_accepted" = "This offer was accepted.";

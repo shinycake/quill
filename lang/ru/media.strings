@@ -41,7 +41,6 @@
 "qll_media_attach_a_picture_sticker_or" = "Прикрепите картинку, стикер или ссылку";
 "qll_media_back" = "Назад";
 "qll_media_back_to_results" = "Назад к результатам";
-"qll_media_block_bot" = "Заблокировать бота";
 "qll_media_bot" = "Бот";
 "qll_media_bot_2" = "Бот {id}";
 "qll_media_bot_3" = "Бот {user_id}";

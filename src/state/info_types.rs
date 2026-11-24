@@ -887,6 +887,10 @@ pub enum DeepLinkAction {
     /// `internalLinkTypeAttachmentMenuBot`: resolve the bot, add it to the
     /// attachment menu if needed, then `openWebApp` in the current chat.
     OpenAttachmentBot { domain: String, url: String },
+    /// `internalLinkTypeBotInvite` (TDLib 1.8.71): resolve the bot; one the
+    /// user owns opens the "Invite to Bot" box, any other its chat
+    /// (tdesktop `ShowResolvedBotInvite`).
+    InviteToBot { domain: String },
     /// `internalLinkTypeRequestManagedBot`: resolve the manager bot, then
     /// the "Create Bot" dialog with the suggested name and username.
     CreateManagedBot {

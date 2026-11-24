@@ -48,6 +48,8 @@ pub(crate) struct DialogUi {
     pub(super) import_contacts_dialog: Option<ImportContactsDialog>,
     /// Batch 8: "Block {name}" box opened from the chat action bar.
     pub(super) block_bar_dialog: Option<super::chat_bars::BlockBarDialog>,
+    /// "Invite to Bot" for a bot the user owns (`invite_to_bot_box`).
+    pub(super) invite_to_bot: Option<quill::invite_to_bot::InviteToBot>,
     /// Theme and wallpaper picker for a chat.
     pub(super) chat_look_dialog: Option<super::chat_look_ui::ChatLookDialog>,
     /// The account wallpaper preview (gallery, `bg/` link, file).
@@ -108,6 +110,8 @@ impl crate::ui::on_screen::Farewell for DialogUi {
         // The color box's Apply waits on answers that are the old account's:
         // closing forgets them, or they sit in the acks for good.
         app.close_peer_color_dialog(cx);
+        // An invite still out is the old account's answer.
+        app.close_invite_to_bot(cx);
         if app
             .session()
             .is_some_and(|session| session.groups.private_sharing.request_box_chat().is_some())
@@ -144,6 +148,7 @@ impl DialogUi {
             add_contact_dialog: None,
             import_contacts_dialog: None,
             block_bar_dialog: None,
+            invite_to_bot: None,
             chat_look_dialog: None,
             wallpaper_preview: None,
             wallpaper_applies: Vec::new(),

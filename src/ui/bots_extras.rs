@@ -170,6 +170,21 @@ impl QuillApp {
                 column = column.child(div().px_2().text_xs().text_color(muted).child(about));
             }
         }
+        // tdesktop `makeInviteToBot`: the owner invites people to the bot.
+        if session.user(user_id).is_some_and(|user| user.can_be_edited) {
+            column = column.child(
+                action_row(
+                    "info-panel-invite-to-bot",
+                    Some(IconName::UserPlus),
+                    tr(keys::PROFILE_INVITE_TO_BOT),
+                    false,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_invite_to_bot(user_id, cx);
+                })),
+            );
+        }
         // The owner of a verifying bot: "Verify accounts" (tdesktop's
         // bot edit screen, shown when `verifierSettings` is set).
         if let Some(row) = self.bot_verify_accounts_row(user_id, cx) {
@@ -890,6 +905,9 @@ impl QuillApp {
             DeepLinkAction::AddBot { invite, .. } => {
                 self.open_add_bot_dialog(bot_id, invite.clone(), cx);
             }
+            // A bot the user does not own opens its chat, as tdesktop's
+            // `ShowResolvedBotInvite` does.
+            DeepLinkAction::InviteToBot { .. } => return self.open_invite_to_bot(bot_id, cx),
             DeepLinkAction::OpenWebAppLink { .. }
             | DeepLinkAction::OpenMainWebApp { .. }
             | DeepLinkAction::OpenAttachmentBot { .. } => {
