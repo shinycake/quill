@@ -1388,6 +1388,35 @@ impl<T> PipelineState<T> {
         Ok(())
     }
 
+    /// Quill: draws the first `instance_count` instances with `texture`
+    /// bound. The HDR and NV12 surface shaders index their instances from
+    /// zero, so they need no batch start.
+    fn draw_with_texture(
+        &self,
+        device_context: &ID3D11DeviceContext,
+        texture: &[Option<ID3D11ShaderResourceView>],
+        sampler: &[Option<ID3D11SamplerState>],
+        instance_count: u32,
+    ) -> Result<()> {
+        self.ensure_range(0, instance_count)?;
+        set_pipeline_state(
+            device_context,
+            slice::from_ref(&self.instances.view),
+            D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
+            &self.vertex,
+            &self.fragment,
+            &self.blend_state,
+            &self.depth_stencil_state,
+        );
+        unsafe {
+            device_context.PSSetSamplers(0, Some(sampler));
+            device_context.VSSetShaderResources(0, Some(texture));
+            device_context.PSSetShaderResources(0, Some(texture));
+            device_context.DrawInstanced(4, instance_count, 0, 0);
+        }
+        Ok(())
+    }
+
     fn draw_range_with_texture(
         &self,
         device_context: &ID3D11DeviceContext,
@@ -2138,10 +2167,10 @@ pub(crate) mod shader_resources {
             match self {
                 ShaderModule::Lens | ShaderModule::LensDownsample => "src/shaders_lens.hlsl",
                 ShaderModule::Quad
+                | ShaderModule::OpaqueQuad
                 | ShaderModule::Shadow
                 | ShaderModule::Underline
-                | ShaderModule::PathRasterization
-                | ShaderModule::PathSprite
+                | ShaderModule::PathTile
                 | ShaderModule::MonochromeSprite
                 | ShaderModule::SubpixelSprite
                 | ShaderModule::PolychromeSprite

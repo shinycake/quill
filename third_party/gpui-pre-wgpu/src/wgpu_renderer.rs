@@ -12,8 +12,8 @@ use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
 use collections::FxHashMap;
 use gpui::{
-    AtlasTextureId, BackdropLens, Bounds, DevicePixels, GpuSpecs, PaintedPath, PrimitiveBatch,
-    ScaledPixels, Scene, Size, get_gamma_correction_ratios, quad_depth, quad_depth_scale,
+    AtlasTextureId, BackdropLens, DevicePixels, GpuSpecs, PaintedPath, PrimitiveBatch, Scene,
+    Size, get_gamma_correction_ratios, quad_depth, quad_depth_scale,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -3113,9 +3113,9 @@ impl RenderingParameters {
 mod tests {
     use super::*;
     use gpui::{
-        BorderStyle, ColorSpace, ContentMask, Corners, Edges, Hsla, MonochromeSprite, PathCurve,
-        PathPaint, PathTile, Point, PolychromeSprite, Quad, Shadow, Size, SubpixelSprite,
-        Underline, linear_color_stop, linear_gradient,
+        BorderStyle, Bounds, ColorSpace, ContentMask, Corners, Edges, Hsla, MonochromeSprite,
+        PathCurve, PathPaint, PathTile, Point, PolychromeSprite, Quad, Shadow, Size,
+        SubpixelSprite, Underline, linear_color_stop, linear_gradient,
     };
     #[cfg(target_os = "linux")]
     use gpui::{DevicePixels, PlatformHeadlessRenderer, Scene};

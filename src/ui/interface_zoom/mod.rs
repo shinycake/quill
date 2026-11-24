@@ -761,6 +761,7 @@ impl PlatformWindow for ZoomWindow {
         self.inner
             .set_traffic_light_position(traffic_light_out(position, self.zoom()))
     }
+    #[cfg(target_os = "macos")]
     fn set_native_titlebar_visibility(&self, visible: bool) {
         self.inner.set_native_titlebar_visibility(visible)
     }
