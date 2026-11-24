@@ -73,10 +73,13 @@ pub fn violations(text: &str, layout: &LineLayout) -> Vec<String> {
     let width = f32::from(layout.width);
 
     // Combining marks sit over or under their base, so their x may run backwards.
-    let spacing: Vec<_> = glyphs
+    // A shaper that names a mark by its cluster's first byte (cosmic-text) gives
+    // it the base's index: only the first glyph of each cluster is compared.
+    let mut spacing: Vec<_> = glyphs
         .iter()
         .filter(|glyph| compared(text, glyph.index))
         .collect();
+    spacing.dedup_by_key(|glyph| glyph.index);
     for pair in spacing.windows(2) {
         if let [a, b] = pair
             && f32::from(b.position.x) + EPS < f32::from(a.position.x)
