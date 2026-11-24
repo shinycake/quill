@@ -14,6 +14,7 @@ use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
 use quill::state::{ChatPhotosFetch, InfoPanelTarget, ProfilePhotosFetch, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
+use quill::telegram::envelope::MessageSender;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -28,6 +29,11 @@ register_demos![
         "screenshot demo — contact info panel, video profile photo"
     )
     .setup(QuillApp::demo_info_video_avatar_user),
+    DemoSpec::chats(
+        "ready-profile-modal-photo",
+        "screenshot demo — contact profile layer over the chat; its avatar opens the viewer"
+    )
+    .setup(QuillApp::demo_profile_modal_photo),
 ];
 
 /// Used as both the chat and the supergroup id, like the other demos.
@@ -175,6 +181,27 @@ impl QuillApp {
         self.open_info_panel_target(InfoPanelTarget::User(VIDEO_USER), window, cx);
         self.set_note(StatusNote::silent(
             "screenshot demo — contact info panel, video profile photo",
+        ));
+        cx.notify();
+    }
+
+    /// The contact's profile as the avatar-click layer (tdesktop
+    /// `Info::LayerWidget`); a click on its avatar opens the photos in
+    /// the viewer, which must cover the layer.
+    fn demo_profile_modal_photo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(session) = self.demo_session.as_mut() {
+            self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+            apply_user(session, &self.demo_ui.sink, &self.demo_ui.seq);
+        }
+        self.open_avatar_profile(
+            MessageSender::User {
+                user_id: VIDEO_USER,
+            },
+            window,
+            cx,
+        );
+        self.set_note(StatusNote::silent(
+            "screenshot demo — profile layer; its avatar opens the viewer",
         ));
         cx.notify();
     }

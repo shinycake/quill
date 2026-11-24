@@ -464,6 +464,28 @@ impl Render for QuillApp {
                     )
                 },
             )
+            // Layers that are pages of the window (tdesktop `LayerWidget`s
+            // and the Instant View reader) sit under the media and story
+            // viewers, which open from them: tdesktop's viewer is its own
+            // window over everything.
+            // Settings → Privacy: the per-rule editor and the always/never
+            // exception list, over the settings page.
+            .when_some(self.privacy_editor_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            .when_some(self.privacy_exceptions_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // Avatar-click profile layer (tdesktop `Info::LayerWidget`).
+            .when_some(self.profile_modal_overlay(window, cx), |this, overlay| {
+                this.child(overlay)
+            })
+            // Revenue and affiliate pages (tdesktop `Info::LayerWidget`).
+            .when_some(self.earn_layer(window, cx), |this, layer| this.child(layer))
+            // The Instant View reader.
+            .when_some(self.instant_view_overlay(cx), |this, overlay| {
+                this.child(overlay)
+            })
             .when(self.viewer.state.is_open(), |this| {
                 this.child(self.media_viewer_overlay(window, cx))
             })
@@ -522,20 +544,6 @@ impl Render for QuillApp {
             // Dialog via the shell sync — render wiring deleted.
             // kit Phase 2 (redo): appearance now hosted in a kit Dialog via
             // the shell sync — render wiring deleted.
-            // Settings → Privacy: the per-rule editor and the always/never
-            // exception list, over the settings page.
-            .when_some(self.privacy_editor_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            .when_some(self.privacy_exceptions_overlay(cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // Avatar-click profile layer (tdesktop `Info::LayerWidget`).
-            .when_some(self.profile_modal_overlay(window, cx), |this, overlay| {
-                this.child(overlay)
-            })
-            // Revenue and affiliate pages (tdesktop `Info::LayerWidget`).
-            .when_some(self.earn_layer(window, cx), |this, layer| this.child(layer))
             // Phase C1: call overlay above everything else.
             .when_some(self.call_overlay(cx), |this, overlay| this.child(overlay))
             // Phase C3a: group-call (voice chat) overlay above the call
@@ -598,10 +606,6 @@ impl Render for QuillApp {
             // it.
             .when_some(self.message_ui.menu.peek(), |this, preview| {
                 this.child(self.chat_preview_overlay(preview, cx))
-            })
-            // MED4: Instant View reader overlay (above the menu).
-            .when_some(self.instant_view_overlay(cx), |this, overlay| {
-                this.child(overlay)
             })
             // The copy menu of a phone number, card number, date or TON
             // address, and the tooltip of a text link; above the Instant

@@ -155,3 +155,57 @@ fn leaving_the_account_gives_the_column_back(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     assert_eq!(info_panel(&app, vcx), None);
 }
+
+/// The avatar inside the modal opens the photos in the viewer, which sits
+/// above the modal (tdesktop's viewer is a window over every layer):
+/// Escape closes the viewer first and finds the modal still open under it.
+#[gpui_kit::test]
+fn the_photo_viewer_opens_above_the_modal(cx: &mut TestAppContext) {
+    use crate::ui::demos::video_avatar::VIDEO_USER;
+    use quill::state::PhotoOwner;
+    cx.update(gpui_kit::init);
+    cx.update(bind_keys);
+    let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+        let view = cx.new(|cx| {
+            QuillApp::new_with_demo(
+                window,
+                cx,
+                None,
+                Some(ScreenshotDemo::named("ready-profile-modal-photo")),
+            )
+        });
+        *slot_in.borrow_mut() = Some(view.clone());
+        let focus = gpui_kit::Focusable::focus_handle(view.read(cx), cx);
+        window.focus(&focus, cx);
+        let shell = cx.new(|_| QuillShell::new(view));
+        Root::new(shell, window, cx)
+    });
+    let app: Entity<QuillApp> = slot.borrow().clone().expect("the app");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    let top = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.topmost_esc_layer().map(|layer| layer.name)
+        })
+    };
+    assert_eq!(top(&app, vcx), Some("profile-modal"));
+    app.update(vcx, |app, cx| {
+        app.frame.window_active.set(false);
+        app.open_peer_photos(PhotoOwner::User(VIDEO_USER), cx);
+    });
+    vcx.run_until_parked();
+    assert_eq!(top(&app, vcx), Some("media-viewer"), "the viewer is on top");
+    vcx.simulate_keystrokes("escape");
+    app.read_with(vcx, |app, _| {
+        assert!(!app.viewer.state.is_open(), "Escape closed the viewer");
+        assert!(app.profile_modal_active(), "the modal is still there");
+    });
+    vcx.simulate_keystrokes("escape");
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(app.dialogs.profile_modal.is_none(), "then the modal closed");
+    });
+}
