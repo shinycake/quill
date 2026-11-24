@@ -62,3 +62,24 @@ fn managed_bot_links_resolve_the_manager_first() {
         LinkRoute::Message(_)
     ));
 }
+
+#[test]
+fn a_bot_invite_link_resolves_the_bot() {
+    let link = parse_internal_link(&serde_json::json!({
+        "@type": "internalLinkTypeBotInvite",
+        "bot_username": "helper_demo_bot",
+    }))
+    .expect("an internal link");
+    assert_eq!(
+        route(&link, "https://t.me/botinvite/helper_demo_bot"),
+        LinkRoute::Resolve(crate::state::DeepLinkAction::InviteToBot {
+            domain: "helper_demo_bot".into()
+        })
+    );
+    let empty = parse_internal_link(&serde_json::json!({
+        "@type": "internalLinkTypeBotInvite",
+        "bot_username": "",
+    }))
+    .expect("an internal link");
+    assert!(matches!(route(&empty, ""), LinkRoute::Message(_)));
+}
