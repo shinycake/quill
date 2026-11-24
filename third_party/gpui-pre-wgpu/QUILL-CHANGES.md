@@ -15,6 +15,9 @@ opaque rectangles only after that pass ran. The pass a lens batch resumes
 keeps a depth attachment, and the lens pipeline declares one. Upstream now
 has its own `write_instance_data` split, which replaces Quill's. Paths are
 tiled curves upstream, so the old `Path`/`ScaledPixels` imports went.
+`WgpuRendererCore::target_format` is upstream's field for the headless test
+renderer; Quill keeps it in every build, since the frame capture and the lens
+pipelines read it.
 
 The Quill project changed it in 2026 so emoji draw in colour on Linux
 (`docs/decisions/linux-titlebar-emoji.md`):

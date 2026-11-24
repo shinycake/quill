@@ -239,11 +239,8 @@ struct WgpuRendererCore {
     transient_attachments: bool,
     adapter_info: wgpu::AdapterInfo,
     depth_texture: Option<DepthTexture>,
-    /// Read by the headless renderer to create its render target.
-    #[cfg(all(
-        not(target_family = "wasm"),
-        any(test, feature = "bench-support", feature = "test-support")
-    ))]
+    /// Quill: read by the frame capture, the lens pipelines and the
+    /// headless renderer, so it is kept in every build.
     target_format: wgpu::TextureFormat,
     max_texture_size: u32,
 }
@@ -1457,10 +1454,6 @@ impl WgpuRendererCore {
             transient_attachments: context.supports_transient_attachments(),
             adapter_info: context.adapter.get_info(),
             depth_texture: None,
-            #[cfg(all(
-                not(target_family = "wasm"),
-                any(test, feature = "bench-support", feature = "test-support")
-            ))]
             target_format,
             max_texture_size,
         }
