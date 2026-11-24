@@ -43,7 +43,7 @@ fn demo_mode() -> String {
 }
 
 /// The export opens now for the steps after "Send via Blockchain".
-fn export_date(mode: &str, now: i64) -> i64 {
+fn mint_date(mode: &str, now: i64) -> i64 {
     match mode {
         "confirm" | "password" | "probing" | "wallet" => now - 60,
         _ => now + LOCKED_FOR,
@@ -51,7 +51,7 @@ fn export_date(mode: &str, now: i64) -> i64 {
 }
 
 /// One of the user's collectibles, `receivedGift` JSON.
-pub(super) fn own_received_gift(export_date: i64, in_wallet: bool) -> Value {
+pub(super) fn own_received_gift(mint_date: i64, in_wallet: bool) -> Value {
     let mut upgraded = listing(1204, 0, 0, 0)
         .get("gift")
         .cloned()
@@ -72,7 +72,7 @@ pub(super) fn own_received_gift(export_date: i64, in_wallet: bool) -> Value {
     }
     json!({"@type": "receivedGift", "received_gift_id": DEMO_GIFT, "date": now_unix() - 86_400,
         "is_saved": true, "can_be_transferred": !in_wallet, "transfer_star_count": 0,
-        "next_transfer_date": 0, "next_resale_date": 0, "export_date": export_date,
+        "next_transfer_date": 0, "next_resale_date": 0, "mint_date": mint_date,
         "gift": {"@type": "sentGiftUpgraded", "gift": upgraded}})
 }
 
@@ -86,7 +86,7 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     hub.received.open();
     hub.received.owner = Some(MessageSender::User { user_id: ME });
     hub.received.rows = parse_received_gift(&own_received_gift(
-        export_date(&mode, now),
+        mint_date(&mode, now),
         mode == "action-locked",
     ))
     .into_iter()

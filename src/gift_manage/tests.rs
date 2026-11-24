@@ -170,6 +170,15 @@ fn resale_gate_needs_a_resale_date_or_a_listing() {
         "resale_parameters": {"star_count": 0, "gram_only": true}}}}),
     );
     assert_eq!(ton.resale_gate(true, NOW), ResaleGate::TonOnly);
+    // TDLib 1.8.71: a listing sold on-chain is changed with TON
+    // transactions, so Quill sends the owner to an official app.
+    let on_chain = unique(
+        json!({"next_resale_date": 10, "gift": {"@type": "sentGiftUpgraded", "gift": {
+        "@type": "upgradedGift", "title": "X", "number": 1, "uses_on_chain_resale": true,
+        "resale_parameters": {"star_count": 500, "gram_only": false,
+            "is_fixed_on_chain": true, "can_be_managed": true}}}}),
+    );
+    assert_eq!(on_chain.resale_gate(true, NOW), ResaleGate::TonOnly);
 }
 
 #[test]

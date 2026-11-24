@@ -191,7 +191,10 @@ fn a_block_quote_keeps_its_formatting_behind_the_quote_mark() {
 fn an_expandable_quote_keeps_header_and_body_formatting() {
     let block = parse_page_block(&json!({
         "@type": "pageBlockExpandableBlockQuote",
-        "text": styled(vec![bold("head"), plain("\nbody "), bold("end")]),
+        "blocks": [
+            {"@type": "pageBlockParagraph", "text": styled(vec![bold("head")])},
+            {"@type": "pageBlockParagraph", "text": styled(vec![plain("body "), bold("end")])},
+        ],
     }));
     let RichBlock::Collapsible {
         header,

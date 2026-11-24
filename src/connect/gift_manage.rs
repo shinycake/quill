@@ -340,7 +340,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// "Open Fragment" in "Manage with Fragment": tdesktop's password-less
-    /// try of `getUpgradedGiftWithdrawalUrl` (`inputCheckPasswordEmpty`),
+    /// try of `getGiftMintingUrl` (`inputCheckPasswordEmpty`),
     /// with a reload of the password state. Since TDLib 1.8.69 it carries
     /// no password, and TDLib refuses it without a temporary password. Its
     /// error picks the security check or the password box; a URL it
@@ -368,7 +368,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
             picker.open_fragment(extra);
         }
-        let json = rq::get_upgraded_gift_withdrawal_url(extra, &id);
+        let json = rq::get_gift_minting_url(extra, &id);
         if let Err(err) = self.send_json_request(extra, &json) {
             if let Some(picker) = self.session.payments.gifts_manage.transfer_mut() {
                 picker.stage = TransferStage::ConfirmExport;
@@ -379,7 +379,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Submit the password box of "Send via Blockchain":
-    /// `createTemporaryPassword`, then `getUpgradedGiftWithdrawalUrl` once
+    /// `createTemporaryPassword`, then `getGiftMintingUrl` once
     /// it is answered (`continue_gift_export`). Only from the idle
     /// password stage (after "Open Fragment" and its probe), with a typed
     /// password, for a gift whose export is unlocked. The answer is a
@@ -416,7 +416,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// After each ingest: the temporary password of "Send via Blockchain"
-    /// arrived, so `getUpgradedGiftWithdrawalUrl` goes out for the picked
+    /// arrived, so `getGiftMintingUrl` goes out for the picked
     /// gift if its export is still allowed; otherwise, or when the send
     /// fails, the idle password box comes back.
     pub(crate) fn continue_gift_export(&mut self) -> Result<(), ConnectSendError> {
@@ -437,7 +437,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.set_export_send(ExportSend::Out(extra));
-        let json = rq::get_upgraded_gift_withdrawal_url(extra, &id);
+        let json = rq::get_gift_minting_url(extra, &id);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.set_export_send(ExportSend::Idle);
             return Err(err);

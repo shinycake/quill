@@ -144,7 +144,7 @@ Without credentials, `cargo run --features ui` opens a synthetic demo chat. To s
 
 On Linux, building the UI also needs the GTK 3 and ALSA development packages (`libgtk-3-dev` and `libasound2-dev` on Debian and Ubuntu).
 
-Toolchain: Rust 1.100.0, pinned in `rust-toolchain.toml` (also the minimum supported version). UI: gpui-kit 0.9.0. TDLib: 1.8.70.
+Toolchain: Rust 1.100.0, pinned in `rust-toolchain.toml` (also the minimum supported version). UI: gpui-kit 0.9.0. TDLib: 1.8.71.
 
 ## Questions
 

@@ -1,6 +1,6 @@
 //! Connect-driver tests: the transfer picker's requests, `transferGift` to
 //! a picked contact and, from the password box, `createTemporaryPassword`
-//! then `getUpgradedGiftWithdrawalUrl` (recorded JSON, nothing live;
+//! then `getGiftMintingUrl` (recorded JSON, nothing live;
 //! nothing is transferred or exported).
 use super::super::*;
 use super::*;
@@ -59,9 +59,9 @@ fn user(p: &mut Parts, id: i64, first: &str, kind: Value) {
     );
 }
 
-fn gift(id: &str, export_date: i64) -> Value {
+fn gift(id: &str, mint_date: i64) -> Value {
     json!({"@type": "receivedGift", "received_gift_id": id, "date": 5, "is_saved": true,
-        "can_be_transferred": true, "transfer_star_count": 0, "export_date": export_date,
+        "can_be_transferred": true, "transfer_star_count": 0, "mint_date": mint_date,
         "gift": {"@type": "sentGiftUpgraded", "gift": {
             "@type": "upgradedGift", "title": "Plush Pepe", "name": "PlushPepe-4",
             "number": 4, "owner_id": {"@type": "messageSenderUser", "user_id": 7}}}})
@@ -189,14 +189,14 @@ fn the_export_url_is_asked_only_from_the_password_box() {
     set_stage(&mut p, "later", password_stage());
     assert!(p.0.export_picked_gift(PASSWORD).is_err());
     assert_eq!(count(&p.1, "createTemporaryPassword"), 0);
-    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
+    assert_eq!(count(&p.1, "getGiftMintingUrl"), 0);
 
     set_stage(&mut p, "open", password_stage());
     let unlock = p.0.export_picked_gift(PASSWORD).unwrap();
     let sent = sent_request(&p.1, "createTemporaryPassword");
     assert_eq!(sent["password"], PASSWORD);
     assert_eq!(sent["valid_for"], 60);
-    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
+    assert_eq!(count(&p.1, "getGiftMintingUrl"), 0);
     let sending = |request| {
         Some(TransferStage::Password {
             send: ExportSend::Out(request),
@@ -211,10 +211,10 @@ fn the_export_url_is_asked_only_from_the_password_box() {
     let state = format!("{:?}", p.0.session.payments.gifts_manage);
     assert!(!state.contains(PASSWORD));
     let extra = temporary_password(&mut p, unlock);
-    let sent = sent_request(&p.1, "getUpgradedGiftWithdrawalUrl");
+    let sent = sent_request(&p.1, "getGiftMintingUrl");
     assert_eq!(sent["received_gift_id"], "open");
     assert!(sent.get("password").is_none());
-    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
+    assert_eq!(count(&p.1, "getGiftMintingUrl"), 1);
     // The box now waits for the URL request, not the unlock.
     assert!(matches!(
         stage(&p),
@@ -234,14 +234,14 @@ fn the_export_url_is_asked_only_from_the_password_box() {
 }
 
 /// `temporaryPasswordState` for `createTemporaryPassword`; returns the
-/// `@extra` of the `getUpgradedGiftWithdrawalUrl` the driver sends next.
+/// `@extra` of the `getGiftMintingUrl` the driver sends next.
 fn temporary_password(p: &mut Parts, unlock: crate::ids::RequestId) -> Value {
     feed(
         p,
         json!({"@type": "temporaryPasswordState", "@extra": unlock.as_extra(),
             "has_password": true, "valid_for": 60}),
     );
-    sent_request(&p.1, "getUpgradedGiftWithdrawalUrl")["@extra"].clone()
+    sent_request(&p.1, "getGiftMintingUrl")["@extra"].clone()
 }
 
 /// Which request of the export answers with the error.
@@ -368,10 +368,10 @@ fn open_fragment_sends_the_password_less_probe_only_from_its_confirmation() {
     // Not for a gift still locked.
     set_stage(&mut p, "later", TransferStage::ConfirmExport);
     assert!(p.0.probe_gift_export().is_err());
-    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
+    assert_eq!(count(&p.1, "getGiftMintingUrl"), 0);
 
     probe(&mut p);
-    let sent = sent_request(&p.1, "getUpgradedGiftWithdrawalUrl");
+    let sent = sent_request(&p.1, "getGiftMintingUrl");
     assert_eq!(sent["received_gift_id"], "open");
     assert!(sent.get("password").is_none());
     assert_eq!(count(&p.1, "createTemporaryPassword"), 0);
@@ -379,7 +379,7 @@ fn open_fragment_sends_the_password_less_probe_only_from_its_confirmation() {
     assert!(matches!(stage(&p), Some(TransferStage::Probing(_))));
     // A second click while it is out sends nothing.
     assert!(p.0.probe_gift_export().is_err());
-    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
+    assert_eq!(count(&p.1, "getGiftMintingUrl"), 1);
 }
 
 #[test]
@@ -453,7 +453,7 @@ fn a_second_transfer_click_sends_nothing() {
     // Nor an export while the transfer is out.
     set_stage(&mut p, "open", TransferStage::ConfirmExport);
     assert!(p.0.probe_gift_export().is_err());
-    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
+    assert_eq!(count(&p.1, "getGiftMintingUrl"), 0);
 }
 
 #[test]
@@ -535,7 +535,7 @@ fn a_late_export_answer_acts_on_nothing_the_new_box_did_not_ask() {
         json!({"@type": "temporaryPasswordState", "@extra": first.as_extra(),
             "has_password": true, "valid_for": 60}),
     );
-    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
+    assert_eq!(count(&p.1, "getGiftMintingUrl"), 0);
     // The first one failing leaves the second one waiting.
     feed(
         &mut p,
@@ -555,7 +555,7 @@ fn a_late_export_answer_acts_on_nothing_the_new_box_did_not_ask() {
         json!({"@type": "temporaryPasswordState", "@extra": second.as_extra(),
             "has_password": true, "valid_for": 60}),
     );
-    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
+    assert_eq!(count(&p.1, "getGiftMintingUrl"), 1);
 }
 
 /// 05-118: a transfer's ok closes the picker that sent it, not a flow

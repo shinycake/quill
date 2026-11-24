@@ -4,10 +4,12 @@ use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::lang::{PluralKey, keys};
 use serde_json::{Value, json};
 
-/// `getForumTopics` (TDLib 1.8.67, `schema/td_api.tl:12701`):
-/// `getForumTopics chat_id:int53 query:string offset_date:int32
+/// `getForumTopics chat_id:int53 query:string icon_custom_emoji_id:int64
+/// exclude_open:Bool exclude_closed:Bool offset_date:int32
 /// offset_message_id:int53 offset_forum_topic_id:int32 limit:int32 =
-/// ForumTopics`. First page: empty query, all offsets 0.
+/// ForumTopics` (TDLib 1.8.71). First page: empty query, all offsets 0.
+/// The icon and open/closed filters stay off: Telegram Desktop never sets
+/// them (`data_forum.cpp`, `dialogs_widget.cpp`).
 pub fn get_forum_topics(
     extra: RequestId,
     chat_id: ChatId,
@@ -22,6 +24,9 @@ pub fn get_forum_topics(
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "query": query,
+        "icon_custom_emoji_id": 0,
+        "exclude_open": false,
+        "exclude_closed": false,
         "offset_date": offset_date,
         "offset_message_id": offset_message_id.0,
         "offset_forum_topic_id": offset_forum_topic_id,

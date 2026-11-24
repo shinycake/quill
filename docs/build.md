@@ -2,7 +2,7 @@
 
 Pinned toolchain: **Rust 1.100.0** (`rust-toolchain.toml`; also the MSRV, since Quill uses 1.100 std APIs).  
 UI: **gpui-kit 0.8.1**.  
-TDLib schema/runtime: **1.8.70** at `23383aef218a3123f02b744bfa91bde21056a814`.
+TDLib schema/runtime: **1.8.71** at `1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d`.
 
 ## Developer (synthetic UI, no Telegram login)
 

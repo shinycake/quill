@@ -267,8 +267,11 @@ fn quoted(lines: JoinedLines) -> RichBlock {
 }
 
 /// An expandable quote: its first line is the header, the rest the body.
+/// `pageBlockExpandableBlockQuote`: since TDLib 1.8.71 it holds `blocks`
+/// like `pageBlockBlockQuote`; its first line stays the header.
 fn expandable_quote(value: &Value) -> RichBlock {
-    let (text, entities, _) = rich_text_to_parts(value.get("text").unwrap_or(&Value::Null));
+    let JoinedLines { text, entities, .. } =
+        join_blocks(value.get("blocks").unwrap_or(&Value::Null));
     let (header, body, body_at) = match text.split_once('\n') {
         Some((header, body)) => (header, body, header.len() + 1),
         None => (text.as_str(), "", text.len()),

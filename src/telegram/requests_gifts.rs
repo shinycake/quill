@@ -98,14 +98,14 @@ pub fn transfer_gift(
     .to_string()
 }
 
-/// `getUpgradedGiftWithdrawalUrl` (TDLib 1.8.69): Fragment's page for
+/// `getGiftMintingUrl` (TDLib 1.8.71; `getUpgradedGiftWithdrawalUrl` before): Fragment's page for
 /// moving the collectible to the TON blockchain. It needs a valid
 /// temporary password (`createTemporaryPassword`); without one TDLib
 /// refuses it before it reaches the server. This only returns a URL;
 /// nothing moves until the user acts on Fragment.
-pub fn get_upgraded_gift_withdrawal_url(extra: RequestId, received_gift_id: &str) -> String {
+pub fn get_gift_minting_url(extra: RequestId, received_gift_id: &str) -> String {
     json!({
-        "@type": "getUpgradedGiftWithdrawalUrl",
+        "@type": "getGiftMintingUrl",
         "@extra": extra.as_extra(),
         "received_gift_id": received_gift_id,
     })

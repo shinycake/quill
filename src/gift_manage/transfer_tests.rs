@@ -76,7 +76,7 @@ fn export_state_needs_a_date_and_opens_when_it_passes() {
 fn received(extra: Value) -> crate::premium_hub::ReceivedGift {
     let mut v = json!({
         "@type": "receivedGift", "received_gift_id": "g1", "date": 5, "is_saved": true,
-        "can_be_transferred": true, "export_date": NOW + 7_200,
+        "can_be_transferred": true, "mint_date": NOW + 7_200,
         "gift": {"@type": "sentGiftUpgraded", "gift": {
             "@type": "upgradedGift", "title": "Plush Pepe", "name": "PlushPepe-1204",
             "number": 1204, "owner_id": {"@type": "messageSenderUser", "user_id": 7}}},
@@ -92,7 +92,7 @@ fn received(extra: Value) -> crate::premium_hub::ReceivedGift {
 #[test]
 fn the_picker_walks_its_stages() {
     let gift = received(json!({}));
-    assert_eq!(gift.manage.export_date, (NOW + 7_200) as i32);
+    assert_eq!(gift.manage.mint_date, (NOW + 7_200) as i32);
     let mut picker = TransferPicker::for_gift(&gift);
     assert_eq!(picker.gift_name, "Plush Pepe #1,204");
     assert_eq!(picker.slug, "PlushPepe-1204");
