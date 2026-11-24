@@ -82,10 +82,16 @@ impl QuillApp {
             .collect()
     }
 
-    fn toggle_invite_pick(&mut self, user_id: i64, cx: &mut Context<Self>) {
+    /// `shown` is the tick the row was drawn with. A click on the tick also
+    /// reaches the row; the second handler finds the pick already changed
+    /// and leaves it.
+    fn toggle_invite_pick(&mut self, user_id: i64, shown: bool, cx: &mut Context<Self>) {
         let Some(invite) = self.dialogs.invite_to_bot.as_mut() else {
             return;
         };
+        if invite.is_picked(user_id) != shown {
+            return;
+        }
         if invite.toggle(user_id) == Toggled::AtLimit {
             self.set_status_note(
                 StatusNote::info(trn(keys::BOT_INVITE_LIMIT, INVITE_LIMIT as i64)),
@@ -195,7 +201,7 @@ impl QuillApp {
                     .cursor_pointer()
                     .hover(|row| row.bg(cx.theme().secondary))
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_invite_pick(user_id, cx);
+                        this.toggle_invite_pick(user_id, checked, cx);
                     }))
                     .child(chat_avatar(&name, photo.as_deref(), 32.))
                     .child(div().flex_1().min_w_0().truncate().child(name))
@@ -204,7 +210,7 @@ impl QuillApp {
                             .checked(checked)
                             .disabled(busy)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.toggle_invite_pick(user_id, cx);
+                                this.toggle_invite_pick(user_id, checked, cx);
                             })),
                     )
             })

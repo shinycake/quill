@@ -216,7 +216,10 @@ fn on_chain_gift_offers_read_by_who_made_them() {
         incoming.starts_with("An offer to buy this gift for 12.5"),
         "{incoming}"
     );
-    let mine = say(&offer(true, "giftOnChainPurchaseOfferStateSettled"), BY_ME);
+    let mine = say(
+        &offer(true, "giftOnChainPurchaseOfferStateCanceling"),
+        BY_ME,
+    );
     assert!(mine.starts_with("You offered 12.5"), "{mine}");
     assert!(mine.ends_with("for Plush Pepe #7."), "{mine}");
     assert_eq!(
@@ -228,6 +231,11 @@ fn on_chain_gift_offers_read_by_who_made_them() {
             &offer(false, "giftOnChainPurchaseOfferStateAccepted"),
             BY_DANA
         ),
+        "This offer was accepted."
+    );
+    // Settled is an accepted offer executed on chain.
+    assert_eq!(
+        say(&offer(true, "giftOnChainPurchaseOfferStateSettled"), BY_ME),
         "This offer was accepted."
     );
 }

@@ -16,7 +16,11 @@ impl Session {
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Bots(BotsPurpose::InviteUsersToBot)) => {
-                if let Some(pending) = pending {
+                // A box closed while its invite was out forgot the request:
+                // its refusal has nobody to show it.
+                if let Some(pending) = pending
+                    && self.acks.is_waited(pending.id)
+                {
                     let refusal = crate::invite_to_bot::InviteRefusal::of(
                         err,
                         crate::state::request_errors::error_reason,

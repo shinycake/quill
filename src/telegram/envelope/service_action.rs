@@ -810,10 +810,13 @@ impl ServiceAction {
                 {
                     Some(
                         "giftOnChainPurchaseOfferStatePending"
-                        | "giftOnChainPurchaseOfferStateSettled"
                         | "giftOnChainPurchaseOfferStateCanceling",
                     ) => GiftOfferState::Pending,
-                    Some("giftOnChainPurchaseOfferStateAccepted") => GiftOfferState::Accepted,
+                    // Settled: accepted and executed on chain, the gift is on its way.
+                    Some(
+                        "giftOnChainPurchaseOfferStateAccepted"
+                        | "giftOnChainPurchaseOfferStateSettled",
+                    ) => GiftOfferState::Accepted,
                     Some(
                         "giftOnChainPurchaseOfferStateDeclined"
                         | "giftOnChainPurchaseOfferStateCanceled"
