@@ -1,14 +1,23 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-macos 0.3.12 from crates.io (Apache-2.0,
+This directory is gpui-pre-macos 0.3.14 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's macOS platform, used through `[patch.crates-io]` in
-Quill's `Cargo.toml`. The commit "Vendor the unmodified gpui-pre 0.3.12 registry copy of gpui-pre-macos" added the unmodified registry copy
+Quill's `Cargo.toml`. The commit "Vendor the unmodified gpui-pre 0.3.14 registry copy of gpui-pre-macos" added the unmodified registry copy
 (without the registry's `.cargo-ok`, `.cargo_vcs_info.json`,
 `Cargo.toml.orig` and `Cargo.lock`), so
 `git diff <that commit> -- third_party/gpui-pre-macos` shows every change. (The
 patch was first made on 0.3.7, carried to 0.3.8 in
 `docs/decisions/codex-gpui-kit-0.7.1.md`, where `step` kept 0.3.8's frame
-signal timestamps, and to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`, and to 0.3.12 in `docs/decisions/gpui-pre-0-3-12.md`.)
+signal timestamps, and to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`, to 0.3.12 in `docs/decisions/gpui-pre-0-3-12.md`, and to 0.3.14 in
+`docs/decisions/gpui-kit-0-11-0.md`.)
+
+0.3.14 note: upstream now posts and dismisses notifications from a worker
+thread of its own, so Quill's `gpui-notifications` worker (below) is dropped
+and the notification extras (inline reply, picture attachment, typed-text
+responses) ride on upstream's commands; `dismiss_system_notification` returns
+a task. Quill's on-demand `CAMetalDisplayLink` stays; upstream's native-view
+pointer check runs after each step, and the window's debug state reports
+Quill's link.
 
 The Quill project changed it in 2026 so an idle window stops costing CPU:
 
@@ -62,6 +71,8 @@ the sender's picture and an inline reply field, which GPUI's
   and every post or dismiss are round trips to `usernoted` that used to run
   on the main thread; the main thread now only queues the job. A single
   thread keeps posts and dismissals in order.
+  Dropped at 0.3.14, where upstream runs the center on a worker thread of
+  its own; the extras travel in upstream's commands.
 - `src/gpui_macos.rs`: declares the new module.
 
 Each changed source file starts with a comment saying so. The changes are

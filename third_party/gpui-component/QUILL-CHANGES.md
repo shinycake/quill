@@ -1,13 +1,14 @@
 # Changes made by the Quill project
 
-This directory is gpui-component 0.10.0 from crates.io (Apache-2.0,
+This directory is gpui-component 0.11.0 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), used through `[patch.crates-io]` in Quill's `Cargo.toml`.
-Commit `2ef7b0d98` added the unmodified registry copy (without `.cargo-ok`,
+The commit "Vendor gpui-base and gpui-component 0.11.0 unmodified from crates.io" added the unmodified registry copy (without `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.lock` and `Cargo.toml.orig`), so
-`git diff 2ef7b0d98 -- third_party/gpui-component` shows every change.
+`git diff <that commit> -- third_party/gpui-component` shows every change.
 (First vendored at 0.7.3 in `255bf944`; carried to 0.8.0 in
 `docs/decisions/gpui-kit-0-8-0.md`, to 0.8.1 in `docs/decisions/gpui-kit-0-8-1.md`
-and to 0.10.0 in `docs/decisions/gpui-kit-0-10-0.md`.)
+to 0.10.0 in `docs/decisions/gpui-kit-0-10-0.md`, and to 0.11.0 in
+`docs/decisions/gpui-kit-0-11-0.md`, where the patch applied unchanged.)
 
 `src/tab/tab_bar.rs`: the sliding indicator sprang (280 ms) whenever the
 selected tab's left or width changed, so a badge appearing in a tab restarted

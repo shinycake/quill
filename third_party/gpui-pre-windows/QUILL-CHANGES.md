@@ -1,13 +1,24 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-windows 0.3.12 from crates.io (Apache-2.0,
+This directory is gpui-pre-windows 0.3.14 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's Windows platform, used through `[patch.crates-io]`
-in Quill's `Cargo.toml`. The commit "Vendor the unmodified gpui-pre 0.3.12 registry copy of gpui-pre-windows" added the unmodified registry copy
+in Quill's `Cargo.toml`. The commit "Vendor the unmodified gpui-pre 0.3.14 registry copy of gpui-pre-windows" added the unmodified registry copy
 (without the registry's `.cargo-ok`, `.cargo_vcs_info.json`,
 `Cargo.toml.orig` and `Cargo.lock`), so
 `git diff <that commit> -- third_party/gpui-pre-windows` shows every change.
 (The patch was first made on 0.3.7, carried to 0.3.8 in
-`docs/decisions/codex-gpui-kit-0.7.1.md` and to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`, and to 0.3.12 in `docs/decisions/gpui-pre-0-3-12.md`.)
+`docs/decisions/codex-gpui-kit-0.7.1.md` and to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`, to 0.3.12 in `docs/decisions/gpui-pre-0-3-12.md`, and to 0.3.14 in
+`docs/decisions/gpui-kit-0-11-0.md`.)
+
+0.3.14 note: upstream draws opaque quads first in a depth pre-pass. A frame
+with glass draws without it and without a depth view (a lens batch rebinds
+the target alone); the quad shader culls opaque rectangles only when the
+pre-pass ran. The scRGB output wrappers cover the new opaque-quad and
+path-tile shaders, the global constants carry both the depth scale and the
+HDR output, and the shader-file match names the new modules. Pipelines now
+draw from a batch start; the HDR and NV12 surface shaders index from zero,
+so they keep a Quill `PipelineState::draw_with_texture` that binds the
+texture and the pipeline's depth state.
 
 The Quill project changed it in 2026 so an idle window stops receiving a
 `WM_PAINT` and a GPUI frame request on every vblank:

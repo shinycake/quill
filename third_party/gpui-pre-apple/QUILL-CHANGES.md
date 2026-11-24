@@ -1,15 +1,26 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-apple 0.3.12 from crates.io (Apache-2.0,
+This directory is gpui-pre-apple 0.3.14 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's Metal renderer and, since 0.3.9, its CoreText text
 system, used through `[patch.crates-io]` in Quill's `Cargo.toml`. The commit
-"Vendor the unmodified gpui-pre 0.3.12 registry copy of gpui-pre-apple" added the unmodified registry copy, including `vendor/gpui` (the
+"Vendor the unmodified gpui-pre 0.3.14 registry copy of gpui-pre-apple" added the unmodified registry copy, including `vendor/gpui` (the
 GPUI sources `build.rs` reads to generate the shader header; `.gitignore`
 keeps `third_party/*/vendor/`), without the registry's `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.toml.orig` and `Cargo.lock`, so
 `git diff <that commit> -- third_party/gpui-pre-apple` shows every change. Changed
 code is marked `QUILL`. (The patch was first made on 0.3.8, vendored in
-`088b96c3`, and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`, and to 0.3.12 in `docs/decisions/gpui-pre-0-3-12.md`.)
+`088b96c3`, and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`, to 0.3.12 in `docs/decisions/gpui-pre-0-3-12.md`, and to 0.3.14 in
+`docs/decisions/gpui-kit-0-11-0.md`.)
+
+0.3.14 note: upstream draws opaque quads first in a depth pre-pass. A frame
+with glass skips it (a lens batch ends the render pass, memoryless depth goes
+with it, and opaque quads drawn ahead would show in the backdrop the lens
+copies), and the quad shader culls opaque rectangles only when the pre-pass
+ran. The lens and downsample shaders build their quads from `vertex_id` like
+upstream's, so the unit-vertex buffer is gone, and the lens buffers start
+after the frame globals. The 8-bit/EDR pipeline swap covers path tiles, opaque
+quads and native views. `shaders.metal` lost two closing braces in the merge
+(after `native_view_fragment` and `is_shaped`), restored.
 
 The Quill project changed it in 2026 to show HDR photos in the media viewer
 (`docs/decisions/hdr-viewer-macos.md`):

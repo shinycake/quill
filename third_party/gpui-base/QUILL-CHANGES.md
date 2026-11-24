@@ -1,12 +1,30 @@
 # Changes made by the Quill project
 
-This directory is gpui-base 0.10.0 from crates.io (Apache-2.0, `LICENSE-APACHE`),
-used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit `2ef7b0d98`
-added the unmodified registry copy, so `git diff 2ef7b0d98 -- third_party/gpui-base`
+This directory is gpui-base 0.11.0 from crates.io (Apache-2.0, `LICENSE-APACHE`),
+used through `[patch.crates-io]` in Quill's `Cargo.toml`. The commit "Vendor gpui-base and gpui-component 0.11.0 unmodified from crates.io"
+added the unmodified registry copy, so `git diff <that commit> -- third_party/gpui-base`
 shows every change. (The patch was first made on 0.7.0, vendored in `eb465597`,
 carried to 0.7.1 in `docs/decisions/codex-gpui-kit-0.7.1.md`, to 0.7.3 in
 `docs/decisions/gpui-kit-0-7-3.md` and to 0.8.0 in
-`docs/decisions/gpui-kit-0-8-0.md`, and to 0.8.1 in `docs/decisions/gpui-kit-0-8-1.md`.)
+`docs/decisions/gpui-kit-0-8-0.md`, to 0.8.1 in `docs/decisions/gpui-kit-0-8-1.md`, and to 0.11.0 in
+`docs/decisions/gpui-kit-0-11-0.md`.)
+
+0.11.0 note: upstream moved the input to a new row model (`f64` scrolling,
+rows placed by `local_row_y` and aligned one by one by `LineLayout::row_x`)
+and added its own long-line work: rows far from the viewport left
+unshaped (`InputLine::unshaped`), natural alignment (`start_align`) and
+width caches (`char_widths`, monospace detection, `measurements`,
+`wrap_width`). Quill's engine sits on the new row model: a right-to-left
+paragraph aligns its rows to the right edge (`align_lines` in
+`element.rs`), rows a long line leaves out count toward row offsets
+(`LineLayout::row_count`), and the caret clamp, bidi rows, formatting
+spans, `row_wrap.rs` and the `LineWindow` layout stay. Upstream's
+unshaped rows, natural alignment and width caches are left out (and their
+`text_wrapper/` submodules and benches removed), since `LineWindow`, the
+bidi direction and `row_wrap.rs` cover the same ground. Upstream's
+single-pass line walk (`LinesFrom`), `RunIndex`, `prepare_wrap_width` and
+`f64` scroll are kept. `start_align`'s test became
+`a_right_aligned_paragraph_aligns_each_row_by_its_own_width`.
 
 The Quill project changed it in 2026 to add bidirectional text support to the
 input engine:

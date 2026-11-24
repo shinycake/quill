@@ -13,7 +13,7 @@ under `licenses/`.
 
 ## Overview
 
-- MIT License: 686
+- MIT License: 690
 - Apache License 2.0: 43
 - Unicode License v3: 27
 - ISC License: 22
@@ -1441,8 +1441,8 @@ Apache License
 Used by:
 - [constant_time_eq 0.6.1](https://codeberg.org/cesarb/constant_time_eq)
 - [dunce 1.0.5](https://gitlab.com/kornelski/dunce)
-- [gpui-kit-assets 0.10.0](https://github.com/longbridge/gpui-kit)
-- [gpui-kit 0.10.0](https://github.com/longbridge/gpui-kit)
+- [gpui-kit-assets 0.11.0](https://github.com/longbridge/gpui-kit)
+- [gpui-kit 0.11.0](https://github.com/longbridge/gpui-kit)
 - [interprocess 2.4.9](https://github.com/kotauskas/interprocess)
 - [ryu 1.0.23](https://github.com/dtolnay/ryu)
 - [spirv 0.4.0+sdk-1.4.341.0](https://github.com/gfx-rs/rspirv)
@@ -1527,24 +1527,24 @@ limitations under the License.
 ### Apache License 2.0
 
 Used by:
-- [gpui-pre 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-apple 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-linux 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-macos 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-wgpu 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-windows 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-collections 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-derive-refineable 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-http-client 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-macros 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-platform 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-refineable 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-scheduler 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-shared-string 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-sum-tree 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-util 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing-macro 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-apple 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-linux 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-macos 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-wgpu 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-windows 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-collections 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-derive-refineable 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-http-client 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-macros 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-platform 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-refineable 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-scheduler 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-shared-string 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-sum-tree 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-util 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing-macro 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing 0.3.14](https://github.com/zed-industries/zed)
 
 ````text
 Copyright 2022 - 2025 Zed Industries, Inc.
@@ -1775,9 +1775,9 @@ Apache License
 ### Apache License 2.0
 
 Used by:
-- [gpui-base 0.10.0](https://github.com/longbridge/gpui-kit)
-- [gpui-component 0.10.0](https://github.com/longbridge/gpui-kit)
-- [gpui-component-macros 0.10.0](https://crates.io/crates/gpui-component-macros)
+- [gpui-base 0.11.0](https://github.com/longbridge/gpui-kit)
+- [gpui-component 0.11.0](https://github.com/longbridge/gpui-kit)
+- [gpui-component-macros 0.11.0](https://crates.io/crates/gpui-component-macros)
 
 ````text
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
@@ -7648,7 +7648,6 @@ Used by:
 - [dirs-sys 0.4.1](https://github.com/dirs-dev/dirs-sys-rs)
 - [dirs-sys 0.5.0](https://github.com/dirs-dev/dirs-sys-rs)
 - [dirs 5.0.1](https://github.com/soc/dirs-rs)
-- [dirs 6.0.0](https://github.com/soc/dirs-rs)
 
 ````text
 Copyright (c) 2018-2019 dirs-rs contributors
@@ -11049,38 +11048,6 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [float_next_after 1.0.0](https://gitlab.com/bronsonbdevost/next_afterf)
-
-````text
-MIT License
-
-Copyright (c) 2020 Scripta Qumranica Electronica
-
-Created by Bronson Brown-deVost
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
 - [normpath 1.5.2](https://github.com/dylni/normpath)
 
 ````text
@@ -11619,11 +11586,8 @@ Used by:
 - [granit-parser 1.3.0](https://github.com/bourumir-wyngs/granit-parser)
 - [harfrust 0.5.2](https://github.com/harfbuzz/harfrust)
 - [libm 0.2.16](https://github.com/rust-lang/compiler-builtins)
-- [lyon 1.0.19](https://github.com/nical/lyon)
-- [lyon_algorithms 1.0.22](https://github.com/nical/lyon)
 - [lyon_geom 1.0.20](https://github.com/nical/lyon)
 - [lyon_path 1.0.19](https://github.com/nical/lyon)
-- [lyon_tessellation 1.0.23](https://github.com/nical/lyon)
 - [mac-notification-sys 0.6.15](https://github.com/h4llow3En/mac-notification-sys)
 - [mac 0.1.1](https://github.com/reem/rust-mac.git)
 - [objc-sys 0.3.5](https://github.com/madsmtm/objc2)
@@ -11668,16 +11632,20 @@ Used by:
 - [taffy 0.15.1](https://github.com/DioxusLabs/taffy)
 - [tauri-winrt-notification 0.8.1](https://github.com/tauri-apps/winrt-notification)
 - [windows-collections 0.3.2](https://github.com/microsoft/windows-rs)
+- [windows-core 0.57.0](https://github.com/microsoft/windows-rs)
 - [windows-core 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows-core 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows-future 0.3.2](https://github.com/microsoft/windows-rs)
+- [windows-implement 0.57.0](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.60.2](https://github.com/microsoft/windows-rs)
+- [windows-interface 0.57.0](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.59.3](https://github.com/microsoft/windows-rs)
 - [windows-link 0.2.1](https://github.com/microsoft/windows-rs)
 - [windows-numerics 0.3.1](https://github.com/microsoft/windows-rs)
 - [windows-registry 0.6.1](https://github.com/microsoft/windows-rs)
+- [windows-result 0.1.2](https://github.com/microsoft/windows-rs)
 - [windows-result 0.2.0](https://github.com/microsoft/windows-rs)
 - [windows-result 0.4.1](https://github.com/microsoft/windows-rs)
 - [windows-strings 0.1.0](https://github.com/microsoft/windows-rs)
@@ -11688,6 +11656,7 @@ Used by:
 - [windows-targets 0.52.6](https://github.com/microsoft/windows-rs)
 - [windows-threading 0.2.1](https://github.com/microsoft/windows-rs)
 - [windows-version 0.1.7](https://github.com/microsoft/windows-rs)
+- [windows 0.57.0](https://github.com/microsoft/windows-rs)
 - [windows 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows_x86_64_gnu 0.48.5](https://github.com/microsoft/windows-rs)
@@ -12624,6 +12593,10 @@ Used by:
 - [encoding_rs_io 0.1.8](https://github.com/BurntSushi/encoding_rs_io)
 - [globset 0.4.21](https://github.com/BurntSushi/ripgrep/tree/master/crates/globset)
 - [ignore 0.4.34](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore)
+- [jiff-core 1.0.1](https://github.com/BurntSushi/jiff)
+- [jiff-tzdb-platform 1.0.0](https://github.com/BurntSushi/jiff)
+- [jiff-tzdb 1.0.0](https://github.com/BurntSushi/jiff)
+- [jiff 1.0.2](https://github.com/BurntSushi/jiff)
 - [memchr 2.8.3](https://github.com/BurntSushi/memchr)
 - [walkdir 2.5.0](https://github.com/BurntSushi/walkdir)
 
