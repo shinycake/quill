@@ -44,21 +44,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, _, cx| app.skip_first_run_intro(cx)
     ),
     layer!(
-        "instant-view",
-        |app| app.live.as_ref().is_some_and(|live| live
-            .driver
-            .session
-            .messages
-            .instant_view
-            .is_some()),
-        |app, _, cx| {
-            if let Some(live) = app.live.as_mut() {
-                live.driver.session.messages.instant_view = None;
-            }
-            cx.notify();
-        }
-    ),
-    layer!(
         "context-menus",
         |app| app.context_menu_open(),
         |app, _, cx| {
@@ -72,17 +57,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
             app.chat_ui.link_popup = None;
             cx.notify();
         }
-    ),
-    // The profile layer fades out before anything beneath it.
-    layer!(
-        "profile-modal",
-        |app| app.profile_modal_active(),
-        |app, _, cx| app.close_profile_modal(cx)
-    ),
-    layer!(
-        "earn-layer",
-        |app| app.earn_layer_open(),
-        |app, window, cx| app.earn_layer_escape(window, cx)
     ),
     // Slice CL: the peek preview is the most transient layer.
     layer!(
@@ -161,6 +135,32 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "media-viewer",
         |app| app.viewer.state.is_open(),
         |app, _, cx| app.close_media_viewer(cx)
+    ),
+    // The window's page layers are under the viewers they open.
+    layer!(
+        "instant-view",
+        |app| app.live.as_ref().is_some_and(|live| live
+            .driver
+            .session
+            .messages
+            .instant_view
+            .is_some()),
+        |app, _, cx| {
+            if let Some(live) = app.live.as_mut() {
+                live.driver.session.messages.instant_view = None;
+            }
+            cx.notify();
+        }
+    ),
+    layer!(
+        "profile-modal",
+        |app| app.profile_modal_active(),
+        |app, _, cx| app.close_profile_modal(cx)
+    ),
+    layer!(
+        "earn-layer",
+        |app| app.earn_layer_open(),
+        |app, window, cx| app.earn_layer_escape(window, cx)
     ),
     layer!("country-box", |app| app.country_box_open(), |app, _, cx| {
         app.close_open_country_boxes(cx)
