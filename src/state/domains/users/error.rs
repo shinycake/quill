@@ -43,10 +43,10 @@ impl Session {
                     );
                 }
             }
-            // One filter's count failed: its count stays unknown (or the
-            // older one stays shown) and the next open asks for all of
-            // them again, never a zero for good.
-            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { .. })) => {}
+            // The counts failed: they stay unknown (or the older ones stay
+            // shown) and the next open asks for all of them again, never a
+            // zero for good.
+            Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCounts { .. })) => {}
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
                 self.users_state.profile_photo_emoji_icons.failed(
                     pending.map(|p| p.id),

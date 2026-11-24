@@ -51,10 +51,10 @@ pub enum CommonPayload {
         text: String,
         entities: Vec<TextEntity>,
     },
-    /// `count` — the answer to `getChatMessageCount` (schema 1.8.67,
-    /// line 10068).
-    Count {
-        count: i32,
+    /// `chatMessageCounts` (TDLib 1.8.71) — the answer to
+    /// `getChatMessageCounts`, in the order of the filters asked for.
+    Counts {
+        counts: Vec<i32>,
     },
     /// Batch 4: `updateServiceNotification` — a server popup.
     UpdateServiceNotification {

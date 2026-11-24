@@ -9,12 +9,14 @@ pub(crate) fn parse_common_payload(
     value: &Value,
 ) -> Result<Option<EnvelopePayload>, ParseError> {
     let payload = match type_name {
-        "count" => Ok(EnvelopePayload::Common(CommonPayload::Count {
-            count: value
-                .get("count")
-                .and_then(Value::as_i64)
-                .unwrap_or(0)
-                .sat_i32(),
+        "chatMessageCounts" => Ok(EnvelopePayload::Common(CommonPayload::Counts {
+            counts: value
+                .get("counts")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|count| count.as_i64().unwrap_or(-1).sat_i32())
+                .collect(),
         })),
         // MED4: `updateOption` (schema:10926). TDLib pushes all options
         // after authorization; Quill keeps `message_caption_length_max`.

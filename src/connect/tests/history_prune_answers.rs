@@ -99,7 +99,7 @@ fn answers_for_a_dropped_chat_bring_nothing_back() {
         .fetch_basic_group_members(ChatId(BASIC))
         .unwrap()
         .expect("member list asked for");
-    let counts = h.sent("getChatMessageCount");
+    let counts = h.sent("getChatMessageCounts");
     assert!(!counts.is_empty());
     h.churn();
     assert!(!h.driver.session.histories.contains_key(&GROUP));
@@ -107,7 +107,7 @@ fn answers_for_a_dropped_chat_bring_nothing_back() {
     // The answers arrive now.
     for extra in &counts {
         h.ingest(&format!(
-            r#"{{"@type":"count","@extra":"{}","count":3}}"#,
+            r#"{{"@type":"chatMessageCounts","@extra":"{}","counts":[3,3,3,3,3,3,3]}}"#,
             extra.0
         ));
     }
@@ -137,7 +137,7 @@ fn answers_for_a_dropped_chat_bring_nothing_back() {
     // Opening the chats and their panels again asks again, in full.
     h.open(GROUP);
     h.driver.fetch_chat_media_counts(ChatId(GROUP)).unwrap();
-    assert_eq!(h.sent("getChatMessageCount").len(), 2 * counts.len());
+    assert_eq!(h.sent("getChatMessageCounts").len(), 2 * counts.len());
     assert!(
         h.driver
             .fetch_supergroup_members(ChatId(GROUP), MemberListFilter::Recent, "")
@@ -162,7 +162,7 @@ fn late_gallery_answers_leave_no_partial_counts() {
     let mut h = Harness::new();
     h.open(CHANNEL);
     assert!(h.driver.open_shared_media().unwrap());
-    let counts = h.sent("getChatMessageCount");
+    let counts = h.sent("getChatMessageCounts");
     let stories = h.sent("getChatPostedToChatPageStories");
     let gifts = h.sent("getReceivedGifts");
     assert!(!counts.is_empty() && !stories.is_empty() && !gifts.is_empty());
@@ -182,7 +182,7 @@ fn late_gallery_answers_leave_no_partial_counts() {
     }
     for extra in &counts {
         h.ingest(&format!(
-            r#"{{"@type":"count","@extra":"{}","count":3}}"#,
+            r#"{{"@type":"chatMessageCounts","@extra":"{}","counts":[3,3,3,3,3,3,3]}}"#,
             extra.0
         ));
     }
@@ -198,5 +198,5 @@ fn late_gallery_answers_leave_no_partial_counts() {
     // Reopened, the gallery asks for every count again.
     h.open(CHANNEL);
     assert!(h.driver.open_shared_media().unwrap());
-    assert_eq!(h.sent("getChatMessageCount").len(), 2 * counts.len());
+    assert_eq!(h.sent("getChatMessageCounts").len(), 2 * counts.len());
 }

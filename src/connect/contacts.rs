@@ -203,8 +203,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The info panel's media counts for `chat_id`: one
-    /// `getChatMessageCount` per `MEDIA_COUNT_FILTERS` entry, on every
-    /// open. Counts already known stay shown while the new ones are out and
+    /// `getChatMessageCounts` for every `MEDIA_COUNT_FILTERS` entry, on
+    /// every open. Counts already known stay shown while the new ones are out and
     /// each answer replaces its own; a count still out is not asked twice.
     pub fn fetch_chat_media_counts(
         &mut self,
@@ -224,29 +224,36 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .chat_media_counts
                 .insert(chat_id.0, Default::default());
         }
-        for (index, (filter, _)) in crate::telegram::requests::MEDIA_COUNT_FILTERS
+        let filters: Vec<&str> = crate::telegram::requests::MEDIA_COUNT_FILTERS
             .iter()
-            .enumerate()
-        {
-            let purpose = RequestPurpose::Users(UsersPurpose::GetChatMessageCount {
-                filter: index as u8,
-            });
-            if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-                continue;
+            .map(|(filter, _)| *filter)
+            .collect();
+        if let Err(err) = self.send_chat_message_counts(chat_id, 0, &filters) {
+            if first {
+                self.session.media.chat_media_counts.remove(&chat_id.0);
             }
-            let extra = self.session.request(purpose, Some(chat_id));
-            if let Err(err) =
-                self.sender
-                    .send_json(&crate::telegram::requests::get_chat_message_count(
-                        extra, chat_id, filter,
-                    ))
-            {
-                self.session.requests.take(extra);
-                if first {
-                    self.session.media.chat_media_counts.remove(&chat_id.0);
-                }
-                return Err(err);
-            }
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// One `getChatMessageCounts` whose counts land under the keys from
+    /// `first` on. Nothing is sent while the same set is still out.
+    pub(super) fn send_chat_message_counts(
+        &mut self,
+        chat_id: crate::ids::ChatId,
+        first: u8,
+        filters: &[&str],
+    ) -> Result<(), ConnectSendError> {
+        let purpose = RequestPurpose::Users(UsersPurpose::GetChatMessageCounts { first });
+        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
+            return Ok(());
+        }
+        let extra = self.session.request(purpose, Some(chat_id));
+        let json = crate::telegram::requests::get_chat_message_counts(extra, chat_id, filters);
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
         }
         Ok(())
     }

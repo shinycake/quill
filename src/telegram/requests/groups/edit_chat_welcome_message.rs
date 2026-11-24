@@ -159,15 +159,21 @@ pub fn delete_community(extra: RequestId, community_id: i64) -> String {
     .to_string()
 }
 
-/// `getChatMessageCount` (schema 1.8.67, line 11989) for one filter, from
-/// the server (`return_local: false`).
-pub fn get_chat_message_count(extra: RequestId, chat_id: ChatId, filter: &str) -> String {
+/// `getChatMessageCounts chat_id topic_id filters return_local =
+/// ChatMessageCounts` (TDLib 1.8.71): every filter's count in one request,
+/// from the server (`return_local: false`); the answer's `counts` follow
+/// `filters`' order.
+pub fn get_chat_message_counts(extra: RequestId, chat_id: ChatId, filters: &[&str]) -> String {
+    let filters: Vec<Value> = filters
+        .iter()
+        .map(|filter| json!({ "@type": filter }))
+        .collect();
     json!({
-        "@type": "getChatMessageCount",
+        "@type": "getChatMessageCounts",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "topic_id": Value::Null,
-        "filter": { "@type": filter },
+        "filters": filters,
         "return_local": false,
     })
     .to_string()
