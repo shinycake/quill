@@ -12,7 +12,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Entity, Modifiers, MouseButton, TestAppContext, VisualTestContext, px, size,
+    AppContext, Entity, Modifiers, MouseButton, Role, TestAppContext, VisualTestContext, px, size,
 };
 use quill::ids::ChatId;
 use quill::state::SearchConfirm;
@@ -141,10 +141,26 @@ fn the_header_link_expands_and_collapses_the_grid(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
     assert_eq!(view(&app, vcx), StripView::Initial);
+    assert_eq!(toggle_expanded(vcx), Some(false));
     click(vcx, "top-toggle");
     assert_eq!(view(&app, vcx), StripView::Expanded);
+    assert_eq!(toggle_expanded(vcx), Some(true));
     click(vcx, "top-toggle");
     assert_eq!(view(&app, vcx), StripView::Collapsed);
+    assert_eq!(toggle_expanded(vcx), Some(false));
+}
+
+/// The expanded state the header link reports to screen readers.
+fn toggle_expanded(vcx: &mut VisualTestContext) -> Option<bool> {
+    let link = vcx.debug_bounds("top-toggle").expect("top-toggle");
+    vcx.update(|window, _| {
+        gpui_base::test_support::snapshots(window)
+            .into_iter()
+            .find(|node| {
+                node.role() == Some(Role::Button) && link.contains(&node.bounds().center())
+            })
+            .and_then(|node| node.expanded())
+    })
 }
 
 fn click(vcx: &mut VisualTestContext, selector: &'static str) {
