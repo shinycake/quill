@@ -41,6 +41,7 @@ mod shared_media_search;
 mod signin;
 mod status_toasts;
 mod stories;
+mod tdlib_1_8_71;
 mod topic_states;
 pub(in crate::ui) mod video_avatar;
 pub(in crate::ui) mod video_fixtures;

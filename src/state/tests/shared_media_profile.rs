@@ -407,9 +407,11 @@ fn gallery_message_counts_include_polls_and_round_videos() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    for (key, count) in [(0u8, 5), (1, 0), (7, 2), (8, 4)] {
+    // One `chatMessageCounts` per set, in the filters' order; -1 (unknown)
+    // leaves its key unknown.
+    for (first, counts) in [(0u8, "[5,0,-1,0,0,0,0]"), (7, "[2,4]")] {
         let extra = session.request(
-            RequestPurpose::Users(UsersPurpose::GetChatMessageCount { filter: key }),
+            RequestPurpose::Users(UsersPurpose::GetChatMessageCounts { first }),
             Some(ChatId(6)),
         );
         apply_json(
@@ -417,11 +419,14 @@ fn gallery_message_counts_include_polls_and_round_videos() {
             &seq,
             &sink,
             &format!(
-                r#"{{"@type":"count","@extra":"{}","count":{count}}}"#,
+                r#"{{"@type":"chatMessageCounts","@extra":"{}","counts":{counts}}}"#,
                 extra.0
             ),
         );
     }
+    let counts = &session.media.chat_media_counts[&6];
+    assert_eq!(counts.get(&2), None, "an unknown count is not a zero");
+    assert_eq!(counts.get(&8), Some(&4));
     let tabs = session.shared_media_visible_tabs();
     assert_eq!(
         tabs,

@@ -2,6 +2,7 @@
 //! (chat list, accessibility), following Telegram Desktop's
 //! `lng_action_gift_*` and `lng_action_giveaway_*` keys.
 use super::*;
+use crate::telegram::envelope::GiftOfferState;
 
 pub(super) fn giveaway_results(winners: i32, stars: bool, unclaimed: i32) -> ServiceText {
     if winners == 0 {
@@ -163,5 +164,30 @@ pub(super) fn render_upgraded_gift(
             }
         }
         GiftOrigin::Craft => say(keys::ACTION_GIFT_CRAFTED),
+    }
+}
+
+/// `messageUpgradedGiftOnChainPurchaseOffer` (TDLib 1.8.71): the offer's
+/// line by who made it, then its outcome. No action goes with it: an
+/// on-chain offer is answered with TON, which Quill never moves.
+pub(super) fn render_on_chain_offer(
+    name: &str,
+    price: &Money,
+    state: GiftOfferState,
+    is_buyer: bool,
+) -> ServiceText {
+    match state {
+        GiftOfferState::Accepted => say(keys::ACTION_GIFT_OFFER_STATE_ACCEPTED),
+        GiftOfferState::Rejected => say(keys::ACTION_GIFT_OFFER_STATE_REJECTED),
+        GiftOfferState::Pending | GiftOfferState::Unknown if is_buyer => phrase(
+            keys::ACTION_GIFT_OFFER_YOU,
+            &[("cost", B::from(cost(price))), ("name", B::from(name))],
+        )
+        .done(),
+        GiftOfferState::Pending | GiftOfferState::Unknown => phrase(
+            keys::ACTION_GIFT_OFFER_INCOMING,
+            &[("amount", B::from(cost(price)))],
+        )
+        .done(),
     }
 }

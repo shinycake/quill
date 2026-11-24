@@ -1,8 +1,8 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
 // `SurfaceSource::Frame` and `surface()` on every platform. See third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{
-    App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    ObjectFit, Pixels, Style, StyleRefinement, Styled, Window,
+    App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, ObjectFit,
+    Pixels, Style, StyleRefinement, Styled, Window,
 };
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use objc2_core_foundation::CFRetained;
@@ -126,14 +126,6 @@ impl Element for Surface {
                 window.paint_surface_frame(new_bounds, frame.clone());
             }
         }
-    }
-}
-
-impl IntoElement for Surface {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 

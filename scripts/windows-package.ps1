@@ -78,7 +78,7 @@ $licDir = Join-Path $pkg 'licenses'
 New-Item -ItemType Directory -Force (Join-Path $licDir 'thorvg'), (Join-Path $licDir 'unicode-emoji') | Out-Null
 Copy-Item 'licenses/*.txt' $licDir
 Copy-Item 'third_party/thorvg/LICENSE' (Join-Path $licDir 'thorvg/LICENSE')
-Copy-Item 'third_party/thorvg/src/loaders/lottie/rapidjson/LICENSE' (Join-Path $licDir 'thorvg/rapidjson-LICENSE')
+Copy-Item 'third_party/thorvg/src/modules/lottie/rapidjson/LICENSE' (Join-Path $licDir 'thorvg/rapidjson-LICENSE')
 Copy-Item 'assets/emoji/LICENSE.txt' (Join-Path $licDir 'unicode-emoji/LICENSE.txt')
 
 & "$PSScriptRoot/check-bundle-pe.ps1" $pkg

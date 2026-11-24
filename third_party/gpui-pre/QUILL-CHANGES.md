@@ -1,13 +1,26 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre 0.3.12 from crates.io (Apache-2.0,
+This directory is gpui-pre 0.3.14 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's core, used through `[patch.crates-io]` in Quill's
-`Cargo.toml`. The commit "Vendor the unmodified gpui-pre 0.3.12 registry copy of gpui-pre" added the registry copy without its
+`Cargo.toml`. The commit "Vendor the unmodified gpui-pre 0.3.14 registry copy of gpui-pre" added the registry copy without its
 `examples/` directory and their `[[example]]` tables (and without the
 registry's `.cargo-ok`, `.cargo_vcs_info.json`, `Cargo.toml.orig` and
 `Cargo.lock`), so `git diff <that commit> -- third_party/gpui-pre` shows every
 later change. (The patch was first made on 0.3.8, vendored in `f55b3086`,
-and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`, and to 0.3.12 in `docs/decisions/gpui-pre-0-3-12.md`.)
+and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`, to 0.3.12 in `docs/decisions/gpui-pre-0-3-12.md`, and to 0.3.14 in
+`docs/decisions/gpui-kit-0-11-0.md`.)
+
+0.3.14 note: upstream rebuilt the scene. A layer's primitives enter the
+bounds tree when the outermost layer closes, primitives that share an order
+draw by kind, paths are curves binned into tiles (`PaintedPath`), sprites
+carry an animation slot, and native views are a primitive. `scene.rs` is the
+0.3.14 file with Quill's changes written in again (see the sections below);
+`paint_layer` takes no bounds, so `line.rs` no longer needs
+`line_paint_bounds`. Patches dropped because upstream now does the same:
+the shadow `painted_bounds` margin (a shadow's `bounds` is now its painted
+area and `shape_bounds` the shape), the in-place primitive sort (upstream's
+`sort_in_place`; Quill keeps only the reused key buffer, `Scene::sort_keys`)
+and the duplicate `Window::display_id` (upstream caches the same id).
 
 The Quill project changed it in 2026 so the `surface` element can carry CPU
 pixels where CoreVideo doesn't exist, for HDR stills on Windows
@@ -375,7 +388,7 @@ cached view replays, to work out orders the last frame had already stored in
   a layer already stores the layer's order. A primitive in a layer counts in the
   union even where it pokes out of the layer's bounds, which `insert_primitive`
   never put in the tree. `insert_primitive` is split in two, and the second half,
-  `push_primitive`, is what both call. `PathId` is still assigned there.
+  `push_primitive`, is what both call. (0.3.14 has no path ids.)
 - `repaint_operations` is the old loop, for a replay into an open layer (a
   primitive takes that layer's order) or while `suppressed`.
 - `Scene::refuse_paint_for_test` (test support) sets `filtered` and `suppressed`.
@@ -399,10 +412,18 @@ are not always what painting again would give:
   pixels, at glyph edges only, and they can change between a painted frame and
   the next replay.
 
-The tree sees a shadow's whole blur (`Primitive::painted_bounds`, the same margin as
-the shaders), on paint and on replay, so a tail keeps its side between a painted
-frame and the next replay. In random scenes that took 3,113 differing pairs to 0,
-for about 4% more batches.
+The tree sees a shadow's whole blur, on paint and on replay, so a tail keeps its
+side between a painted frame and the next replay. In random scenes that took
+3,113 differing pairs to 0, for about 4% more batches. Since 0.3.14 a shadow's
+`bounds` is that painted area upstream, so Quill's `painted_bounds` is gone.
+
+0.3.14: primitives that share an order and a kind draw in the order they
+reached the scene's arrays, and a layer's primitives reach them when the
+outermost layer closes. `replay_as_one` now pushes a range's primitives in
+that order (`deferred_layer_sequence`), so a nested layer still draws above
+what its outer layer painted after it. `PaintedPath::order` and
+`PaintedPath::color` are Quill accessors for the replay tests. Test:
+`a_nested_layer_replays_above_what_its_outer_layer_paints_after_it`.
 
 On a demo chat of 4,813 paint operations with a looping sticker, `Scene::replay`
 went from 283 to 75 µs a frame and `Window::draw` from 1,003 to 797 µs of CPU.
@@ -507,7 +528,9 @@ sort buffer each frame:
   sorts `(key, position)` pairs in a kept buffer, then moves the primitives by
   swaps. `sort_by_key` took a scratch buffer of whole structs, up to 128 bytes
   each, from `malloc`'s large path on every frame. Test:
-  `src/ui/scene_replay_tests.rs`.
+  `src/ui/scene_replay_tests.rs`. 0.3.14 sorts the same way upstream
+  (`sort_in_place`) with a new key buffer each frame; Quill keeps the buffer
+  on the scene (`Scene::sort_keys`).
 
 The Quill project also changed it in 2026 so a warning logged during a quit
 reaches the log:
@@ -591,7 +614,8 @@ foreground task that waits for the app, since it can arrive with the app borrowe
 The Quill project also changed it in 2026 so a frame does not ask for the
 display list (`docs/decisions/launch-time-macos-appkit.md`): `src/window.rs`
 adds `Window::display_id`, the id the window already keeps, for callers that
-need only the id. `Window::display` lists every display through the platform,
+need only the id. 0.3.14 caches the same id upstream; Quill's public accessor
+stays and upstream's crate-private duplicate is removed. `Window::display` lists every display through the platform,
 a WindowServer round trip on macOS.
 
 The Quill project added `App::active_drag_is::<T>()` in `src/app.rs` in 2026:
@@ -690,7 +714,8 @@ whose `gpui-patches/` carry the same change against crates.io GPUI.
   only while a frame has such a lens, so other frames pay nothing.
 - `src/scene.rs`, `src/window.rs`: `Scene::inks`, `Scene::sharp_backdrops`,
   `Scene::insert_inked_sprite`, `Window::with_lens_ink` (labels painted
-  inside carry their two inks in `MonochromeSprite::pad` and draw in
+  inside carry their two inks in `MonochromeSprite::pad` (since 0.3.14 the
+  `animation` slot, read back with `MonochromeSprite::ink_entry`) and draw in
   grayscale antialiasing), and each lens's id and density. A replayed
   range carries its inks and glyph sources over.
 - `src/scene/backdrop_lens.rs`: `LensDroplet`, `LensBlob` and `LensNeck`
@@ -702,6 +727,11 @@ whose `gpui-patches/` carry the same change against crates.io GPUI.
 - Tests: Quill's `src/ui/backdrop_lens_tests.rs` (reuse, inks, droplet
   bounds, density); the full reuse suite is in gpui-liquid-glass's
   `tests/reuse.rs`.
+- 0.3.14: paths are `PaintedPath`s. The reuse hash takes a path's bounds,
+  paint, curves and tiles; a path's coverage is its paint's content mask; a
+  sprite with an animation makes the backdrop unknowable, so it copies every
+  frame. `src/path_winding.rs` adds `PathTiles::mapped(origin, scale)`, which
+  `backdrop_sharp.rs` uses to draw a path into the sub-scene at its density.
 
 ## Backdrop glass as a style
 

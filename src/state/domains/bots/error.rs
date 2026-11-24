@@ -15,6 +15,19 @@ impl Session {
             return;
         }
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::Bots(BotsPurpose::InviteUsersToBot)) => {
+                // A box closed while its invite was out forgot the request:
+                // its refusal has nobody to show it.
+                if let Some(pending) = pending
+                    && self.acks.is_waited(pending.id)
+                {
+                    let refusal = crate::invite_to_bot::InviteRefusal::of(
+                        err,
+                        crate::state::request_errors::error_reason,
+                    );
+                    self.bots.invite_refusals.push((pending.id, refusal));
+                }
+            }
             // The lookup of a group bot failed: the next time the group's
             // commands arrive it is asked again.
             Some(RequestPurpose::Bots(BotsPurpose::GroupBotUser)) => {

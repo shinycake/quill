@@ -113,6 +113,7 @@ mod index_sliders;
 mod inline_players;
 mod inline_video;
 pub(crate) mod interface_zoom;
+mod invite_to_bot_box;
 mod layer_draws;
 mod lean_buttons;
 mod links_state;

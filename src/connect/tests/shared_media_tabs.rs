@@ -17,6 +17,11 @@ fn types_sent(recorder: &RecordingSender) -> Vec<String> {
         .filter_map(|json| {
             let value: serde_json::Value = serde_json::from_str(json).ok()?;
             let kind = value["@type"].as_str()?.to_string();
+            if let Some(filters) = value.get("filters").and_then(|f| f.as_array()) {
+                let filters: Vec<&str> =
+                    filters.iter().filter_map(|f| f["@type"].as_str()).collect();
+                return Some(format!("{kind}:{}", filters.join(",")));
+            }
             match value.get("filter").and_then(|f| f["@type"].as_str()) {
                 Some(filter) => Some(format!("{kind}:{filter}")),
                 None => Some(kind),
@@ -47,17 +52,23 @@ fn opening_the_gallery_asks_for_counts_and_the_profile_tabs_of_a_user() {
     // The active tab, the info-panel counts, the two extra counts, and the
     // three profile tabs.
     assert!(sent.contains(&"searchChatMessages:searchMessagesFilterPhotoAndVideo".to_string()));
-    for filter in [
-        "searchMessagesFilterPhoto",
-        "searchMessagesFilterVideo",
-        "searchMessagesFilterPoll",
-        "searchMessagesFilterVoiceAndVideoNote",
-    ] {
-        assert!(
-            sent.contains(&format!("getChatMessageCount:{filter}")),
-            "{filter}"
-        );
-    }
+    // One request for the info panel's seven counts, one for the extra two.
+    let counts: Vec<&String> = sent
+        .iter()
+        .filter(|kind| kind.starts_with("getChatMessageCounts:"))
+        .collect();
+    assert_eq!(counts.len(), 2, "{counts:?}");
+    assert!(counts.iter().any(|kind| {
+        kind.starts_with(
+            "getChatMessageCounts:searchMessagesFilterPhoto,searchMessagesFilterVideo,",
+        )
+    }));
+    assert!(
+        counts.contains(
+            &&"getChatMessageCounts:searchMessagesFilterPoll,searchMessagesFilterVoiceAndVideoNote"
+                .to_string()
+        )
+    );
     for method in ["getChatPostedToChatPageStories", "getReceivedGifts"] {
         assert!(sent.contains(&method.to_string()), "{method}");
     }
@@ -238,7 +249,7 @@ fn reopening_the_gallery_asks_for_the_counts_again_and_keeps_the_shown_ones() {
     let counts_sent = |recorder: &RecordingSender| {
         types_sent(recorder)
             .iter()
-            .filter(|kind| kind.starts_with("getChatMessageCount"))
+            .filter(|kind| kind.starts_with("getChatMessageCounts"))
             .count()
     };
     let first = counts_sent(&recorder);
@@ -257,9 +268,9 @@ fn reopening_the_gallery_asks_for_the_counts_again_and_keeps_the_shown_ones() {
     // Once they answered, the next open asks again and the entry stays.
     let ids: Vec<_> = driver.session.requests.ids_for_chat(
         &(0..16u8)
-            .map(|filter| {
+            .map(|first| {
                 crate::state::RequestPurpose::Users(
-                    crate::state::UsersPurpose::GetChatMessageCount { filter },
+                    crate::state::UsersPurpose::GetChatMessageCounts { first },
                 )
             })
             .collect::<Vec<_>>(),

@@ -1,8 +1,8 @@
 diff --git a/td/generate/scheme/td_api.tl b/td/generate/scheme/td_api.tl
-index ab9bfc9aa..e284767af 100644
+index 96383ba2c..84232d4de 100644
 --- a/td/generate/scheme/td_api.tl
 +++ b/td/generate/scheme/td_api.tl
-@@ -12297,7 +12297,28 @@ testVectorString value:vector<string> = TestVectorString;
+@@ -12685,7 +12685,28 @@ testVectorString value:vector<string> = TestVectorString;
  //@description A simple object containing a vector of objects that hold a string; for testing only @value Vector of objects
  testVectorStringObject value:vector<testString> = TestVectorStringObject;
  
@@ -29,10 +29,10 @@ index ab9bfc9aa..e284767af 100644
 +getQuillTakeoutMessageRanges = QuillTakeoutMessageRanges;
 +
  
- //@description Returns the current authorization state. This is an offline method. For informational purposes only. Use updateAuthorizationState instead to maintain the current authorization state. Can be called before initialization
- getAuthorizationState = AuthorizationState;
+ //@description Returns the current authorization state. This is an offline method. For informational purposes only.
+ //-Use updateAuthorizationState instead to maintain the current authorization state. Can be called before initialization
 diff --git a/td/generate/scheme/telegram_api.tl b/td/generate/scheme/telegram_api.tl
-index e16381ad4..bead69793 100644
+index cb0bf5510..36522e6da 100644
 --- a/td/generate/scheme/telegram_api.tl
 +++ b/td/generate/scheme/telegram_api.tl
 @@ -28,6 +28,7 @@ inputStickerSetThumbLegacy#dbaeae9 stickerset:InputStickerSet volume_id:long loc
@@ -44,7 +44,7 @@ index e16381ad4..bead69793 100644
  invokeWithGooglePlayIntegrityPrefix#1df92984 nonce:string token:string = Error;
  invokeWithApnsSecretPrefix#0dae54f8 nonce:string secret:string = Error;
 diff --git a/td/telegram/OptionManager.cpp b/td/telegram/OptionManager.cpp
-index 5a1a4bf92..fc24f0123 100644
+index b46488373..dcc5c3598 100644
 --- a/td/telegram/OptionManager.cpp
 +++ b/td/telegram/OptionManager.cpp
 @@ -44,6 +44,7 @@
@@ -55,7 +55,7 @@ index 5a1a4bf92..fc24f0123 100644
  
  #include <cmath>
  #include <functional>
-@@ -1136,10 +1137,19 @@ td_api::object_ptr<td_api::OptionValue> OptionManager::get_option_value_object(S
+@@ -1150,10 +1151,19 @@ td_api::object_ptr<td_api::OptionValue> OptionManager::get_option_value_object(S
      case 'I':
        return td_api::make_object<td_api::optionValueInteger>(to_integer<int64>(value.substr(1)));
      case 'S':
@@ -91,10 +91,10 @@ index 0338ab53d..4654fa914 100644
  
    Td *td_;
 diff --git a/td/telegram/Requests.cpp b/td/telegram/Requests.cpp
-index c2cb83379..61c847a13 100644
+index 2c4a6fd4f..240a25275 100644
 --- a/td/telegram/Requests.cpp
 +++ b/td/telegram/Requests.cpp
-@@ -6824,6 +6824,18 @@ void Requests::on_request(uint64 id, const td_api::removeContacts &request) {
+@@ -6856,6 +6856,18 @@ void Requests::on_request(uint64 id, const td_api::removeContacts &request) {
    CREATE_REQUEST(RemoveContactsRequest, UserId::get_user_ids(request.user_ids_));
  }
  
@@ -114,10 +114,10 @@ index c2cb83379..61c847a13 100644
    CHECK_IS_USER();
    CREATE_COUNT_REQUEST_PROMISE();
 diff --git a/td/telegram/Requests.h b/td/telegram/Requests.h
-index 1acf3238a..45219a26c 100644
+index 2ead58dd7..2a1a03842 100644
 --- a/td/telegram/Requests.h
 +++ b/td/telegram/Requests.h
-@@ -1360,6 +1360,10 @@ class Requests {
+@@ -1368,6 +1368,10 @@ class Requests {
  
    void on_request(uint64 id, const td_api::removeContacts &request);
  
@@ -129,7 +129,7 @@ index 1acf3238a..45219a26c 100644
  
    void on_request(uint64 id, td_api::changeImportedContacts &request);
 diff --git a/td/telegram/UserManager.cpp b/td/telegram/UserManager.cpp
-index 27ffac78f..487fe0f71 100644
+index 6a6cc29f7..fc0da9c1d 100644
 --- a/td/telegram/UserManager.cpp
 +++ b/td/telegram/UserManager.cpp
 @@ -118,6 +118,154 @@
@@ -287,7 +287,7 @@ index 27ffac78f..487fe0f71 100644
  class GetContactsQuery final : public Td::ResultHandler {
   public:
    void send(int64 hash) {
-@@ -8398,6 +8546,17 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
+@@ -8399,6 +8547,17 @@ void UserManager::on_deleted_contacts(const vector<UserId> &deleted_contact_user
    }
  }
  

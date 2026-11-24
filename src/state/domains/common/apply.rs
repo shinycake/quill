@@ -239,8 +239,8 @@ impl Session {
             CommonPayload::UpdateAgeVerificationParameters { parameters } => {
                 self.sync.set_age_verification(parameters)
             }
-            CommonPayload::Count { count } => {
-                if let Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { filter })) =
+            CommonPayload::Counts { counts: answered } => {
+                if let Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCounts { first })) =
                     pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                     // Only into the entry `fetch_chat_media_counts` opened:
@@ -248,7 +248,12 @@ impl Session {
                     // longer kept) is asked for again in full.
                     && let Some(counts) = self.media.chat_media_counts.get_mut(&chat_id.0)
                 {
-                    counts.insert(filter, count);
+                    for (key, count) in (first..).zip(answered) {
+                        // -1 is "unknown locally", never asked for here.
+                        if count >= 0 {
+                            counts.insert(key, count);
+                        }
+                    }
                 }
             }
             CommonPayload::UpdateServiceNotification { kind, text } => {

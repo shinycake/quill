@@ -6,7 +6,7 @@ impl UsersPurpose {
     /// What this request is. Exhaustive: a new variant must be classified here.
     pub(crate) fn kind(&self) -> RequestKind {
         match self {
-            Self::GetChatMessageCount { .. }
+            Self::GetChatMessageCounts { .. }
             | Self::OpenChatSimilarChat
             | Self::GetMe
             | Self::GetUserFullInfo

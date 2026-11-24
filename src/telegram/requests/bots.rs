@@ -285,3 +285,16 @@ pub fn block_message_sender_from_replies(
     })
     .to_string()
 }
+
+/// `inviteUsersToBot bot_user_id:int53 user_ids:vector<int53> = Ok`
+/// (TDLib 1.8.71): 1-10 people get a `messageBotInvite` from a bot the
+/// user owns.
+pub fn invite_users_to_bot(extra: RequestId, bot_user_id: i64, user_ids: &[i64]) -> String {
+    json!({
+        "@type": "inviteUsersToBot",
+        "@extra": extra.as_extra(),
+        "bot_user_id": bot_user_id,
+        "user_ids": user_ids,
+    })
+    .to_string()
+}

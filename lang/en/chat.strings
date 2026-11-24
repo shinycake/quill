@@ -71,6 +71,10 @@
 "lng_mute_menu_sound_select" = "Select tone";
 "lng_new_contact_add_name" = "Add {user} to contacts";
 "lng_new_contact_share" = "Share my phone number";
+"lng_new_contact_block_bot" = "Block bot";
+"lng_new_contact_bot_invited_owner" = "{user} invited you to this bot owned by {owner}.";
+"lng_report_spam_ok" = "Report";
+"lng_report_spam_sure_bot_inviter" = "Are you sure you want to report {user}, who invited you to this bot, for spam?";
 "lng_new_contact_share_sure" = "Do you want to share your phone number {phone} with {user}?";
 "lng_pinned_hide_all" = "Don't show pinned messages";
 "lng_pinned_message" = "Pinned message";

@@ -121,9 +121,9 @@ void LottieColorStop::release()
 
     if (!frames) return;
 
-    ARRAY_FOREACH(p, *frames) {
-        tvg::free((*p).value.data);
-        delete((*p).value.input);
+    for (auto& p : *frames) {
+        tvg::free(p.value.data);
+        delete (p.value.input);
     }
     tvg::free(frames->data);
     tvg::free(frames);
@@ -168,8 +168,8 @@ Result LottieColorStop::operator()(float frameNo, Fill* fill, LottieExpressions*
     if (frame->interpolator) t = frame->interpolator->progress(t);
 
     if (frame->hold) {
-        if (t < 1.0f) fill->colorStops(frame->value.data, count);
-        else fill->colorStops((frame + 1)->value.data, count);
+        if (t < 1.0f) return fill->colorStops(frame->value.data, count);
+        return fill->colorStops((frame + 1)->value.data, count);
     }
 
     auto s = frame->value.data;
@@ -388,9 +388,9 @@ void LottiePathSet::release()
 
     if (!frames) return;
 
-    ARRAY_FOREACH(p, *frames) {
-        tvg::free((*p).value.cmds);
-        tvg::free((*p).value.pts);
+    for (auto& p : *frames) {
+        tvg::free(p.value.cmds);
+        tvg::free(p.value.pts);
     }
     tvg::free(frames->data);
     tvg::free(frames);
@@ -443,9 +443,9 @@ void LottieTextDoc::release()
 
     if (!frames) return;
 
-    ARRAY_FOREACH(p, *frames) {
-        tvg::free((*p).value.text);
-        tvg::free((*p).value.name);
+    for (auto& p : *frames) {
+        tvg::free(p.value.text);
+        tvg::free(p.value.name);
     }
     delete(frames);
     frames = nullptr;

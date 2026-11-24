@@ -115,6 +115,11 @@ const TON_WALLET: &[&str] = &[
     "TonCenter",
     "WalletBot",
     "OnRamp",
+    // TDLib 1.8.71: on-chain gift offers and sales, minting a gift into the
+    // TON wallet and withdrawing Grams to it.
+    "OnChain",
+    "mintGift",
+    "withdrawGrams",
 ];
 
 /// The account itself, and reads that act for the user: other sessions,
@@ -197,7 +202,7 @@ const MONEY: &[&str] = &[
     "getStarWithdrawalUrl",
     "getGramWithdrawalUrl",
     "getStarAdAccountUrl",
-    "getUpgradedGiftWithdrawalUrl",
+    "getGiftMintingUrl",
 ];
 
 /// Words in a change's name that mean it posts on the user's profile or
@@ -388,6 +393,11 @@ mod tests {
             "checkWalletBotBalance",
             "createOnRampPaymentSession",
             "setDatabaseEncryptionKey",
+            "mintGift",
+            "withdrawGrams",
+            "sendGiftOnChainPurchaseOffer",
+            "acceptGiftOnChainPurchaseOffer",
+            "getGiftOnChainListingTransaction",
         ] {
             assert!(
                 matches!(classify(method, false, false), Class::Blocked(_)),
@@ -446,7 +456,7 @@ mod tests {
             "boostChat",
             "getChatRevenueWithdrawalUrl",
             "getGramWithdrawalUrl",
-            "getUpgradedGiftWithdrawalUrl",
+            "getGiftMintingUrl",
         ] {
             assert_eq!(
                 classify(method, false, true),

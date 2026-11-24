@@ -14,15 +14,16 @@
 #   share/quillvideo/  FFmpeg's license texts and the exact source + configure line
 #
 # LGPL posture: no --enable-gpl / --enable-nonfree, no external libraries
-# (--disable-autodetect), dynamic linking only. Telegram Desktop pins the same
-# FFmpeg release (Telegram/build/prepare/prepare.py).
+# (--disable-autodetect), dynamic linking only. Telegram Desktop builds FFmpeg's
+# release/8.1 branch (Telegram/build/prepare/prepare.py); Quill follows FFmpeg
+# releases (docs/dependency-updates.md).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${QUILL_FFMPEG_DEST:-$ROOT/vendor/ffmpeg}"
 PREFIX="$DEST/prefix"
-TAG=n9.0.2
-COMMIT=946fcce07b6dcd0331c8cc609192aeff5e1924f8
+TAG=n9.1
+COMMIT=74e4393595cf2b5857f0da925c4e0dd74ea306e5
 JOBS="${JOBS:-$( (nproc || sysctl -n hw.ncpu) 2>/dev/null || echo 4)}"
 
 case "$(uname -s)" in

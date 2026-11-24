@@ -446,11 +446,11 @@ fn push_block(block: &Value, depth: usize, out: &mut Vec<QuoteRichText>) -> Opti
             .as_array()?
             .iter()
             .try_for_each(|item| push_children(item, depth, out)),
-        "pageBlockBlockQuote" => {
+        "pageBlockBlockQuote" | "pageBlockExpandableBlockQuote" => {
             push_children(block, depth, out)?;
             push_text(field("credit"), out)
         }
-        "pageBlockExpandableBlockQuote" | "pageBlockPullQuote" => {
+        "pageBlockPullQuote" => {
             push_text(field("text"), out)?;
             push_text(field("credit"), out)
         }

@@ -222,7 +222,7 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
         app.dialogs.block_bar_dialog = Some(BlockBarDialog {
             chat_id: CHAT,
             user_id: 5,
-            report: false,
+            report: Some(false),
             delete_chat: false,
         });
         app.call_boxes.confirm = Some((7, false));

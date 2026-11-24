@@ -230,7 +230,7 @@ impl Session {
         manage.events.push(GiftEvent::Deleted);
     }
 
-    /// The `httpUrl` of `getUpgradedGiftWithdrawalUrl`: tdesktop opens it
+    /// The `httpUrl` of `getGiftMintingUrl`: tdesktop opens it
     /// and closes the picker (`ExportOnBlockchain`).
     pub(crate) fn apply_gift_export_url(&mut self, url: String, request: Option<RequestId>) {
         let manage = &mut self.payments.gifts_manage;

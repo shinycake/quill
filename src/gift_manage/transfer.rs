@@ -21,7 +21,7 @@ const SERVICE_USER_ID: i64 = 777_000;
 /// Whether the "Send via Blockchain" row can be used now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportState {
-    /// `export_date == 0`: the gift can't leave Telegram; no row.
+    /// `mint_date == 0`: the gift can't leave Telegram; no row.
     Unavailable,
     /// The row is shown with "unlocks in ..."; tapping it explains.
     Locked { hours: i64 },
@@ -31,12 +31,12 @@ pub enum ExportState {
 
 impl ExportState {
     /// tdesktop `MakeExportOption` / `ExportRow`: the hours left are
-    /// `max((left + 1800) / 3600, 1)` while `export_date` is in the future.
-    pub fn of(export_date: i64, now: i64) -> Self {
-        if export_date <= 0 {
+    /// `max((left + 1800) / 3600, 1)` while `mint_date` is in the future.
+    pub fn of(mint_date: i64, now: i64) -> Self {
+        if mint_date <= 0 {
             return Self::Unavailable;
         }
-        let left = export_date.saturating_sub(now);
+        let left = mint_date.saturating_sub(now);
         if left <= 0 {
             Self::Ready
         } else {
@@ -138,7 +138,7 @@ pub enum TransferStage {
     /// "Manage with Fragment" with "Open Fragment".
     ConfirmExport,
     /// "Open Fragment" was pressed: the password-less try of
-    /// `getUpgradedGiftWithdrawalUrl` is out (tdesktop `ExportOnBlockchain`
+    /// `getGiftMintingUrl` is out (tdesktop `ExportOnBlockchain`
     /// sends `inputCheckPasswordEmpty` first). It only tells whether a
     /// password exists and is old enough; a URL it might return is dropped.
     /// Since TDLib 1.8.69 the probe stops in TDLib unless a temporary

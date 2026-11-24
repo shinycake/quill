@@ -334,6 +334,7 @@ impl QuillApp {
                 Button::new("search-frequent-toggle")
                     .label(label)
                     .ghost()
+                    .aria_expanded(view.expanded())
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_top_people(cx))),
             )
         });

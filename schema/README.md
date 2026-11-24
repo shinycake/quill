@@ -1,9 +1,9 @@
-Vendored from official TDLib commit `23383aef218a3123f02b744bfa91bde21056a814` (`td/generate/scheme/td_api.tl`).
+Vendored from official TDLib commit `1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d` (`td/generate/scheme/td_api.tl`).
 
-- CMake version: 1.8.70
-- Size: 1,236,740 bytes
-- SHA-256: `fe37b2e83c39a2bd27b946213555ba8674c57d8971d27719d11c3961c9d11145`
-- Upstream: https://raw.githubusercontent.com/tdlib/td/23383aef218a3123f02b744bfa91bde21056a814/td/generate/scheme/td_api.tl
+- CMake version: 1.8.71
+- Size: 1,277,521 bytes
+- SHA-256: `bf68db118f42010b1359dc6776128567d8de18fc793aa5280f10d2912384c1b1`
+- Upstream: https://raw.githubusercontent.com/tdlib/td/1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d/td/generate/scheme/td_api.tl
 - License: Boost Software License 1.0 (see TDLib `LICENSE_1_0.txt`)
 
 Refresh with `bash scripts/vendor-td-schema.sh`. Do not mix this file with a different tdjson binary. A 1,000,001-byte copy is truncated and invalid (`vector<T>` parameters get stripped).

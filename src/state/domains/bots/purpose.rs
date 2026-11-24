@@ -166,6 +166,10 @@ pub enum BotsPurpose {
     GetWidgetQueryAnswer,
     /// `getWidgetPublicData` for an on-screen widget that asked to poll.
     GetWidgetPublicData,
+    /// `inviteUsersToBot` (TDLib 1.8.71) from the "Invite to Bot" box,
+    /// whose `Sending` stage holds the request. Response is `ok`; a
+    /// refusal lands in `bots.invite_refusals` under the request.
+    InviteUsersToBot,
 }
 
 flat_purposes!(Bots(BotsPurpose) {
@@ -189,4 +193,5 @@ flat_purposes!(Bots(BotsPurpose) {
     SendWebAppCustomRequest,
     SetMessageSenderBotVerification,
     RemoveMessageSenderBotVerification,
+    InviteUsersToBot,
 });

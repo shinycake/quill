@@ -5,9 +5,10 @@ use crate::state::request_purpose::flat_purposes;
 /// [`RequestPurpose::Users`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsersPurpose {
-    /// The info panel's media counts: `getChatMessageCount` with the
-    /// filter at index `filter` of `MEDIA_COUNT_FILTERS`.
-    GetChatMessageCount { filter: u8 },
+    /// Media counts: one `getChatMessageCounts` whose answer's `counts`
+    /// land under the count keys `first`, `first + 1`, ... (keys 0-6 are
+    /// `MEDIA_COUNT_FILTERS`, 7 and on `EXTRA_COUNT_FILTERS`).
+    GetChatMessageCounts { first: u8 },
     /// `openChatSimilarChat` (TDLib 1.8.68, schema line 12016): a channel
     /// was opened from the similar-channels strip. Response is `ok`.
     OpenChatSimilarChat,

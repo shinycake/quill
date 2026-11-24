@@ -17,6 +17,7 @@
 
 use std::hash::{DefaultHasher, Hasher};
 
+use super::{PaintedPath, SpriteAnimationId};
 use crate::{
     BackdropLens, Bounds, DrawOrder, Hsla, LensCopy, LensPacking, LensRegion, MonochromeSprite,
     PolychromeSprite, Quad, Rgba, ScaledPixels, Scene, Shadow, SubpixelSprite,
@@ -419,7 +420,7 @@ fn collect_under(
         }
     }
     for (index, path) in scene.paths.iter().enumerate() {
-        let coverage = path.bounds.intersect(&path.content_mask.bounds);
+        let coverage = path.bounds.intersect(&path.paint.content_mask.bounds);
         if drawn_before(path.order) && covers(coverage, &region) {
             push(path.order, Rank::Path, index, hash_path(path));
         }
@@ -442,11 +443,23 @@ fn collect_under(
             &sprite.transformation,
         );
         if drawn_before(sprite.order) && covers(coverage, &region) {
+            // An animated sprite moves on every present without a new
+            // frame, so what lies under the region can't be told.
+            if scene
+                .animations
+                .iter()
+                .any(|animation| animation.sprite_index == index)
+            {
+                return None;
+            }
             // A label's ink is chosen on the GPU from the slot of the glass
             // under it, so the same sprite can draw differently: hash its
             // ink and what that glass holds.
             let ink = ink_key(scene, sprite, drawn)?;
-            let plain = MonochromeSprite { pad: 0, ..*sprite };
+            let plain = MonochromeSprite {
+                animation: SpriteAnimationId::NONE,
+                ..*sprite
+            };
             push(
                 sprite.order,
                 Rank::MonochromeSprite,
@@ -485,7 +498,7 @@ fn collect_under(
     Some(under)
 }
 
-fn hash_path(path: &crate::Path<ScaledPixels>) -> u64 {
+fn hash_path(path: &PaintedPath) -> u64 {
     let mut hasher = DefaultHasher::new();
     let mut f = |v: f32| hasher.write_u32(v.to_bits());
     let bounds = |b: &Bounds<ScaledPixels>, f: &mut dyn FnMut(f32)| {
@@ -494,19 +507,37 @@ fn hash_path(path: &crate::Path<ScaledPixels>) -> u64 {
         f(b.size.width.0);
         f(b.size.height.0);
     };
+    let point = |p: &crate::Point<f32>, f: &mut dyn FnMut(f32)| {
+        f(p.x);
+        f(p.y);
+    };
     bounds(&path.bounds, &mut f);
-    bounds(&path.content_mask.bounds, &mut f);
-    for vertex in &path.vertices {
-        f(vertex.xy_position.x.0);
-        f(vertex.xy_position.y.0);
-        f(vertex.st_position.x);
-        f(vertex.st_position.y);
-        bounds(&vertex.content_mask.bounds, &mut f);
+    bounds(&path.paint.bounds, &mut f);
+    bounds(&path.paint.content_mask.bounds, &mut f);
+    f(f32::from_bits(path.paint.even_odd.0));
+    for curve in path.tiles.curves() {
+        for p in [&curve.p0, &curve.p1, &curve.a, &curve.b] {
+            point(p, &mut f);
+        }
+        f(curve.sign);
     }
-    let color = path.color;
+    for tile in path.tiles.tiles() {
+        for v in [tile.curve_start, tile.curve_count, tile.backdrop as u32] {
+            f(f32::from_bits(v));
+        }
+        for p in [
+            &tile.top_left,
+            &tile.bottom_right,
+            &tile.reference,
+            &tile.curves_top_left,
+            &tile.curves_bottom_right,
+        ] {
+            point(p, &mut f);
+        }
+    }
     let mut hasher2 = DefaultHasher::new();
     hasher2.write_u64(hasher.finish());
-    hasher2.write(&background_bytes(&color));
+    hasher2.write(&background_bytes(&path.paint.color));
     hasher2.finish()
 }
 
@@ -569,11 +600,7 @@ fn lens_drawn_key(lens: &BackdropLens, region: &LensRegion, under: u64) -> u64 {
 /// A sprite's ink, and while planning, what the glass it reads holds;
 /// `None` when that can't be told.
 fn ink_key(scene: &Scene, sprite: &MonochromeSprite, drawn: Option<&[Option<u64>]>) -> Option<u64> {
-    let Some(entry) = sprite
-        .pad
-        .checked_sub(1)
-        .and_then(|i| scene.inks.get(i as usize))
-    else {
+    let Some(entry) = sprite.ink_entry().and_then(|i| scene.inks.get(i)) else {
         return Some(0);
     };
     // Outside planning (a re-rendered backdrop), the ink is what it is.

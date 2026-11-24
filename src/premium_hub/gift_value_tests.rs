@@ -40,7 +40,7 @@ fn other_objects_and_broken_fields_are_safe() {
     );
     assert_eq!(parse_payload("ok", &json!({"@type": "ok"})), None);
     let info = parse_gift_value_info(&json!({
-        "@type": "upgradedGiftValueInfo", "value": -5, "minimum_price": "12",
+        "@type": "upgradedGiftValueInfo", "value": -5, "min_price": "12",
         "telegram_listed_gift_count": null, "currency": 7,
     }))
     .expect("info");

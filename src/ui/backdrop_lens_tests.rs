@@ -7,8 +7,8 @@ use gpui_kit::{
     AtlasTextureId, AtlasTextureKind, AtlasTile, BackdropLens, Background, Bounds, ContentMask,
     LENS_ATLAS_GUTTER, LensBend, LensCopy, LensDetail, LensDroplet, LensFrameContext, LensInk,
     LensInkEntry, LensMaterial, LensPacking, LensReuse, LensStyle, LensTune, LensWork,
-    MonochromeSprite, Quad, ScaledPixels, Scene, TileId, TransformationMatrix, bounds, hsla, point,
-    px, size,
+    MonochromeSprite, Quad, ScaledPixels, Scene, SpriteAnimationId, TileId, TransformationMatrix,
+    bounds, hsla, point, px, size,
 };
 
 fn style() -> LensStyle {
@@ -128,7 +128,7 @@ fn content_beside_a_lens_keeps_its_place() {
 #[test]
 fn a_lens_in_a_paint_layer_draws_as_its_fallback_quad() {
     let mut scene = Scene::default();
-    scene.push_layer(rect(0.0, 0.0, 400.0, 400.0));
+    scene.push_layer();
     scene.insert_primitive(lens(10.0, 10.0, 80.0, 40.0));
     scene.pop_layer();
     scene.finish();
@@ -293,7 +293,7 @@ fn an_inked_label_reads_the_glass_under_it_and_none_beside_it() {
     };
     let glyph = |x: f32| MonochromeSprite {
         order: 0,
-        pad: 0,
+        animation: SpriteAnimationId::NONE,
         tile: AtlasTile {
             texture_id: AtlasTextureId {
                 index: 0,
@@ -313,12 +313,12 @@ fn an_inked_label_reads_the_glass_under_it_and_none_beside_it() {
     scene.insert_inked_sprite(glyph(40.0), ink);
     scene.insert_inked_sprite(glyph(300.0), ink);
     scene.finish();
-    // Each glyph's `pad` names its entry (1-based): the lens it reads.
+    // Each glyph names its ink entry: the lens it reads.
     let mut read: Vec<(f32, Option<u32>)> = scene
         .monochrome_sprites
         .iter()
         .map(|sprite| {
-            let entry = scene.inks.get((sprite.pad as usize).wrapping_sub(1));
+            let entry = sprite.ink_entry().and_then(|i| scene.inks.get(i));
             assert_eq!(entry.map(|entry| entry.ink), Some(ink));
             (sprite.bounds.origin.x.0, entry.map(|entry| entry.lens))
         })

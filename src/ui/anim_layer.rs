@@ -609,14 +609,6 @@ impl Styled for Layered {
     }
 }
 
-impl IntoElement for Layered {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for Layered {
     type RequestLayoutState = ();
     /// The item's index in the layer.
@@ -724,14 +716,6 @@ pub(super) fn occluder(child: impl IntoElement) -> Occluder {
     Occluder {
         layer: current(),
         child: child.into_any_element(),
-    }
-}
-
-impl IntoElement for Occluder {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 
@@ -846,14 +830,6 @@ struct LayerPainter {
     /// The [`AnimationLayer`] view, the frame-clock target.
     painter: EntityId,
     window: Option<ChatId>,
-}
-
-impl IntoElement for LayerPainter {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 impl Element for LayerPainter {

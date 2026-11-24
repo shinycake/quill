@@ -340,14 +340,6 @@ impl<V: View> ViewElement<V> {
     }
 }
 
-impl<V: View> IntoElement for ViewElement<V> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 pub(crate) struct ViewElementState {
     prepaint_range: Range<PrepaintStateIndex>,
     paint_range: Range<PaintIndex>,

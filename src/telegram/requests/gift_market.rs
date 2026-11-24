@@ -4,8 +4,11 @@ use crate::gift_market::{CRAFT_PAGE_SIZE, RESALE_PAGE_SIZE, ResaleFilter};
 use crate::ids::RequestId;
 use serde_json::json;
 
-/// `searchGiftsForResale gift_id order for_crafting for_stars attributes
-/// offset limit`. Answer `giftsForResale`.
+/// `searchGiftsForResale gift_id order for_crafting for_stars for_grams
+/// for_fragment attributes offset limit` (TDLib 1.8.71). Answer
+/// `giftsForResale`. `for_grams` and `for_fragment` stay off: both list
+/// gifts bought with TON (on-chain sales and Fragment), which Quill never
+/// buys; with neither set TDLib leaves on-chain sales out.
 pub fn search_gifts_for_resale(
     extra: RequestId,
     gift_id: i64,
@@ -20,6 +23,8 @@ pub fn search_gifts_for_resale(
         "order": filter.sort.to_json(),
         "for_crafting": for_crafting,
         "for_stars": filter.stars_only,
+        "for_grams": false,
+        "for_fragment": false,
         "attributes": filter.attributes_json(),
         "offset": offset,
         "limit": RESALE_PAGE_SIZE,

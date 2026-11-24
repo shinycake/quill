@@ -199,3 +199,71 @@ wording!(
     r#"{"@type":"messageDirectMessagePriceChanged","is_enabled":false,"paid_message_star_count":0}"#,
     "Channel disabled Direct Messages."
 );
+
+// TDLib 1.8.71: on-chain offers read as text (no buttons), in Grams.
+#[test]
+fn on_chain_gift_offers_read_by_who_made_them() {
+    let offer = |is_buyer: bool, state: &str| {
+        format!(
+            r#"{{"@type":"messageUpgradedGiftOnChainPurchaseOffer","gift":{{"@type":"upgradedGift","title":"Plush Pepe","number":7}},"is_buyer":{is_buyer},"state":{{"@type":"{state}"}},"offer_address":"EQ","gram_amount":"12500000000","fee_basis_points":500,"expiration_date":1,"offer_message_id":0}}"#
+        )
+    };
+    let incoming = say(
+        &offer(false, "giftOnChainPurchaseOfferStatePending"),
+        BY_DANA,
+    );
+    assert!(
+        incoming.starts_with("An offer to buy this gift for 12.5"),
+        "{incoming}"
+    );
+    let mine = say(
+        &offer(true, "giftOnChainPurchaseOfferStateCanceling"),
+        BY_ME,
+    );
+    assert!(mine.starts_with("You offered 12.5"), "{mine}");
+    assert!(mine.ends_with("for Plush Pepe #7."), "{mine}");
+    assert_eq!(
+        say(&offer(true, "giftOnChainPurchaseOfferStateExpired"), BY_ME),
+        "This offer was rejected."
+    );
+    assert_eq!(
+        say(
+            &offer(false, "giftOnChainPurchaseOfferStateAccepted"),
+            BY_DANA
+        ),
+        "This offer was accepted."
+    );
+    // Settled is an accepted offer executed on chain.
+    assert_eq!(
+        say(&offer(true, "giftOnChainPurchaseOfferStateSettled"), BY_ME),
+        "This offer was accepted."
+    );
+}
+
+#[test]
+fn a_gift_bought_on_chain_reads_as_a_sale() {
+    let text = say(
+        r#"{"@type":"messageUpgradedGift","gift":{"@type":"upgradedGift","title":"Plush Pepe","number":7},"sender_id":{"@type":"messageSenderUser","user_id":1},"receiver_id":{"@type":"messageSenderUser","user_id":9},"origin":{"@type":"upgradedGiftOriginOnChainResale","gram_amount":"40000000000"},"received_gift_id":"","text":{"@type":"formattedText","text":"","entities":[]},"is_private":false,"is_saved":false,"can_be_transferred":false,"was_transferred":false,"transfer_star_count":0,"drop_original_details_star_count":0,"next_transfer_date":0,"next_resale_date":0,"mint_date":0,"craft_date":0}"#,
+        BY_DANA,
+    );
+    assert!(text.contains("40"), "{text}");
+}
+
+#[test]
+fn a_bot_invite_names_the_inviter() {
+    let json = r#"{"@type":"messageBotInvite","inviter_user_id":2}"#;
+    assert_eq!(say(json, BY_DANA), "Dana Cole was invited by Omar Haddad.");
+    let (content, _) = parse(json);
+    let ctx = ServiceCtx {
+        actor: Some(MessageSender::User { user_id: 77 }),
+        is_outgoing: false,
+        my_id: Some(ME),
+        is_channel: false,
+        is_secret: false,
+        chat_id: 77,
+        now: 1_800_000_000,
+        names: &Names,
+    };
+    let from_bot = render(&content, &ctx).expect("service").plain();
+    assert_eq!(from_bot, "Omar Haddad invited you to this bot.");
+}

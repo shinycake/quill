@@ -1089,6 +1089,31 @@ fn pending_join_request_updates_keep_requester_ids() {
 }
 
 #[test]
+fn a_bot_invite_bar_keeps_the_inviter_and_the_owner() {
+    // TDLib 1.8.71 `chatActionBarBotInvite`.
+    use crate::telegram::envelope::ChatActionBar;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":777,"title":"Helper Bot","type":{"@type":"chatTypePrivate","user_id":777},"action_bar":{"@type":"chatActionBarBotInvite","can_unarchive":true,"inviter_user_id":42,"owner_user_id":43}}}"#,
+    );
+    let bar = session.chat_action_bar(ChatId(777)).expect("bar stored");
+    assert_eq!(
+        bar,
+        &ChatActionBar::BotInvite {
+            can_unarchive: true,
+            inviter_user_id: 42,
+            owner_user_id: 43,
+        }
+    );
+    // tdesktop's bot-invite bar has Block and Report, no Unarchive.
+    assert!(!bar.can_unarchive() && bar.is_dismissible());
+}
+
+#[test]
 fn chat_action_bar_from_new_chat_and_updates() {
     // Batch 8: recorded-shape `chat.action_bar`, then `updateChatActionBar`
     // changing and clearing it (schema 1.8.67 lines 3667-3690, 10526).

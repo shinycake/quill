@@ -182,6 +182,8 @@ pub(crate) fn view_button_label(preview_type: &Value) -> Option<&'static str> {
         "linkPreviewTypeTextCompositionStyle" => "View Style",
         "linkPreviewTypeUpgradedGift" => "View collectible",
         "linkPreviewTypeGiftCollection" => "View Collection",
+        // TDLib 1.8.71 (tdesktop `lng_view_button_botinvite`).
+        "linkPreviewTypeBotInvite" => "Invite to Bot",
         // The label follows the clock; see `LinkPreview::button_label`.
         "linkPreviewTypeGiftAuction" => "Join",
         _ => return None,

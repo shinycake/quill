@@ -59,14 +59,17 @@ pub struct GiftManageInfo {
     pub upgrade_star_count: i64,
     /// A collectible listed for resale: its Star price (`resale_parameters`).
     pub resale_star_count: i64,
-    /// Listed for TON only (`resale_parameters.gram_only`).
+    /// The listing can only be changed with TON: listed for Grams only
+    /// (`resale_parameters.gram_only`), or sold on-chain
+    /// (`upgradedGift.uses_on_chain_resale`, TDLib 1.8.71), whose price
+    /// and delisting go through TON wallet transactions.
     pub resale_gram_only: bool,
     pub listed: bool,
     /// Not usable for crafting before this Unix time (`craft_date`).
     pub craft_date: i32,
     /// When the collectible may leave for the TON blockchain
-    /// (`export_date`); 0 when it never can.
-    pub export_date: i32,
+    /// (`mint_date`); 0 when it never can.
+    pub mint_date: i32,
 }
 
 impl GiftManageInfo {
@@ -88,10 +91,11 @@ impl GiftManageInfo {
             next_resale_date: int(received.get("next_resale_date")) as i32,
             upgrade_star_count: int(inner.and_then(|g| g.get("upgrade_star_count"))),
             resale_star_count: int(resale.and_then(|r| r.get("star_count"))),
-            resale_gram_only: resale.is_some_and(|r| flag(r, "gram_only")),
+            resale_gram_only: resale.is_some_and(|r| flag(r, "gram_only"))
+                || inner.is_some_and(|g| flag(g, "uses_on_chain_resale")),
             listed: resale.is_some_and(|r| !r.is_null()),
             craft_date: int(received.get("craft_date")) as i32,
-            export_date: i32::try_from(int(received.get("export_date"))).unwrap_or(0),
+            mint_date: i32::try_from(int(received.get("mint_date"))).unwrap_or(0),
         }
     }
 }
@@ -210,7 +214,7 @@ impl ReceivedGift {
 
     /// The "Send via Blockchain" row of the transfer picker.
     pub fn export_state(&self, now: i64) -> ExportState {
-        ExportState::of(i64::from(self.manage.export_date), now)
+        ExportState::of(i64::from(self.manage.mint_date), now)
     }
 
     /// The collectible lives in a TON wallet: Telegram can't move it until

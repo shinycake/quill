@@ -2,7 +2,7 @@
 //! Playlist), their counts for the tab bar, and the Photos / Videos split.
 use super::*;
 use crate::ids::ChatId;
-use crate::state::{MediaPurpose, RequestPurpose, SharedMediaTab, UsersPurpose};
+use crate::state::{MediaPurpose, RequestPurpose, SharedMediaTab};
 use crate::telegram::envelope::{ChatKind, MessageSender};
 use crate::telegram::requests::{
     EXTRA_COUNT_FILTERS, get_user_profile_audios, is_profile_audio, remove_profile_audio,
@@ -64,20 +64,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn fetch_gallery_counts(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
         self.fetch_chat_media_counts(chat_id)?;
         let base = crate::telegram::requests::MEDIA_COUNT_FILTERS.len() as u8;
-        for (index, filter) in EXTRA_COUNT_FILTERS.iter().enumerate() {
-            let purpose = RequestPurpose::Users(UsersPurpose::GetChatMessageCount {
-                filter: base + index as u8,
-            });
-            if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-                continue;
-            }
-            let extra = self.session.request(purpose, Some(chat_id));
-            let json = crate::telegram::requests::get_chat_message_count(extra, chat_id, filter);
-            if let Err(err) = self.sender.send_json(&json) {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
-        }
+        self.send_chat_message_counts(chat_id, base, &EXTRA_COUNT_FILTERS)?;
         Ok(())
     }
 

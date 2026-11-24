@@ -903,6 +903,12 @@ fn full_screen_hides_the_controls_and_the_cursor(cx: &mut TestAppContext) {
     call.update(|window, _| window.toggle_fullscreen());
     app.update(call, |_, cx| cx.notify());
     frames(call);
+    // The test window reports the pointer at the origin after the resize a
+    // full-screen toggle makes (gpui-pre 0.3.14); a real platform reports
+    // where it is, still over the picture, so put it back there.
+    let viewport = find(call, "group-call-stream-viewport").expect("the picture");
+    call.simulate_mouse_move(viewport.center(), None, Modifiers::default());
+    frames(call);
     assert!(controls_shown(&app, call), "leaving full screen shows them");
     assert!(!hide_pending(&app, call), "and stops the timer");
     cx.executor().advance_clock(Duration::from_secs(6));

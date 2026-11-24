@@ -24,7 +24,7 @@ const KEY_PAN: f64 = 80.;
 const SCROLL_PER_STEP: f32 = 120.;
 
 /// The Mapbox marker tdesktop shows (27×41, tip at 13.5,35).
-fn pin_path(origin: Point<Pixels>) -> Option<Path<Pixels>> {
+fn pin_path(origin: Point<Pixels>) -> Option<Path> {
     let at = |x: f32, y: f32| point(origin.x + px(x), origin.y + px(y));
     let mut path = PathBuilder::fill();
     path.move_to(at(27., 13.5));

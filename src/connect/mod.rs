@@ -62,6 +62,7 @@ mod gift_market;
 mod gift_value;
 mod giveaway_members;
 mod grams;
+mod invite_to_bot;
 mod main_profile_tab;
 mod message_actions;
 mod message_link_at;

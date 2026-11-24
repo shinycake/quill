@@ -1,6 +1,6 @@
 # ThorVG sticker renderer
 
-Animated stickers (TGS, gzipped Lottie) render with ThorVG 1.1.3, compiled
+Animated stickers (TGS, gzipped Lottie) render with ThorVG 1.1.4, compiled
 into the Quill binary. It replaces Samsung rlottie, which shipped as a
 separate library (`librlottie.dylib`, `librlottie.so`, `rlottie.dll`) built by
 two scripts with a local patch.
@@ -34,8 +34,8 @@ in the core crate's CI tests on Linux.
 
 - `scripts/vendor-thorvg.sh <tag>` copies a subset of a ThorVG checkout into
   `third_party/thorvg` and writes `VERSION` (tag, commit, version). The subset is
-  `inc/`, `src/common`, `src/renderer` with `cpu_engine`, `src/loaders/raw`,
-  `src/loaders/lottie` with its RapidJSON copy, and `src/bindings/capi`.
+  `inc/`, `src/common`, `src/renderer` with `cpu_engine`, `src/modules/raw`,
+  `src/modules/lottie` with its RapidJSON copy, and `src/bindings/capi`.
   JerryScript and `tvgLottieExpressions.cpp` stay out. `tvgLottieExpressions.h`
   stays in: with expressions off it holds the no-op stubs the parser calls.
 - `build.rs` compiles every `.cpp` of those directories with the `cc` crate into

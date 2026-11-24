@@ -22,6 +22,7 @@ use quill::local_time::{civil_local, day_label, hhmm, now_unix};
 use quill::state::JoinRequestFetch;
 use quill::telegram::envelope::{ChatActionBar, ChatKind};
 
+mod bot_invite;
 mod join_requests;
 
 /// "Block {name}" box state (tdesktop `PeerMenuBlockUserBox`): optional
@@ -29,7 +30,9 @@ mod join_requests;
 pub struct BlockBarDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) user_id: i64,
-    pub(crate) report: bool,
+    /// The "Report spam" box and its tick; `None` hides the box (a bot
+    /// someone invited the user to: the bar reports the inviter instead).
+    pub(crate) report: Option<bool>,
     pub(crate) delete_chat: bool,
 }
 
@@ -144,6 +147,15 @@ impl QuillApp {
         let session = self.session()?;
         let bar = session.chat_action_bar(chat_id)?.clone();
         let chat = session.chats.get(&chat_id.0)?;
+        if let ChatActionBar::BotInvite {
+            inviter_user_id,
+            owner_user_id,
+            ..
+        } = bar
+        {
+            let bot_id = private_user_id(&chat.kind)?;
+            return Some(self.bot_invite_bar(chat_id, bot_id, inviter_user_id, owner_user_id, cx));
+        }
         let user_id = private_user_id(&chat.kind);
         let name = user_id
             .map(|id| self.contact_display_name(id))
@@ -185,7 +197,9 @@ impl QuillApp {
                 }
                 push(
                     Self::bar_button("action-bar-block".into(), tr(keys::Q_CHAT_BLOCK_USER), true),
-                    Box::new(move |this, _, cx| this.open_block_bar_dialog(chat_id, uid, cx)),
+                    Box::new(move |this, _, cx| {
+                        this.open_block_bar_dialog(chat_id, uid, Some(true), cx)
+                    }),
                 );
             }
             (ChatActionBar::AddContact, Some(uid)) => {
@@ -429,12 +443,19 @@ impl QuillApp {
         );
     }
 
-    fn open_block_bar_dialog(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
-        // tdesktop pre-checks both boxes for a stranger's bar.
+    /// `report`: the "Report spam" box's first tick, or `None` for no box.
+    /// tdesktop pre-checks both boxes for a stranger's bar.
+    fn open_block_bar_dialog(
+        &mut self,
+        chat_id: ChatId,
+        user_id: i64,
+        report: Option<bool>,
+        cx: &mut Context<Self>,
+    ) {
         self.dialogs.block_bar_dialog = Some(BlockBarDialog {
             chat_id,
             user_id,
-            report: true,
+            report,
             delete_chat: true,
         });
         self.open_box(DialogKind::BlockBar);
@@ -452,7 +473,7 @@ impl QuillApp {
         };
         let plan = BlockPlan {
             user_id: dialog.user_id,
-            report: dialog.report,
+            report: dialog.report.unwrap_or(false),
             delete_chat: dialog.delete_chat,
         };
         self.start_bar_work(
@@ -493,17 +514,17 @@ impl QuillApp {
                     keys::BLOCKED_LIST_CONFIRM_TEXT,
                     &[("name", &name.to_string())],
                 )))
-                .child(
+                .children(report.map(|report| {
                     Checkbox::new("block-bar-report")
                         .label(tr(keys::Q_CHAT_REPORT_SPAM))
                         .checked(report)
                         .on_click(cx.listener(|this, &on, _, cx| {
                             if let Some(d) = this.dialogs.block_bar_dialog.as_mut() {
-                                d.report = on;
+                                d.report = Some(on);
                             }
                             cx.notify();
-                        })),
-                )
+                        }))
+                }))
                 .child(
                     Checkbox::new("block-bar-delete")
                         .label(tr(keys::Q_CHAT_DELETE_THIS_CHAT))

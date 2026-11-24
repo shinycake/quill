@@ -119,7 +119,7 @@ pub(super) fn using_test_dc() -> bool {
 }
 
 /// `YYYY-MM-DDTHH:MM:00` of a unix time in the local zone, the shape
-/// `NaiveDateTime` parses (the kit does not re-export chrono).
+/// `jiff::civil::DateTime` parses (the kit does not re-export jiff).
 fn local_stamp(unix: i64, clock: &WallClock) -> String {
     let c = clock.civil(unix);
     format!(
@@ -181,7 +181,7 @@ pub(super) fn new_date_time_picker(
             .time_precision(TimePrecision::Minute)
             .hour_cycle(HourCycle::H23)
             .disabled_matcher(Matcher::custom(move |day| {
-                let day = day.format(tr(keys::Q_OPS_Y_M_D)).to_string();
+                let day = day.strftime(&tr(keys::Q_OPS_Y_M_D)).to_string();
                 day < first_day || day > last_day
             }))
     });
@@ -199,7 +199,9 @@ pub(super) fn picked_unix(picker: &TimePicker, lead: i64, cx: &App) -> Option<i6
         .read(cx)
         .date_time()
         .start()
-        .and_then(|value| parse_picker_stamp(&value.format(tr(keys::Q_OPS_Y_M_D_H_M)).to_string()))
+        .and_then(|value| {
+            parse_picker_stamp(&value.strftime(&tr(keys::Q_OPS_Y_M_D_H_M)).to_string())
+        })
         .map(|civil| clock.resolve(&civil, picker.initial, lead))
 }
 

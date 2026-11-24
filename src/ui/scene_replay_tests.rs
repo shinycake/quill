@@ -1,8 +1,8 @@
 use gpui_kit::{
     AtlasTextureId, AtlasTextureKind, AtlasTile, Bounds, ContentMask, Corners, Edges, Hsla,
-    MonochromeSprite, Path, PathId, PolychromeSprite, Primitive, PrimitiveBatch, Quad,
-    ScaledPixels, Scene, Shadow, SubpixelSprite, TileId, TransformationMatrix, Underline, point,
-    px, size,
+    MonochromeSprite, PaintedPath, PathBuilder, PolychromeSprite, Primitive, PrimitiveBatch, Quad,
+    ScaledPixels, Scene, Shadow, SpriteAnimationId, SubpixelSprite, TileId, TransformationMatrix,
+    Underline, point, px, size,
 };
 use std::collections::HashMap;
 use std::ops::Range;
@@ -66,10 +66,6 @@ fn quad(tag: u32, bounds: Rect) -> Primitive {
     primitive(Kind::Quad, tag, bounds, canvas())
 }
 
-fn path(tag: u32, bounds: Rect) -> Primitive {
-    primitive(Kind::Path, tag, bounds, canvas())
-}
-
 fn sprite(tag: u32, bounds: Rect) -> Primitive {
     primitive(Kind::MonochromeSprite, tag, bounds, canvas())
 }
@@ -99,16 +95,17 @@ fn primitive(kind: Kind, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             ..Quad::default()
         }
         .into(),
+        // A shadow is painted out to three blur radii past its shape.
         Kind::Shadow => Shadow {
             order: 0,
             blur_radius: ScaledPixels((tag % 3) as f32),
-            bounds,
+            bounds: bounds.dilate(ScaledPixels((tag % 3) as f32 * 3.)),
             corner_radii: Corners::default(),
             content_mask,
             color: Hsla::default(),
-            element_bounds: bounds,
-            element_corner_radii: Corners::default(),
-            inset: 0,
+            shape_bounds: bounds,
+            shape_corner_radii: Corners::default(),
+            inset: false.into(),
             pad: tag,
         }
         .into(),
@@ -122,11 +119,11 @@ fn primitive(kind: Kind, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             wavy: false.into(),
         }
         .into(),
-        // A monochrome sprite's `pad` carries a label's ink (backdrop
-        // glass), so its tag is its tile id.
+        // A monochrome sprite's `animation` slot carries a label's ink
+        // (backdrop glass), so its tag is its tile id.
         Kind::MonochromeSprite => MonochromeSprite {
             order: 0,
-            pad: 0,
+            animation: SpriteAnimationId::NONE,
             tile: tile(tag),
             bounds,
             content_mask,
@@ -159,15 +156,28 @@ fn primitive(kind: Kind, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             let at = |x: ScaledPixels, y: ScaledPixels| point(px(x.0), px(y.0));
             let (left, top) = (bounds.origin.x, bounds.origin.y);
             let (right, bottom) = (left + bounds.size.width, top + bounds.size.height);
-            let mut path = Path::new(at(left, top));
-            let mark = point(tag as f32, 0.);
-            path.push_triangle(
-                (at(left, top), at(right, top), at(left, bottom)),
-                (mark, mark, mark),
-            );
-            let mut path = path.scale(1.);
-            path.content_mask = content_mask;
-            path.into()
+            let mut builder = PathBuilder::fill();
+            builder.move_to(at(left, top));
+            builder.line_to(at(right, top));
+            builder.line_to(at(left, bottom));
+            builder.close();
+            let Ok(path) = builder.build() else {
+                return quad(tag, bounds);
+            };
+            let clip = ContentMask {
+                bounds: Bounds {
+                    origin: at(clip.origin.x, clip.origin.y),
+                    size: size(px(clip.size.width.0), px(clip.size.height.0)),
+                },
+            };
+            // The fill's hue carries the tag.
+            let tagged = Hsla {
+                h: tag as f32,
+                s: 0.,
+                l: 0.,
+                a: 1.,
+            };
+            PaintedPath::new(path, 1., clip, tagged.into()).into()
         }
     }
 }
@@ -176,22 +186,20 @@ fn quad_tag(quad: &Quad) -> u32 {
     quad.border_widths.left.0 as u32
 }
 
-fn path_tag(path: &Path<ScaledPixels>) -> u32 {
-    path.vertices[0].st_position.x as u32
+fn path_tag(path: &PaintedPath) -> u32 {
+    path.color().as_solid().map_or(0, |color| color.h as u32)
 }
 
 fn clipped(primitive: &Primitive) -> Rect {
-    let bounds = match primitive {
-        Primitive::Shadow(shadow) => shadow.bounds.dilate(shadow.blur_radius * 3.),
-        primitive => *primitive.bounds(),
-    };
-    bounds.intersect(&primitive.content_mask().bounds)
+    primitive
+        .bounds()
+        .intersect(&primitive.content_mask().bounds)
 }
 
 #[derive(Clone)]
 enum Step {
     Draw(Primitive),
-    Layer(Rect),
+    Layer,
     EndLayer,
 }
 
@@ -214,7 +222,7 @@ fn paint(scene: &mut Scene, steps: &[Step]) {
     for step in steps {
         match step {
             Step::Draw(primitive) => scene.insert_primitive(primitive.clone()),
-            Step::Layer(bounds) => scene.push_layer(*bounds),
+            Step::Layer => scene.push_layer(),
             Step::EndLayer => scene.pop_layer(),
         }
     }
@@ -270,7 +278,9 @@ fn drawn(scene: &Scene) -> Vec<u32> {
             PrimitiveBatch::PolychromeSprites { range, .. } => {
                 tags.extend(scene.polychrome_sprites[range].iter().map(|s| s.pad));
             }
-            PrimitiveBatch::Surfaces(_) | PrimitiveBatch::Lenses(_) => {}
+            PrimitiveBatch::Surfaces(_)
+            | PrimitiveBatch::NativeViews(_)
+            | PrimitiveBatch::Lenses(_) => {}
         }
     }
     tags
@@ -293,7 +303,7 @@ fn tag_of(primitive: &Primitive) -> u32 {
         Primitive::MonochromeSprite(sprite) => sprite.tile.tile_id.0,
         Primitive::SubpixelSprite(sprite) => sprite.pad,
         Primitive::PolychromeSprite(sprite) => sprite.pad,
-        Primitive::Surface(_) | Primitive::Lens(_) => 0,
+        Primitive::Surface(_) | Primitive::NativeView(_) | Primitive::Lens(_) => 0,
     }
 }
 
@@ -345,7 +355,12 @@ fn orders(scene: &Scene) -> HashMap<u32, u32> {
         )
         .chain(scene.subpixel_sprites.iter().map(|s| (s.pad, s.order)))
         .chain(scene.polychrome_sprites.iter().map(|s| (s.pad, s.order)))
-        .chain(scene.paths.iter().map(|path| (path_tag(path), path.order)))
+        .chain(
+            scene
+                .paths
+                .iter()
+                .map(|path| (path_tag(path), path.order())),
+        )
         .collect()
 }
 
@@ -386,7 +401,7 @@ impl Painter {
 
     fn layer_in(&mut self, area: Rect, depth: u32, steps: &mut Vec<Step>) {
         let bounds = self.rect_in(area);
-        steps.push(Step::Layer(bounds));
+        steps.push(Step::Layer);
         for _ in 0..self.dice.below(5) {
             if depth < 2 && self.dice.one_in(4) {
                 self.layer_in(bounds, depth + 1, steps);
@@ -548,18 +563,14 @@ fn what_is_painted_after_a_replay_sorts_above_all_of_it() {
 
 #[test]
 fn a_replay_is_one_box_in_the_bounds_tree() {
-    let first = last_frame(&[
-        quad(1, rect(0, 0, 4, 4)),
-        quad(2, rect(0, 0, 4, 4)),
-        quad(3, rect(20, 20, 4, 4)),
-    ]);
+    let first = last_frame(&[quad(1, rect(0, 0, 4, 4)), quad(2, rect(20, 20, 4, 4))]);
     let mut second = Scene::default();
-    second.replay(0..3, &first);
-    let between_the_corners = rect(10, 10, 4, 4);
-    second.insert_primitive(quad(4, between_the_corners));
-    let top_of_the_replay = 2;
-    let orders: Vec<u32> = second.quads.iter().map(|quad| quad.order).collect();
-    assert_eq!(orders, [1, 2, 1, top_of_the_replay + 1]);
+    second.replay(0..2, &first);
+    // A shadow between the corners meets no quad, only the replay's box. A
+    // shadow can't share an order with a quad drawn there, so it goes above.
+    second.insert_primitive(primitive(Kind::Shadow, 3, rect(10, 10, 4, 4), canvas()));
+    let orders: Vec<u32> = second.shadows.iter().map(|shadow| shadow.order).collect();
+    assert_eq!(orders, [2]);
 }
 
 #[test]
@@ -576,7 +587,7 @@ fn a_replay_starts_above_what_it_covers() {
 #[test]
 fn a_view_replayed_inside_a_layer_takes_the_layers_order() {
     let mut first = Scene::default();
-    first.push_layer(canvas());
+    first.push_layer();
     let start = first.len();
     first.insert_primitive(quad(1, rect(0, 0, 10, 10)));
     first.insert_primitive(quad(2, rect(20, 0, 10, 10)));
@@ -585,18 +596,37 @@ fn a_view_replayed_inside_a_layer_takes_the_layers_order() {
     first.finish();
 
     let mut second = Scene::default();
-    second.insert_primitive(quad(3, canvas()));
-    second.push_layer(canvas());
+    second.insert_primitive(sprite(3, canvas()));
+    second.push_layer();
     second.replay(start..end, &first);
     second.pop_layer();
     let orders: Vec<u32> = second.quads.iter().map(|quad| quad.order).collect();
-    assert_eq!(orders, [1, 2, 2]);
+    assert_eq!(orders, [2, 2]);
+}
+
+#[test]
+fn a_nested_layer_replays_above_what_its_outer_layer_paints_after_it() {
+    let mut first = Scene::default();
+    first.push_layer();
+    first.push_layer();
+    first.insert_primitive(quad(1, rect(0, 0, 10, 10)));
+    first.pop_layer();
+    first.insert_primitive(quad(2, rect(0, 0, 10, 10)));
+    first.pop_layer();
+    let operations = first.len();
+    first.finish();
+    assert_eq!(drawn(&first), [2, 1]);
+
+    let mut second = Scene::default();
+    second.replay(0..operations, &first);
+    second.finish();
+    assert_eq!(drawn(&second), [2, 1]);
 }
 
 #[test]
 fn a_layer_inside_a_replay_keeps_its_one_order() {
     let mut first = Scene::default();
-    first.push_layer(rect(0, 0, 40, 10));
+    first.push_layer();
     first.insert_primitive(sprite(1, rect(0, 0, 10, 10)));
     first.insert_primitive(sprite(2, rect(20, 0, 10, 10)));
     first.pop_layer();
@@ -614,7 +644,7 @@ fn a_layer_inside_a_replay_keeps_its_one_order() {
 #[test]
 fn a_glyph_past_its_line_stays_under_what_follows() {
     let mut first = Scene::default();
-    first.push_layer(rect(0, 0, 10, 10));
+    first.push_layer();
     first.insert_primitive(sprite(1, rect(8, 8, 6, 6)));
     first.pop_layer();
     let operations = first.len();
@@ -628,19 +658,9 @@ fn a_glyph_past_its_line_stays_under_what_follows() {
 }
 
 #[test]
-fn replayed_paths_get_ids_for_their_new_place() {
-    let first = last_frame(&[path(1, rect(0, 0, 8, 8)), path(2, rect(20, 0, 8, 8))]);
-    let mut second = Scene::default();
-    second.insert_primitive(path(3, rect(40, 0, 8, 8)));
-    second.replay(0..2, &first);
-    let ids: Vec<PathId> = second.paths.iter().map(|path| path.id).collect();
-    assert_eq!(ids, [PathId(0), PathId(1), PathId(2)]);
-}
-
-#[test]
 fn a_view_with_nothing_but_empty_layers_replays_as_it_painted() {
     let mut first = Scene::default();
-    first.push_layer(canvas());
+    first.push_layer();
     first.pop_layer();
     let operations = first.len();
     first.finish();

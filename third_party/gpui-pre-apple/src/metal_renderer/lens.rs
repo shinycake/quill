@@ -11,7 +11,7 @@
 
 use super::{
     InstanceBinding, InstanceBindings, InstanceBufferWriter, MetalRenderer,
-    new_command_encoder_for_texture,
+    new_command_encoder_for_texture, set_frame_globals,
 };
 use anyhow::{Context as _, Result};
 use gpui::{
@@ -81,11 +81,11 @@ pub struct LensDownsampleSlot {
     pub src_y1: f32,
 }
 
+/// The lens pass's slots. Buffers start after `GlobalInputIndex`'s, which
+/// the frame's other batches read from the same encoder after the lenses.
 #[repr(C)]
 pub enum LensInputIndex {
-    Vertices = 0,
-    Lenses = 1,
-    ViewportSize = 2,
+    Lenses = 2,
     Slots = 3,
     AtlasSize = 4,
     Atlas = 5,
@@ -93,7 +93,6 @@ pub enum LensInputIndex {
 
 #[repr(C)]
 pub enum LensDownsampleIndex {
-    Vertices = 0,
     Slots = 1,
     TargetSize = 2,
     Source = 3,
@@ -194,6 +193,7 @@ impl LensPipelines {
                 "lens_vertex",
                 "lens_fragment",
                 format,
+                true,
             )?,
             downsample: build_downsample_pipeline_state(device, library, format)?,
         })
@@ -465,17 +465,13 @@ impl MetalRenderer {
         instance_bindings: &InstanceBindings,
         writer: &mut InstanceBufferWriter,
         texture: &ProtocolObject<dyn MTLTexture>,
+        depth_texture: &ProtocolObject<dyn MTLTexture>,
         viewport_size: Size<DevicePixels>,
         command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
         command_encoder: &mut Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>,
     ) -> Result<()> {
         let Some(glass) = glass else {
-            self.draw_quads(
-                range,
-                &instance_bindings.lens_fallbacks,
-                viewport_size,
-                command_encoder,
-            );
+            self.draw_quads(range, &instance_bindings.lens_fallbacks, command_encoder);
             return Ok(());
         };
         let fresh: Vec<(usize, LensSlotPlan)> = glass
@@ -489,21 +485,25 @@ impl MetalRenderer {
         if !fresh.is_empty() {
             command_encoder.endEncoding();
             let filled = self.fill_slots(glass, &fresh, texture, writer, command_buffer);
-            *command_encoder =
-                new_command_encoder_for_texture(command_buffer, texture, viewport_size, None)?;
+            *command_encoder = new_command_encoder_for_texture(
+                command_buffer,
+                texture,
+                depth_texture,
+                viewport_size,
+                None,
+            )?;
+            // A frame with lenses draws without depth (a zero scale), so the
+            // reopened pass starts as the frame's first one did.
+            set_frame_globals(command_encoder, viewport_size, 0.0);
+            command_encoder.setDepthStencilState(Some(&self.depth_ignore_state));
             if let Err(error) = filled {
                 log::error!("glass draws flat: {error:#}");
                 self.lens.forget();
-                self.draw_quads(
-                    range,
-                    &instance_bindings.lens_fallbacks,
-                    viewport_size,
-                    command_encoder,
-                );
+                self.draw_quads(range, &instance_bindings.lens_fallbacks, command_encoder);
                 return Ok(());
             }
         }
-        self.draw_glass(glass, range, viewport_size, command_encoder);
+        self.draw_glass(glass, range, command_encoder);
         Ok(())
     }
 
@@ -594,16 +594,10 @@ impl MetalRenderer {
                 DevicePixels(target.height() as i32),
             );
             encoder.setRenderPipelineState(&glass.pipelines.downsample);
-            // SAFETY: six unit vertices and `fresh.len()` downsample slots
-            // at an aligned binding match the shader's slots; the size
-            // bytes are copied; `source` is another level than the
-            // attachment.
+            // SAFETY: `fresh.len()` downsample slots at an aligned binding
+            // match the shader's slots; the size bytes are copied; `source`
+            // is another level than the attachment.
             unsafe {
-                encoder.setVertexBuffer_offset_atIndex(
-                    Some(&self.unit_vertices),
-                    0,
-                    LensDownsampleIndex::Vertices as usize,
-                );
                 encoder.setVertexBuffer_offset_atIndex(
                     Some(&slots.buffer),
                     slots.offset,
@@ -622,9 +616,9 @@ impl MetalRenderer {
                 encoder
                     .setFragmentTexture_atIndex(Some(source), LensDownsampleIndex::Source as usize);
                 encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(
-                    MTLPrimitiveType::Triangle,
+                    MTLPrimitiveType::TriangleStrip,
                     0,
-                    6,
+                    4,
                     fresh.len(),
                 );
             }
@@ -637,32 +631,22 @@ impl MetalRenderer {
         &self,
         glass: &GlassFrame,
         range: Range<usize>,
-        viewport_size: Size<DevicePixels>,
         command_encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
     ) {
         if range.is_empty() {
             return;
         }
         command_encoder.setRenderPipelineState(&glass.pipelines.lens);
-        // SAFETY: six unit vertices and the frame's lenses and slots (one
-        // per scene lens) at aligned bindings match the shader's slots; the
-        // batch's range lies inside them; the size bytes are copied; the
-        // atlas is retained by the frame and the command buffer.
+        // SAFETY: the frame's lenses and slots (one per scene lens) at
+        // aligned bindings match the shader's slots; the batch's range lies
+        // inside them; the size bytes are copied; the atlas is retained by
+        // the frame and the command buffer. The viewport size is the frame's
+        // global (`set_frame_globals`).
         unsafe {
-            command_encoder.setVertexBuffer_offset_atIndex(
-                Some(&self.unit_vertices),
-                0,
-                LensInputIndex::Vertices as usize,
-            );
             command_encoder.setVertexBuffer_offset_atIndex(
                 Some(&glass.lenses.buffer),
                 glass.lenses.offset,
                 LensInputIndex::Lenses as usize,
-            );
-            command_encoder.setVertexBytes_length_atIndex(
-                ptr::NonNull::from(&viewport_size).cast(),
-                mem::size_of_val(&viewport_size),
-                LensInputIndex::ViewportSize as usize,
             );
             command_encoder.setFragmentBuffer_offset_atIndex(
                 Some(&glass.lenses.buffer),
@@ -682,9 +666,9 @@ impl MetalRenderer {
             command_encoder
                 .setFragmentTexture_atIndex(Some(&glass.atlas), LensInputIndex::Atlas as usize);
             command_encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(
-                MTLPrimitiveType::Triangle,
+                MTLPrimitiveType::TriangleStrip,
                 0,
-                6,
+                4,
                 range.len(),
                 range.start,
             );

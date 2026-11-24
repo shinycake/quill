@@ -1,29 +1,29 @@
 //! Exact pins for this checkout. Recheck together; never refresh one layer alone.
 #![deny(clippy::indexing_slicing)]
 
-/// crates.io `gpui-kit` version (`=0.10.0` in Cargo.toml, 2026-11-16). The
-/// whole UI family is this Kit release, with GPUI from the `gpui-pre` 0.3.12
+/// crates.io `gpui-kit` version (`=0.11.0` in Cargo.toml, 2026-11-23). The
+/// whole UI family is this Kit release, with GPUI from the `gpui-pre` 0.3.14
 /// snapshot crates; `gpui-base`, `gpui-component`, `gpui-pre` and
 /// `gpui-pre-{apple,macos,linux,windows,wgpu}` are patched copies in
-/// `third_party/` (docs/decisions/gpui-kit-0-9-0.md).
-pub const GPUI_KIT_VERSION: &str = "0.10.0";
+/// `third_party/` (docs/decisions/gpui-kit-0-11-0.md).
+pub const GPUI_KIT_VERSION: &str = "0.11.0";
 
 /// Official TDLib git commit used as the schema/runtime baseline.
-pub const TDLIB_GIT_COMMIT: &str = "23383aef218a3123f02b744bfa91bde21056a814";
+pub const TDLIB_GIT_COMMIT: &str = "1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d";
 
 /// CMake `project(TDLib VERSION …)` at [`TDLIB_GIT_COMMIT`].
-pub const TDLIB_CMAKE_VERSION: &str = "1.8.70";
+pub const TDLIB_CMAKE_VERSION: &str = "1.8.71";
 
 /// Official `td/generate/scheme/td_api.tl` at [`TDLIB_GIT_COMMIT`].
 /// SHA-256 of the **upstream** file (not of a locally truncated copy).
 pub const TD_API_TL_SHA256: &str =
-    "fe37b2e83c39a2bd27b946213555ba8674c57d8971d27719d11c3961c9d11145";
+    "bf68db118f42010b1359dc6776128567d8de18fc793aa5280f10d2912384c1b1";
 
 /// Byte length of that official schema file.
-pub const TD_API_TL_BYTES: usize = 1_236_740;
+pub const TD_API_TL_BYTES: usize = 1_277_521;
 
 /// Raw GitHub URL for the official schema at [`TDLIB_GIT_COMMIT`].
-pub const TD_API_TL_UPSTREAM_URL: &str = "https://raw.githubusercontent.com/tdlib/td/23383aef218a3123f02b744bfa91bde21056a814/td/generate/scheme/td_api.tl";
+pub const TD_API_TL_UPSTREAM_URL: &str = "https://raw.githubusercontent.com/tdlib/td/1b9efe84d6e9a2e2f6eadeeea32b0726d2b8c25d/td/generate/scheme/td_api.tl";
 
 /// Relative path of the vendored schema.
 pub const TD_API_TL_PATH: &str = "schema/td_api.tl";

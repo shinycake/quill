@@ -58,7 +58,7 @@ pub fn parse_gift_value_info(value: &Value) -> Option<GiftValueInfo> {
         last_sale_date: amount("last_sale_date"),
         last_sale_price: amount("last_sale_price"),
         is_last_sale_on_fragment: flag(value, "is_last_sale_on_fragment"),
-        minimum_price: amount("minimum_price"),
+        minimum_price: amount("min_price"),
         average_sale_price: amount("average_sale_price"),
         telegram_listed_gift_count: amount("telegram_listed_gift_count"),
         fragment_listed_gift_count: amount("fragment_listed_gift_count"),

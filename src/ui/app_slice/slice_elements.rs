@@ -27,14 +27,6 @@ impl SliceScope {
     }
 }
 
-impl IntoElement for SliceScope {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for SliceScope {
     type RequestLayoutState = ();
     type PrepaintState = ();
@@ -104,14 +96,6 @@ pub(super) struct MeasureHeight {
     pub(super) height: Rc<Cell<Pixels>>,
     pub(super) redraw: Option<EntityId>,
     pub(super) child: AnyElement,
-}
-
-impl IntoElement for MeasureHeight {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 impl Element for MeasureHeight {

@@ -506,7 +506,7 @@ pub enum GiftEvent {
     Deleted,
     /// A finished transfer: the toast and the recipient's chat.
     Transferred(GiftTransferred),
-    /// Fragment's export page from `getUpgradedGiftWithdrawalUrl`, to open.
+    /// Fragment's export page from `getGiftMintingUrl`, to open.
     ExportUrl(String),
     /// The password box of "Send via Blockchain" is ready for a password
     /// (it opened, or a try was refused or failed): the field takes the

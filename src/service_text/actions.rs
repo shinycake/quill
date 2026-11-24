@@ -463,6 +463,31 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
                 }
             }
         },
+        A::GiftOnChainOffer {
+            name,
+            price,
+            state,
+            is_buyer,
+        } => super::gifts::render_on_chain_offer(name, price, *state, *is_buyer),
+        A::BotInvite { inviter_user_id } => {
+            // In the chat with the bot the bot itself posts it: "{user}
+            // invited you"; a person's copy names them as `{from}`
+            // (tdesktop `PrepareBotInviteText`).
+            let from_bot = matches!(ctx.actor, Some(MessageSender::User { user_id }) if user_id == ctx.chat_id);
+            if from_bot || ctx.actor.is_none() {
+                phrase(
+                    keys::ACTION_BOT_INVITED_YOU,
+                    &[("user", ctx.user(*inviter_user_id))],
+                )
+                .done()
+            } else {
+                phrase(
+                    keys::ACTION_BOT_INVITED_USER,
+                    &[("from", from()), ("user", ctx.user(*inviter_user_id))],
+                )
+                .done()
+            }
+        }
         A::GiftOfferRejected {
             name,
             price,

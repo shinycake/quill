@@ -139,10 +139,10 @@ pub enum PaymentsPurpose {
     /// Blockchain" (TDLib 1.8.69 withdraws with a temporary password).
     /// Response is `temporaryPasswordState`.
     GiftExportTempPassword,
-    /// `getUpgradedGiftWithdrawalUrl`, sent once the temporary password
+    /// `getGiftMintingUrl`, sent once the temporary password
     /// exists. Response is `httpUrl`.
     GiftExportUrl,
-    /// The password-less `getUpgradedGiftWithdrawalUrl` sent on "Open
+    /// The password-less `getGiftMintingUrl` sent on "Open
     /// Fragment" (tdesktop `inputCheckPasswordEmpty`): its error picks the
     /// next step; an `httpUrl` answer is dropped, never opened.
     GiftExportProbe,

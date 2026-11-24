@@ -13,7 +13,7 @@ under `licenses/`.
 
 ## Overview
 
-- MIT License: 684
+- MIT License: 690
 - Apache License 2.0: 43
 - Unicode License v3: 27
 - ISC License: 22
@@ -1441,9 +1441,9 @@ Apache License
 Used by:
 - [constant_time_eq 0.6.1](https://codeberg.org/cesarb/constant_time_eq)
 - [dunce 1.0.5](https://gitlab.com/kornelski/dunce)
-- [gpui-kit-assets 0.10.0](https://github.com/longbridge/gpui-kit)
-- [gpui-kit 0.10.0](https://github.com/longbridge/gpui-kit)
-- [interprocess 2.4.8](https://github.com/kotauskas/interprocess)
+- [gpui-kit-assets 0.11.0](https://github.com/longbridge/gpui-kit)
+- [gpui-kit 0.11.0](https://github.com/longbridge/gpui-kit)
+- [interprocess 2.4.9](https://github.com/kotauskas/interprocess)
 - [ryu 1.0.23](https://github.com/dtolnay/ryu)
 - [spirv 0.4.0+sdk-1.4.341.0](https://github.com/gfx-rs/rspirv)
 
@@ -1527,24 +1527,24 @@ limitations under the License.
 ### Apache License 2.0
 
 Used by:
-- [gpui-pre 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-apple 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-linux 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-macos 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-wgpu 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-windows 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-collections 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-derive-refineable 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-http-client 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-macros 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-platform 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-refineable 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-scheduler 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-shared-string 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-sum-tree 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-util 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing-macro 0.3.12](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-apple 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-linux 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-macos 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-wgpu 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-windows 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-collections 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-derive-refineable 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-http-client 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-macros 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-platform 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-refineable 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-scheduler 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-shared-string 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-sum-tree 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-util 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing-macro 0.3.14](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing 0.3.14](https://github.com/zed-industries/zed)
 
 ````text
 Copyright 2022 - 2025 Zed Industries, Inc.
@@ -1775,9 +1775,9 @@ Apache License
 ### Apache License 2.0
 
 Used by:
-- [gpui-base 0.10.0](https://github.com/longbridge/gpui-kit)
-- [gpui-component 0.10.0](https://github.com/longbridge/gpui-kit)
-- [gpui-component-macros 0.10.0](https://crates.io/crates/gpui-component-macros)
+- [gpui-base 0.11.0](https://github.com/longbridge/gpui-kit)
+- [gpui-component 0.11.0](https://github.com/longbridge/gpui-kit)
+- [gpui-component-macros 0.11.0](https://crates.io/crates/gpui-component-macros)
 
 ````text
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
@@ -2012,61 +2012,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### BSD 3-Clause "New" or "Revised" License
 
 Used by:
-- [rusty-opus 1.1.0](https://github.com/Remade-With-Rust/rusty-opus)
-
-````text
-
-Copyright 2026 restsend.com
-
-Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic,
-                    Jean-Marc Valin, Timothy B. Terriberry,
-                    CSIRO, Gregory Maxwell, Mark Borgerding,
-                    Erik de Castro Lopo, Mozilla, Amazon
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions
-are met:
-
-- Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-
-- Redistributions in binary form must reproduce the above copyright
-notice, this list of conditions and the following disclaimer in the
-documentation and/or other materials provided with the distribution.
-
-- Neither the name of Internet Society, IETF or IETF Trust, nor the
-names of specific contributors, may be used to endorse or promote
-products derived from this software without specific prior written
-permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-Opus is subject to the royalty-free patent licenses which are
-specified at:
-
-Xiph.Org Foundation:
-https://datatracker.ietf.org/ipr/1524/
-
-Microsoft Corporation:
-https://datatracker.ietf.org/ipr/1914/
-
-Broadcom Corporation:
-https://datatracker.ietf.org/ipr/1526/
-````
-
-### BSD 3-Clause "New" or "Revised" License
-
-Used by:
 - [encoding_rs 0.8.44](https://github.com/hsivonen/encoding_rs)
 
 ````text
@@ -2124,6 +2069,43 @@ pub(crate) static GB18030_2022_OVERRIDE_BYTES: [[u8; 2]; 18] = [
     [0xFE, 0x90],
     [0xFE, 0xA0],
 ];
+
+````
+
+### BSD 3-Clause "New" or "Revised" License
+
+Used by:
+- [rusty-opus 1.2.0](https://github.com/Remade-With-Rust/rusty-opus)
+
+````text
+BSD 3-Clause License
+
+Copyright (c) 2026, Remade-With-Rust contributors
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ````
 
@@ -3704,11 +3686,11 @@ Used by:
 #ifndef _TVG_COMPRESSOR_H_
 #define _TVG_COMPRESSOR_H_
 
-#include <cstdint>
+#include <cstddef>
 
 namespace tvg
 {
-    size_t b64Decode(const char* encoded, const size_t len, char** decoded);
+    std::size_t b64Decode(const char* encoded, const size_t len, char** decoded);
     unsigned long djb2Encode(const char* str);
 }
 
@@ -3753,13 +3735,68 @@ struct RawLoader : BitmapLoader
     ~RawLoader();
 
     using Loader::open;
-    bool open(const uint32_t* data, uint32_t w, uint32_t h, ColorSpace cs, Ownership owner);
+    bool open(const uint32_t* data, uint32_t stride, uint32_t w, uint32_t h, ColorSpace cs, Ownership owner);
     bool read() override;
 };
 
 
 #endif //_TVG_RAW_LOADER_H_
 
+````
+
+### MIT License
+
+Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+
+````text
+/*
+ * Copyright (c) 2020 - 2026 ThorVG project. All rights reserved.
+
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#include "tvgArray.h"
+
+namespace tvg
+{
+
+void* arrayGrow(void* data, uint32_t count, uint32_t& reserved, size_t size)
+{
+    reserved = count + (count + 2) / 2;
+    return tvg::realloc<void>(data, size * reserved);
+}
+
+void* arrayCompact(void* data, uint32_t count, uint32_t& reserved, size_t size)
+{
+    if (count == reserved) return data;
+    if (count == 0) {
+        tvg::free(data);
+        data = nullptr;
+    } else {
+        data = tvg::realloc<void>(data, size * count);
+    }
+    reserved = count;
+    return data;
+}
+
+}
 ````
 
 ### MIT License
@@ -3798,24 +3835,23 @@ RawLoader::~RawLoader()
     if (owner != Ownership::Borrow) tvg::free(surface.buf32);
 }
 
-bool RawLoader::open(const uint32_t* data, uint32_t w, uint32_t h, ColorSpace cs, Ownership owner)
+bool RawLoader::open(const uint32_t* data, uint32_t stride, uint32_t w, uint32_t h, ColorSpace cs, Ownership owner)
 {
     if (!Loader::read()) return true;
-
-    if (!data || w == 0 || h == 0) return false;
 
     this->w = (float)w;
     this->h = (float)h;
     this->owner = owner;
 
+    // todo: backward compatibility with the legacy load() API. remove this at v2
     if (owner == Ownership::Copy) {
         surface.buf32 = tvg::malloc<uint32_t>(sizeof(uint32_t) * w * h);
-        memcpy((void*)surface.buf32, data, sizeof(uint32_t) * w * h);
+        memcpy(surface.buf32, data, sizeof(uint32_t) * w * h);
     } else {
         surface.buf32 = const_cast<uint32_t*>(data);
     }
 
-    surface.setup(surface.buf32, w, w, h, sizeof(uint32_t), cs);
+    surface.setup(surface.buf32, stride, w, h, sizeof(uint32_t), cs);
     return true;
 }
 
@@ -4238,16 +4274,16 @@ struct LottieRenderPooler
 
     ~LottieRenderPooler()
     {
-        ARRAY_FOREACH(p, pooler) {
-            (*p)->unref();
+        for (auto& p : pooler) {
+            p->unref();
         }
     }
 
     T* pooling(bool copy = false)
     {
         //return available one.
-        ARRAY_FOREACH(p, pooler) {
-            if ((*p)->refCnt() == 1) return *p;
+        for (auto& p : pooler) {
+            if (p->refCnt() == 1) return p;
         }
 
         //no empty, generate a new one.
@@ -5151,7 +5187,7 @@ DEALINGS IN THE SOFTWARE.
 Used by:
 - [backtrace 0.3.77](https://github.com/rust-lang/backtrace-rs)
 - [cfg-if 1.0.5](https://github.com/rust-lang/cfg-if)
-- [filetime 0.2.29](https://github.com/alexcrichton/filetime)
+- [filetime 0.2.30](https://github.com/alexcrichton/filetime)
 - [rustc-demangle 0.1.28](https://github.com/rust-lang/rustc-demangle)
 - [scoped-tls 1.0.1](https://github.com/alexcrichton/scoped-tls)
 - [socket2 0.6.5](https://github.com/rust-lang/socket2)
@@ -5359,9 +5395,9 @@ Used by:
 - [num-rational 0.4.2](https://github.com/rust-num/num-rational)
 - [num-traits 0.2.19](https://github.com/rust-num/num-traits)
 - [num 0.4.3](https://github.com/rust-num/num)
-- [regex-automata 0.4.18](https://github.com/rust-lang/regex)
-- [regex-syntax 0.8.11](https://github.com/rust-lang/regex)
-- [regex 1.13.1](https://github.com/rust-lang/regex)
+- [regex-automata 0.4.19](https://github.com/rust-lang/regex)
+- [regex-syntax 0.8.12](https://github.com/rust-lang/regex)
+- [regex 1.13.2](https://github.com/rust-lang/regex)
 
 ````text
 Copyright (c) 2014 The Rust Project Developers
@@ -5395,7 +5431,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [uuid 1.29.2](https://github.com/uuid-rs/uuid)
+- [uuid 1.29.3](https://github.com/uuid-rs/uuid)
 
 ````text
 Copyright (c) 2014 The Rust Project Developers
@@ -6451,7 +6487,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [qrcode 0.14.1](https://github.com/kennytm/qrcode-rust)
+- [qrcode 0.15.0](https://github.com/kennytm/qrcode-rust)
 
 ````text
 Copyright (c) 2016 kennytm
@@ -6884,7 +6920,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [heapless 0.9.3](https://github.com/rust-embedded/heapless)
+- [heapless 0.9.4](https://github.com/rust-embedded/heapless)
 
 ````text
 Copyright (c) 2017 Jorge Aparicio
@@ -7315,7 +7351,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [bytes 1.12.1](https://github.com/tokio-rs/bytes)
+- [bytes 1.12.2](https://github.com/tokio-rs/bytes)
 
 ````text
 Copyright (c) 2018 Carl Lerche
@@ -7419,7 +7455,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [smallvec 1.16.5](https://github.com/servo/rust-smallvec)
+- [smallvec 1.16.6](https://github.com/smallvec/smallvec)
 
 ````text
 Copyright (c) 2018 The Servo Project Developers
@@ -7850,7 +7886,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [zeroize 1.9.1](https://github.com/RustCrypto/utils)
+- [zeroize 1.9.2](https://github.com/RustCrypto/utils)
 
 ````text
 Copyright (c) 2018-2026 The RustCrypto Project Developers
@@ -9266,7 +9302,7 @@ THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [notify-types 2.3.0](https://github.com/notify-rs/notify.git)
+- [notify-types 2.3.1](https://github.com/notify-rs/notify.git)
 
 ````text
 Copyright (c) 2023 Notify Contributors
@@ -9399,9 +9435,9 @@ SOFTWARE.
 
 Used by:
 - [zbus 5.19.0](https://github.com/z-galaxy/zbus/)
-- [zbus 6.3.0](https://github.com/z-galaxy/zbus/)
+- [zbus 6.5.0](https://github.com/z-galaxy/zbus/)
 - [zbus_macros 5.19.0](https://github.com/z-galaxy/zbus/)
-- [zbus_macros 6.3.0](https://github.com/z-galaxy/zbus/)
+- [zbus_macros 6.5.0](https://github.com/z-galaxy/zbus/)
 - [zbus_names 4.3.5](https://github.com/z-galaxy/zbus/)
 - [zbus_utils 6.1.0](https://github.com/z-galaxy/zbus/)
 - [zbus_xml 5.2.1](https://github.com/z-galaxy/zbus/)
@@ -9577,7 +9613,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [zcheapstr 1.2.0](https://github.com/z-galaxy/zcheapstr/)
+- [zcheapstr 1.4.0](https://github.com/z-galaxy/zcheapstr/)
 
 ````text
 Copyright (c) 2026 Zeeshan Ali Khan & zcheapstr contributors
@@ -9611,7 +9647,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [zruntime 0.2.3](https://github.com/z-galaxy/zruntime)
+- [zruntime 0.2.4](https://github.com/z-galaxy/zruntime)
 
 ````text
 Copyright (c) 2026 Zeeshan Ali Khan & zruntime contributors
@@ -9970,7 +10006,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [rand 0.10.3](https://github.com/rust-random/rand)
+- [rand 0.10.4](https://github.com/rust-random/rand)
 - [rand 0.9.5](https://github.com/rust-random/rand)
 - [rand_chacha 0.9.0](https://github.com/rust-random/rand)
 - [rand_core 0.9.5](https://github.com/rust-random/rand)
@@ -10892,7 +10928,7 @@ SOFTWARE.
 
 Used by:
 - [ashpd 0.13.13](https://github.com/bilelmoussaoui/ashpd)
-- [ashpd 0.14.0](https://github.com/bilelmoussaoui/ashpd)
+- [ashpd 0.14.1](https://github.com/bilelmoussaoui/ashpd)
 
 ````text
 MIT License
@@ -11012,38 +11048,6 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [float_next_after 1.0.0](https://gitlab.com/bronsonbdevost/next_afterf)
-
-````text
-MIT License
-
-Copyright (c) 2020 Scripta Qumranica Electronica
-
-Created by Bronson Brown-deVost
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-````
-
-### MIT License
-
-Used by:
 - [normpath 1.5.2](https://github.com/dylni/normpath)
 
 ````text
@@ -11104,7 +11108,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [fast_image_resize 6.1.0](https://github.com/cykooz/fast_image_resize)
+- [fast_image_resize 6.2.0](https://github.com/cykooz/fast_image_resize)
 
 ````text
 MIT License
@@ -11435,13 +11439,13 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [naga-types 30.0.1](https://github.com/gfx-rs/wgpu)
+- [naga-types 30.0.2](https://github.com/gfx-rs/wgpu)
 - [naga 30.0.2](https://github.com/gfx-rs/wgpu)
-- [wgpu-core-deps-apple 30.0.1](https://github.com/gfx-rs/wgpu)
-- [wgpu-core-deps-windows-linux-android 30.0.1](https://github.com/gfx-rs/wgpu)
+- [wgpu-core-deps-apple 30.0.2](https://github.com/gfx-rs/wgpu)
+- [wgpu-core-deps-windows-linux-android 30.0.2](https://github.com/gfx-rs/wgpu)
 - [wgpu-core 30.0.2](https://github.com/gfx-rs/wgpu)
 - [wgpu-hal 30.0.2](https://github.com/gfx-rs/wgpu)
-- [wgpu-naga-bridge 30.0.1](https://github.com/gfx-rs/wgpu)
+- [wgpu-naga-bridge 30.0.2](https://github.com/gfx-rs/wgpu)
 - [wgpu-types 30.0.2](https://github.com/gfx-rs/wgpu)
 - [wgpu 30.0.1](https://github.com/gfx-rs/wgpu)
 
@@ -11582,11 +11586,8 @@ Used by:
 - [granit-parser 1.3.0](https://github.com/bourumir-wyngs/granit-parser)
 - [harfrust 0.5.2](https://github.com/harfbuzz/harfrust)
 - [libm 0.2.16](https://github.com/rust-lang/compiler-builtins)
-- [lyon 1.0.19](https://github.com/nical/lyon)
-- [lyon_algorithms 1.0.22](https://github.com/nical/lyon)
 - [lyon_geom 1.0.20](https://github.com/nical/lyon)
 - [lyon_path 1.0.19](https://github.com/nical/lyon)
-- [lyon_tessellation 1.0.23](https://github.com/nical/lyon)
 - [mac-notification-sys 0.6.15](https://github.com/h4llow3En/mac-notification-sys)
 - [mac 0.1.1](https://github.com/reem/rust-mac.git)
 - [objc-sys 0.3.5](https://github.com/madsmtm/objc2)
@@ -11631,16 +11632,20 @@ Used by:
 - [taffy 0.15.1](https://github.com/DioxusLabs/taffy)
 - [tauri-winrt-notification 0.8.1](https://github.com/tauri-apps/winrt-notification)
 - [windows-collections 0.3.2](https://github.com/microsoft/windows-rs)
+- [windows-core 0.57.0](https://github.com/microsoft/windows-rs)
 - [windows-core 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows-core 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows-future 0.3.2](https://github.com/microsoft/windows-rs)
+- [windows-implement 0.57.0](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows-implement 0.60.2](https://github.com/microsoft/windows-rs)
+- [windows-interface 0.57.0](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows-interface 0.59.3](https://github.com/microsoft/windows-rs)
 - [windows-link 0.2.1](https://github.com/microsoft/windows-rs)
 - [windows-numerics 0.3.1](https://github.com/microsoft/windows-rs)
 - [windows-registry 0.6.1](https://github.com/microsoft/windows-rs)
+- [windows-result 0.1.2](https://github.com/microsoft/windows-rs)
 - [windows-result 0.2.0](https://github.com/microsoft/windows-rs)
 - [windows-result 0.4.1](https://github.com/microsoft/windows-rs)
 - [windows-strings 0.1.0](https://github.com/microsoft/windows-rs)
@@ -11651,6 +11656,7 @@ Used by:
 - [windows-targets 0.52.6](https://github.com/microsoft/windows-rs)
 - [windows-threading 0.2.1](https://github.com/microsoft/windows-rs)
 - [windows-version 0.1.7](https://github.com/microsoft/windows-rs)
+- [windows 0.57.0](https://github.com/microsoft/windows-rs)
 - [windows 0.58.0](https://github.com/microsoft/windows-rs)
 - [windows 0.62.2](https://github.com/microsoft/windows-rs)
 - [windows_x86_64_gnu 0.48.5](https://github.com/microsoft/windows-rs)
@@ -12146,9 +12152,9 @@ Used by:
 - [parking 2.2.1](https://github.com/smol-rs/parking)
 - [paste 1.0.15](https://github.com/dtolnay/paste)
 - [pastey 0.2.3](https://github.com/as1100k/pastey)
-- [pin-project-internal 1.1.13](https://github.com/taiki-e/pin-project)
-- [pin-project-lite 0.2.17](https://github.com/taiki-e/pin-project-lite)
-- [pin-project 1.1.13](https://github.com/taiki-e/pin-project)
+- [pin-project-internal 1.2.0](https://github.com/taiki-e/pin-project)
+- [pin-project-lite 0.2.18](https://github.com/taiki-e/pin-project-lite)
+- [pin-project 1.2.0](https://github.com/taiki-e/pin-project)
 - [piper 0.2.5](https://github.com/smol-rs/piper)
 - [polling 3.11.0](https://github.com/smol-rs/polling)
 - [proc-macro-crate 3.5.0](https://github.com/bkchr/proc-macro-crate)
@@ -12336,8 +12342,8 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [ctor 1.0.13](https://github.com/mmastrac/linktime)
-- [link-section 0.19.3](https://github.com/mmastrac/linktime)
+- [ctor 1.0.14](https://github.com/mmastrac/linktime)
+- [link-section 0.19.4](https://github.com/mmastrac/linktime)
 - [linktime-proc-macro 0.2.3](https://github.com/mmastrac/linktime)
 
 ````text
@@ -12426,7 +12432,7 @@ SOFTWARE.
 
 Used by:
 - [tracing-core 0.1.36](https://github.com/tokio-rs/tracing)
-- [zip 9.5.1](https://github.com/zip-rs/zip2)
+- [zip 9.8.1](https://github.com/zip-rs/zip2)
 
 ````text
 The MIT License (MIT)
@@ -12587,6 +12593,10 @@ Used by:
 - [encoding_rs_io 0.1.8](https://github.com/BurntSushi/encoding_rs_io)
 - [globset 0.4.21](https://github.com/BurntSushi/ripgrep/tree/master/crates/globset)
 - [ignore 0.4.34](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore)
+- [jiff-core 1.0.1](https://github.com/BurntSushi/jiff)
+- [jiff-tzdb-platform 1.0.0](https://github.com/BurntSushi/jiff)
+- [jiff-tzdb 1.0.0](https://github.com/BurntSushi/jiff)
+- [jiff 1.0.2](https://github.com/BurntSushi/jiff)
 - [memchr 2.8.3](https://github.com/BurntSushi/memchr)
 - [walkdir 2.5.0](https://github.com/BurntSushi/walkdir)
 
@@ -12618,7 +12628,7 @@ THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [nix 0.31.3](https://github.com/nix-rust/nix)
+- [nix 0.32.0](https://github.com/nix-rust/nix)
 
 ````text
 The MIT License (MIT)
@@ -13078,7 +13088,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [bstr 1.13.1](https://github.com/BurntSushi/bstr)
+- [bstr 1.14.0](https://github.com/BurntSushi/bstr)
 
 ````text
 The MIT License (MIT)
@@ -13207,7 +13217,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [lz4_flex 0.14.0](https://github.com/pseitz/lz4_flex)
+- [lz4_flex 0.14.2](https://github.com/pseitz/lz4_flex)
 
 ````text
 The MIT License (MIT)

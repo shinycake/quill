@@ -156,6 +156,11 @@ impl WrapMap {
         self.wrapper.set_tab_size(tab_size, cx)
     }
 
+    /// See [`super::DisplayMap::prepare_wrap_width`].
+    pub(super) fn prepare_wrap_width(&mut self, wrap_width: Pixels) {
+        self.wrapper.prepare_wrap_width(wrap_width);
+    }
+
     pub(super) fn text_style(&self) -> (&Font, Pixels) {
         self.wrapper.text_style()
     }

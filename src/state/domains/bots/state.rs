@@ -193,6 +193,9 @@ pub struct BotsState {
     /// Message widgets: TDLib's answers to their queries and public data
     /// polls, in order, until the UI takes them for the runtimes.
     pub widget_answers: Vec<crate::message_widget::WidgetAnswer>,
+    /// Refused `inviteUsersToBot` requests, until the "Invite to Bot" box
+    /// that sent one takes its reason (`take_invite_refusal`).
+    pub invite_refusals: Vec<(RequestId, crate::invite_to_bot::InviteRefusal)>,
 }
 
 /// Usernames kept in [`BotsState::inline_bots`]; older settled ones go first.
@@ -253,6 +256,24 @@ impl BotsState {
             inline_bots: HashMap::new(),
             owned: OwnedBotsState::default(),
             widget_answers: Vec::new(),
+            invite_refusals: Vec::new(),
         }
+    }
+}
+
+impl BotsState {
+    /// The refusal of the `inviteUsersToBot` request `request`, if TDLib
+    /// refused it. Older refusals no box took go with it.
+    pub fn take_invite_refusal(
+        &mut self,
+        request: RequestId,
+    ) -> Option<crate::invite_to_bot::InviteRefusal> {
+        let at = self
+            .invite_refusals
+            .iter()
+            .position(|(id, _)| *id == request)?;
+        let (_, refusal) = self.invite_refusals.swap_remove(at);
+        self.invite_refusals.clear();
+        Some(refusal)
     }
 }

@@ -243,7 +243,7 @@ impl Window {
                 let integer = quantized.map(|c| ScaledPixels(c.trunc()));
                 Some(MonochromeSprite {
                     order: 0,
-                    pad: 0,
+                    animation: crate::SpriteAnimationId::NONE,
                     bounds: Bounds {
                         origin: integer + raster.origin.map(Into::into),
                         size: tile.bounds.size.map(Into::into),
@@ -288,7 +288,7 @@ impl Window {
                     );
                 Some(MonochromeSprite {
                     order: 0,
-                    pad: 0,
+                    animation: crate::SpriteAnimationId::NONE,
                     bounds: Bounds {
                         origin: origin.map(|v| ScaledPixels(round_half_toward_zero(v.0))),
                         size: size.map(|v| v.ceil()),

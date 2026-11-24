@@ -105,7 +105,8 @@ fn vs_lens(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
     var out = LensVarying();
     out.position = to_device_position(unit_vertex, lens.bounds);
     out.lens_id = instance_id;
-    out.clip_distances = distance_from_clip_rect(unit_vertex, lens.bounds, lens.content_mask);
+    let position = unit_vertex * vec2<f32>(lens.bounds.size) + lens.bounds.origin;
+    out.clip_distances = distance_from_clip_rect_impl(position, lens.content_mask);
     return out;
 }
 

@@ -53,6 +53,7 @@ HELD_MAJORS = {
     "moxcms": ("0.9", "waits for `image` and `jxl-oxide` to move to moxcms 0.9"),
     "x11rb": ("0.14", "waits for the vendored `gpui-pre-linux` to move to x11rb 0.14"),
     "windows-future": ("0.100", "Quill's `windows` 0.62 returns `windows-future` 0.3 operations (core 0.62); 0.100 pairs with `windows-core` 0.100 and waits for a `windows` release on it"),
+    "webkit2gtk": ("3", "`wry` 0.57 pins `webkit2gtk` =2.0.2, and the Linux webview host must link the same copy as wry"),
     "zbus": ("6", "`ksni`, `accesskit_unix` and GPUI (through `ashpd` 0.13) are still on zbus 5; Quill's `ashpd` 0.14 brings zbus 6 alongside"),
 }
 # Gap between crates.io requests (their crawler policy asks for at most 1/s).
@@ -215,6 +216,9 @@ def direct_registry_deps(metadata: dict) -> dict:
     """
     packages = {p["id"]: p for p in metadata["packages"]}
     members = set(metadata.get("workspace_members") or [metadata["resolve"]["root"]])
+    # Vendored copies in third_party/ keep upstream's dependencies: they move when the
+    # gpui-kit issue re-vendors them, so their majors are not Quill's to bump.
+    members = {m for m in members if "/third_party/" not in packages.get(m, {}).get("manifest_path", "")}
     out = {}
     for node in metadata["resolve"]["nodes"]:
         if node["id"] not in members:

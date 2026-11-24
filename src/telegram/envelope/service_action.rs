@@ -256,6 +256,20 @@ pub enum ServiceAction {
         price: Money,
         state: GiftOfferState,
     },
+    /// `messageUpgradedGiftOnChainPurchaseOffer` (TDLib 1.8.71): an offer
+    /// paid from a TON wallet. Shown as text only: answering it moves TON,
+    /// which Quill never does.
+    GiftOnChainOffer {
+        name: String,
+        price: Money,
+        state: GiftOfferState,
+        is_buyer: bool,
+    },
+    /// `messageBotInvite` (TDLib 1.8.71): the user was invited to this bot
+    /// by `inviter_user_id`.
+    BotInvite {
+        inviter_user_id: i64,
+    },
     GiftOfferRejected {
         name: String,
         price: Money,
@@ -455,10 +469,50 @@ fn resale_price(value: Option<&Value>) -> Option<Money> {
     }
 }
 
+/// TON Grams in their smallest units (10^-9) as the 1/100 Gram amounts
+/// `Money` holds for "TON".
+fn gram_cents(value: &Value, key: &str) -> Money {
+    Money {
+        currency: "TON".into(),
+        amount: i(value, key) / 10_000_000,
+    }
+}
+
+/// The price an upgraded gift was bought for: a `giftResalePrice`, or the
+/// `gram_amount` of the TDLib 1.8.71 on-chain origins.
+fn origin_price(origin: Option<&Value>) -> Option<Money> {
+    let origin = origin?;
+    match origin.get("@type").and_then(Value::as_str)? {
+        "upgradedGiftOriginOnChainResale" | "upgradedGiftOriginOnChainOffer" => {
+            Some(gram_cents(origin, "gram_amount"))
+        }
+        _ => resale_price(origin.get("price")),
+    }
+}
+
+/// `giftOnChainPurchaseOfferState*` (TDLib 1.8.71) as the offer states the
+/// text knows.
+fn on_chain_offer_state(value: &Value) -> GiftOfferState {
+    let state = value
+        .get("state")
+        .and_then(|s| s.get("@type"))
+        .and_then(Value::as_str);
+    match state.and_then(|t| t.strip_prefix("giftOnChainPurchaseOfferState")) {
+        Some("Pending" | "Canceling") => GiftOfferState::Pending,
+        // Settled: accepted and executed on chain, the gift is on its way.
+        Some("Accepted" | "Settled") => GiftOfferState::Accepted,
+        Some("Declined" | "Canceled" | "Expired") => GiftOfferState::Rejected,
+        _ => GiftOfferState::Unknown,
+    }
+}
+
 fn gift_origin(origin: Option<&Value>) -> GiftOrigin {
     match origin.and_then(|o| o.get("@type")).and_then(Value::as_str) {
         Some("upgradedGiftOriginTransfer") => GiftOrigin::Transfer,
-        Some("upgradedGiftOriginResale") => GiftOrigin::Resale,
+        // TDLib 1.8.71: bought on the TON blockchain; the text is the same
+        // as a sale or an accepted offer.
+        Some("upgradedGiftOriginResale" | "upgradedGiftOriginOnChainResale") => GiftOrigin::Resale,
+        Some("upgradedGiftOriginOnChainOffer") => GiftOrigin::Offer,
         Some("upgradedGiftOriginBlockchain") => GiftOrigin::Blockchain,
         Some("upgradedGiftOriginPrepaidUpgrade") => GiftOrigin::PrepaidUpgrade,
         Some("upgradedGiftOriginOffer") => GiftOrigin::Offer,
@@ -739,7 +793,7 @@ impl ServiceAction {
                     sender: sender(value, "sender_id"),
                     receiver: sender(value, "receiver_id"),
                     origin,
-                    price: resale_price(origin_value.and_then(|o| o.get("price"))),
+                    price: origin_price(origin_value),
                 }
             }
             "messageRefundedUpgradedGift" => A::RefundedUpgradedGift {
@@ -761,6 +815,15 @@ impl ServiceAction {
                     Some("giftPurchaseOfferStateRejected") => GiftOfferState::Rejected,
                     _ => GiftOfferState::Unknown,
                 },
+            },
+            "messageUpgradedGiftOnChainPurchaseOffer" => A::GiftOnChainOffer {
+                name: upgraded_gift_name(value.get("gift")),
+                price: gram_cents(value, "gram_amount"),
+                state: on_chain_offer_state(value),
+                is_buyer: flag(value, "is_buyer"),
+            },
+            "messageBotInvite" => A::BotInvite {
+                inviter_user_id: i(value, "inviter_user_id"),
             },
             "messageUpgradedGiftPurchaseOfferRejected" => A::GiftOfferRejected {
                 name: upgraded_gift_name(value.get("gift")),

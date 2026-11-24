@@ -46,6 +46,11 @@ impl RequestAcks {
         self.settle(id, Answer::Failed(why));
     }
 
+    /// A surface still waits for `id`, or has its answer to take.
+    pub fn is_waited(&self, id: RequestId) -> bool {
+        self.awaited.contains(&id) || self.settled.contains_key(&id)
+    }
+
     /// The answer to `id`, once, if it came.
     pub fn take(&mut self, id: RequestId) -> Option<Answer> {
         self.settled.remove(&id)

@@ -60,6 +60,10 @@ pub enum InternalLink {
         username: String,
         game_short_name: String,
     },
+    /// `internalLinkTypeBotInvite` (TDLib 1.8.71): `t.me/botinvite/<bot>`.
+    BotInvite {
+        username: String,
+    },
     /// `internalLinkTypeRequestManagedBot`: `tg://newbot?manager=&username=&name=`.
     RequestManagedBot {
         manager_username: String,
@@ -326,6 +330,9 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
             username: text(value, "chat_username"),
             draft_text: text(value, "draft_text"),
             open_profile: flag(value, "open_profile"),
+        },
+        "BotInvite" => InternalLink::BotInvite {
+            username: text(value, "bot_username"),
         },
         "BotStart" => InternalLink::BotStart {
             username: text(value, "bot_username"),
@@ -612,6 +619,14 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
             })
         }
         InternalLink::Game { .. } => LinkRoute::Message(tr(keys::Q_CHAT_LINK_GAME_BROKEN).into()),
+        InternalLink::BotInvite { username } if !username.is_empty() => {
+            LinkRoute::Resolve(A::InviteToBot {
+                domain: username.clone(),
+            })
+        }
+        InternalLink::BotInvite { .. } => {
+            LinkRoute::Message(tr(keys::Q_CHAT_LINK_BOT_BROKEN).into())
+        }
         InternalLink::RequestManagedBot {
             manager_username,
             suggested_username,

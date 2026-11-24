@@ -392,7 +392,7 @@ fn move_to_my_wallet_opens_the_notice_once_the_gift_is_unlocked(cx: &mut TestApp
         app.transfer_step_back(window, cx);
         if let Some(session) = app.demo_session.as_mut() {
             for gift in session.payments.hub.received.rows.iter_mut() {
-                gift.manage.export_date = 1;
+                gift.manage.mint_date = 1;
             }
         }
         app.tap_transfer_export(cx);

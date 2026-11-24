@@ -10,9 +10,12 @@
 //! draws that scene into a texture and fills the lens's slot from it
 //! instead of from the frame, so a magnified label stays crisp.
 
+use std::rc::Rc;
+
+use super::{PaintedPath, PathPaint, SpriteAnimationId};
 use crate::{
-    AtlasTile, Bounds, ContentMask, Corners, Edges, FontId, GlyphId, MonochromeSprite, Path,
-    Pixels, Point, PolychromeSprite, Quad, ScaledPixels, Scene, Shadow, SharedString, Size,
+    AtlasTile, Bounds, ContentMask, Corners, Edges, FontId, GlyphId, MonochromeSprite, Pixels,
+    Point, PolychromeSprite, Quad, ScaledPixels, Scene, Shadow, SharedString, Size,
     SubpixelSprite, TransformationMatrix, Underline, point,
 };
 
@@ -163,8 +166,8 @@ impl SlotSpace {
             bounds: self.bounds(s.bounds),
             corner_radii: self.corners(s.corner_radii),
             content_mask: self.mask(s.content_mask),
-            element_bounds: self.bounds(s.element_bounds),
-            element_corner_radii: self.corners(s.element_corner_radii),
+            shape_bounds: self.bounds(s.shape_bounds),
+            shape_corner_radii: self.corners(s.shape_corner_radii),
             ..*s
         }
     }
@@ -179,16 +182,22 @@ impl SlotSpace {
         }
     }
 
-    pub(crate) fn path(&self, p: &Path<ScaledPixels>) -> Path<ScaledPixels> {
-        let mut path = p.clone();
-        path.order = 0;
-        path.bounds = self.bounds(p.bounds);
-        path.content_mask = self.mask(p.content_mask);
-        for vertex in &mut path.vertices {
-            vertex.xy_position = self.point(vertex.xy_position);
-            vertex.content_mask = self.mask(vertex.content_mask);
+    /// A path's tiles moved and scaled with the slot: a positive scale and a
+    /// move keep the binning valid, so nothing is binned again.
+    pub(crate) fn path(&self, p: &PaintedPath) -> PaintedPath {
+        PaintedPath {
+            order: 0,
+            bounds: self.bounds(p.bounds),
+            tiles: Rc::new(
+                p.tiles
+                    .mapped(point(self.origin.x.0, self.origin.y.0), self.density),
+            ),
+            paint: PathPaint {
+                bounds: self.bounds(p.paint.bounds),
+                content_mask: self.mask(p.paint.content_mask),
+                ..p.paint
+            },
         }
-        path
     }
 
     /// A sprite whose tile is drawn larger (no source to rasterize it
@@ -196,7 +205,7 @@ impl SlotSpace {
     pub(crate) fn monochrome(&self, s: &MonochromeSprite) -> MonochromeSprite {
         MonochromeSprite {
             order: 0,
-            pad: 0,
+            animation: SpriteAnimationId::NONE,
             bounds: self.bounds(s.bounds),
             content_mask: self.mask(s.content_mask),
             transformation: self.transformation(s.transformation),

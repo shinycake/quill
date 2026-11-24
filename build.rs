@@ -82,8 +82,8 @@ fn thorvg(manifest: &Path, out: &Path) -> Result<(), String> {
         "src/common",
         "src/renderer",
         "src/renderer/cpu_engine",
-        "src/loaders/raw",
-        "src/loaders/lottie",
+        "src/modules/raw",
+        "src/modules/lottie",
         "src/bindings/capi",
     ];
     let mut build = cc::Build::new();

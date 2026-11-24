@@ -9,7 +9,7 @@
   "last_sale_date": 1758110400,
   "last_sale_price": 248750,
   "is_last_sale_on_fragment": true,
-  "minimum_price": 182300,
+  "min_price": 182300,
   "average_sale_price": 214900,
   "telegram_listed_gift_count": 1284,
   "fragment_listed_gift_count": 37,

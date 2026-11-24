@@ -204,14 +204,6 @@ impl FittedTitles {
     }
 }
 
-impl IntoElement for FittedTitles {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for FittedTitles {
     type RequestLayoutState = ();
     type PrepaintState = AnyElement;

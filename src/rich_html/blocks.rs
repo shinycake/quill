@@ -251,22 +251,17 @@ fn block(out: &mut String, value: &Value, ctx: &mut Ctx<'_>, depth: usize) {
             ));
         }
         "pageBlockList" => list(out, value, ctx, depth),
-        "pageBlockBlockQuote" => {
+        "pageBlockBlockQuote" | "pageBlockExpandableBlockQuote" => {
             out.push_str("<blockquote>");
             blocks(out, value.at("blocks"), ctx, depth + 1);
             credit(out, value.at("credit"), ctx);
             out.push_str("</blockquote>\n");
         }
-        "pageBlockExpandableBlockQuote" | "pageBlockPullQuote" => {
-            let tag = if value.at("@type") == "pageBlockPullQuote" {
-                "aside"
-            } else {
-                "blockquote"
-            };
-            out.push_str(&format!("<{tag}>"));
+        "pageBlockPullQuote" => {
+            out.push_str("<aside>");
             rich_text(out, value.at("text"), ctx, true, 0);
             credit(out, value.at("credit"), ctx);
-            out.push_str(&format!("</{tag}>\n"));
+            out.push_str("</aside>\n");
         }
         "pageBlockPhoto" | "pageBlockVideo" | "pageBlockAnimation" => {
             let Some(item) = MediaItem::of(value) else {

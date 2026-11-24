@@ -283,7 +283,8 @@ impl LensPipelines {
                         module: &wgpu::ShaderModule,
                         entries: (&str, &str),
                         topology: wgpu::PrimitiveTopology,
-                        blend: Option<wgpu::BlendState>| {
+                        blend: Option<wgpu::BlendState>,
+                        depth_stencil: Option<wgpu::DepthStencilState>| {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(name),
                 bind_group_layouts: layouts,
@@ -312,7 +313,7 @@ impl LensPipelines {
                     topology,
                     ..Default::default()
                 },
-                depth_stencil: None,
+                depth_stencil,
                 multisample: wgpu::MultisampleState::default(),
                 multiview_mask: None,
                 cache: None,
@@ -325,6 +326,15 @@ impl LensPipelines {
             ("vs_lens", "fs_lens"),
             wgpu::PrimitiveTopology::TriangleStrip,
             Some(blend),
+            // Lenses draw inside the frame's pass, which has a depth
+            // attachment; a frame with glass tests no depth.
+            Some(wgpu::DepthStencilState {
+                format: super::DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
         );
         let downsample = pipeline(
             "lens_downsample",
@@ -333,6 +343,7 @@ impl LensPipelines {
             ("vs_lens_downsample", "fs_lens_downsample"),
             wgpu::PrimitiveTopology::TriangleStrip,
             None,
+            None,
         );
         let frame_copy = pipeline(
             "lens_frame_copy",
@@ -340,6 +351,7 @@ impl LensPipelines {
             &post_module,
             ("vs_lens_frame_copy", "fs_lens_frame_copy"),
             wgpu::PrimitiveTopology::TriangleList,
+            None,
             None,
         );
         let sampler = |label: &str, mipmap_filter: wgpu::MipmapFilterMode| {
@@ -630,12 +642,12 @@ impl WgpuRendererCore {
         instance_offset: &mut u64,
         instances: &[T],
     ) -> Result<Option<StorageSlice>> {
-        let (offset, size, _) = self.write_instance_data(instance_offset, instances)?;
+        let allocation = self.write_instance_data(instance_offset, instances)?;
         Ok(match &self.resources.instance_data {
             InstanceData::Storage(buffer) => Some(StorageSlice {
                 buffer: buffer.clone(),
-                offset,
-                size,
+                offset: allocation.offset,
+                size: allocation.size,
             }),
             InstanceData::Texture { .. } => None,
         })

@@ -415,6 +415,9 @@ impl Platform for ZoomPlatform {
     fn on_validate_app_menu_command(&self, callback: Box<dyn FnMut(&dyn Action) -> bool>) {
         self.inner.on_validate_app_menu_command(callback)
     }
+    fn debug_state(&self) -> serde_json::Value {
+        self.inner.debug_state()
+    }
     fn thermal_state(&self) -> ThermalState {
         self.inner.thermal_state()
     }
@@ -436,7 +439,7 @@ impl Platform for ZoomPlatform {
     fn show_system_notification(&self, notification: SystemNotification) {
         self.inner.show_system_notification(notification)
     }
-    fn dismiss_system_notification(&self, tag: &str) {
+    fn dismiss_system_notification(&self, tag: &str) -> gpui_kit::Task<()> {
         self.inner.dismiss_system_notification(tag)
     }
     fn on_system_notification_response(
@@ -632,8 +635,42 @@ impl PlatformWindow for ZoomWindow {
     fn is_fullscreen(&self) -> bool {
         self.inner.is_fullscreen()
     }
+    fn debug_state(&self) -> serde_json::Value {
+        self.inner.debug_state()
+    }
     fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
         self.inner.frame_waker()
+    }
+    unsafe fn attach_native_view(
+        &self,
+        id: gpui_kit::NativeViewId,
+        view: std::ptr::NonNull<std::ffi::c_void>,
+    ) -> Option<Box<dyn std::any::Any>> {
+        // SAFETY: the caller's contract is passed on unchanged.
+        unsafe { self.inner.attach_native_view(id, view) }
+    }
+    fn set_focused_native_view(&self, id: Option<gpui_kit::NativeViewId>) {
+        self.inner.set_focused_native_view(id)
+    }
+    fn on_hit_test_native_view(
+        &self,
+        mut callback: Box<dyn FnMut(Point<Pixels>) -> Option<gpui_kit::NativeViewId>>,
+    ) {
+        let state = Rc::downgrade(&self.state);
+        self.inner
+            .on_hit_test_native_view(Box::new(move |position| {
+                let zoom = state.upgrade().map_or(1., |s| s.zoom.get());
+                callback(point_in(position, zoom))
+            }))
+    }
+    fn on_native_view_focused(&self, callback: Box<dyn FnMut(gpui_kit::NativeViewId)>) {
+        self.inner.on_native_view_focused(callback)
+    }
+    fn on_key_down_before_native_view(
+        &self,
+        callback: Box<dyn FnMut(gpui_kit::KeyDownEvent) -> bool>,
+    ) {
+        self.inner.on_key_down_before_native_view(callback)
     }
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.inner.on_request_frame(callback)
@@ -731,6 +768,10 @@ impl PlatformWindow for ZoomWindow {
         self.state.traffic_light_zoom.set(self.zoom());
         self.inner
             .set_traffic_light_position(traffic_light_out(position, self.zoom()))
+    }
+    #[cfg(target_os = "macos")]
+    fn set_native_titlebar_visibility(&self, visible: bool) {
+        self.inner.set_native_titlebar_visibility(visible)
     }
     fn show_character_palette(&self) {
         self.inner.show_character_palette()

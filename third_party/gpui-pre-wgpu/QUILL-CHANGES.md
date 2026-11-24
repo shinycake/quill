@@ -1,12 +1,23 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-wgpu 0.3.12 from crates.io (Apache-2.0,
+This directory is gpui-pre-wgpu 0.3.14 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's wgpu renderer and cosmic-text text system (Linux),
-used through `[patch.crates-io]` in Quill's `Cargo.toml`. The commit "Vendor the unmodified gpui-pre 0.3.12 registry copy of gpui-pre-wgpu" added
+used through `[patch.crates-io]` in Quill's `Cargo.toml`. The commit "Vendor the unmodified gpui-pre 0.3.14 registry copy of gpui-pre-wgpu" added
 the unmodified registry copy (without the registry's `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.toml.orig` and `Cargo.lock`), so
 `git diff <that commit> -- third_party/gpui-pre-wgpu` shows every change. The crate's
 own unit tests read fonts from the Zed source tree and do not build here.
+
+0.3.14 note: upstream draws opaque quads first in a depth pre-pass. A frame
+with glass skips it (a lens batch ends the render pass, and opaque quads drawn
+ahead would show in the backdrop the lens copies); the quad shader culls
+opaque rectangles only after that pass ran. The pass a lens batch resumes
+keeps a depth attachment, and the lens pipeline declares one. Upstream now
+has its own `write_instance_data` split, which replaces Quill's. Paths are
+tiled curves upstream, so the old `Path`/`ScaledPixels` imports went.
+`WgpuRendererCore::target_format` is upstream's field for the headless test
+renderer; Quill keeps it in every build, since the frame capture and the lens
+pipelines read it.
 
 The Quill project changed it in 2026 so emoji draw in colour on Linux
 (`docs/decisions/linux-titlebar-emoji.md`):

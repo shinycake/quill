@@ -41,7 +41,7 @@ fn a_failed_media_count_is_asked_again_on_the_next_open() {
         .chat_media_counts
         .insert(chat.0, [(1u8, 4)].into_iter().collect());
     let extra = session.request(
-        RequestPurpose::Users(UsersPurpose::GetChatMessageCount { filter: 2 }),
+        RequestPurpose::Users(UsersPurpose::GetChatMessageCounts { first: 0 }),
         Some(chat),
     );
     let lost = session.requests.take(extra).expect("registered");
