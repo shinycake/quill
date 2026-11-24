@@ -136,6 +136,28 @@ These reach Quill without code changes, through the vendored crates:
   clean, and the remaining warnings are in Quill code this change does not
   touch (`capture_access.rs`, `winreg.rs` and a few test files).
 - All `scripts/check-*.py` and `check-file-size.sh`.
-- Demo captures before (origin/main) and after, light and dark (listed below).
+- Demo captures before (origin/main) and after, light and dark: chat list,
+  open chat, composer with a wrapping draft, chat-row menu with the Mute
+  submenu open, Settings, a dialog and the backdrop-glass showcase. All but
+  the glass showcase are pixel-identical. On the glass showcase 16 pixels
+  differ, all on the edges of the story rings next to the search field:
+  paths now get analytic coverage from tiles instead of a multisampled
+  texture. Kept in `quill-work/scratch/deps-1123/kit/{before,after}`.
 
-MEASUREMENTS
+## Measurements
+
+Memory, 2026-11-23, M-series Mac, debug builds of origin/main (`14453005e`)
+and this branch, demo window 1200x800 pt at 2x. Each run started a demo, waited
+8 s, read `footprint -p`, alternating A and B, three runs each:
+
+| Demo | origin/main | 0.11.0 |
+|---|---|---|
+| `ready-glass` (story rings, glass) | 88–89 MB | 71–72 MB |
+| `ready-chats-composer` (no paths) | 56–57 MB | 56–57 MB |
+
+The 17 MB matches the window-sized path intermediate texture
+(2400×1600×4 bytes is 15.4 MB) that 0.3.12's Metal renderer kept for every
+window; 0.3.14 draws paths from tiles straight into the frame and has no such
+texture. The texture was created on each resize, but its pages only counted
+once a frame drew a path into it, so a window that never drew one (the second
+row) shows no change. Frame time was not measured.
