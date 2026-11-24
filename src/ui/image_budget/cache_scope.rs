@@ -38,14 +38,6 @@ impl CacheScope {
     }
 }
 
-impl IntoElement for CacheScope {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for CacheScope {
     type RequestLayoutState = ();
     type PrepaintState = ();

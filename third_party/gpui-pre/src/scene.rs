@@ -482,6 +482,7 @@ impl Scene {
                 .insert_span(bounds, highest.saturating_sub(lowest), top_kind)
                 .wrapping_sub(lowest)
         });
+        let first_operation = self.paint_operations.len();
         for operation in operations {
             match operation {
                 // Animation ids index the scene they were inserted into.
@@ -508,20 +509,37 @@ impl Scene {
                             None => SpriteAnimationId::NONE,
                         };
                     }
-                    let order = sprite.order.wrapping_add(shift);
-                    self.record_primitive(Primitive::MonochromeSprite(sprite), order);
+                    sprite.order = sprite.order.wrapping_add(shift);
+                    self.paint_operations
+                        .push(PaintOperation::Primitive(Primitive::MonochromeSprite(sprite)));
                 }
                 PaintOperation::Primitive(Primitive::PolychromeSprite(sprite)) => {
                     self.copy_glyph_source(prev_scene, &sprite.tile, &sprite.bounds);
-                    let order = sprite.order.wrapping_add(shift);
-                    self.record_primitive(Primitive::PolychromeSprite(*sprite), order);
+                    let mut sprite = *sprite;
+                    sprite.order = sprite.order.wrapping_add(shift);
+                    self.paint_operations
+                        .push(PaintOperation::Primitive(Primitive::PolychromeSprite(sprite)));
                 }
                 PaintOperation::Primitive(primitive) => {
-                    let order = primitive.order().wrapping_add(shift);
-                    self.record_primitive(primitive.clone(), order);
+                    let mut primitive = primitive.clone();
+                    primitive.set_order(primitive.order().wrapping_add(shift));
+                    self.paint_operations
+                        .push(PaintOperation::Primitive(primitive));
                 }
                 PaintOperation::StartLayer => self.paint_operations.push(PaintOperation::StartLayer),
                 PaintOperation::EndLayer => self.paint_operations.push(PaintOperation::EndLayer),
+            }
+        }
+        // Primitives that share an order and a kind draw in the order they
+        // reached the scene, which for a layer is when the outermost layer
+        // around it ended: so push them as painting did.
+        for index in deferred_layer_sequence(operations) {
+            if let Some(PaintOperation::Primitive(primitive)) =
+                self.paint_operations.get(first_operation + index)
+            {
+                let primitive = primitive.clone();
+                let order = primitive.order();
+                self.push_primitive(primitive, order);
             }
         }
     }
@@ -827,6 +845,37 @@ impl PrimitiveKind {
             kind => kind,
         }
     }
+}
+
+/// QUILL: the indices of `operations`' primitives in the order painting
+/// them puts them in the scene. A primitive in a layer goes in when the
+/// outermost layer around it ends, layer by layer in the order they started
+/// (`Scene::pop_layer`); any other goes in at once.
+fn deferred_layer_sequence(operations: &[PaintOperation]) -> Vec<usize> {
+    let mut sequence = Vec::with_capacity(operations.len());
+    let mut layers: Vec<Vec<usize>> = Vec::new();
+    let mut open: Vec<usize> = Vec::new();
+    for (index, operation) in operations.iter().enumerate() {
+        match operation {
+            PaintOperation::StartLayer => {
+                open.push(layers.len());
+                layers.push(Vec::new());
+            }
+            PaintOperation::EndLayer => {
+                open.pop();
+                if open.is_empty() {
+                    sequence.extend(layers.drain(..).flatten());
+                }
+            }
+            PaintOperation::Primitive(_) => match open.last().and_then(|&l| layers.get_mut(l)) {
+                Some(layer) => layer.push(index),
+                None => sequence.push(index),
+            },
+        }
+    }
+    // A range that ends inside a layer.
+    sequence.extend(layers.into_iter().flatten());
+    sequence
 }
 
 pub(crate) enum PaintOperation {
@@ -2056,6 +2105,16 @@ impl PaintedPath {
 
     pub fn tile_count(&self) -> usize {
         self.tiles.tiles().len()
+    }
+
+    /// QUILL: where the path sits among the scene's primitives.
+    pub fn order(&self) -> DrawOrder {
+        self.order
+    }
+
+    /// QUILL: what the path is filled with.
+    pub fn color(&self) -> Background {
+        self.paint.color
     }
 
     pub fn append_to(

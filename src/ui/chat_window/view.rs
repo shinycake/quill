@@ -448,14 +448,6 @@ impl WindowScope {
     }
 }
 
-impl IntoElement for WindowScope {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for WindowScope {
     type RequestLayoutState = ();
     type PrepaintState = ();

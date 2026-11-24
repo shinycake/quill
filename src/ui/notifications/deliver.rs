@@ -173,7 +173,8 @@ impl QuillApp {
             {
                 cx.dismiss_system_notification(&quill::notify_call::call_notification_tag(
                     &account.0, call_id,
-                ));
+                ))
+                .detach();
             }
             return;
         };
@@ -209,7 +210,8 @@ impl QuillApp {
             cx.dismiss_system_notification(&quill::notify_call::call_notification_tag(
                 &old_account.0,
                 old_call,
-            ));
+            ))
+            .detach();
         }
         self.calls.notified = Some((account.clone(), call_id));
         self.spawn_call_notification_as(&account, notification, cx);

@@ -334,14 +334,6 @@ pub(crate) struct MeasureSize {
     pub(crate) child: AnyElement,
 }
 
-impl IntoElement for MeasureSize {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for MeasureSize {
     type RequestLayoutState = ();
     type PrepaintState = ();

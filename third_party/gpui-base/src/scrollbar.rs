@@ -2442,6 +2442,7 @@ mod tests {
             move |_, _| ScrollbarHarness {
                 handle,
                 axis: ScrollbarAxis::Vertical,
+                placement: ScrollbarPlacement::default(),
                 mode: ScrollbarMode::Scrolling,
                 scroll_viewport_size: None,
             }

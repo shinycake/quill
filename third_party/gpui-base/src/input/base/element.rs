@@ -3200,7 +3200,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                     wrapped_lines.push(row);
                     continue;
                 }
-                let line_runs = runs_for_range(runs, part_run_offset, &range);
+                let line_runs = run_index.runs_for_range(part_run_offset, &range);
                 let line_runs = if bg_segments.is_empty() {
                     line_runs
                 } else {
@@ -4325,15 +4325,19 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 align_lines(&mut lines, state.text_align);
                 last_layout.lines = Rc::new(lines);
                 bounds = unscrolled_bounds;
-                (cursor_infos, cursor_scroll_offset, current_row, reveal_owned) = self
-                    .layout_cursors(
-                        &last_layout,
-                        &mut bounds,
-                        scroll_size,
-                        reveal_on_resize,
-                        resize_reveal_owned,
-                        cx,
-                    );
+                (
+                    cursor_infos,
+                    cursor_scroll_offset,
+                    current_row,
+                    reveal_owned,
+                ) = self.layout_cursors(
+                    &last_layout,
+                    &mut bounds,
+                    scroll_size,
+                    reveal_on_resize,
+                    resize_reveal_owned,
+                    cx,
+                );
             }
         }
         let resize_reveal_owned = reveal_owned;

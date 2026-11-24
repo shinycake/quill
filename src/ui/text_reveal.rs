@@ -159,14 +159,6 @@ struct RevealBlock {
     sink: RevealSink,
 }
 
-impl IntoElement for RevealBlock {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for RevealBlock {
     type RequestLayoutState = ();
     type PrepaintState = ();

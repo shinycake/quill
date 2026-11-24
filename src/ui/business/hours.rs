@@ -46,7 +46,7 @@ fn field_minute(state: &Entity<TimeFieldState>, cx: &App) -> i32 {
     let text = state
         .read(cx)
         .time()
-        .format(tr(keys::Q_OPS_H_M))
+        .strftime(&tr(keys::Q_OPS_H_M))
         .to_string();
     let mut parts = text.split(':').filter_map(|p| p.parse::<i32>().ok());
     let hour = parts.next().unwrap_or(0);

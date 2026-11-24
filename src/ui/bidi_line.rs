@@ -141,14 +141,6 @@ struct BidiBlock {
     paragraph: Option<Rc<BidiParagraph>>,
 }
 
-impl IntoElement for BidiBlock {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for BidiBlock {
     type RequestLayoutState = ();
     type PrepaintState = ();
@@ -248,14 +240,6 @@ fn metrics(window: &Window) -> (TextStyle, Pixels, Pixels) {
             .to_pixels(font_size.into(), window.rem_size()),
     );
     (style, font_size, line_height)
-}
-
-impl IntoElement for BidiLine {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 impl Element for BidiLine {

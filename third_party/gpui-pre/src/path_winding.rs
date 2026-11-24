@@ -87,6 +87,48 @@ impl PathTiles {
         &self.curves
     }
 
+    /// QUILL (backdrop glass): these tiles with every point moved by
+    /// `-origin` and scaled by `scale` (> 0), to draw the path again in a
+    /// finer slot. A positive scale and a move keep each tile's curves and
+    /// winding, so nothing is binned again.
+    pub(crate) fn mapped(&self, origin: Point<f32>, scale: f32) -> Self {
+        let at = |p: Point<f32>| point((p.x - origin.x) * scale, (p.y - origin.y) * scale);
+        let by = |v: Point<f32>| point(v.x * scale, v.y * scale);
+        let device = |p: Point<ScaledPixels>| {
+            let p = at(point(p.x.0, p.y.0));
+            point(ScaledPixels(p.x), ScaledPixels(p.y))
+        };
+        Self {
+            bounds: Bounds::from_corners(
+                device(self.bounds.origin),
+                device(self.bounds.bottom_right()),
+            ),
+            tiles: self
+                .tiles
+                .iter()
+                .map(|tile| PathTile {
+                    top_left: at(tile.top_left),
+                    bottom_right: at(tile.bottom_right),
+                    reference: at(tile.reference),
+                    curves_top_left: at(tile.curves_top_left),
+                    curves_bottom_right: at(tile.curves_bottom_right),
+                    ..*tile
+                })
+                .collect(),
+            curves: self
+                .curves
+                .iter()
+                .map(|curve| PathCurve {
+                    p0: at(curve.p0),
+                    p1: at(curve.p1),
+                    a: by(curve.a),
+                    b: by(curve.b),
+                    ..*curve
+                })
+                .collect(),
+        }
+    }
+
     /// Drops the tiles that lie entirely outside `mask`.
     pub(crate) fn retain_visible(&mut self, mask: Bounds<ScaledPixels>) {
         self.tiles.retain(|tile| {

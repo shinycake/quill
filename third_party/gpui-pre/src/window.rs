@@ -3098,10 +3098,6 @@ impl Window {
         self.last_window_bounds
     }
 
-    pub(crate) fn display_id(&self) -> Option<DisplayId> {
-        self.display_id
-    }
-
     /// Return the `WindowBounds` excluding insets (Wayland and X11)
     pub fn inner_window_bounds(&self) -> WindowBounds {
         self.platform_window.inner_window_bounds()

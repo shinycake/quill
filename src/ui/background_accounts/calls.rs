@@ -207,7 +207,7 @@ impl QuillApp {
         if let RingNotice::Posted { tag } = &ring.notice
             && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
         {
-            cx.dismiss_system_notification(tag);
+            cx.dismiss_system_notification(tag).detach();
         }
         cx.notify();
     }

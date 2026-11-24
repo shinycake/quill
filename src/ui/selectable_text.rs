@@ -382,14 +382,6 @@ fn emoji_bounds(layout: &TextLayout, range: &Range<usize>, font: Pixels) -> Opti
     Some(Bounds::new(origin, size(edge, edge)))
 }
 
-impl IntoElement for SelectableRichText {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for SelectableRichText {
     type RequestLayoutState = TextSelectionHandle;
     type PrepaintState = (Hitbox, Vec<AnyElement>);
@@ -937,14 +929,6 @@ pub(super) struct SelectionViewport {
 pub(super) fn selection_viewport(child: impl IntoElement) -> SelectionViewport {
     SelectionViewport {
         child: child.into_any_element(),
-    }
-}
-
-impl IntoElement for SelectionViewport {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 

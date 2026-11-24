@@ -1027,6 +1027,8 @@ vertex NativeViewVertexOutput native_view_vertex(
 // The pipeline does not blend, so this erases what was drawn beneath the view.
 fragment float4 native_view_fragment(NativeViewVertexOutput input [[stage_in]]) {
   return float4(0.);
+}
+
 // QUILL: HDR still images (`kCVPixelFormatType_64RGBAHalf`, linear extended
 // sRGB, premultiplied alpha). `headroom` is the display's EDR headroom (1 on
 // an SDR target); `extended_output` is set when the drawable is a float
@@ -1442,6 +1444,8 @@ bool has_border(Edges_ScaledPixels border_widths) {
 
 bool is_shaped(Quad quad) {
   return has_rounded_corners(quad.corner_radii) || has_border(quad.border_widths);
+}
+
 // QUILL: backdrop glass (`BackdropLens`). The renderer copies each lens's
 // footprint out of the target into a slot of a mip-chained atlas, blurs the
 // chain with dual-Kawase downsamples, and draws the lens from it. The optics

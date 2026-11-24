@@ -147,7 +147,8 @@ impl QuillApp {
         // Quill's own windows, whichever backend showed the rest.
         self.clear_custom_notifications(&account, chat_id, cx);
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
-            cx.dismiss_system_notification(&quill::notify::notification_tag(&account.0, chat_id));
+            cx.dismiss_system_notification(&quill::notify::notification_tag(&account.0, chat_id))
+                .detach();
             return;
         }
         self.close_linux_notification(account, chat_id);
