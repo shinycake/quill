@@ -641,6 +641,14 @@ impl PlatformWindow for ZoomWindow {
     fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
         self.inner.frame_waker()
     }
+    unsafe fn attach_native_view(
+        &self,
+        id: gpui_kit::NativeViewId,
+        view: std::ptr::NonNull<std::ffi::c_void>,
+    ) -> Option<Box<dyn std::any::Any>> {
+        // SAFETY: the caller's contract is passed on unchanged.
+        unsafe { self.inner.attach_native_view(id, view) }
+    }
     fn set_focused_native_view(&self, id: Option<gpui_kit::NativeViewId>) {
         self.inner.set_focused_native_view(id)
     }
