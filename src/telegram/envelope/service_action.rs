@@ -490,6 +490,22 @@ fn origin_price(origin: Option<&Value>) -> Option<Money> {
     }
 }
 
+/// `giftOnChainPurchaseOfferState*` (TDLib 1.8.71) as the offer states the
+/// text knows.
+fn on_chain_offer_state(value: &Value) -> GiftOfferState {
+    let state = value
+        .get("state")
+        .and_then(|s| s.get("@type"))
+        .and_then(Value::as_str);
+    match state.and_then(|t| t.strip_prefix("giftOnChainPurchaseOfferState")) {
+        Some("Pending" | "Canceling") => GiftOfferState::Pending,
+        // Settled: accepted and executed on chain, the gift is on its way.
+        Some("Accepted" | "Settled") => GiftOfferState::Accepted,
+        Some("Declined" | "Canceled" | "Expired") => GiftOfferState::Rejected,
+        _ => GiftOfferState::Unknown,
+    }
+}
+
 fn gift_origin(origin: Option<&Value>) -> GiftOrigin {
     match origin.and_then(|o| o.get("@type")).and_then(Value::as_str) {
         Some("upgradedGiftOriginTransfer") => GiftOrigin::Transfer,
@@ -803,27 +819,7 @@ impl ServiceAction {
             "messageUpgradedGiftOnChainPurchaseOffer" => A::GiftOnChainOffer {
                 name: upgraded_gift_name(value.get("gift")),
                 price: gram_cents(value, "gram_amount"),
-                state: match value
-                    .get("state")
-                    .and_then(|s| s.get("@type"))
-                    .and_then(Value::as_str)
-                {
-                    Some(
-                        "giftOnChainPurchaseOfferStatePending"
-                        | "giftOnChainPurchaseOfferStateCanceling",
-                    ) => GiftOfferState::Pending,
-                    // Settled: accepted and executed on chain, the gift is on its way.
-                    Some(
-                        "giftOnChainPurchaseOfferStateAccepted"
-                        | "giftOnChainPurchaseOfferStateSettled",
-                    ) => GiftOfferState::Accepted,
-                    Some(
-                        "giftOnChainPurchaseOfferStateDeclined"
-                        | "giftOnChainPurchaseOfferStateCanceled"
-                        | "giftOnChainPurchaseOfferStateExpired",
-                    ) => GiftOfferState::Rejected,
-                    _ => GiftOfferState::Unknown,
-                },
+                state: on_chain_offer_state(value),
                 is_buyer: flag(value, "is_buyer"),
             },
             "messageBotInvite" => A::BotInvite {
