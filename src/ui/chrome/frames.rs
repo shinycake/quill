@@ -1,5 +1,6 @@
-//! The frames of the chat list column and the side panels: Classic's
-//! lined columns, or Floating's cards (docs/decisions/floating-layout.md).
+//! The frames of the chat list column, the side panels, the chat header
+//! and the composer: Classic's lines, or Floating's cards and pills
+//! (docs/decisions/floating-layout.md).
 //! Every call site passes its element through here, so the two layouts
 //! cannot drift apart at one site.
 //!
@@ -13,7 +14,7 @@ use super::radius::card_in;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::layout_style::{Chrome, Clip, Edge, Elevation};
+use quill::layout_style::{Chrome, Clip, Edge, Elevation, Placement};
 
 /// The chat list column's own frame, inside its slot: Classic's right
 /// border, or a card's rounded fill.
@@ -44,6 +45,38 @@ pub(in crate::ui) fn panel_frame<E: Styled + FluentBuilder>(
             .bg(theme.sidebar),
         Clip::Rounded => surface(this, chrome, theme),
     }
+}
+
+/// The chat header's frame: Classic's line under it, or a pill.
+pub(in crate::ui) fn header_frame<E: Styled + FluentBuilder>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+) -> E {
+    match chrome.metrics.placement {
+        Placement::Stacked => this.border_b_1().border_color(theme.border),
+        Placement::Overlaid => pill(this, chrome, theme),
+    }
+}
+
+/// The composer's frame: Classic's line over it, or a pill.
+pub(in crate::ui) fn composer_frame<E: Styled + FluentBuilder>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+) -> E {
+    match chrome.metrics.placement {
+        Placement::Stacked => this.border_t_1().border_color(theme.border),
+        Placement::Overlaid => pill(this, chrome, theme),
+    }
+}
+
+/// A pill over the history: a card's fill, edge and shadow. It does not
+/// clip, as the composer's popups hang outside it.
+fn pill<E: Styled + FluentBuilder>(this: E, chrome: &Chrome, theme: &Theme) -> E {
+    surface(this, chrome, theme).when(chrome.elevation == Elevation::Shadowed, |this| {
+        this.shadow(card_shadow(theme))
+    })
 }
 
 /// A card's fill and edge, rounded.

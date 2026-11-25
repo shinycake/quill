@@ -10,6 +10,7 @@ pub(in crate::ui) mod radius;
 
 use crate::ui::app::QuillApp;
 use gpui_kit::component::theme::ActiveTheme;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::layout_style::{
     BackdropKind, Chrome, ChromeMetrics, Contrast, FLOATING_FROM, LayoutOverride, LayoutStyle,
@@ -61,6 +62,21 @@ impl QuillApp {
     /// history's.
     pub(in crate::ui) fn window_backdrop(&self, cx: &App) -> bool {
         self.chrome(cx).metrics.backdrop == quill::layout_style::Backdrop::Window
+    }
+
+    /// The chat header's frame in this window (`frames::header_frame`).
+    pub(in crate::ui) fn header_frame<E: Styled + FluentBuilder>(&self, this: E, cx: &App) -> E {
+        frames::header_frame(this, &self.chrome(cx), cx.theme())
+    }
+
+    /// The composer's frame in this window (`frames::composer_frame`).
+    pub(in crate::ui) fn composer_frame<E: Styled + FluentBuilder>(&self, this: E, cx: &App) -> E {
+        frames::composer_frame(this, &self.chrome(cx), cx.theme())
+    }
+
+    /// The header and the bars float over the history in their own slice.
+    pub(in crate::ui) fn bars_float(&self) -> bool {
+        self.chrome_metrics().placement == quill::layout_style::Placement::Overlaid
     }
 
     /// What the window whose state is in place draws this frame.

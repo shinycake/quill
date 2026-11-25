@@ -12,6 +12,9 @@ use quill::ids::ChatId;
 use std::cell::Cell;
 use std::rc::Rc;
 
+/// The header slice's height before its first measure: one bar.
+const FIRST_TOP_HEIGHT: f32 = 48.;
+
 /// What a window's render did with its conversation since the last
 /// `history_drawn`.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -28,6 +31,10 @@ enum ConversationFrame {
 #[derive(Default)]
 pub(in crate::ui) struct WindowSlices {
     pub(super) conversation: Option<SliceParts>,
+    /// The header and the bars above the history, when they float over it
+    /// (Floating): its own slice and layer, so a typing peer's dots or a
+    /// title's emoji status redraw the header and not the history.
+    pub(super) header: Option<SliceParts>,
     pub(super) composer: Option<Entity<AppSlice>>,
     /// The media panel's layer: over the composer, whose slice draws the
     /// panel, or the selector, which the window draws.
@@ -36,6 +43,9 @@ pub(in crate::ui) struct WindowSlices {
     /// is sized before its content renders, so the slot takes the measured
     /// height (a change redraws the slot next frame).
     pub(super) composer_height: Rc<Cell<Pixels>>,
+    /// The header slice's height as laid out last time, as
+    /// `composer_height` is the composer's.
+    pub(super) top_height: Rc<Cell<Pixels>>,
     /// The window's content width as its last render measured it: what
     /// `QuillApp::chrome` reads for this window (a measurement cache, as
     /// `composer_height` is).
@@ -58,6 +68,12 @@ impl WindowSlices {
             painter: cx.new(|_| AnimationLayer::new(layer.clone(), app.clone(), window)),
             layer,
         };
+        let layer = Layer::default();
+        let header = SliceParts {
+            slice: cx.new(|_| AppSlice::new(app.clone(), SliceKind::Header, window)),
+            painter: cx.new(|_| AnimationLayer::new(layer.clone(), app.clone(), window)),
+            layer,
+        };
         let composer = cx.new(|_| AppSlice::new(app.clone(), SliceKind::Composer, window));
         let layer = Layer::default();
         let panel = SliceParts {
@@ -65,12 +81,17 @@ impl WindowSlices {
             painter: cx.new(|_| AnimationLayer::new(layer.clone(), app.clone(), window)),
             layer,
         };
-        Self {
+        let slices = Self {
             conversation: Some(conversation),
+            header: Some(header),
             composer: Some(composer),
             panel: Some(panel),
             ..Self::default()
-        }
+        };
+        // A bar's height until the header is measured, so the first frame
+        // does not jump.
+        slices.top_height.set(px(FIRST_TOP_HEIGHT));
+        slices
     }
 
     /// Start at `height`, as the composer's box until it is measured.
@@ -107,13 +128,14 @@ impl WindowSlices {
     /// The slices that show the conversation.
     pub(in crate::ui) fn slice_ids(&self) -> impl Iterator<Item = EntityId> {
         let conversation = self.conversation.as_ref().map(|p| p.slice.entity_id());
+        let header = self.header.as_ref().map(|p| p.slice.entity_id());
         let composer = self.composer.as_ref().map(Entity::entity_id);
-        conversation.into_iter().chain(composer)
+        conversation.into_iter().chain(header).chain(composer)
     }
 
     /// The window's views: its slices and layer painters.
     pub(in crate::ui) fn view_ids(&self) -> impl Iterator<Item = EntityId> {
-        let painters = [&self.conversation, &self.panel]
+        let painters = [&self.conversation, &self.header, &self.panel]
             .into_iter()
             .flatten()
             .map(|parts| parts.painter.entity_id());

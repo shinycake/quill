@@ -155,3 +155,38 @@ Verification note: screenshot demos stop a slide where it is (a pre-existing
 behaviour of the demo pipeline, the same on main for the Classic sidebar
 toggle), so the held drawer's resting place is proved by
 `chrome/cards_tests.rs` (its card lands at x = 16), not by a capture.
+
+## The header and composer float (step 8a, 8b)
+
+`session_history` builds the header and the bars (`history_bars`, in
+`conversation/top_bars.rs`) apart from the body (`history_body`), in the
+order the one chain used. Classic still draws them in the conversation
+slice. In Floating, `ConversationPart::Bars` renders them in a Header
+slice of their own with its own animation layer, so a typing peer's dots
+and a title's emoji status tick in the header's layer, not the
+history's. `floating_column` lays the history over the whole pane and
+the header and composer boxes over it, each a gutter from the pane's
+edge and centred at most the chat column wide; the boxes take the
+heights their slices measured, as the composer did. The strips under the
+history (bottom subsection tabs, the busy-call banner) join the composer
+slice.
+
+Order in Floating is header pill, then the player, call and capture
+bars, then the chat's own bars; Classic keeps the player and call bars
+above the header. Web K shows its audio and call bars under the chat
+header, so that order follows it. Each bar is wrapped in a box that
+blocks clicks (`block_mouse_except_scroll`), which the wheel passes
+through; the gaps between bars have no box.
+
+Deviations from the plan, recorded here:
+
+- The pills do not clip their content: the composer's popups (the
+  emoji panel, the round-video circle) hang outside the pill, and a
+  rounded clip would cut them. A hover fill that reaches a pill's end
+  stays square until a bar is reshaped in step 8f.
+- `MeasureHeight.redraw` stays one view until a slice other than the
+  slot reads a measured height (step 8c), and `chrome/frame.rs` lands
+  with its first reader in 8c.
+- The typing test proves the dots tick with no slice rendering and with
+  the header's own layer; a typing update itself still redraws every
+  conversation slice through the session's notify, as it did.

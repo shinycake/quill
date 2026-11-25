@@ -294,8 +294,7 @@ impl QuillApp {
             .id("conversation-header")
             .px(px(self.density().header_inset_x))
             .py(px(self.density().header_inset_y))
-            .border_b_1()
-            .border_color(cx.theme().border)
+            .map(|this| self.header_frame(this, cx))
             .flex()
             .items_center()
             .justify_between()
@@ -527,7 +526,11 @@ impl QuillApp {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum ConversationPart {
     /// Call bars, history, bottom tabs and banners: all but the composer.
+    /// When the bars float (Floating), the history alone.
     Top,
+    /// The header and the bars above the history, floating over it in
+    /// their own slice (Floating only).
+    Bars,
     /// The composer with its popups, or the note / channel footer that
     /// replaces it.
     Bottom,

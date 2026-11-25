@@ -13,7 +13,13 @@ impl QuillApp {
         part: ConversationPart,
         forum_on_screen: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
+        // Floating: the header and the bars float in their own slice, and
+        // the strips under the history join the composer's.
+        let float = self.bars_float();
+        if part == ConversationPart::Bars {
+            return self.floating_bars(self.pane_mode(), cx);
+        }
         if part.top() {
             crate::ui::frame_clock::trace_slice_render("history");
             // One instant for the rows work and the dust of this frame, in
@@ -39,7 +45,9 @@ impl QuillApp {
                 cx,
             )
             .into_any_element(),
-            PaneMode::Ready => self.session_history(forum_on_screen, cx).into_any_element(),
+            PaneMode::Ready => self
+                .session_history(forum_on_screen, !float, cx)
+                .into_any_element(),
         };
         let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
@@ -121,12 +129,14 @@ impl QuillApp {
                     .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
             });
         let top = part.top();
+        let bars = top && !float;
+        let strips = if float { part.bottom() } else { top };
         let dust = top.then(|| self.vanish_overlay(cx)).flatten();
-        let player_bar = top.then(|| self.player_bar(cx)).flatten();
-        let call_bar = top
+        let player_bar = bars.then(|| self.player_bar(cx)).flatten();
+        let call_bar = bars
             .then(|| self.call_bar(cx).or_else(|| self.group_call_bar(cx)))
             .flatten();
-        let capture_notice = top.then(|| self.capture_notice(cx)).flatten();
+        let capture_notice = bars.then(|| self.capture_notice(cx)).flatten();
         div()
             .relative()
             .flex()
@@ -138,14 +148,15 @@ impl QuillApp {
             .children(capture_notice)
             .when(top, |this| this.child(history))
             .children(
-                top.then(|| self.subsection_tabs_strip(SubsectionTabsMode::Bottom, cx))
+                strips
+                    .then(|| self.subsection_tabs_strip(SubsectionTabsMode::Bottom, cx))
                     .flatten(),
             )
             // Phase C2i: busy-decline banner — the calls that arrived
             // while another call was active were declined with
             // `discardCall` (TDLib has no hold/swap API). Dismissible.
             .when_some(
-                top.then(|| self.call_busy_banner(cx)).flatten(),
+                strips.then(|| self.call_busy_banner(cx)).flatten(),
                 |this, banner| this.child(banner),
             )
             .when(composer.is_some() && part.bottom(), |this| {
@@ -197,8 +208,7 @@ impl QuillApp {
                         })
                         .px_3()
                         .py(px(self.density().composer_inset_y))
-                        .border_t_1()
-                        .border_color(cx.theme().border)
+                        .map(|this| self.composer_frame(this, cx))
                         .flex()
                         .flex_col()
                         .gap_2()
@@ -423,16 +433,23 @@ impl QuillApp {
             )
             // A deleted message's dust drifts over everything.
             .children(dust.map(super::anim_layer::occluder))
+            .into_any_element()
     }
 
     pub(in crate::ui) fn session_history(
         &mut self,
         forum_on_screen: bool,
+        with_bars: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         super::video_player::warm_decoder(cx);
         let tabs_left = self.subsection_tabs_column(cx);
-        let bars = self.history_bars(cx);
+        let (header, bars) = if with_bars {
+            let (header, bars) = self.history_bars(cx);
+            (Some(header), bars)
+        } else {
+            (None, Vec::new())
+        };
         let body = self.history_body(tabs_left, forum_on_screen, cx);
         div()
             .id("conversation-history")
@@ -441,6 +458,7 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .min_w_0()
+            .children(header)
             .children(bars)
             .child(body)
     }

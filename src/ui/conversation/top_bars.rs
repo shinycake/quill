@@ -5,9 +5,44 @@
 use super::*;
 
 impl QuillApp {
-    /// The header and every bar above the history's body, top to bottom.
+    /// The header slice's content when the bars float: the header pill,
+    /// then the player, call and capture bars, then the chat's own bars,
+    /// a gap apart. Each blocks clicks to the rows under it; the gaps
+    /// between them do not.
     #[inline(never)]
-    pub(super) fn history_bars(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn floating_bars(&mut self, mode: PaneMode, cx: &mut Context<Self>) -> AnyElement {
+        let (header, bars) = match mode {
+            PaneMode::Ready => {
+                let (header, bars) = self.history_bars(cx);
+                (Some(header), bars)
+            }
+            PaneMode::Synthetic | PaneMode::Connecting => (None, Vec::new()),
+        };
+        let calls = [
+            self.player_bar(cx).map(IntoElement::into_any_element),
+            self.call_bar(cx)
+                .or_else(|| self.group_call_bar(cx))
+                .map(IntoElement::into_any_element),
+            self.capture_notice(cx).map(IntoElement::into_any_element),
+        ];
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.chrome_metrics().bar_gap))
+            .children(
+                header
+                    .into_iter()
+                    .chain(calls.into_iter().flatten())
+                    .chain(bars)
+                    .map(|bar| div().block_mouse_except_scroll().child(bar)),
+            )
+            .into_any_element()
+    }
+
+    /// The header, and every other bar above the history's body, top to
+    /// bottom.
+    #[inline(never)]
+    pub(super) fn history_bars(&self, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
         let session = self.session();
         let open = session.and_then(|s| s.open_chat_id());
         let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
@@ -27,10 +62,10 @@ impl QuillApp {
             open.is_some_and(|id| session.is_some_and(|s| s.subsection_tabs_used_for(id)));
         let topic_info = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
         let chat_search_open = session.is_some_and(|s| s.search.chat_search.is_open());
-        let mut bars = vec![
-            self.conversation_header(&title, chat_actions, peer_typing, cx)
-                .into_any_element(),
-        ];
+        let header = self
+            .conversation_header(&title, chat_actions, peer_typing, cx)
+            .into_any_element();
+        let mut bars = Vec::new();
         if let Some(info) = topic_info.clone().filter(|_| !tabs_used) {
             bars.push(self.forum_topic_strip(&info, cx).into_any_element());
         }
@@ -51,6 +86,6 @@ impl QuillApp {
         if chat_search_open {
             bars.push(self.chat_search_bar(cx).into_any_element());
         }
-        bars
+        (header, bars)
     }
 }
