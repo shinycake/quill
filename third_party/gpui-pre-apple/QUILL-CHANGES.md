@@ -296,3 +296,12 @@ and the opaque pre-pass; monochrome sprites pass their instance index and
 surfaces their mask's shape to the fragment; `QUILL-LAYOUT` lines state each
 struct's size and mask offset. `src/metal_renderer.rs`: `ContentMask::rect`
 and a headless pixel test of the coverage.
+
+## Drawing a scene into a texture
+
+Changed by the Quill project in 2026. `src/metal_renderer/scene_target.rs`
+(new): `new_scene_target` allocates a texture a scene can be drawn into and
+sampled from, and `MetalRenderer::draw_scene_into` encodes a whole scene
+into it on a command buffer of its own. `src/metal_renderer/lens.rs`: the
+sharp magnifier's canvases are allocated and drawn through them (no change
+in output).

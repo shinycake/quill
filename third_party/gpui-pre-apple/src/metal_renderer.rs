@@ -4,6 +4,7 @@
 use crate::metal_atlas::MetalAtlas;
 
 mod lens;
+mod scene_target;
 pub use lens::{LensDownsampleIndex, LensDownsampleSlot, LensInputIndex, LensSlot};
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
