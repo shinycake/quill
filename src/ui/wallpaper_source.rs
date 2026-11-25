@@ -237,13 +237,15 @@ impl Sources {
                     Pattern::read(path).map(Arc::new)
                 });
                 // Until the pattern reads, the fill shows alone (tdesktop
-                // paints the gradient while the pattern loads).
+                // paints the gradient while the pattern loads); a pattern
+                // over black shows black, never its bare fill.
                 let Some(pattern) = pattern else {
-                    return Some(Rendered::FillOnly(Picture {
-                        raster: compose_fill(&sampler, width, height),
-                        x: 0,
-                        y: 0,
-                    }));
+                    let raster = if super::wallpaper::pattern_on_black(*intensity, *inverted) {
+                        Raster::black(width, height)
+                    } else {
+                        compose_fill(&sampler, width, height)
+                    };
+                    return Some(Rendered::FillOnly(Picture { raster, x: 0, y: 0 }));
                 };
                 let (pw, ph) = pattern.size();
                 let (tw, th) = pattern_tile_size(pw, ph, height);
@@ -445,5 +447,23 @@ mod tests {
         assert!(!out.is_whole());
         let solid = sources.render(&Wallpaper::Solid(0x336699), 8, 8).unwrap();
         assert!(solid.is_whole());
+    }
+
+    #[test]
+    fn an_unreadable_dark_pattern_paints_black_not_its_fill() {
+        let mut sources = Sources::default();
+        let pattern = Wallpaper::Pattern {
+            fill: BackgroundFill::Solid(0x8e9dec),
+            path: "/nonexistent/quill-pattern.svg".into(),
+            intensity: -50,
+            inverted: false,
+            rotation: 0,
+        };
+        let out = sources.render(&pattern, 8, 8).unwrap();
+        assert!(!out.is_whole());
+        assert_eq!(
+            out.picture().raster,
+            quill::wallpaper_raster::Raster::black(8, 8)
+        );
     }
 }
