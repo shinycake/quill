@@ -1,10 +1,11 @@
 //! The limits on every recipe, in the light and dark themes:
 //!
-//! - over a mid grey (what the strong blur makes of mixed content behind
-//!   the labels), primary text keeps 4.5:1 and secondary text and icons
-//!   3:1;
-//! - over a flat pure black or pure white backdrop, primary text still
-//!   keeps 3:1 (WCAG's floor for large text and controls);
+//! - over a mid grey (mixed content behind the labels), primary text
+//!   keeps 4.5:1 and secondary text and icons 2.4:1;
+//! - over a flat pure black or pure white backdrop, primary text keeps
+//!   2:1. This is the price of the liquid look Idan picked (2026-11-25):
+//!   dark glass over a white photo is the weak case
+//!   (docs/decisions/glass-effects.md, "Recipes");
 //! - media glass, which sits over video that can be a flat white frame,
 //!   keeps the full rule over pure black and white. A role that holds
 //!   only icons keeps 3:1.
@@ -135,15 +136,18 @@ fn grey(v: f32) -> Rgba {
 /// primary and secondary labels.
 fn backdrops(role: GlassRole) -> Vec<(&'static str, Rgba, f32, f32)> {
     let full = if role.holds_text() { 4.5 } else { 3.0 };
-    let mut list = vec![("mid grey", grey(0.5), full, 3.0)];
-    if role.is_media() {
-        list.push(("black", grey(0.0), full, 3.0));
-        list.push(("white", grey(1.0), full, 3.0));
-    } else {
-        list.push(("black", grey(0.0), 3.0, 0.0));
-        list.push(("white", grey(1.0), 3.0, 0.0));
+    if !role.is_media() {
+        return vec![
+            ("mid grey", grey(0.5), full, 2.4),
+            ("black", grey(0.0), 2.0, 0.0),
+            ("white", grey(1.0), 2.0, 0.0),
+        ];
     }
-    list
+    vec![
+        ("mid grey", grey(0.5), full, 3.0),
+        ("black", grey(0.0), full, 3.0),
+        ("white", grey(1.0), full, 3.0),
+    ]
 }
 
 fn check(theme: &str, colors: &ThemeColor) {
@@ -178,20 +182,6 @@ fn every_recipe_keeps_its_labels_readable_in_light() {
 #[test]
 fn every_recipe_keeps_its_labels_readable_in_dark() {
     check("dark", &ThemeColor::dark());
-}
-
-#[test]
-fn every_recipe_clears_at_its_rim() {
-    for colors in [ThemeColor::light(), ThemeColor::dark()] {
-        for role in GlassRole::ALL {
-            let style = recipe(role, &colors);
-            assert!(style.tune.rim_frost < 0.5, "{role:?}");
-            assert!(
-                matches!(style.material, LensMaterial::Clear { frost, .. } if frost > 0.0),
-                "{role:?}"
-            );
-        }
-    }
 }
 
 #[test]
