@@ -323,6 +323,7 @@ float2 lens_radial_bend(LensShape s, BackdropLens lens, float2 q, float amount) 
 float4 lens_fragment(LensFragmentInput input): SV_Target {
     BackdropLens lens = b_lenses[input.lens_id];
     LensSlot slot = b_lens_slots[input.slot_id];
+    float mask_coverage = rounded_mask_coverage(input.position.xy, lens.content_mask.rounded);
     uint atlas_w, atlas_h, atlas_levels;
     t_lens_atlas.GetDimensions(0, atlas_w, atlas_h, atlas_levels);
     float2 atlas_size = float2(float(atlas_w), float(atlas_h));
@@ -352,7 +353,7 @@ float4 lens_fragment(LensFragmentInput input): SV_Target {
         if (shadow_alpha <= 0.0) {
             discard;
         }
-        return to_output(float4(0.0, 0.0, 0.0, shadow_alpha * lens.opacity));
+        return to_output(float4(0.0, 0.0, 0.0, shadow_alpha * lens.opacity * mask_coverage));
     }
 
     // Surface normal from the bevel height field.
@@ -482,7 +483,7 @@ float4 lens_fragment(LensFragmentInput input): SV_Target {
     if (a <= 1e-5) {
         discard;
     }
-    return to_output(float4(g * mask / max(a, 1e-5), a * lens.opacity));
+    return to_output(float4(g * mask / max(a, 1e-5), a * lens.opacity * mask_coverage));
 }
 
 struct LensDownsampleVertexOutput {
