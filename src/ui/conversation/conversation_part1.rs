@@ -431,6 +431,29 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         super::video_player::warm_decoder(cx);
+        let tabs_left = self.subsection_tabs_column(cx);
+        let bars = self.history_bars(cx);
+        let body = self.history_body(tabs_left, forum_on_screen, cx);
+        div()
+            .id("conversation-history")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .children(bars)
+            .child(body)
+    }
+
+    /// The history's body: the message list, or the pane that stands in
+    /// for it, beside the left tab column when the chat has one.
+    #[inline(never)]
+    fn history_body(
+        &mut self,
+        tabs_left: Option<AnyElement>,
+        forum_on_screen: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let session = self.session();
         let open = session.and_then(|s| s.open_chat_id());
         let title = open
@@ -452,24 +475,12 @@ impl QuillApp {
             open.and_then(|id| session.and_then(|s| s.chats.get(&id.0).cloned()));
         let media_roots = self.media_display_roots();
         let sender_name = title.clone();
-        let chat_search_open = session.is_some_and(|s| s.search.chat_search.is_open());
         let highlight_id = session.and_then(|s| match s.search.chat_search.jump {
             ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id, .. } => {
                 Some(message_id)
             }
             ChatSearchJump::None | ChatSearchJump::Missing { .. } => None,
         });
-        let chat_actions = open.and_then(|id| {
-            session.and_then(|s| s.chats.get(&id.0)).and_then(|chat| {
-                chat.supported().then_some((
-                    chat.id,
-                    chat.is_muted(),
-                    chat.notification_settings.is_muted_forever(),
-                    chat.in_archive(),
-                ))
-            })
-        });
-        let peer_typing = chat.as_ref().is_some_and(|c| c.is_peer_typing());
         // Phase 5.1: forum supergroups render a topic list instead of the
         // general history; a selected topic renders its own history.
         let is_forum = chat.as_ref().is_some_and(|c| c.is_forum_chat());
@@ -478,9 +489,7 @@ impl QuillApp {
         let has_topics = open.is_some_and(|id| session.is_some_and(|s| s.chat_has_topics(id)));
         let tabs_used =
             open.is_some_and(|id| session.is_some_and(|s| s.subsection_tabs_used_for(id)));
-        let tabs_left = self.subsection_tabs_column(cx);
         let open_topic = session.and_then(|s| s.open_forum_topic());
-        let topic_info = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
         let topic_history = match (open, open_topic) {
             (Some(id), Some(topic_id)) => {
                 session.and_then(|s| s.threads.topic_histories.get(&(id.0, topic_id)))
@@ -505,88 +514,109 @@ impl QuillApp {
         // Saved Messages: the sublist list, one sublist or a tag filter.
         let saved_mode = self.saved_mode();
         let saved_rows = self.saved_rows_input(highlight_id);
-        div()
-            .id("conversation-history")
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            .min_w_0()
-            .child(self.conversation_header(&title, chat_actions, peer_typing, cx))
-            .when_some(topic_info.clone().filter(|_| !tabs_used), |this, info| {
-                this.child(self.forum_topic_strip(&info, cx))
-            })
-            .when_some(
-                topic_info
-                    .clone()
-                    .filter(|_| self.chat_ui.info_card.topic()),
-                |this, info| this.child(self.topic_info_card(&info, cx)),
-            )
-            .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
-            .children(self.saved_tags_bar(cx))
-            .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
-            .children(
-                open.map(|chat_id| self.chat_top_bars(chat_id, cx))
-                    .unwrap_or_default(),
-            )
-            .children(open.and_then(|chat_id| self.pinned_message_banner(chat_id, cx)))
-            .children(
-                open.filter(|chat| self.pinned_list_open_for(*chat))
-                    .and_then(|chat_id| self.pinned_list_panel(chat_id, cx)),
-            )
-            .when_some(self.pending_bot_reply(cx), |this, reply| this.child(reply))
-            .when(chat_search_open, |this| {
-                this.child(self.chat_search_bar(cx))
-            })
-            .child(super::subsection_tabs::with_left_column(
-                tabs_left,
-                if let Some(reason) = gate {
-                    pane_placeholder(tr(keys::Q_CHAT_UNSUPPORTED_CHAT), reason, cx)
-                        .into_any_element()
-                } else if open.is_none() {
+        super::subsection_tabs::with_left_column(
+            tabs_left,
+            if let Some(reason) = gate {
+                pane_placeholder(tr(keys::Q_CHAT_UNSUPPORTED_CHAT), reason, cx).into_any_element()
+            } else if open.is_none() {
+                pane_placeholder(
+                    tr(keys::Q_CHAT_SELECT_A_CHAT),
+                    tr(keys::Q_CHAT_CHOOSE_A_CONVERSATION_FROM_THE),
+                    cx,
+                )
+                .into_any_element()
+            } else if !supported {
+                pane_placeholder(
+                    tr(keys::Q_CHAT_UNSUPPORTED_CHAT),
+                    tr(keys::Q_CHAT_THIS_CONVERSATION_TYPE_IS_NOT),
+                    cx,
+                )
+                .into_any_element()
+            } else if saved_mode == Some(super::saved_sublists::SavedMode::Sublists) {
+                self.saved_sublists_pane(cx)
+            } else if let Some((key, rows)) = saved_rows {
+                let list = self.history_message_list(
+                    "saved-history",
+                    rows,
+                    chat.as_ref(),
+                    &sender_name,
+                    highlight_id,
+                    media_roots,
+                    cx,
+                );
+                self.history.rows_key = Some(key);
+                let failed = self
+                    .saved_history()
+                    .is_some_and(|(_, history)| history.older == quill::state::OlderEnd::Failed)
+                    .then_some(super::older_retry::OlderRetryFor::Saved);
+                super::older_retry::with_older_retry(list, failed, cx)
+            } else if thread_pending {
+                self.thread_status_pane(cx)
+            } else if let Some(thread) = thread_open {
+                let (key, rows) = self.thread_rows_input(thread, highlight_id);
+                let failed = (thread.history.older == quill::state::OlderEnd::Failed)
+                    .then_some(super::older_retry::OlderRetryFor::Thread);
+                let newer = thread
+                    .history
+                    .newer_failed()
+                    .then_some(super::older_retry::NewerRetryFor::Thread);
+                let list = self.history_message_list(
+                    "thread-history",
+                    rows,
+                    chat.as_ref(),
+                    &sender_name,
+                    highlight_id,
+                    media_roots,
+                    cx,
+                );
+                self.history.rows_key = Some(key);
+                let list = super::older_retry::with_older_retry(list, failed, cx);
+                let list = super::older_retry::with_newer_retry(list, newer, cx);
+                self.thread_history_pane(list, cx)
+            } else if is_forum
+                && open_topic.is_none()
+                && !tabs_used
+                && open.is_some_and(|id| session.is_some_and(|s| s.chat_views_as_topics(id)))
+            {
+                // Phase 5.1: opening a forum supergroup shows its topics;
+                // with the topic column on screen the pane only asks for
+                // a choice.
+                if forum_on_screen {
                     pane_placeholder(
-                        tr(keys::Q_CHAT_SELECT_A_CHAT),
-                        tr(keys::Q_CHAT_CHOOSE_A_CONVERSATION_FROM_THE),
+                        tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
+                        tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
                         cx,
                     )
                     .into_any_element()
-                } else if !supported {
+                } else {
+                    self.forum_topics_pane(open, cx).into_any_element()
+                }
+            } else if has_topics && open_topic.is_some() {
+                // Phase 5.1: per-topic history — same history component,
+                // fed from the topic history store (`searchChatMessages`
+                // with `topic_id`).
+                if topic_failed {
+                    self.topic_load_failed_row(cx).into_any_element()
+                } else if topic_loading {
+                    history_skeleton().into_any_element()
+                } else if topic_empty {
                     pane_placeholder(
-                        tr(keys::Q_CHAT_UNSUPPORTED_CHAT),
-                        tr(keys::Q_CHAT_THIS_CONVERSATION_TYPE_IS_NOT),
+                        tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC),
+                        tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC_2),
                         cx,
                     )
                     .into_any_element()
-                } else if saved_mode == Some(super::saved_sublists::SavedMode::Sublists) {
-                    self.saved_sublists_pane(cx)
-                } else if let Some((key, rows)) = saved_rows {
+                } else {
+                    let (key, rows) =
+                        self.topic_rows_input(open, open_topic, topic_history, highlight_id);
+                    let failed = topic_history
+                        .is_some_and(|h| h.older == quill::state::OlderEnd::Failed)
+                        .then_some(super::older_retry::OlderRetryFor::Topic);
+                    let newer = topic_history
+                        .is_some_and(|h| h.newer_failed())
+                        .then_some(super::older_retry::NewerRetryFor::Topic);
                     let list = self.history_message_list(
-                        "saved-history",
-                        rows,
-                        chat.as_ref(),
-                        &sender_name,
-                        highlight_id,
-                        media_roots,
-                        cx,
-                    );
-                    self.history.rows_key = Some(key);
-                    let failed = self
-                        .saved_history()
-                        .is_some_and(|(_, history)| history.older == quill::state::OlderEnd::Failed)
-                        .then_some(super::older_retry::OlderRetryFor::Saved);
-                    super::older_retry::with_older_retry(list, failed, cx)
-                } else if thread_pending {
-                    self.thread_status_pane(cx)
-                } else if let Some(thread) = thread_open {
-                    let (key, rows) = self.thread_rows_input(thread, highlight_id);
-                    let failed = (thread.history.older == quill::state::OlderEnd::Failed)
-                        .then_some(super::older_retry::OlderRetryFor::Thread);
-                    let newer = thread
-                        .history
-                        .newer_failed()
-                        .then_some(super::older_retry::NewerRetryFor::Thread);
-                    let list = self.history_message_list(
-                        "thread-history",
+                        "topic-history",
                         rows,
                         chat.as_ref(),
                         &sender_name,
@@ -596,123 +626,68 @@ impl QuillApp {
                     );
                     self.history.rows_key = Some(key);
                     let list = super::older_retry::with_older_retry(list, failed, cx);
-                    let list = super::older_retry::with_newer_retry(list, newer, cx);
-                    self.thread_history_pane(list, cx)
-                } else if is_forum
-                    && open_topic.is_none()
-                    && !tabs_used
-                    && open.is_some_and(|id| session.is_some_and(|s| s.chat_views_as_topics(id)))
-                {
-                    // Phase 5.1: opening a forum supergroup shows its topics;
-                    // with the topic column on screen the pane only asks for
-                    // a choice.
-                    if forum_on_screen {
-                        pane_placeholder(
-                            tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
-                            tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
-                            cx,
-                        )
-                        .into_any_element()
-                    } else {
-                        self.forum_topics_pane(open, cx).into_any_element()
-                    }
-                } else if has_topics && open_topic.is_some() {
-                    // Phase 5.1: per-topic history — same history component,
-                    // fed from the topic history store (`searchChatMessages`
-                    // with `topic_id`).
-                    if topic_failed {
-                        self.topic_load_failed_row(cx).into_any_element()
-                    } else if topic_loading {
-                        history_skeleton().into_any_element()
-                    } else if topic_empty {
-                        pane_placeholder(
-                            tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC),
-                            tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC_2),
-                            cx,
-                        )
-                        .into_any_element()
-                    } else {
-                        let (key, rows) =
-                            self.topic_rows_input(open, open_topic, topic_history, highlight_id);
-                        let failed = topic_history
-                            .is_some_and(|h| h.older == quill::state::OlderEnd::Failed)
-                            .then_some(super::older_retry::OlderRetryFor::Topic);
-                        let newer = topic_history
-                            .is_some_and(|h| h.newer_failed())
-                            .then_some(super::older_retry::NewerRetryFor::Topic);
-                        let list = self.history_message_list(
-                            "topic-history",
-                            rows,
-                            chat.as_ref(),
-                            &sender_name,
-                            highlight_id,
-                            media_roots,
-                            cx,
-                        );
-                        self.history.rows_key = Some(key);
-                        let list = super::older_retry::with_older_retry(list, failed, cx);
-                        super::older_retry::with_newer_retry(list, newer, cx)
-                    }
-                } else if main_empty {
-                    // Phase S1: an empty secret chat shows TGX's end-to-end
-                    // encryption explainer (MessagesHolder TYPE_SECRET_CHAT_INFO:
-                    // "Secret Chats" + EncryptedDescription1-4) instead of the
-                    // generic placeholder.
-                    let is_secret = chat
-                        .as_ref()
-                        .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
-                    // kit Phase 9: no history entry yet means the first
-                    // getChatHistory batch is still in flight — show skeleton
-                    // message rows instead of the empty placeholder.
-                    let history_loading =
-                        open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
-                    // R5: the first page failed or timed out — a Retry row
-                    // instead of an endless skeleton or a false "No messages".
-                    let history_failed =
-                        open.is_some_and(|id| session.is_some_and(|s| s.history_load_failed(id)));
-                    // The first page is asked when the chat opens
-                    // (`select_chat_open`, `open_chat_window`); a send that
-                    // could not go out is the Failed row. Render only draws.
-                    if history_failed {
-                        history_load_failed(cx)
-                    } else if history_loading {
-                        history_skeleton().into_any_element()
-                    } else if is_secret {
-                        self.secret_empty_explainer(cx).into_any_element()
-                    } else if let Some(intro) = self.bot_about_intro(chat.as_ref(), cx) {
-                        intro
-                    } else if let Some(intro) = self.locked_intro(chat.as_ref(), cx) {
-                        intro
-                    } else if let Some(intro) = self.greeting_intro(chat.as_ref(), cx) {
-                        intro
-                    } else {
-                        // tdesktop paints nothing for an empty group or channel
-                        // it did not create; no developer text in the pane.
-                        div().id("empty-chat").flex_1().into_any_element()
-                    }
-                } else {
-                    let (key, rows) =
-                        self.main_rows_input(open, open_topic, main_history, highlight_id);
-                    let older = main_history
-                        .is_some_and(|h| h.load_failed())
-                        .then_some(super::older_retry::OlderRetryFor::Chat);
-                    let newer = main_history
-                        .is_some_and(|h| h.newer_failed())
-                        .then_some(super::older_retry::NewerRetryFor::Chat);
-                    let list = self.history_message_list(
-                        "session-history",
-                        rows,
-                        chat.as_ref(),
-                        &sender_name,
-                        highlight_id,
-                        media_roots,
-                        cx,
-                    );
-                    self.history.rows_key = Some(key);
-                    let list = super::older_retry::with_older_retry(list, older, cx);
                     super::older_retry::with_newer_retry(list, newer, cx)
-                },
-            ))
+                }
+            } else if main_empty {
+                // Phase S1: an empty secret chat shows TGX's end-to-end
+                // encryption explainer (MessagesHolder TYPE_SECRET_CHAT_INFO:
+                // "Secret Chats" + EncryptedDescription1-4) instead of the
+                // generic placeholder.
+                let is_secret = chat
+                    .as_ref()
+                    .is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
+                // kit Phase 9: no history entry yet means the first
+                // getChatHistory batch is still in flight — show skeleton
+                // message rows instead of the empty placeholder.
+                let history_loading =
+                    open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
+                // R5: the first page failed or timed out — a Retry row
+                // instead of an endless skeleton or a false "No messages".
+                let history_failed =
+                    open.is_some_and(|id| session.is_some_and(|s| s.history_load_failed(id)));
+                // The first page is asked when the chat opens
+                // (`select_chat_open`, `open_chat_window`); a send that
+                // could not go out is the Failed row. Render only draws.
+                if history_failed {
+                    history_load_failed(cx)
+                } else if history_loading {
+                    history_skeleton().into_any_element()
+                } else if is_secret {
+                    self.secret_empty_explainer(cx).into_any_element()
+                } else if let Some(intro) = self.bot_about_intro(chat.as_ref(), cx) {
+                    intro
+                } else if let Some(intro) = self.locked_intro(chat.as_ref(), cx) {
+                    intro
+                } else if let Some(intro) = self.greeting_intro(chat.as_ref(), cx) {
+                    intro
+                } else {
+                    // tdesktop paints nothing for an empty group or channel
+                    // it did not create; no developer text in the pane.
+                    div().id("empty-chat").flex_1().into_any_element()
+                }
+            } else {
+                let (key, rows) =
+                    self.main_rows_input(open, open_topic, main_history, highlight_id);
+                let older = main_history
+                    .is_some_and(|h| h.load_failed())
+                    .then_some(super::older_retry::OlderRetryFor::Chat);
+                let newer = main_history
+                    .is_some_and(|h| h.newer_failed())
+                    .then_some(super::older_retry::NewerRetryFor::Chat);
+                let list = self.history_message_list(
+                    "session-history",
+                    rows,
+                    chat.as_ref(),
+                    &sender_name,
+                    highlight_id,
+                    media_roots,
+                    cx,
+                );
+                self.history.rows_key = Some(key);
+                let list = super::older_retry::with_older_retry(list, older, cx);
+                super::older_retry::with_newer_retry(list, newer, cx)
+            },
+        )
     }
 
     /// A reply thread's history under its root bar and info card.
