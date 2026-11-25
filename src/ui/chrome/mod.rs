@@ -11,8 +11,8 @@ use crate::ui::app::QuillApp;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::layout_style::{
-    BackdropKind, Chrome, Contrast, FLOATING_FROM, LayoutOverride, LayoutStyle, Power, Readings,
-    contrast_ratio, resolve,
+    BackdropKind, Chrome, ChromeMetrics, Contrast, FLOATING_FROM, LayoutOverride, LayoutStyle,
+    Power, Readings, contrast_ratio, metrics_for, resolve,
 };
 
 /// WCAG 2.1 relative luminance of a colour.
@@ -35,6 +35,17 @@ impl QuillApp {
     /// show this one, so a demo run with the override shows it selected.
     pub(in crate::ui) fn layout_choice(&self) -> LayoutStyle {
         quill::layout_style::choice(self.appearance.layout, LayoutOverride::from_env())
+    }
+
+    /// The metrics of the window whose state is in place, which need no
+    /// theme: the shell's columns read them.
+    pub(in crate::ui) fn chrome_metrics(&self) -> &'static ChromeMetrics {
+        metrics_for(
+            self.appearance.layout,
+            LayoutOverride::from_env(),
+            f32::from(self.slices.window.width.get()),
+            FLOATING_FROM,
+        )
     }
 
     /// What the window whose state is in place draws this frame.

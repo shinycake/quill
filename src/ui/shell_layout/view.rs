@@ -37,6 +37,7 @@ impl QuillApp {
     fn shell_input(&self) -> ShellInput {
         let width = f32::from(self.frame.main_width);
         let session = self.session();
+        let metrics = self.chrome_metrics();
         ShellInput {
             width,
             rail: self.folder_rail_width(),
@@ -53,6 +54,9 @@ impl QuillApp {
                 1.
             },
             panels_shown: self.frame.panels.shown(self.frame.panels.now()),
+            gutter: metrics.gutter,
+            chat_column: metrics.chat_column,
+            drawer_to: metrics.drawer_to,
         }
     }
 
@@ -78,7 +82,12 @@ impl QuillApp {
     pub(in crate::ui) fn max_list_width(&self) -> Pixels {
         let input = self.shell_input();
         let forum_beside = input.forum == ForumColumn::Beside;
-        px(max_list_width(input.width, input.rail, forum_beside))
+        px(max_list_width(
+            input.width,
+            input.rail,
+            forum_beside,
+            input.gutter,
+        ))
     }
 
     /// The panels open in the side column, from state.
@@ -183,6 +192,9 @@ impl QuillApp {
                 Some(self.sliding_panels(row, width, layout.panel_column()))
             }
             PanelPane::Fill => Some(row.flex_1().min_w_0().into_any_element()),
+            // Drawn as a card over the chat from step 7; until then beside
+            // it, as a column of its own width.
+            PanelPane::Over(width) => Some(row.flex_none().w(px(width)).into_any_element()),
         };
         let forum = match layout.forum {
             ForumPane::Hidden => None,

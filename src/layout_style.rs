@@ -366,13 +366,31 @@ impl Chrome {
 
 /// The chrome for `choice` (after the override) in a window that reads
 /// `readings`. The first matching row wins (docs/decisions/floating-layout.md).
+/// The metrics a window this wide draws: [`resolve`]'s table without
+/// the edge and elevation, for callers that have no theme to read (the
+/// shell's columns).
+pub fn metrics_for(
+    stored: LayoutStyle,
+    overridden: Option<LayoutOverride>,
+    width: f32,
+    floating_from: f32,
+) -> &'static ChromeMetrics {
+    if choice(stored, overridden) == LayoutStyle::Classic || width < floating_from {
+        &CLASSIC
+    } else {
+        &FLOATING
+    }
+}
+
 pub fn resolve(
     stored: LayoutStyle,
     overridden: Option<LayoutOverride>,
     readings: Readings,
 ) -> Chrome {
-    if choice(stored, overridden) == LayoutStyle::Classic || readings.width < readings.floating_from
-    {
+    if std::ptr::eq(
+        metrics_for(stored, overridden, readings.width, readings.floating_from),
+        &CLASSIC,
+    ) {
         return Chrome::CLASSIC;
     }
     let plain_low = matches!(
