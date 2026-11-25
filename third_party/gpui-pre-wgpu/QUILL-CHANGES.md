@@ -269,3 +269,9 @@ struct's size and mask offset. `src/yuv_surfaces.rs`: the NV12 surface
 parameters carry the shape (112 bytes). `src/wgpu_renderer.rs`,
 `src/wgpu_renderer/lens.rs`: `ContentMask::rect`, the instance strides and
 the lens layout asserts.
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md):
+the renderer skips a `PrimitiveBatch::Snapshots` batch. Windows on this
+backend don't support snapshots yet, so the scene never holds one.

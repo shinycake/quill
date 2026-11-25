@@ -1793,6 +1793,9 @@ impl WgpuRendererCore {
                     }
                     // Native views are only composited by the Metal renderer.
                     PrimitiveBatch::NativeViews(_) => {}
+                    // QUILL: this renderer reports no snapshot support, so
+                    // no frame holds one.
+                    PrimitiveBatch::Snapshots(_) => {}
                 }
             }
         }

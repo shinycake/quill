@@ -648,3 +648,9 @@ pre-pass; the monochrome and subpixel sprites pass their instance index;
 `src/hdr_surfaces.rs`, `src/yuv_surfaces.rs`: the surface instances carry
 the shape (80 and 112 bytes). `src/backdrop_glass.rs`: the lens size
 assert.
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md):
+the renderer skips a `PrimitiveBatch::Snapshots` batch. Windows on this
+backend don't support snapshots yet, so the scene never holds one.

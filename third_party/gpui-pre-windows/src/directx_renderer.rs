@@ -511,6 +511,9 @@ impl DirectXRenderer {
                 PrimitiveBatch::Surfaces(range) => self.draw_surfaces(&scene.surfaces[range]),
                 // Native views are only composited on macOS.
                 PrimitiveBatch::NativeViews(_) => Ok(()),
+                // QUILL: this renderer reports no snapshot support, so no
+                // frame holds one.
+                PrimitiveBatch::Snapshots(_) => Ok(()),
                 // Quill: glass copies and blurs what is under it
                 // (`backdrop_glass`); else the batch draws as its fallback
                 // quads, uploaded after the scene's own.

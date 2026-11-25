@@ -597,6 +597,7 @@ mod sidebar_hide_tests;
 mod sidebar_reveal;
 mod signin_ui;
 mod similar_strip;
+mod snapshot_demo;
 mod spell_dictionaries;
 #[cfg(target_os = "macos")]
 mod spellcheck_mac;

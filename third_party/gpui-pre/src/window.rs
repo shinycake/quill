@@ -80,6 +80,7 @@ mod backdrop_glass;
 mod live_views;
 mod native_view;
 mod prompts;
+mod snapshot;
 
 pub use a11y::{A11yNodeSnapshot, A11ySubtreeBuilder, A11yTreeSnapshot};
 use native_view::NativeViewState;
@@ -93,6 +94,7 @@ use crate::util::{
     round_half_toward_zero_f64, round_stroke_to_device_pixel, round_to_device_pixel,
 };
 pub use prompts::*;
+pub use snapshot::{Snapshot, SnapshotDraw, SnapshotState};
 
 /// Default window size used when no explicit size is provided.
 pub const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1536.), px(1095.));
@@ -1362,6 +1364,12 @@ pub struct Window {
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
     /// QUILL: frames this window began drawing ([`Window::frame_number`]).
     frames_begun: u64,
+    /// QUILL: frames this window built a scene for (not those that only
+    /// patched live views): a cached view replays only what the frame
+    /// before painted.
+    pub(crate) scenes_drawn: u64,
+    /// QUILL: the window's live snapshots (`window/snapshot.rs`).
+    snapshots: Rc<snapshot::SnapshotTable>,
     /// The [`TextInputConfiguration`] most recently forwarded to the platform
     /// window, so that only actual changes are forwarded (reconfiguring a live
     /// input session can restart the IME connection).
@@ -2535,6 +2543,8 @@ impl Window {
             element_opacity: 1.0,
             requested_autoscroll: None,
             frames_begun: 0,
+            scenes_drawn: 0,
+            snapshots: Rc::default(),
             last_text_input_configuration: None,
             focused_text_input: None,
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
@@ -4065,6 +4075,7 @@ impl Window {
         if self.platform_window.prepare_frame() {
             self.refresh();
         }
+        self.check_snapshots();
         let after_patch = mem::take(&mut self.scene_patched);
         if after_patch {
             self.next_frame.scene.clear();
@@ -4080,6 +4091,7 @@ impl Window {
         }
         self.invalidate_entities();
         cx.entities.clear_accessed();
+        self.scenes_drawn += 1;
         debug_assert!(self.rendered_entity_stack.is_empty());
         self.invalidator.set_dirty(false);
         self.requested_autoscroll = None;
@@ -4151,6 +4163,8 @@ impl Window {
         }
 
         self.layout_engine.as_mut().unwrap().clear();
+        // QUILL: captures draw into their textures, or live.
+        self.settle_snapshots();
         self.next_frame.finish(&mut self.rendered_frame);
         // QUILL (glass stage 5): sharp magnifiers draw what is under them again.
         self.build_sharp_backdrops(cx);

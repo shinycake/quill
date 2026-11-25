@@ -415,7 +415,8 @@ impl MetalRenderer {
             let canvas = self
                 .lens
                 .canvas(&self.device, canvases.len(), format, width, height)?;
-            let command_buffer = self.draw_scene_into(&sharp.scene, writer, &canvas)?;
+            let clear = self.frame_clear();
+            let command_buffer = self.draw_scene_into(&sharp.scene, writer, &canvas, clear)?;
             renders.push(command_buffer);
             canvases.push((index, canvas));
         }

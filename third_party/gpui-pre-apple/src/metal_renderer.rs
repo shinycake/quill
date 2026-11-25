@@ -1,16 +1,18 @@
 // Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
 // window capture renders the scene offscreen and reads it back; backdrop glass
-// (`metal_renderer/lens.rs`). See third_party/gpui-pre-apple/QUILL-CHANGES.md.
+// (`metal_renderer/lens.rs`); snapshot textures (`metal_renderer/snapshots.rs`).
+// See third_party/gpui-pre-apple/QUILL-CHANGES.md.
 use crate::metal_atlas::MetalAtlas;
 
 mod lens;
 mod scene_target;
+mod snapshots;
 pub use lens::{LensDownsampleIndex, LensDownsampleSlot, LensInputIndex, LensSlot};
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
 use gpui::{
     AtlasTextureId, BackdropLens, Bounds, ContentMask, DevicePixels, PaintSurface, PaintedPath,
-    PrimitiveBatch, ScaledPixels, Scene, Size, quad_depth, quad_depth_scale, size,
+    PrimitiveBatch, ScaledPixels, Scene, Size, SnapshotQuad, quad_depth, quad_depth_scale, size,
 };
 use image::RgbaImage;
 use objc2::{Message, rc::Retained, runtime::ProtocolObject};
@@ -200,6 +202,8 @@ pub struct MetalRenderer {
     lens: lens::LensState,
     /// QUILL: whether the layer hands out drawables glass can read.
     drawable_reads: lens::DrawableReads,
+    /// QUILL: snapshot textures (`snapshots.rs`).
+    snapshots: snapshots::SnapshotPool,
 }
 
 impl MetalRenderer {
@@ -510,6 +514,7 @@ impl MetalRenderer {
             drawables_handed_out: Vec::new(),
             lens: lens::LensState::default(),
             drawable_reads: lens::DrawableReads::default(),
+            snapshots: snapshots::SnapshotPool::default(),
         })
     }
 
@@ -817,6 +822,9 @@ impl MetalRenderer {
             &self.instance_buffer_pool,
             self.is_unified_memory,
         )?;
+        // QUILL: snapshot textures are drawn first, on command buffers
+        // committed ahead of the frame's.
+        let snapshot_renders = self.draw_snapshot_scenes(scene, &mut writer);
         // QUILL: the frame's glass is planned first: which lens backdrops
         // are copied, kept from last frame or drawn again sharper, and
         // where inked labels read them.
@@ -854,11 +862,15 @@ impl MetalRenderer {
                 viewport_size,
                 &mut surface_textures,
                 glass.as_ref(),
+                self.frame_clear(),
             )
             .inspect_err(|_| self.lens.forget())?;
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
         let frame_resources = Cell::new(Some((writer.finish(), surface_textures)));
+        for command_buffer in &snapshot_renders {
+            command_buffer.commit();
+        }
         if let Some(glass) = &glass {
             glass.commit_renders();
         }
@@ -1050,12 +1062,13 @@ impl MetalRenderer {
         viewport_size: Size<DevicePixels>,
         surface_textures: &mut Vec<CFRetained<CVMetalTexture>>,
         glass: Option<&lens::GlassFrame>,
+        // QUILL: what the target is cleared to (a snapshot's own colour).
+        clear: MTLClearColor,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let command_queue = self.command_queue.clone();
         let command_buffer = command_queue
             .commandBuffer()
             .context("creating command buffer")?;
-        let alpha = if self.opaque { 1. } else { 0. };
         let depth_texture = self.depth_texture_matching(texture)?;
 
         let mut command_encoder = new_command_encoder_for_texture(
@@ -1063,12 +1076,7 @@ impl MetalRenderer {
             texture,
             &depth_texture,
             viewport_size,
-            Some(MTLClearColor {
-                red: 0.,
-                green: 0.,
-                blue: 0.,
-                alpha,
-            }),
+            Some(clear),
         )?;
         // QUILL: a frame with lenses draws without the opaque pre-pass. A lens
         // batch ends the pass (its depth buffer is memoryless and goes with
@@ -1173,6 +1181,9 @@ impl MetalRenderer {
                         &mut command_encoder,
                     )?;
                 }
+                PrimitiveBatch::Snapshots(range) => {
+                    self.draw_snapshots(scene, range, instance_bindings, &command_encoder)
+                }
                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),
             }
         }
@@ -1180,6 +1191,17 @@ impl MetalRenderer {
         command_encoder.endEncoding();
 
         Ok(command_buffer)
+    }
+
+    /// QUILL: what a frame's target is cleared to: black, opaque when the
+    /// window is.
+    fn frame_clear(&self) -> MTLClearColor {
+        MTLClearColor {
+            red: 0.,
+            green: 0.,
+            blue: 0.,
+            alpha: if self.opaque { 1. } else { 0. },
+        }
     }
 
     fn depth_texture_matching(
@@ -2073,6 +2095,8 @@ struct InstanceBindings {
     /// atlas it reads (`None` when the frame's glass draws flat).
     lens_inks: InstanceBinding,
     lens_atlas: Option<Retained<ProtocolObject<dyn MTLTexture>>>,
+    /// QUILL: each snapshot quad as a polychrome sprite.
+    snapshot_sprites: InstanceBinding,
 }
 
 fn write_instances(
@@ -2109,6 +2133,7 @@ fn write_instances(
             }
         }))?,
         lens_fallbacks: writer.write_iter(scene.lenses.iter().map(BackdropLens::fallback_quad))?,
+        snapshot_sprites: writer.write_iter(scene.snapshots.iter().map(SnapshotQuad::sprite))?,
     })
 }
 
@@ -2740,6 +2765,116 @@ mod tests {
             .unwrap();
         assert_eq!(image.get_pixel(0, 30).0, [255, 255, 255, 255]);
         assert_eq!(image.get_pixel(0, 20).0[0], 0);
+    }
+
+    /// QUILL (docs/decisions/snapshot-transitions.md): the hand-back
+    /// invariant. Content drawn into a snapshot, and the snapshot drawn at
+    /// identity over the frame, gives the pixels the content gives drawn
+    /// live: exactly where it is opaque, within one level where it blends.
+    #[test]
+    fn a_snapshot_at_identity_draws_the_pixels_of_its_content() {
+        let px = |x: f32, y: f32, w: f32, h: f32| Bounds {
+            origin: point(ScaledPixels(x), ScaledPixels(y)),
+            size: size(ScaledPixels(w), ScaledPixels(h)),
+        };
+        let hsla = |h: f32, s: f32, l: f32, a: f32| Hsla { h, s, l, a };
+        let target = px(0.0, 0.0, 64.0, 64.0);
+        let background = Quad {
+            bounds: target,
+            content_mask: ContentMask::rect(target),
+            background: hsla(0.6, 0.5, 0.3, 1.0).into(),
+            ..Quad::default()
+        };
+        // The content, its top left at `at`: an opaque rounded card and a
+        // half-transparent bar over its edge.
+        let content = |at: f32| {
+            let card = px(at + 4.0, at + 4.0, 40.0, 40.0);
+            let bar = px(at + 20.0, at + 24.0, 36.0, 12.0);
+            [
+                Quad {
+                    bounds: card,
+                    content_mask: ContentMask::rect(px(at, at, 56.0, 56.0)),
+                    background: hsla(0.0, 0.0, 1.0, 1.0).into(),
+                    corner_radii: Corners::all(ScaledPixels(12.0)),
+                    ..Quad::default()
+                },
+                Quad {
+                    bounds: bar,
+                    content_mask: ContentMask::rect(px(at, at, 56.0, 56.0)),
+                    background: hsla(0.0, 1.0, 0.5, 0.5).into(),
+                    ..Quad::default()
+                },
+            ]
+        };
+        let mut live = Scene::default();
+        live.insert_primitive(background);
+        for quad in content(8.0) {
+            live.insert_primitive(quad);
+        }
+        live.finish();
+
+        let mut captured = Scene::default();
+        for quad in content(0.0) {
+            captured.insert_primitive(quad);
+        }
+        captured.finish();
+        let texels = size(DevicePixels(56), DevicePixels(56));
+        let mut through = Scene::default();
+        through.insert_primitive(background);
+        through.insert_primitive(gpui::SnapshotQuad {
+            order: 0,
+            bounds: px(8.0, 8.0, 56.0, 56.0),
+            content_mask: ContentMask::rect(target),
+            opacity: 1.0,
+            slot: gpui::SnapshotSlot(1),
+            size: texels,
+        });
+        through.finish();
+        through.snapshot_scenes.push(gpui::SnapshotScene {
+            slot: gpui::SnapshotSlot(1),
+            size: texels,
+            backing: None,
+            scene: captured,
+        });
+
+        let mut renderer =
+            MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())))
+                .unwrap();
+        let frame = size(DevicePixels(64), DevicePixels(64));
+        let expected = renderer.render_scene_to_image(&live, frame).unwrap();
+        let actual = renderer.render_scene_to_image(&through, frame).unwrap();
+        let mut worst = (0u8, 0, 0);
+        for (x, y, pixel) in actual.enumerate_pixels() {
+            let want = expected.get_pixel(x, y);
+            for (got, want) in pixel.0.iter().zip(want.0) {
+                worst = worst.max((got.abs_diff(want), x, y));
+            }
+        }
+        assert!(
+            worst.0 <= 1,
+            "worst difference {worst:?}: {:?} against {:?}",
+            actual.get_pixel(worst.1, worst.2),
+            expected.get_pixel(worst.1, worst.2)
+        );
+        // The card's middle is opaque: exactly the live pixel, and white.
+        assert_eq!(actual.get_pixel(20, 20), expected.get_pixel(20, 20));
+        assert_eq!(actual.get_pixel(20, 20).0, [255, 255, 255, 255]);
+
+        // Its texture released, the quad draws nothing over the background.
+        let mut released = Scene::default();
+        released.insert_primitive(background);
+        released.insert_primitive(gpui::SnapshotQuad {
+            order: 0,
+            bounds: px(8.0, 8.0, 56.0, 56.0),
+            content_mask: ContentMask::rect(target),
+            opacity: 1.0,
+            slot: gpui::SnapshotSlot(1),
+            size: texels,
+        });
+        released.finish();
+        released.snapshot_releases.push(gpui::SnapshotSlot(1));
+        let image = renderer.render_scene_to_image(&released, frame).unwrap();
+        assert_eq!(image.get_pixel(20, 20), image.get_pixel(2, 2));
     }
 }
 

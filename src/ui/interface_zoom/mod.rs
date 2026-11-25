@@ -735,6 +735,15 @@ impl PlatformWindow for ZoomWindow {
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
         self.inner.sprite_atlas()
     }
+    fn snapshots_supported(&self) -> bool {
+        self.inner.snapshots_supported()
+    }
+    fn draw_snapshot(&self, snapshot: &gpui_kit::SnapshotScene) -> bool {
+        self.inner.draw_snapshot(snapshot)
+    }
+    fn snapshot_losses(&self) -> u64 {
+        self.inner.snapshot_losses()
+    }
     fn is_subpixel_rendering_supported(&self) -> bool {
         self.inner.is_subpixel_rendering_supported()
     }

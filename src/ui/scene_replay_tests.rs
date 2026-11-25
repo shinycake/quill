@@ -278,7 +278,8 @@ fn drawn(scene: &Scene) -> Vec<u32> {
             }
             PrimitiveBatch::Surfaces(_)
             | PrimitiveBatch::NativeViews(_)
-            | PrimitiveBatch::Lenses(_) => {}
+            | PrimitiveBatch::Lenses(_)
+            | PrimitiveBatch::Snapshots(_) => {}
         }
     }
     tags
@@ -301,7 +302,10 @@ fn tag_of(primitive: &Primitive) -> u32 {
         Primitive::MonochromeSprite(sprite) => sprite.tile.tile_id.0,
         Primitive::SubpixelSprite(sprite) => sprite.pad,
         Primitive::PolychromeSprite(sprite) => sprite.pad,
-        Primitive::Surface(_) | Primitive::NativeView(_) | Primitive::Lens(_) => 0,
+        Primitive::Surface(_)
+        | Primitive::NativeView(_)
+        | Primitive::Lens(_)
+        | Primitive::Snapshot(_) => 0,
     }
 }
 

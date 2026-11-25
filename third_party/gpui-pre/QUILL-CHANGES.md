@@ -791,3 +791,34 @@ GPUI update:
 
 The vendored gpui-base and gpui-component, and Quill's own code, build their
 rectangular masks with `ContentMask::rect` too.
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
+An element can paint into a texture of its own and draw that texture as one
+quad, scaled, moved and faded. Upstream files touched, to patch again on
+every GPUI update:
+
+- `src/scene.rs`: `PaintOperation::{StartCapture, EndCapture}` mark what a
+  capture holds, and replays copy them. `Scene::push_primitive` takes the
+  operation's index and diverts a captured primitive, then
+  `push_into_frame` does what it did. `Primitive::Snapshot`,
+  `PrimitiveKind::Snapshot` and `PrimitiveBatch::Snapshots`;
+  `Scene::{snapshots, snapshot_scenes, snapshot_releases}`.
+  `PaddedBool32::PREMULTIPLIED`: the polychrome shader's flag word gains bit
+  2, for sampling a texture that holds premultiplied colour.
+- `src/scene/snapshot.rs` (new): captures, how they settle at the end of a
+  frame (drawn, kept, or pushed back live), and `Scene::region_snapshot`.
+- `src/scene/backdrop_frame.rs`: a lens over a snapshot quad redraws its
+  backdrop.
+- `src/window.rs`, `src/window/snapshot.rs` (new): `Snapshot`,
+  `SnapshotState`, `SnapshotDraw`; `Window::{new_snapshot,
+  capture_snapshot, paint_snapshot, snapshot_last_frame,
+  snapshots_supported}`; `Window::scenes_drawn` counts full draws.
+- `src/view.rs`: a cached view reuses its paint only when it was painted
+  in the previous full draw (always true in Classic, where a re-rendered
+  view refreshes its children).
+- `src/elements/snapshot.rs` (new): the `snapshot` element.
+- `src/platform.rs`: `PlatformWindow::{snapshots_supported, draw_snapshot,
+  snapshot_losses}`, false and zero by default. `src/platform/test/window.rs`
+  records drawn and released snapshots.

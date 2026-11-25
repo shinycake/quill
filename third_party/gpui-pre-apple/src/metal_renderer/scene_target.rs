@@ -1,14 +1,14 @@
 // Added by the Quill project (2026). See third_party/gpui-pre-apple/QUILL-CHANGES.md.
 //! QUILL: drawing a whole scene into a texture of its own, on its own
-//! command buffer: the re-rendered backdrops of sharp magnifiers draw
-//! through it (docs/decisions/snapshot-transitions.md).
+//! command buffer: the re-rendered backdrops of sharp magnifiers and
+//! snapshot textures draw through it (docs/decisions/snapshot-transitions.md).
 
 use anyhow::{Context as _, Result};
 use gpui::{DevicePixels, Scene, size};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{
-    MTLCommandBuffer, MTLDevice, MTLPixelFormat, MTLStorageMode, MTLTexture,
+    MTLClearColor, MTLCommandBuffer, MTLDevice, MTLPixelFormat, MTLStorageMode, MTLTexture,
     MTLTextureDescriptor, MTLTextureUsage,
 };
 
@@ -37,13 +37,15 @@ pub(super) fn new_scene_target(
 }
 
 impl MetalRenderer {
-    /// Encodes `scene` into the whole of `texture`, on a command buffer of
-    /// its own that the caller commits ahead of the frame that reads it.
+    /// Encodes `scene` into the whole of `texture`, cleared to `clear`, on a
+    /// command buffer of its own that the caller commits ahead of the frame
+    /// that reads it.
     pub(super) fn draw_scene_into(
         &mut self,
         scene: &Scene,
         writer: &mut InstanceBufferWriter,
         texture: &ProtocolObject<dyn MTLTexture>,
+        clear: MTLClearColor,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let bindings = super::write_instances(scene, writer, None)?;
         let mut surfaces = Vec::new();
@@ -59,6 +61,7 @@ impl MetalRenderer {
             viewport,
             &mut surfaces,
             None,
+            clear,
         )
     }
 }

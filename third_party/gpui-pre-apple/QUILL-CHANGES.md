@@ -305,3 +305,15 @@ sampled from, and `MetalRenderer::draw_scene_into` encodes a whole scene
 into it on a command buffer of its own. `src/metal_renderer/lens.rs`: the
 sharp magnifier's canvases are allocated and drawn through them (no change
 in output).
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
+`src/metal_renderer/snapshots.rs` (new): a texture per live snapshot, drawn
+from `Scene::snapshot_scenes` ahead of the frame and freed with
+`Scene::snapshot_releases`; snapshot quads draw through the polychrome
+pipeline with the snapshot's texture bound. `src/metal_renderer.rs`: the
+pool, the batch arm, and `draw_primitives_to_texture` takes its clear
+colour. `src/metal_renderer/scene_target.rs`: `draw_scene_into` takes a
+clear colour. `src/shaders.metal`: bit 2 of the polychrome flags divides
+the sample by its alpha.

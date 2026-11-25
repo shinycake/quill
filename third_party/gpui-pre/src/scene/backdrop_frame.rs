@@ -339,8 +339,9 @@ pub(crate) enum UnderItem {
 
 /// The primitives the frame draws before a lens at `before` whose pixels
 /// reach `region`, in draw order; `None` when what lies there can't be
-/// told from the scene (a surface, whose picture changes on its own, or
-/// glass under glass, which bends pixels from outside the region).
+/// told from the scene (a surface, whose picture changes on its own, a
+/// snapshot's texture (QUILL), or glass under glass, which bends pixels
+/// from outside the region).
 pub(crate) fn primitives_under_ranked(
     scene: &Scene,
     region: Bounds<ScaledPixels>,
@@ -379,6 +380,13 @@ fn collect_under(
     let drawn_before = |order: DrawOrder| order <= before;
     if scene.surfaces.iter().any(|s| {
         drawn_before(s.order) && covers(s.bounds.intersect(&s.content_mask.bounds), &region)
+    }) {
+        return None;
+    }
+    // QUILL: nor a snapshot's texture.
+    if scene.snapshots.iter().any(|quad| {
+        drawn_before(quad.order)
+            && covers(quad.bounds.intersect(&quad.content_mask.bounds), &region)
     }) {
         return None;
     }
