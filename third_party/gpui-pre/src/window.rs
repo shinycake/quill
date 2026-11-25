@@ -94,7 +94,7 @@ use crate::util::{
     round_half_toward_zero_f64, round_stroke_to_device_pixel, round_to_device_pixel,
 };
 pub use prompts::*;
-pub use snapshot::{Snapshot, SnapshotDraw, SnapshotState};
+pub use snapshot::{Snapshot, SnapshotDraw, SnapshotState, SnapshotSwitch};
 
 /// Default window size used when no explicit size is provided.
 pub const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1536.), px(1095.));

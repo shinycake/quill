@@ -25,12 +25,57 @@ again on every frame. It is a general renderer feature; the Floating layout
   out, prepaints and paints the child as always, so its hitboxes, listeners
   and focus are real, but its pixels go into the snapshot, which is drawn
   as `draw` says. With `None`, or on a window without snapshots, the child
-  paints live. `.backing(color)` clears the texture to an opaque colour
-  first (subpixel text stays correct); `.margin(px)` captures beyond the
-  bounds for a shadow.
+  paints live. `.backing(color, radius)` paints an opaque rounded quad
+  under the element's bounds inside the capture, so subpixel text has an
+  opaque background to blend against; the margin stays clear, so a shadow
+  keeps its own alpha. `.margin(px)` captures beyond the bounds for a
+  shadow.
 - `Window::snapshot_last_frame(bounds, scale)` fills a snapshot from what
   the last frame drew in `bounds`, at once, for a picture of something
   about to go away.
+
+## The animation helper
+
+`element.with_snapshot_animation(id, animation, |t, bounds| draw)`
+(`elements/snapshot_animation.rs`) draws an element through a snapshot for
+one animation. Its element state is the run:
+
+```rust
+enum SnapshotRun {
+    Running { started: Instant, snapshot: Snapshot },
+    Ended,
+}
+```
+
+The first frame starts the run with a new snapshot; each frame draws it as
+the animator says for the eased time and asks for the next frame. Past the
+end the state becomes `Ended`, which drops the snapshot, and the element
+paints live from then on. If the element is not rendered in a frame, GPUI
+drops its state and the snapshot with it. Where the window has no snapshots
+or motion is reduced the run ends at once; the owner picks its own
+fallback. The clock is the executor's (`background_executor().now()`), as
+for `with_animation`, so tests drive it by hand. The animator also gets the
+element's bounds, since the origin of a scale (a menu's corner) is only
+known once the element is laid out.
+
+## The switch
+
+`QUILL_SNAPSHOTS=off` (or `0`) makes `Window::snapshots_supported` false in
+every window, so every snapshot element paints live and every owner takes
+its fallback, on a machine where snapshots work. `on`, `1` or no value
+leaves it to the platform. It is read once (`SnapshotSwitch::from_env`) in
+gpui-pre, where the windows ask for it, rather than beside `QUILL_GLASS` in
+`src/glass.rs`; a test sets a window's switch with
+`set_test_snapshot_switch`.
+
+## The demo
+
+`ready-snapshot` (`src/ui/snapshot_demo.rs`) draws one card, with large
+and small text, emoji, an image, a shadow and a rounded clip, live and
+through snapshots: at identity, at .8 about each corner, moved, at half
+opacity, at identity without a backing colour, and through a snapshot
+replaced after the first frame (captured again from empty). With
+`QUILL_SNAPSHOTS=off` every card is the live card.
 
 ## Captures
 
@@ -131,5 +176,32 @@ Direct3D keeps a resource alive until the GPU is done with it, so
 without support, a capture drawn once and then kept, the draw's scale,
 move and fade, a lens left in the frame, release at the next frame, loss on
 a scale change or a device loss, the area limit, and a last-frame snapshot.
+The switch, and `with_snapshot_animation` ending, going away mid-run and
+ending at once without support, are tested there too on the test clock.
 `gpui-pre-apple`'s `a_snapshot_at_identity_draws_the_pixels_of_its_content`
-draws on a real Metal device.
+draws on a real Metal device. The wgpu and DirectX crates' own tests do not
+build in this checkout, so the pixel invariant there rests on the demo run
+on lavapipe and WARP and on real GPUs.
+
+## Deviations from the plan
+
+- `SnapshotDraw` is a uniform scale about an origin, a translation and an
+  opacity, not a general transform (see the model above).
+- A released texture is freed at the next frame, not at once: the handle
+  can drop in the middle of a frame that still draws it.
+- `QUILL_SNAPSHOTS` is read in gpui-pre, not in `src/glass.rs`.
+- A lens inside a capture stays live in the frame and is not moved by the
+  draw.
+- `snapshot_last_frame` walks the last scene itself, refuses regions with
+  a native view or a lens, and waits for the GPU.
+- A capture is kept only while everything in it replays; a cached
+  ancestor that renders again refreshes its children, so they recapture.
+- The area limit counts exact texels; the 256 rounding of the textures can
+  go a little past it.
+- The animator takes the element's bounds as well as the eased time.
+- The backing is a rounded quad under the bounds, not a clear colour for
+  the whole texture, which filled the shadow margin.
+- The demo has no 1x capture: interface scale starts at 100% on a 2x
+  screen, so it was captured at 2x and at 150% (3x).
+- The `view.rs` painted-in-the-last-frame condition never changes a
+  Classic frame.

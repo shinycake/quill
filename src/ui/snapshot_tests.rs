@@ -4,11 +4,13 @@
 //! snapshot is drawn, and every way a snapshot ends.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::{
-    AppContext as _, Bounds, Context, DevicePixels, Entity, IntoElement, ParentElement as _,
-    Render, ScaledPixels, Snapshot, SnapshotDraw, SnapshotState, Styled as _, TestAppContext,
-    VisualTestContext, Window, canvas, div, hsla, point, px, size, snapshot,
+    Animation, AppContext as _, Bounds, Context, DevicePixels, Entity, IntoElement,
+    ParentElement as _, Render, ScaledPixels, Snapshot, SnapshotAnimationExt as _, SnapshotDraw,
+    SnapshotState, SnapshotSwitch, Styled as _, TestAppContext, VisualTestContext, Window, canvas,
+    div, hsla, point, px, size, snapshot,
 };
 
 struct Child;
@@ -26,6 +28,9 @@ struct Card {
     side: f32,
     /// Paints a lens inside the capture too.
     lens: bool,
+    /// Draws the content through `with_snapshot_animation` instead, from
+    /// half size to whole over this long.
+    animation: Option<Duration>,
 }
 
 impl Render for Card {
@@ -53,10 +58,16 @@ impl Render for Card {
             content.into_any_element()
         };
         let card = div().absolute().left(px(10.0)).top(px(20.0)).size(side);
-        div().size_full().child(match &self.snapshot {
-            Some(held) => card.child(snapshot(content, held, self.draw)),
-            None => card.child(content),
-        })
+        let card = match (self.animation, &self.snapshot) {
+            (Some(duration), _) => card.child(content.with_snapshot_animation(
+                "pop",
+                Animation::new(duration),
+                |t, bounds| SnapshotDraw::scaled_about(bounds.origin, 0.5 + 0.5 * t),
+            )),
+            (None, Some(held)) => card.child(snapshot(content, held, self.draw)),
+            (None, None) => card.child(content),
+        };
+        div().size_full().child(card)
     }
 }
 
@@ -128,6 +139,7 @@ fn open(cx: &mut TestAppContext, supported: bool, side: f32) -> Harness {
             draw: Some(SnapshotDraw::IDENTITY),
             side,
             lens: false,
+            animation: None,
         });
         let _ = made_in.set(card.clone());
         let outer = cx.new(|_| Outer { card });
@@ -406,4 +418,93 @@ fn a_last_frame_snapshot_is_drawn_at_once(cx: &mut TestAppContext) {
         window.snapshot_last_frame(region, 1.0).is_none()
     });
     assert!(refused);
+}
+
+#[test]
+fn the_switch_reads_off_and_on() {
+    assert_eq!(SnapshotSwitch::parse("off"), Some(SnapshotSwitch::Off));
+    assert_eq!(SnapshotSwitch::parse(" 0 "), Some(SnapshotSwitch::Off));
+    assert_eq!(SnapshotSwitch::parse("ON"), Some(SnapshotSwitch::On));
+    assert_eq!(SnapshotSwitch::parse("1"), Some(SnapshotSwitch::On));
+    assert_eq!(SnapshotSwitch::parse("maybe"), None);
+}
+
+#[gpui_kit::test]
+fn with_the_switch_off_every_snapshot_paints_live(cx: &mut TestAppContext) {
+    let mut h = open(cx, true, 100.0);
+    let supported = h.vcx.update(|window, _| {
+        window.set_test_snapshot_switch(SnapshotSwitch::Off);
+        window.snapshots_supported()
+    });
+    assert!(!supported);
+    assert_eq!(
+        h.frame(|_, _| {}),
+        Drawn {
+            child_quads: 1,
+            snapshots: vec![],
+            captures: 0
+        }
+    );
+    assert_eq!(h.state(), Some(SnapshotState::Empty));
+}
+
+/// Starts a 200 ms snapshot animation on the card.
+fn animate(h: &mut Harness) -> Drawn {
+    h.frame(|card, _| {
+        card.snapshot = None;
+        card.animation = Some(Duration::from_millis(200));
+    })
+}
+
+fn live_snapshots(h: &mut Harness) -> usize {
+    h.vcx.update(|window, _| window.live_snapshot_count())
+}
+
+#[gpui_kit::test]
+fn a_snapshot_animation_drops_its_snapshot_when_it_ends(cx: &mut TestAppContext) {
+    let mut h = open(cx, true, 100.0);
+    // Half size at the start, about the card's top left.
+    assert_eq!(
+        animate(&mut h),
+        Drawn {
+            child_quads: 0,
+            snapshots: vec![device(20.0, 40.0, 100.0)],
+            captures: 1
+        }
+    );
+    assert_eq!(live_snapshots(&mut h), 1);
+    h.vcx.executor().advance_clock(Duration::from_millis(100));
+    assert_eq!(h.frame(|_, _| {}).snapshots, [device(20.0, 40.0, 150.0)]);
+    // Past the end: live, and the snapshot gone with the run.
+    h.vcx.executor().advance_clock(Duration::from_millis(150));
+    assert_eq!(
+        h.frame(|_, _| {}),
+        Drawn {
+            child_quads: 1,
+            snapshots: vec![],
+            captures: 0
+        }
+    );
+    assert_eq!(live_snapshots(&mut h), 0);
+    // It stays live.
+    h.vcx.executor().advance_clock(Duration::from_millis(100));
+    assert_eq!(h.frame(|_, _| {}).child_quads, 1);
+}
+
+#[gpui_kit::test]
+fn a_snapshot_animation_drops_its_snapshot_when_the_element_goes(cx: &mut TestAppContext) {
+    let mut h = open(cx, true, 100.0);
+    animate(&mut h);
+    h.vcx.executor().advance_clock(Duration::from_millis(50));
+    let drawn = h.frame(|card, _| card.animation = None);
+    assert_eq!((drawn.child_quads, drawn.snapshots), (1, vec![]));
+    assert_eq!(live_snapshots(&mut h), 0);
+}
+
+#[gpui_kit::test]
+fn without_support_a_snapshot_animation_ends_at_once(cx: &mut TestAppContext) {
+    let mut h = open(cx, false, 100.0);
+    let drawn = animate(&mut h);
+    assert_eq!((drawn.child_quads, drawn.snapshots), (1, vec![]));
+    assert_eq!(live_snapshots(&mut h), 0);
 }

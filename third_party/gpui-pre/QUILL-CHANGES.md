@@ -819,6 +819,9 @@ every GPUI update:
   in the previous full draw (always true in Classic, where a re-rendered
   view refreshes its children).
 - `src/elements/snapshot.rs` (new): the `snapshot` element.
+  `src/elements/snapshot_animation.rs` (new): `with_snapshot_animation`.
+- `src/window/snapshot.rs`: `SnapshotSwitch`, the `QUILL_SNAPSHOTS` switch,
+  read once.
 - `src/platform.rs`: `PlatformWindow::{snapshots_supported, draw_snapshot,
   snapshot_losses}`, false and zero by default. `src/platform/test/window.rs`
   records drawn and released snapshots.

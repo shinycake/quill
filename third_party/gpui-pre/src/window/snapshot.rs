@@ -11,6 +11,7 @@
 use std::{
     cell::Cell,
     rc::{Rc, Weak},
+    sync::OnceLock,
 };
 
 use super::Window;
@@ -25,6 +26,40 @@ const MAX_SIDE: i32 = 16384;
 /// What a window's snapshots may hold together, in multiples of the
 /// window's own device pixels.
 const AREA_LIMIT: f64 = 1.25;
+
+/// `QUILL_SNAPSHOTS`, for demos and tests: `off` (or `0`) makes every
+/// window paint its snapshot elements live, the fallback every owner has,
+/// so it can be seen and tested where snapshots work; `on` (or `1`), or no
+/// value, leaves it to the platform. Read once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotSwitch {
+    /// Snapshots where the platform draws them.
+    On,
+    /// No snapshots anywhere.
+    Off,
+}
+
+impl SnapshotSwitch {
+    /// The switch a value of `QUILL_SNAPSHOTS` sets, if it is one.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" | "0" => Some(Self::Off),
+            "on" | "1" => Some(Self::On),
+            _ => None,
+        }
+    }
+
+    /// The switch in the environment, `On` when unset or unknown.
+    pub fn from_env() -> Self {
+        static SWITCH: OnceLock<SnapshotSwitch> = OnceLock::new();
+        *SWITCH.get_or_init(|| {
+            std::env::var("QUILL_SNAPSHOTS")
+                .ok()
+                .and_then(|value| Self::parse(&value))
+                .unwrap_or(Self::On)
+        })
+    }
+}
 
 /// What a [`Snapshot`] holds.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -192,6 +227,8 @@ pub(crate) struct SnapshotTable {
     /// The scale factor and the renderer's loss count the live snapshots
     /// were drawn under, once a frame has set them.
     drawn_under: Cell<Option<(f32, u64)>>,
+    /// A test's switch in place of the environment's.
+    switch: Cell<Option<SnapshotSwitch>>,
 }
 
 impl SnapshotTable {
@@ -315,7 +352,12 @@ impl Window {
     /// QUILL: whether this window can draw snapshots. When it can't, every
     /// owner of a transition takes its fallback.
     pub fn snapshots_supported(&self) -> bool {
-        self.platform_window.snapshots_supported()
+        let switch = self
+            .snapshots
+            .switch
+            .get()
+            .unwrap_or_else(SnapshotSwitch::from_env);
+        switch == SnapshotSwitch::On && self.platform_window.snapshots_supported()
     }
 
     /// QUILL: a new, empty snapshot of this window.
@@ -503,6 +545,13 @@ impl Window {
         if let Some(window) = self.platform_window.as_test() {
             window.set_snapshots_supported(supported);
         }
+    }
+
+    /// QUILL: sets the `QUILL_SNAPSHOTS` switch for this window, in place
+    /// of the environment's.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_test_snapshot_switch(&mut self, switch: SnapshotSwitch) {
+        self.snapshots.switch.set(Some(switch));
     }
 
     /// QUILL: on a test window, the renderer loses every snapshot texture.

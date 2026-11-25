@@ -3,7 +3,7 @@
 
 use crate::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, Hsla, InspectorElementId,
-    IntoElement, LayoutId, Pixels, Snapshot, SnapshotDraw, Window,
+    IntoElement, LayoutId, Pixels, Snapshot, SnapshotDraw, Window, fill,
 };
 
 /// Draws `child` through `snapshot` while `draw` is `Some`: the child is laid
@@ -23,20 +23,38 @@ pub fn snapshot(child: impl IntoElement, snapshot: &Snapshot, draw: Option<Snaps
     }
 }
 
+/// What a snapshot is drawn on inside its texture: a colour under the
+/// element's bounds, rounded by `radius`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SnapshotBacking {
+    /// The colour, opaque for subpixel text to stay correct.
+    pub color: Hsla,
+    /// The corner radius, the element's own.
+    pub radius: Pixels,
+}
+
+impl SnapshotBacking {
+    /// Paints the backing under `bounds`, inside a capture.
+    pub(crate) fn paint(&self, bounds: Bounds<Pixels>, window: &mut Window) {
+        window.paint_quad(fill(bounds, self.color).corner_radii(self.radius));
+    }
+}
+
 /// An element that draws its child through a [`Snapshot`]; see [`snapshot`].
 pub struct SnapshotElement {
     child: Option<AnyElement>,
     snapshot: Snapshot,
     draw: Option<SnapshotDraw>,
-    backing: Option<Hsla>,
+    backing: Option<SnapshotBacking>,
     margin: Pixels,
 }
 
 impl SnapshotElement {
-    /// Clears the snapshot to an opaque colour before the child is drawn
-    /// into it, which keeps subpixel text correct.
-    pub fn backing(mut self, color: Hsla) -> Self {
-        self.backing = Some(color);
+    /// Paints `color` under the child's bounds, rounded by `radius` (the
+    /// child's own), before the child is drawn into the snapshot, which
+    /// keeps subpixel text correct. The margin stays clear.
+    pub fn backing(mut self, color: Hsla, radius: Pixels) -> Self {
+        self.backing = Some(SnapshotBacking { color, radius });
         self
     }
 
@@ -103,7 +121,11 @@ impl Element for SnapshotElement {
         match self.draw {
             Some(draw) if window.snapshots_supported() => {
                 let region = bounds.dilate(self.margin);
-                window.capture_snapshot(&self.snapshot, region, self.backing, |window| {
+                let backing = self.backing;
+                window.capture_snapshot(&self.snapshot, region, None, |window| {
+                    if let Some(backing) = backing {
+                        backing.paint(bounds, window);
+                    }
                     child.paint(window, cx)
                 });
                 window.paint_snapshot(&self.snapshot, region, draw);
