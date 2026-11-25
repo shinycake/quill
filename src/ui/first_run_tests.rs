@@ -12,6 +12,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
+use quill::layout_style::LayoutStyle;
 
 fn new_app(cx: &mut TestAppContext, demo: &'static str) -> (Entity<QuillApp>, VisualTestContext) {
     let root = quill::scratch::process_dir("quill-first-run-ui");
@@ -57,7 +58,10 @@ fn the_notice_then_the_highlights_lead_to_sign_in(cx: &mut TestAppContext) {
         ));
     });
     assert!(vcx.debug_bounds("first-run-understand").is_none());
+    assert!(vcx.debug_bounds("first-run-start").is_none());
 
+    click(&mut vcx, "first-run-continue");
+    vcx.read(|cx| assert!(app.read(cx).first_run.in_style()));
     click(&mut vcx, "first-run-start");
     vcx.read(|cx| assert!(matches!(app.read(cx).first_run, FirstRun::Done)));
     assert!(vcx.debug_bounds("first-run-start").is_none());
@@ -88,7 +92,39 @@ fn the_replay_from_settings_plays_over_the_signed_in_app(cx: &mut TestAppContext
     });
     frames(&mut vcx);
     click(&mut vcx, "first-run-understand");
+    click(&mut vcx, "first-run-continue");
     click(&mut vcx, "first-run-start");
     vcx.read(|cx| assert!(matches!(app.read(cx).first_run, FirstRun::Done)));
     assert!(vcx.debug_bounds("first-run-start").is_none());
+}
+
+/// The layout card writes the pref the Settings card writes and stays up;
+/// Escape finishes onboarding with the pref as it was.
+#[gpui_kit::test]
+fn the_style_card_picks_the_layout_and_escape_finishes(cx: &mut TestAppContext) {
+    let _prefs = crate::ui::appearance::own_appearance_prefs("quill-first-run-style");
+    let (app, mut vcx) = new_app(cx, "first-run-style");
+    frames(&mut vcx);
+    vcx.read(|cx| assert!(app.read(cx).first_run.in_style()));
+    click(&mut vcx, "layout-option-floating");
+    vcx.read(|cx| {
+        let app = app.read(cx);
+        assert_eq!(app.appearance.layout, LayoutStyle::Floating);
+        assert!(app.first_run.in_style(), "picking does not leave the card");
+    });
+    assert_eq!(QuillApp::load_appearance().layout, LayoutStyle::Floating);
+    // No wallpaper is set: the card offers one.
+    assert!(vcx.debug_bounds("layout-wallpaper-offer").is_some());
+
+    // Escape: the topmost layer is the card.
+    let dismissed = app.update_in(&mut vcx, |app, window, cx| {
+        app.dismiss_topmost_layer(window, cx)
+    });
+    assert!(dismissed);
+    frames(&mut vcx);
+    vcx.read(|cx| {
+        let app = app.read(cx);
+        assert!(matches!(app.first_run, FirstRun::Done));
+        assert_eq!(app.appearance.layout, LayoutStyle::Floating);
+    });
 }

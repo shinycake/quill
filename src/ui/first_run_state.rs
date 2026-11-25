@@ -1,5 +1,6 @@
 //! The first-run onboarding's state: the intro clip, then the notice that
-//! Quill is experimental, then the highlights, then sign-in. The screen is
+//! Quill is experimental, then the highlights, then the layout choice, then
+//! sign-in. The screen is
 //! drawn from this value alone (`ui/first_run_ui.rs`).
 #![deny(clippy::indexing_slicing)]
 
@@ -48,6 +49,13 @@ pub(super) enum FirstRun {
     /// The clip could not open (or animations are off): the notice.
     Notice,
     Highlights {
+        since: Instant,
+    },
+    /// The layout choice: Classic or Floating. The choice itself is
+    /// `AppearancePrefs::layout`; the stage only says this card is up.
+    /// Start Messaging, Enter or Escape finish; a replay replaces it; it
+    /// holds no task, so the window closing drops it.
+    Style {
         since: Instant,
     },
     /// Finished, or never needed: the sign-in screen shows.
@@ -214,6 +222,18 @@ impl FirstRun {
         }
     }
 
+    /// Continue from the highlights to the layout choice.
+    pub(super) fn choose_style(&mut self, now: Instant) {
+        if matches!(self, Self::Highlights { .. }) {
+            *self = Self::Style { since: now };
+        }
+    }
+
+    /// The layout card is up.
+    pub(super) fn in_style(&self) -> bool {
+        matches!(self, Self::Style { .. })
+    }
+
     pub(super) fn finish(&mut self) {
         *self = Self::Done;
     }
@@ -235,7 +255,9 @@ impl FirstRun {
             Self::Playing { player, .. } => intro_look(&player.transport(), None, now),
             // The way out runs on the clock; the transport is not read.
             Self::Leaving { outro, .. } => intro_look(&opening(), Some(*outro), now),
-            Self::Notice | Self::Highlights { .. } | Self::Done => IntroLook::NOTICE,
+            Self::Notice | Self::Highlights { .. } | Self::Style { .. } | Self::Done => {
+                IntroLook::NOTICE
+            }
         }
     }
 
@@ -249,7 +271,9 @@ impl FirstRun {
                 player.transport().state,
                 PlayState::NotOpen | PlayState::Ready
             ),
-            Self::Highlights { since } => elapsed_since(*since, now) < CARD_IN,
+            Self::Highlights { since } | Self::Style { since } => {
+                elapsed_since(*since, now) < CARD_IN
+            }
             Self::Notice | Self::Done => false,
         }
     }
@@ -419,8 +443,31 @@ mod tests {
             matches!(first_run, FirstRun::Highlights { .. }),
             "only the notice acknowledges"
         );
+        first_run.choose_style(now);
+        assert!(matches!(first_run, FirstRun::Style { .. }));
+        first_run.acknowledge(now);
+        assert!(first_run.in_style(), "the notice is long gone");
         first_run.finish();
         assert!(matches!(first_run, FirstRun::Done));
+    }
+
+    /// The layout card follows only the highlights, rises like them, and
+    /// asks for frames only while it rises.
+    #[test]
+    fn the_style_card_follows_the_highlights_and_rises_once() {
+        use super::CARD_IN;
+        let now = Instant::now();
+        let mut first_run = FirstRun::welcome(None, now);
+        first_run.choose_style(now);
+        assert!(!first_run.in_style(), "not from the notice");
+        first_run.acknowledge(now);
+        first_run.choose_style(now);
+        assert!(first_run.in_style());
+        let ms = Duration::from_millis(1);
+        assert!(first_run.animating(now + CARD_IN.saturating_sub(ms)));
+        assert!(!first_run.animating(now + CARD_IN));
+        assert_eq!(first_run.intro_look(now).card, 1.);
+        assert!(!first_run.in_welcome());
     }
 
     /// The clip is written out off the UI thread: meanwhile the intro is

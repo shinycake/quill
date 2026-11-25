@@ -44,6 +44,11 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, _, cx| app.skip_first_run_intro(cx)
     ),
     layer!(
+        "first-run-style",
+        |app| app.first_run.in_style(),
+        |app, _, cx| app.finish_first_run(cx)
+    ),
+    layer!(
         "context-menus",
         |app| app.context_menu_open(),
         |app, _, cx| {

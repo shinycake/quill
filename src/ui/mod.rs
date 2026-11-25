@@ -357,6 +357,7 @@ mod export_state;
 mod fact_check;
 mod first_run_demo;
 mod first_run_state;
+mod first_run_style;
 mod first_run_tests;
 mod first_run_ui;
 mod focus_return_tests;
