@@ -988,9 +988,10 @@ fn paint_labels(
     let x = timeline.duration_x(duration_w.min(available), available);
     let origin = point(bounds.origin.x + px(x), bounds.origin.y);
     window.with_content_mask(
-        Some(ContentMask {
-            bounds: Bounds::new(bounds.origin, size(px(available), line_height)),
-        }),
+        Some(ContentMask::rect(Bounds::new(
+            bounds.origin,
+            size(px(available), line_height),
+        ))),
         |window| {
             let _ = duration.paint(origin, line_height, TextAlign::Left, None, window, cx);
         },

@@ -24,7 +24,7 @@ use crate::{
     ModifiersChangedEvent, MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent,
     MouseUpEvent, PaintedPath, Path, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
     PlatformInputHandler, PlatformWindow, Point, PolychromeSprite, Priority, PromptButton,
-    PromptLevel, Quad, Render, RenderGlyphParams,
+    PromptLevel, Quad, Render, RenderGlyphParams, RoundedMask,
     RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge, SMOOTH_SVG_SCALE_FACTOR,
     SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow, SharedString, Size,
     SpriteAnimation, SpriteAnimationId, StrikethroughStyle, Style, SubpixelSprite, Subscription,
@@ -2623,28 +2623,15 @@ pub struct DispatchEventResult {
 }
 
 /// Indicates which region of the window is visible. Content falling outside of this mask will not be
-/// rendered. Currently, only rectangular content masks are supported, but we give the mask its own type
-/// to leave room to support more complex shapes in the future.
+/// rendered. QUILL: a rectangle, clipped exactly, and at most one rounded rectangle, cut per
+/// fragment (`scene/rounded_mask.rs`, docs/decisions/rounded-content-masks.md).
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct ContentMask<P: Clone + Debug + Default + PartialEq> {
-    /// The bounds
+    /// The rectangle. Intersected exactly, clipped in the vertex stage.
     pub bounds: Bounds<P>,
-}
-
-impl ContentMask<Pixels> {
-    /// Scale the content mask's pixel units by the given scaling factor.
-    pub fn scale(&self, factor: f32) -> ContentMask<ScaledPixels> {
-        ContentMask {
-            bounds: self.bounds.scale(factor),
-        }
-    }
-
-    /// Intersect the content mask with the given content mask.
-    pub fn intersect(&self, other: &Self) -> Self {
-        let bounds = self.bounds.intersect(&other.bounds);
-        ContentMask { bounds }
-    }
+    /// QUILL: one rounded shape, cut per fragment. All radii zero: none.
+    pub rounded: RoundedMask<P>,
 }
 
 impl Window {
@@ -3872,6 +3859,7 @@ impl Window {
                         point(start, bounds.top()),
                         point(end, bounds.bottom()),
                     ),
+                    ..underline.content_mask
                 },
                 ..underline
             });
@@ -3953,8 +3941,19 @@ impl Window {
 
     #[inline]
     fn snapped_content_mask(&self) -> ContentMask<ScaledPixels> {
+        let mask = self.content_mask();
+        // QUILL: the rounded shape's bounds snap like a quad's; radii do not.
+        let rounded = if mask.rounded.is_none() {
+            RoundedMask::default()
+        } else {
+            RoundedMask {
+                bounds: self.snap_bounds(mask.rounded.bounds),
+                radii: mask.rounded.radii.scale(self.scale_factor()),
+            }
+        };
         ContentMask {
-            bounds: self.cover_bounds(self.content_mask().bounds),
+            bounds: self.cover_bounds(mask.bounds),
+            rounded,
         }
     }
 
@@ -4891,7 +4890,10 @@ impl Window {
     ) -> R {
         self.invalidator.debug_assert_paint_or_prepaint();
         if let Some(mask) = mask {
-            let mask = mask.intersect(&self.content_mask());
+            let (mask, nesting) = mask.nest_in(&self.content_mask());
+            if nesting == crate::Nesting::Inexact {
+                self.next_frame.scene.note_inexact_rounded_mask();
+            }
             self.content_mask_stack.push(mask);
             let result = f(self);
             self.content_mask_stack.pop();
@@ -4899,6 +4901,19 @@ impl Window {
         } else {
             f(self)
         }
+    }
+
+    /// QUILL: invoke `f` with the current mask narrowed to `bounds` with its
+    /// corners cut to `radii` (docs/decisions/rounded-content-masks.md). Only
+    /// primitives that reach a corner pay for the cut. This method should only
+    /// be called during element drawing.
+    pub fn with_rounded_content_mask<R>(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        radii: Corners<Pixels>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        self.with_content_mask(Some(ContentMask::rounded(bounds, radii)), f)
     }
 
     /// Updates the global element offset relative to the current offset. This is used to implement
@@ -5041,11 +5056,11 @@ impl Window {
         self.content_mask_stack
             .last()
             .cloned()
-            .unwrap_or_else(|| ContentMask {
-                bounds: Bounds {
+            .unwrap_or_else(|| {
+                ContentMask::rect(Bounds {
                     origin: Point::default(),
                     size: self.viewport_size,
-                },
+                })
             })
     }
 
@@ -5478,6 +5493,7 @@ impl Window {
             self.next_frame.scene.insert_primitive(Quad {
                 content_mask: ContentMask {
                     bounds: quad.content_mask.bounds.intersect(&inner_bounds),
+                    ..quad.content_mask
                 },
                 border_widths: Edges::default(),
                 corner_radii: Corners::default(),
@@ -5512,6 +5528,7 @@ impl Window {
             self.next_frame.scene.insert_primitive(Quad {
                 content_mask: ContentMask {
                     bounds: quad.content_mask.bounds.intersect(&strip),
+                    ..quad.content_mask
                 },
                 ..strip_quad
             });
@@ -6351,7 +6368,7 @@ impl Window {
         self.next_frame.scene.suppressed = false;
         self.next_frame.scene.insert_primitive(Quad {
             bounds,
-            content_mask: ContentMask { bounds },
+            content_mask: ContentMask::rect(bounds),
             background: hidden.into(),
             ..Quad::default()
         });
@@ -11070,9 +11087,7 @@ mod tests {
             let scale = window.scale_factor();
             let original_mask = window.content_mask();
             let original_opacity = window.element_opacity();
-            let mask = ContentMask {
-                bounds: Bounds::from_corners(point(px(4.), px(10.)), point(px(16.), px(12.))),
-            };
+            let mask = ContentMask::rect(Bounds::from_corners(point(px(4.), px(10.)), point(px(16.), px(12.))));
             let style = UnderlineStyle {
                 thickness: px(2.),
                 color: Some(hsla(0.25, 0.5, 0.75, 0.5)),
@@ -11171,9 +11186,7 @@ mod tests {
     #[gpui::test]
     fn test_empty_content_masks_remain_empty_when_snapped(cx: &mut TestAppContext) {
         test_paint_at_scales(cx, |window| {
-            let viewport = ContentMask {
-                bounds: Bounds::from_corners(point(px(20.), px(20.)), point(px(100.), px(100.))),
-            };
+            let viewport = ContentMask::rect(Bounds::from_corners(point(px(20.), px(20.)), point(px(100.), px(100.))));
             for fraction in [0., 0.25, 0.5, 0.75] {
                 for bounds in [
                     Bounds::new(point(px(30.), px(120. + fraction)), size(px(40.), px(20.))),
@@ -11192,7 +11205,7 @@ mod tests {
                     ),
                 ] {
                     window.with_content_mask(Some(viewport), |window| {
-                        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                        window.with_content_mask(Some(ContentMask::rect(bounds)), |window| {
                             assert!(window.content_mask().bounds.is_empty());
                             assert!(
                                 window.snapped_content_mask().bounds.is_empty(),
@@ -11218,7 +11231,7 @@ mod tests {
     fn test_nonempty_content_masks_keep_covering_fractional_edges(cx: &mut TestAppContext) {
         test_paint_at_scales(cx, |window| {
             let bounds = Bounds::new(point(px(30.25), px(40.25)), size(px(0.125), px(0.125)));
-            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            window.with_content_mask(Some(ContentMask::rect(bounds)), |window| {
                 let snapped = window.snapped_content_mask().bounds;
                 let scale = window.scale_factor();
                 assert_eq!(snapped, window.cover_bounds(bounds));
@@ -11308,12 +11321,10 @@ mod tests {
             canvas(
                 |_, _, _| {},
                 move |_, _, window, _| {
-                    window.content_mask_stack.push(ContentMask {
-                        bounds: Bounds::from_corners(
+                    window.content_mask_stack.push(ContentMask::rect(Bounds::from_corners(
                             point(px(-1000.), px(-1000.)),
                             point(px(1000.), px(1000.)),
-                        ),
-                    });
+                        )));
                     paint(window);
                     window.content_mask_stack.pop();
                 },

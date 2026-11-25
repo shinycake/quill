@@ -43,6 +43,30 @@ struct Corners {
     float bottom_left;
 };
 
+// QUILL: a content mask is a rectangle, clipped in the vertex stage, and at
+// most one rounded rectangle, cut per fragment; all radii zero is none
+// (docs/decisions/rounded-content-masks.md).
+struct RoundedMask {
+    Bounds bounds;
+    Corners radii;
+};
+
+struct ContentMask {
+    Bounds bounds;
+    RoundedMask rounded;
+};
+
+// QUILL: instance layouts, in bytes: each struct's size and the offset of
+// its `content_mask`. src/ui/rounded_mask_tests.rs checks these lines
+// against the Rust structs, so a struct changed on one side fails a test.
+// QUILL-LAYOUT Quad size=192 mask=24
+// QUILL-LAYOUT Shadow size=144 mask=40
+// QUILL-LAYOUT Underline size=96 mask=24
+// QUILL-LAYOUT MonochromeSprite size=144 mask=56
+// QUILL-LAYOUT SubpixelSprite size=144 mask=56
+// QUILL-LAYOUT PolychromeSprite size=128 mask=64
+// QUILL-LAYOUT PathPaint size=144 mask=16
+
 struct Edges {
     float top;
     float right;
@@ -547,7 +571,7 @@ struct Quad {
     uint order;
     uint border_style;
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Background background;
     Hsla border_color;
     Corners corner_radii;
@@ -602,7 +626,7 @@ QuadFragmentInput quad_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_
     }
 
     float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
-    ClippedVertex vertex = clip_to_mask(unit_vertex, quad.bounds, quad.content_mask);
+    ClippedVertex vertex = clip_to_mask(unit_vertex, quad.bounds, quad.content_mask.bounds);
     float4 device_position = to_device_position_impl(vertex.position);
 
     float4 border_color = hsla_to_rgba(quad.border_color);
@@ -919,7 +943,7 @@ OpaqueQuadFragmentInput opaque_quad_vertex(uint vertex_id: SV_VertexID, uint ins
     }
 
     float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
-    ClippedVertex vertex = clip_to_mask(unit_vertex, quad.bounds, quad.content_mask);
+    ClippedVertex vertex = clip_to_mask(unit_vertex, quad.bounds, quad.content_mask.bounds);
 
     output.position = to_device_position_impl(vertex.position);
     output.position.z = quad_depth(quad_id);
@@ -942,7 +966,7 @@ struct Shadow {
     float blur_radius;
     Bounds bounds;
     Corners corner_radii;
-    Bounds content_mask;
+    ContentMask content_mask;
     Hsla color;
     Bounds shape_bounds;
     Corners shape_corner_radii;
@@ -1029,7 +1053,7 @@ ShadowFragmentInput shadow_vertex(uint vertex_id: SV_VertexID, uint instance_id:
     uint shadow_id = batch_start_index + instance_id;
     Shadow shadow = shadows[shadow_id];
 
-    ClippedVertex vertex = clip_to_mask(unit_vertex, shadow.bounds, shadow.content_mask);
+    ClippedVertex vertex = clip_to_mask(unit_vertex, shadow.bounds, shadow.content_mask.bounds);
     float4 device_position = to_device_position_impl(vertex.position);
     float4 color = hsla_to_rgba(shadow.color);
 
@@ -1094,7 +1118,7 @@ struct PathTile {
 
 struct PathPaint {
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Background color;
     uint even_odd;
     uint pad;
@@ -1119,8 +1143,8 @@ PathTileFragmentInput path_tile_vertex(uint vertex_id: SV_VertexID, uint tile_id
     // Neighboring tiles store their shared edge as the same number, so clipping each corner on its
     // own gives them bit-identical edges, which the rasterizer neither overlaps nor leaves gaps
     // between. Interpolating from an origin and a size would not.
-    float2 mask_top_left = paint.content_mask.origin;
-    float2 mask_bottom_right = paint.content_mask.origin + paint.content_mask.size;
+    float2 mask_top_left = paint.content_mask.bounds.origin;
+    float2 mask_bottom_right = paint.content_mask.bounds.origin + paint.content_mask.bounds.size;
     float2 top_left = clamp(tile.top_left, mask_top_left, mask_bottom_right);
     float2 bottom_right = clamp(tile.bottom_right, top_left, mask_bottom_right);
     float2 position = float2(
@@ -1252,7 +1276,7 @@ struct Underline {
     uint order;
     uint pad;
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Hsla color;
     float thickness;
     uint wavy;
@@ -1270,7 +1294,7 @@ UnderlineFragmentInput underline_vertex(uint vertex_id: SV_VertexID, uint instan
     float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
     uint underline_id = batch_start_index + instance_id;
     Underline underline = underlines[underline_id];
-    ClippedVertex vertex = clip_to_mask(unit_vertex, underline.bounds, underline.content_mask);
+    ClippedVertex vertex = clip_to_mask(unit_vertex, underline.bounds, underline.content_mask.bounds);
     float4 device_position = to_device_position_impl(vertex.position);
     float4 color = hsla_to_rgba(underline.color);
 
@@ -1319,7 +1343,7 @@ struct MonochromeSprite {
     uint pad;
     AtlasTile tile;
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Hsla color;
     TransformationMatrix transformation;
 };
@@ -1339,7 +1363,7 @@ MonochromeSpriteFragmentInput monochrome_sprite_vertex(uint vertex_id: SV_Vertex
     MonochromeSprite sprite = mono_sprites[sprite_id];
     float4 device_position =
         to_device_position_transformed(unit_vertex, sprite.bounds, sprite.transformation);
-    float4 clip_distance = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask, sprite.transformation);
+    float4 clip_distance = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask.bounds, sprite.transformation);
     float2 tile_position = to_tile_position(unit_vertex, sprite.tile);
     float4 color = hsla_to_rgba(sprite.color);
 
@@ -1388,7 +1412,7 @@ struct PolychromeSprite {
     uint grayscale;
     float opacity;
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Corners corner_radii;
 };
 
@@ -1405,7 +1429,7 @@ PolychromeSpriteFragmentInput polychrome_sprite_vertex(uint vertex_id: SV_Vertex
     float2 unit_vertex = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
     uint sprite_id = batch_start_index + instance_id;
     PolychromeSprite sprite = poly_sprites[sprite_id];
-    ClippedVertex vertex = clip_to_mask(unit_vertex, sprite.bounds, sprite.content_mask);
+    ClippedVertex vertex = clip_to_mask(unit_vertex, sprite.bounds, sprite.content_mask.bounds);
     float4 device_position = to_device_position_impl(vertex.position);
     float2 tile_position = to_tile_position(vertex.unit_vertex, sprite.tile);
 

@@ -755,3 +755,33 @@ Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`):
   HLSL): `LensTune::rim_frost` (default 1, no change) thins the frost of
   clear glass across the rim band, carried in the lens's `edge_clear`
   field, which clear glass did not use. The GPU struct is unchanged.
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`). A content mask is a rectangle,
+clipped exactly in the vertex stage as before, and at most one rounded
+rectangle, cut per fragment. Upstream files touched, to patch again on every
+GPUI update:
+
+- `src/window.rs`: `ContentMask` gains `rounded: RoundedMask` (32 bytes, so
+  every primitive instance grows by 32 bytes); its `scale` and `intersect`
+  moved to `src/scene/rounded_mask.rs`. `with_content_mask` nests by the
+  rules there and counts the one inexact case on the scene;
+  `with_rounded_content_mask` pushes a rounded mask; `snapped_content_mask`
+  snaps the rounded shape's bounds like a quad's (radii are not snapped);
+  the quad and underline splitters keep the shape. Every
+  `ContentMask { bounds }` became `ContentMask::rect(bounds)`.
+- `src/scene/rounded_mask.rs` (new): `RoundedMask`, `MaskUnit`, `Nesting`,
+  `ContentMask::{rect, rounded, contains, nest_in, culled_for}`.
+- `src/scene.rs`: `Scene::try_insert_primitive` clears the shape of a
+  primitive that reaches none of its corner squares (corner culling), so
+  it keeps today's shader path; `Scene::inexact_rounded_masks`.
+- `src/scene/backdrop_sharp.rs`: `SlotSpace::mask` maps the rounded shape
+  too. The reuse hash of `backdrop_frame.rs` hashes whole instances, so it
+  covers the shape; `hash_path` hashes it explicitly.
+- `src/elements/list.rs`, `uniform_list.rs`, `style.rs`, `path_winding.rs`,
+  `debug_overlay.rs`: `ContentMask::rect`.
+
+The vendored gpui-base and gpui-component, and Quill's own code, build their
+rectangular masks with `ContentMask::rect` too.

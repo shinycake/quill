@@ -118,6 +118,29 @@ struct Corners {
     bottom_left: f32,
 }
 
+// QUILL: a content mask is a rectangle, clipped in the vertex stage, and at
+// most one rounded rectangle, cut per fragment; all radii zero is none
+// (docs/decisions/rounded-content-masks.md).
+struct RoundedMask {
+    bounds: Bounds,
+    radii: Corners,
+}
+
+struct ContentMask {
+    bounds: Bounds,
+    rounded: RoundedMask,
+}
+
+// QUILL: instance layouts, in bytes: each struct's size and the offset of
+// its `content_mask`. src/ui/rounded_mask_tests.rs checks these lines
+// against the Rust structs, so a struct changed on one side fails a test.
+// QUILL-LAYOUT Quad size=192 mask=24
+// QUILL-LAYOUT Shadow size=144 mask=40
+// QUILL-LAYOUT Underline size=96 mask=24
+// QUILL-LAYOUT MonochromeSprite size=144 mask=56
+// QUILL-LAYOUT PolychromeSprite size=128 mask=64
+// QUILL-LAYOUT PathPaint size=144 mask=16
+
 struct Edges {
     top: f32,
     right: f32,
@@ -521,7 +544,7 @@ struct Quad {
     order: u32,
     border_style: u32,
     bounds: Bounds,
-    content_mask: Bounds,
+    content_mask: ContentMask,
     background: Background,
     border_color: Hsla,
     corner_radii: Corners,
@@ -581,7 +604,7 @@ fn vs_quad(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
     }
 
     let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
-    let clipped = clip_to_mask(unit_vertex, quad.bounds, quad.content_mask);
+    let clipped = clip_to_mask(unit_vertex, quad.bounds, quad.content_mask.bounds);
     out.position = to_device_position_impl(clipped.position);
     out.position.z = quad_depth(instance_id);
 
@@ -981,7 +1004,7 @@ fn vs_opaque_quad(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     }
 
     let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
-    let clipped = clip_to_mask(unit_vertex, quad.bounds, quad.content_mask);
+    let clipped = clip_to_mask(unit_vertex, quad.bounds, quad.content_mask.bounds);
     out.position = to_device_position_impl(clipped.position);
     out.position.z = quad_depth(quad_id);
     out.color = blend_color(hsla_to_rgba(quad.background.solid), 1.0);
@@ -1002,7 +1025,7 @@ struct Shadow {
     // that an inset shadow is clipped to.
     bounds: Bounds,
     corner_radii: Corners,
-    content_mask: Bounds,
+    content_mask: ContentMask,
     color: Hsla,
     // The shape that is blurred: the silhouette of a drop shadow, or the hole of an
     // inset shadow.
@@ -1093,7 +1116,7 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) ins
     var shadow = load_shadow(instance_id);
 
     var out = ShadowVarying();
-    let clipped = clip_to_mask(unit_vertex, shadow.bounds, shadow.content_mask);
+    let clipped = clip_to_mask(unit_vertex, shadow.bounds, shadow.content_mask.bounds);
     out.position = to_device_position_impl(clipped.position);
     out.color = hsla_to_rgba(shadow.color);
     out.shadow_id = instance_id;
@@ -1157,7 +1180,7 @@ struct PathCurve {
 
 struct PathPaint {
     bounds: Bounds,
-    content_mask: Bounds,
+    content_mask: ContentMask,
     color: Background,
     even_odd: u32,
     pad: u32,
@@ -1178,8 +1201,8 @@ fn vs_path_tile(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) 
     let tile = load_path_tile(instance_id);
     let paint = load_path_paint(tile.paint);
 
-    let mask_top_left = paint.content_mask.origin;
-    let mask_bottom_right = paint.content_mask.origin + paint.content_mask.size;
+    let mask_top_left = paint.content_mask.bounds.origin;
+    let mask_bottom_right = paint.content_mask.bounds.origin + paint.content_mask.bounds.size;
     let top_left = clamp(tile.top_left, mask_top_left, mask_bottom_right);
     let bottom_right = clamp(tile.bottom_right, top_left, mask_bottom_right);
     let position = vec2<f32>(
@@ -1311,7 +1334,7 @@ struct Underline {
     order: u32,
     pad: u32,
     bounds: Bounds,
-    content_mask: Bounds,
+    content_mask: ContentMask,
     color: Hsla,
     thickness: f32,
     wavy: u32,
@@ -1330,7 +1353,7 @@ fn vs_underline(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) 
     let underline = load_underline(instance_id);
 
     var out = UnderlineVarying();
-    let clipped = clip_to_mask(unit_vertex, underline.bounds, underline.content_mask);
+    let clipped = clip_to_mask(unit_vertex, underline.bounds, underline.content_mask.bounds);
     out.position = to_device_position_impl(clipped.position);
     out.color = hsla_to_rgba(underline.color);
     out.underline_id = instance_id | select(0u, SIMPLE_PRIMITIVE_FLAG, underline.wavy == 0u);
@@ -1370,7 +1393,7 @@ struct MonochromeSprite {
     pad: u32,
     tile: AtlasTile,
     bounds: Bounds,
-    content_mask: Bounds,
+    content_mask: ContentMask,
     color: Hsla,
     transformation: TransformationMatrix,
 }
@@ -1393,7 +1416,7 @@ fn vs_mono_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
 
     out.tile_position = to_tile_position(unit_vertex, sprite.tile);
     out.color = hsla_to_rgba(sprite.color);
-    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask, sprite.transformation);
+    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask.bounds, sprite.transformation);
     return out;
 }
 
@@ -1419,7 +1442,7 @@ struct PolychromeSprite {
     grayscale: u32,
     opacity: f32,
     bounds: Bounds,
-    content_mask: Bounds,
+    content_mask: ContentMask,
     corner_radii: Corners,
 }
 
@@ -1437,7 +1460,7 @@ fn vs_poly_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     let sprite = load_poly_sprite(instance_id);
 
     var out = PolySpriteVarying();
-    let clipped = clip_to_mask(unit_vertex, sprite.bounds, sprite.content_mask);
+    let clipped = clip_to_mask(unit_vertex, sprite.bounds, sprite.content_mask.bounds);
     out.position = to_device_position_impl(clipped.position);
     out.tile_position = to_tile_position(clipped.unit_vertex, sprite.tile);
     let simple = !has_rounded_corners(sprite.corner_radii) && sprite.grayscale == 0u;

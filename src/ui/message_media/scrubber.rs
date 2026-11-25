@@ -157,7 +157,7 @@ fn paint_zones(
             point(px(left + zone.start), outer.origin.y),
             size(px(zone.end - zone.start), outer.size.height),
         );
-        window.with_content_mask(Some(ContentMask { bounds: mask }), |window| {
+        window.with_content_mask(Some(ContentMask::rect(mask)), |window| {
             paint(zone.alpha, window);
         });
     }

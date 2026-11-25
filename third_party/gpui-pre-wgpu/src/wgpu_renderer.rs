@@ -3107,7 +3107,7 @@ mod tests {
     use super::*;
     use gpui::{
         BorderStyle, Bounds, ColorSpace, ContentMask, Corners, Edges, Hsla, MonochromeSprite,
-        PathCurve, PathPaint, PathTile, Point, PolychromeSprite, Quad, Shadow, Size,
+        PathCurve, PathPaint, PathTile, Point, PolychromeSprite, Quad, RoundedMask, Shadow, Size,
         SubpixelSprite, Underline, linear_color_stop, linear_gradient,
     };
     #[cfg(target_os = "linux")]
@@ -3137,7 +3137,7 @@ mod tests {
             order: 0,
             border_style: BorderStyle::Solid,
             bounds,
-            content_mask: ContentMask { bounds },
+            content_mask: ContentMask::rect(bounds),
             background: color.into(),
             border_color: color,
             corner_radii: Corners::default(),
@@ -3291,15 +3291,15 @@ mod tests {
 
     #[test]
     fn webgl_record_sizes_match_shader_word_strides() {
-        assert_eq!(std::mem::size_of::<Quad>(), 40 * 4);
-        assert_eq!(std::mem::size_of::<Shadow>(), 28 * 4);
+        assert_eq!(std::mem::size_of::<Quad>(), 48 * 4);
+        assert_eq!(std::mem::size_of::<Shadow>(), 36 * 4);
         assert_eq!(std::mem::size_of::<PathTile>(), 14 * 4);
         assert_eq!(std::mem::size_of::<PathCurve>(), 10 * 4);
-        assert_eq!(std::mem::size_of::<PathPaint>(), 28 * 4);
-        assert_eq!(std::mem::size_of::<Underline>(), 16 * 4);
-        assert_eq!(std::mem::size_of::<MonochromeSprite>(), 28 * 4);
-        assert_eq!(std::mem::size_of::<SubpixelSprite>(), 28 * 4);
-        assert_eq!(std::mem::size_of::<PolychromeSprite>(), 24 * 4);
+        assert_eq!(std::mem::size_of::<PathPaint>(), 36 * 4);
+        assert_eq!(std::mem::size_of::<Underline>(), 24 * 4);
+        assert_eq!(std::mem::size_of::<MonochromeSprite>(), 36 * 4);
+        assert_eq!(std::mem::size_of::<SubpixelSprite>(), 36 * 4);
+        assert_eq!(std::mem::size_of::<PolychromeSprite>(), 32 * 4);
     }
 
     #[test]
@@ -3326,6 +3326,24 @@ mod tests {
                     size: Size {
                         width: 7.0.into(),
                         height: 8.0.into(),
+                    },
+                },
+                rounded: RoundedMask {
+                    bounds: Bounds {
+                        origin: Point {
+                            x: 34.0.into(),
+                            y: 35.0.into(),
+                        },
+                        size: Size {
+                            width: 36.0.into(),
+                            height: 37.0.into(),
+                        },
+                    },
+                    radii: Corners {
+                        top_left: 38.0.into(),
+                        top_right: 39.0.into(),
+                        bottom_right: 40.0.into(),
+                        bottom_left: 41.0.into(),
                     },
                 },
             },
@@ -3386,6 +3404,14 @@ mod tests {
                 6.0_f32.to_bits(),
                 7.0_f32.to_bits(),
                 8.0_f32.to_bits(),
+                34.0_f32.to_bits(),
+                35.0_f32.to_bits(),
+                36.0_f32.to_bits(),
+                37.0_f32.to_bits(),
+                38.0_f32.to_bits(),
+                39.0_f32.to_bits(),
+                40.0_f32.to_bits(),
+                41.0_f32.to_bits(),
                 1,
                 1,
                 0,

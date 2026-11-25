@@ -5,6 +5,17 @@ using namespace metal;
 
 constant uint SIMPLE_PRIMITIVE_FLAG = 1u << 31;
 
+// QUILL: instance layouts, in bytes: each struct's size and the offset of
+// its `content_mask`. src/ui/rounded_mask_tests.rs checks these lines
+// against the Rust structs, so a struct changed on one side fails a test.
+// QUILL-LAYOUT Quad size=192 mask=24
+// QUILL-LAYOUT Shadow size=144 mask=40
+// QUILL-LAYOUT Underline size=96 mask=24
+// QUILL-LAYOUT MonochromeSprite size=144 mask=56
+// QUILL-LAYOUT PolychromeSprite size=128 mask=64
+// QUILL-LAYOUT PathPaint size=144 mask=16
+// QUILL-LAYOUT BackdropLens size=328 mask=24
+
 float4 hsla_to_rgba(Hsla hsla);
 float3 srgb_to_linear(float3 color);
 float3 linear_to_srgb(float3 color);

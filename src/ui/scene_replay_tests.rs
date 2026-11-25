@@ -83,7 +83,7 @@ fn tile(tag: u32) -> AtlasTile {
 }
 
 fn primitive(kind: Kind, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
-    let content_mask = ContentMask { bounds: clip };
+    let content_mask = ContentMask::rect(clip);
     match kind {
         Kind::Quad => Quad {
             bounds,
@@ -164,12 +164,10 @@ fn primitive(kind: Kind, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             let Ok(path) = builder.build() else {
                 return quad(tag, bounds);
             };
-            let clip = ContentMask {
-                bounds: Bounds {
-                    origin: at(clip.origin.x, clip.origin.y),
-                    size: size(px(clip.size.width.0), px(clip.size.height.0)),
-                },
-            };
+            let clip = ContentMask::rect(Bounds {
+                origin: at(clip.origin.x, clip.origin.y),
+                size: size(px(clip.size.width.0), px(clip.size.height.0)),
+            });
             // The fill's hue carries the tag.
             let tagged = Hsla {
                 h: tag as f32,

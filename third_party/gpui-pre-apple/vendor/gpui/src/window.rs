@@ -2535,13 +2535,25 @@ pub struct DispatchEventResult {
 }
 
 /// Indicates which region of the window is visible. Content falling outside of this mask will not be
-/// rendered. Currently, only rectangular content masks are supported, but we give the mask its own type
-/// to leave room to support more complex shapes in the future.
+/// rendered. QUILL: a rectangle and at most one rounded rectangle (gpui-pre's
+/// `scene/rounded_mask.rs`); this copy only feeds the shader header.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct ContentMask<P: Clone + Debug + Default + PartialEq> {
     /// The bounds
     pub bounds: Bounds<P>,
+    /// QUILL: one rounded shape, cut per fragment. All radii zero: none.
+    pub rounded: RoundedMask<P>,
+}
+
+/// QUILL: the rounded shape of a [`ContentMask`].
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct RoundedMask<P: Clone + Debug + Default + PartialEq> {
+    /// The rounded rectangle's bounds.
+    pub bounds: Bounds<P>,
+    /// Its corner radii.
+    pub radii: Corners<P>,
 }
 
 impl ContentMask<Pixels> {

@@ -52,9 +52,7 @@ fn rect(x: f32, y: f32, w: f32, h: f32) -> Bounds<ScaledPixels> {
 }
 
 fn everywhere() -> ContentMask<ScaledPixels> {
-    ContentMask {
-        bounds: rect(0.0, 0.0, 10_000.0, 10_000.0),
-    }
+    ContentMask::rect(rect(0.0, 0.0, 10_000.0, 10_000.0))
 }
 
 fn lens(x: f32, y: f32, w: f32, h: f32) -> BackdropLens {

@@ -18,10 +18,12 @@ use crate::{
 mod backdrop_frame;
 mod backdrop_lens;
 mod backdrop_sharp;
+mod rounded_mask;
 pub use backdrop_frame::*;
 pub(crate) use backdrop_frame::{UnderItem, primitives_under_ranked};
 pub use backdrop_lens::*;
 pub use backdrop_sharp::SharpBackdrop;
+pub use rounded_mask::{MaskUnit, Nesting, RoundedMask};
 pub(crate) use backdrop_sharp::{GlyphKey, GlyphSource, SlotSpace};
 
 use smallvec::SmallVec;
@@ -105,6 +107,9 @@ pub struct Scene {
     /// Quill: this scene is drawn under a paint filter, so cached
     /// primitives are not replayed (they were never filtered).
     pub(crate) filtered: bool,
+    /// QUILL: how many masks were nested this frame with a loss of the outer
+    /// mask's rounding (rule 5 of docs/decisions/rounded-content-masks.md).
+    pub inexact_rounded_masks: u32,
 }
 
 #[expect(missing_docs)]
@@ -132,6 +137,22 @@ impl Scene {
         self.sort_keys.clear();
         self.suppressed = false;
         self.filtered = false;
+        self.inexact_rounded_masks = 0;
+    }
+
+    /// QUILL: records a mask nested with the loss of the outer mask's
+    /// rounding (rule 5), and says so once in a debug build.
+    pub(crate) fn note_inexact_rounded_mask(&mut self) {
+        self.inexact_rounded_masks = self.inexact_rounded_masks.saturating_add(1);
+        #[cfg(debug_assertions)]
+        {
+            static LOGGED: std::sync::Once = std::sync::Once::new();
+            LOGGED.call_once(|| {
+                log::warn!(
+                    "a rounded content mask crossed another one's corner; the outer rounding is lost there (docs/decisions/rounded-content-masks.md, rule 5)"
+                );
+            });
+        }
     }
 
     /// Inserts a sprite that [`Self::advance_animations`] keeps moving. The
@@ -288,6 +309,10 @@ impl Scene {
         if clipped_bounds.is_empty() {
             return false;
         }
+        // QUILL: a primitive nowhere near a rounded mask's corner keeps the
+        // fast path (docs/decisions/rounded-content-masks.md, corner culling).
+        let mut primitive = primitive;
+        primitive.cull_rounded_mask(&clipped_bounds);
 
         if let Primitive::Lens(lens) = primitive {
             return self.insert_lens(lens, clipped_bounds);
@@ -945,6 +970,26 @@ impl Primitive {
         self.transformation()
             .transform_bounds(*self.bounds())
             .intersect(&self.content_mask().bounds)
+    }
+
+    /// QUILL: clears the rounded shape of the primitive's mask when the
+    /// primitive (clipped to the mask's rectangle) reaches none of its corners.
+    fn cull_rounded_mask(&mut self, clipped_bounds: &Bounds<ScaledPixels>) {
+        let mask = match self {
+            Primitive::Shadow(shadow) => &mut shadow.content_mask,
+            Primitive::Quad(quad) => &mut quad.content_mask,
+            Primitive::Path(path) => &mut path.paint.content_mask,
+            Primitive::Underline(underline) => &mut underline.content_mask,
+            Primitive::MonochromeSprite(sprite) => &mut sprite.content_mask,
+            Primitive::SubpixelSprite(sprite) => &mut sprite.content_mask,
+            Primitive::PolychromeSprite(sprite) => &mut sprite.content_mask,
+            Primitive::Surface(surface) => &mut surface.content_mask,
+            Primitive::NativeView(native_view) => &mut native_view.content_mask,
+            Primitive::Lens(lens) => &mut lens.content_mask,
+        };
+        if !mask.rounded.is_none() {
+            *mask = mask.culled_for(clipped_bounds);
+        }
     }
 
     pub fn content_mask(&self) -> &ContentMask<ScaledPixels> {
@@ -2156,7 +2201,7 @@ mod tests {
     fn quad(x: f32) -> Quad {
         Quad {
             bounds: square(x),
-            content_mask: ContentMask { bounds: square(x) },
+            content_mask: ContentMask::rect(square(x)),
             ..Default::default()
         }
     }
@@ -2166,7 +2211,7 @@ mod tests {
             order: 0,
             pad: 0,
             bounds: square(x),
-            content_mask: ContentMask { bounds: square(x) },
+            content_mask: ContentMask::rect(square(x)),
             color: Hsla::default(),
             thickness: ScaledPixels(1.),
             wavy: false.into(),
@@ -2188,7 +2233,7 @@ mod tests {
             id: NativeViewId::for_test(1),
             hitbox_id: HitboxId::placeholder(),
             bounds: square(0.),
-            content_mask: ContentMask { bounds: square(0.) },
+            content_mask: ContentMask::rect(square(0.)),
             background: Hsla::default(),
         });
         scene.insert_primitive(quad(0.));
@@ -2208,7 +2253,7 @@ mod tests {
             id: NativeViewId::for_test(1),
             hitbox_id,
             bounds: square(x),
-            content_mask: ContentMask { bounds: square(x) },
+            content_mask: ContentMask::rect(square(x)),
             background: Hsla::default(),
         };
         let first_hitbox = HitboxId::placeholder();

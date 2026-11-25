@@ -19,6 +19,11 @@
 // read for a downsample), s1 a clamped trilinear sampler.
 #include "shaders.hlsl"
 
+// QUILL: instance layouts, in bytes: each struct's size and the offset of
+// its `content_mask`. src/ui/rounded_mask_tests.rs checks these lines
+// against the Rust structs, so a struct changed on one side fails a test.
+// QUILL-LAYOUT BackdropLens size=328 mask=24
+
 static const int LENS_LEVELS = 5;
 
 // `gpui::BackdropLens`, field for field (296 bytes, no padding: structured
@@ -27,7 +32,7 @@ struct BackdropLens {
     uint order;
     uint material;
     Bounds bounds;
-    Bounds content_mask;
+    ContentMask content_mask;
     Bounds body;
     float corner_radius;
     float scale_factor;
@@ -132,7 +137,7 @@ LensVertexOutput lens_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_I
     output.lens_id = lens_id;
     output.slot_id = instance_id;
     output.position = to_device_position(unit_vertex, lens.bounds);
-    output.clip_distance = distance_from_clip_rect(unit_vertex, lens.bounds, lens.content_mask);
+    output.clip_distance = distance_from_clip_rect(unit_vertex, lens.bounds, lens.content_mask.bounds);
     return output;
 }
 

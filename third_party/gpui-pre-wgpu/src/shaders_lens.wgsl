@@ -13,13 +13,18 @@
 
 const LENS_LEVELS: i32 = 5;
 
+// QUILL: instance layouts, in bytes: each struct's size and the offset of
+// its `content_mask`. src/ui/rounded_mask_tests.rs checks these lines
+// against the Rust structs, so a struct changed on one side fails a test.
+// QUILL-LAYOUT BackdropLens size=328 mask=24
+
 // `gpui::BackdropLens`, field for field (`lens.rs` asserts the size and
 // the offsets the vec2 alignment of `Bounds` could move).
 struct BackdropLens {
     order: u32,
     material: u32,
     bounds: Bounds,
-    content_mask: Bounds,
+    content_mask: ContentMask,
     body: Bounds,
     corner_radius: f32,
     scale_factor: f32,
@@ -106,7 +111,7 @@ fn vs_lens(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
     out.position = to_device_position(unit_vertex, lens.bounds);
     out.lens_id = instance_id;
     let position = unit_vertex * vec2<f32>(lens.bounds.size) + lens.bounds.origin;
-    out.clip_distances = distance_from_clip_rect_impl(position, lens.content_mask);
+    out.clip_distances = distance_from_clip_rect_impl(position, lens.content_mask.bounds);
     return out;
 }
 

@@ -766,7 +766,7 @@ impl QuillApp {
                     {
                         let clip = Bounds::new(at((rect.x, rect.y)), size_px(rect.w, rect.h));
                         let progress = size / metrics::ARROW_SIZE;
-                        window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
+                        window.with_content_mask(Some(ContentMask::rect(clip)), |window| {
                             for line in metrics::arrow_strokes(cx_, cy, size) {
                                 let points: Vec<_> = line.into_iter().map(at).collect();
                                 round_stroke(

@@ -514,6 +514,17 @@ fn hash_path(path: &PaintedPath) -> u64 {
     bounds(&path.bounds, &mut f);
     bounds(&path.paint.bounds, &mut f);
     bounds(&path.paint.content_mask.bounds, &mut f);
+    // QUILL: the rounded part of the mask (docs/decisions/rounded-content-masks.md).
+    let rounded = &path.paint.content_mask.rounded;
+    bounds(&rounded.bounds, &mut f);
+    for r in [
+        rounded.radii.top_left,
+        rounded.radii.top_right,
+        rounded.radii.bottom_right,
+        rounded.radii.bottom_left,
+    ] {
+        f(r.0);
+    }
     f(f32::from_bits(path.paint.even_odd.0));
     for curve in path.tiles.curves() {
         for p in [&curve.p0, &curve.p1, &curve.a, &curve.b] {
