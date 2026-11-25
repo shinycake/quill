@@ -5,6 +5,19 @@
 use super::*;
 
 impl QuillApp {
+    /// The history shows a reply thread's list (`history_body`).
+    fn thread_shown(&self) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        !session.thread_unavailable()
+            && session.open_chat_id().is_some_and(|id| {
+                session.thread_for_chat(id).is_some_and(|thread| {
+                    !matches!(thread.status, quill::state::ThreadStatus::Failed(_))
+                })
+            })
+    }
+
     /// The header slice's content when the bars float: the header pill,
     /// then the player, call and capture bars, then the chat's own bars,
     /// a gap apart. Each blocks clicks to the rows under it; the gaps
@@ -85,6 +98,14 @@ impl QuillApp {
         bars.extend(self.pending_bot_reply(cx));
         if chat_search_open {
             bars.push(self.chat_search_bar(cx).into_any_element());
+        }
+        // A reply thread's root bar and info card sit over its list
+        // (`thread_history_pane`); floating, they join the bars.
+        if self.bars_float() && self.thread_shown() {
+            bars.extend(self.thread_root_bar(cx));
+            if self.chat_ui.info_card.thread() {
+                bars.extend(self.thread_info_card(cx));
+            }
         }
         (header, bars)
     }

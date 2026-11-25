@@ -27,6 +27,9 @@ impl QuillApp {
         super::super::image_budget::slice_shown(header.slice.entity_id(), self.windows.scope);
         let metrics = self.chrome_metrics();
         let gutter = px(metrics.gutter);
+        // A left tab column card takes the pane's left; the pills centre
+        // in the rest.
+        let reserved = px(self.left_tabs_reserved());
         let width = metrics.chat_column.map(px);
         let lane = |id: &'static str| {
             div()
@@ -35,7 +38,8 @@ impl QuillApp {
                 .absolute()
                 .left_0()
                 .right_0()
-                .px(gutter)
+                .pl(gutter + reserved)
+                .pr(gutter)
                 .flex()
                 .justify_center()
         };

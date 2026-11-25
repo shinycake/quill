@@ -71,6 +71,21 @@ pub(in crate::ui) fn composer_frame<E: Styled + FluentBuilder>(
     }
 }
 
+/// A chat's left tab column: Classic's lined column, or a card.
+pub(in crate::ui) fn tab_column_frame<E: Styled + FluentBuilder>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+) -> E {
+    match chrome.metrics.clip {
+        Clip::Square => this
+            .bg(theme.background)
+            .border_r_1()
+            .border_color(theme.border),
+        Clip::Rounded => card(surface(this, chrome, theme), chrome, theme),
+    }
+}
+
 /// A pill over the history: a card's fill, edge and shadow. It does not
 /// clip, as the composer's popups hang outside it.
 fn pill<E: Styled + FluentBuilder>(this: E, chrome: &Chrome, theme: &Theme) -> E {

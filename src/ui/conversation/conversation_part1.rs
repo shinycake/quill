@@ -532,26 +532,40 @@ impl QuillApp {
         // Saved Messages: the sublist list, one sublist or a tag filter.
         let saved_mode = self.saved_mode();
         let saved_rows = self.saved_rows_input(highlight_id);
+        // A pane in the list's place keeps clear of the pills.
+        let frame = self.pane_frame();
+        let pane = move |pane: AnyElement| match frame {
+            Some(frame) => frame.wrap(pane),
+            None => pane,
+        };
         super::subsection_tabs::with_left_column(
             tabs_left,
+            px(self.chrome_metrics().gutter),
             if let Some(reason) = gate {
-                pane_placeholder(tr(keys::Q_CHAT_UNSUPPORTED_CHAT), reason, cx).into_any_element()
+                pane(
+                    pane_placeholder(tr(keys::Q_CHAT_UNSUPPORTED_CHAT), reason, cx)
+                        .into_any_element(),
+                )
             } else if open.is_none() {
-                pane_placeholder(
-                    tr(keys::Q_CHAT_SELECT_A_CHAT),
-                    tr(keys::Q_CHAT_CHOOSE_A_CONVERSATION_FROM_THE),
-                    cx,
+                pane(
+                    pane_placeholder(
+                        tr(keys::Q_CHAT_SELECT_A_CHAT),
+                        tr(keys::Q_CHAT_CHOOSE_A_CONVERSATION_FROM_THE),
+                        cx,
+                    )
+                    .into_any_element(),
                 )
-                .into_any_element()
             } else if !supported {
-                pane_placeholder(
-                    tr(keys::Q_CHAT_UNSUPPORTED_CHAT),
-                    tr(keys::Q_CHAT_THIS_CONVERSATION_TYPE_IS_NOT),
-                    cx,
+                pane(
+                    pane_placeholder(
+                        tr(keys::Q_CHAT_UNSUPPORTED_CHAT),
+                        tr(keys::Q_CHAT_THIS_CONVERSATION_TYPE_IS_NOT),
+                        cx,
+                    )
+                    .into_any_element(),
                 )
-                .into_any_element()
             } else if saved_mode == Some(super::saved_sublists::SavedMode::Sublists) {
-                self.saved_sublists_pane(cx)
+                pane(self.saved_sublists_pane(cx))
             } else if let Some((key, rows)) = saved_rows {
                 let list = self.history_message_list(
                     "saved-history",
@@ -569,7 +583,7 @@ impl QuillApp {
                     .then_some(super::older_retry::OlderRetryFor::Saved);
                 super::older_retry::with_older_retry(list, failed, cx)
             } else if thread_pending {
-                self.thread_status_pane(cx)
+                pane(self.thread_status_pane(cx))
             } else if let Some(thread) = thread_open {
                 let (key, rows) = self.thread_rows_input(thread, highlight_id);
                 let failed = (thread.history.older == quill::state::OlderEnd::Failed)
@@ -600,30 +614,34 @@ impl QuillApp {
                 // with the topic column on screen the pane only asks for
                 // a choice.
                 if forum_on_screen {
-                    pane_placeholder(
-                        tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
-                        tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
-                        cx,
+                    pane(
+                        pane_placeholder(
+                            tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
+                            tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
+                            cx,
+                        )
+                        .into_any_element(),
                     )
-                    .into_any_element()
                 } else {
-                    self.forum_topics_pane(open, cx).into_any_element()
+                    pane(self.forum_topics_pane(open, cx).into_any_element())
                 }
             } else if has_topics && open_topic.is_some() {
                 // Phase 5.1: per-topic history — same history component,
                 // fed from the topic history store (`searchChatMessages`
                 // with `topic_id`).
                 if topic_failed {
-                    self.topic_load_failed_row(cx).into_any_element()
+                    pane(self.topic_load_failed_row(cx).into_any_element())
                 } else if topic_loading {
-                    history_skeleton().into_any_element()
+                    pane(history_skeleton().into_any_element())
                 } else if topic_empty {
-                    pane_placeholder(
-                        tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC),
-                        tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC_2),
-                        cx,
+                    pane(
+                        pane_placeholder(
+                            tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC),
+                            tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC_2),
+                            cx,
+                        )
+                        .into_any_element(),
                     )
-                    .into_any_element()
                 } else {
                     let (key, rows) =
                         self.topic_rows_input(open, open_topic, topic_history, highlight_id);
@@ -667,21 +685,21 @@ impl QuillApp {
                 // (`select_chat_open`, `open_chat_window`); a send that
                 // could not go out is the Failed row. Render only draws.
                 if history_failed {
-                    history_load_failed(cx)
+                    pane(history_load_failed(cx))
                 } else if history_loading {
-                    history_skeleton().into_any_element()
+                    pane(history_skeleton().into_any_element())
                 } else if is_secret {
-                    self.secret_empty_explainer(cx).into_any_element()
+                    pane(self.secret_empty_explainer(cx).into_any_element())
                 } else if let Some(intro) = self.bot_about_intro(chat.as_ref(), cx) {
-                    intro
+                    pane(intro)
                 } else if let Some(intro) = self.locked_intro(chat.as_ref(), cx) {
-                    intro
+                    pane(intro)
                 } else if let Some(intro) = self.greeting_intro(chat.as_ref(), cx) {
-                    intro
+                    pane(intro)
                 } else {
                     // tdesktop paints nothing for an empty group or channel
                     // it did not create; no developer text in the pane.
-                    div().id("empty-chat").flex_1().into_any_element()
+                    pane(div().id("empty-chat").flex_1().into_any_element())
                 }
             } else {
                 let (key, rows) =
@@ -711,6 +729,10 @@ impl QuillApp {
     /// A reply thread's history under its root bar and info card.
     #[inline(never)]
     fn thread_history_pane(&mut self, list: AnyElement, cx: &mut Context<Self>) -> AnyElement {
+        // Floating: the two bars float with the others (`history_bars`).
+        if self.bars_float() {
+            return list;
+        }
         div()
             .flex()
             .flex_col()

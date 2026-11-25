@@ -183,6 +183,15 @@ impl QuillApp {
         )
     }
 
+    /// How much of the pane's left the tab column takes when it is a card
+    /// (Floating): the pills centre in the rest.
+    pub(super) fn left_tabs_reserved(&self) -> f32 {
+        let gutter = self.chrome_metrics().gutter;
+        self.subsection_tabs_snapshot()
+            .filter(|t| t.mode == SubsectionTabsMode::Left && gutter > 0.)
+            .map_or(0., |_| COLUMN_WIDTH + gutter)
+    }
+
     /// The Left layout's column, if the open chat uses it.
     pub(super) fn subsection_tabs_column(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let tabs = self
@@ -211,9 +220,7 @@ impl QuillApp {
                 .w(px(COLUMN_WIDTH))
                 .h_full()
                 .min_h_0()
-                .bg(cx.theme().background)
-                .border_r_1()
-                .border_color(cx.theme().border)
+                .map(|this| self.tab_column_frame(this, cx))
                 .role(Role::TabList)
                 .aria_label(tr(keys::Q_MISC_TOPICS))
                 .child(
@@ -662,7 +669,25 @@ impl QuillApp {
 
 /// The Left layout: the tab column beside the history (or the history
 /// alone when the chat doesn't use the Left layout).
-pub(super) fn with_left_column(column: Option<AnyElement>, history: AnyElement) -> AnyElement {
+pub(super) fn with_left_column(
+    column: Option<AnyElement>,
+    gutter: Pixels,
+    history: AnyElement,
+) -> AnyElement {
+    // Floating: the column is a card a gutter in from the pane's edges.
+    let column = column.map(|column| {
+        if gutter > px(0.) {
+            div()
+                .flex()
+                .flex_none()
+                .pl(gutter)
+                .py(gutter)
+                .child(column)
+                .into_any_element()
+        } else {
+            column
+        }
+    });
     match column {
         None => history,
         Some(column) => div()

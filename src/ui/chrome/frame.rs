@@ -3,7 +3,8 @@
 //! (docs/decisions/floating-layout.md). Classic passes
 //! [`HistoryInsets::ZERO`] everywhere, so every consumer has one code path.
 
-use gpui_kit::{Bounds, Pixels, px};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::{AnyElement, Bounds, IntoElement, ParentElement, Pixels, Styled, div, px};
 
 /// What the frame is computed from, in interface pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -199,5 +200,42 @@ mod tests {
         let readable = insets.inside(bounds);
         assert_eq!(readable.origin.y, px(100.));
         assert_eq!(readable.size.height, px(244.));
+    }
+}
+
+/// Where a body that is not the list sits when the bars float: clear of the
+/// pills above and below, and in the centred column. It needs no measured
+/// width, so a placeholder lands right on its first frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::ui) struct PaneFrame {
+    pub top: Pixels,
+    pub bottom: Pixels,
+    pub gutter: Pixels,
+    pub column: Option<Pixels>,
+}
+
+impl PaneFrame {
+    pub(in crate::ui) fn wrap(self, pane: AnyElement) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .items_center()
+            .pt(self.top)
+            .pb(self.bottom)
+            .px(self.gutter)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .when_some(self.column, |this, column| this.max_w(column))
+                    .child(pane),
+            )
+            .into_any_element()
     }
 }

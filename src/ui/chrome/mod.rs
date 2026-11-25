@@ -95,6 +95,22 @@ impl QuillApp {
         frame.insets
     }
 
+    /// The frame a body that is not the list sits in, or `None` when the
+    /// bars stack (Classic), which leaves the body as it is.
+    pub(in crate::ui) fn pane_frame(&self) -> Option<frame::PaneFrame> {
+        if !self.bars_float() {
+            return None;
+        }
+        let insets = self.history_insets();
+        let metrics = self.chrome_metrics();
+        Some(frame::PaneFrame {
+            top: insets.top,
+            bottom: insets.bottom,
+            gutter: px(metrics.gutter),
+            column: metrics.chat_column.map(px),
+        })
+    }
+
     /// How the history's rows are placed: across the pane, or in the
     /// centred column when the bars float.
     pub(in crate::ui) fn row_column(&self) -> frame::RowColumn {
@@ -105,6 +121,15 @@ impl QuillApp {
             },
             _ => frame::RowColumn::Pane,
         }
+    }
+
+    /// A chat's left tab column's frame (`frames::tab_column_frame`).
+    pub(in crate::ui) fn tab_column_frame<E: Styled + FluentBuilder>(
+        &self,
+        this: E,
+        cx: &App,
+    ) -> E {
+        frames::tab_column_frame(this, &self.chrome(cx), cx.theme())
     }
 
     /// The header and the bars float over the history in their own slice.

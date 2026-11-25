@@ -237,3 +237,36 @@ The rows' side padding is `HistoryInsets.left/right` plus the kit's
 12 px row inset (the kit's row padding replaces its `px_3`), so
 bubbles sit 12 px inside the pills' edges. `left_reserved` stays 0
 until the left tab column becomes a card (step 8e).
+
+## Bodies that are not a list (step 8e)
+
+Every body that takes the list's place (placeholders, the history skeleton,
+load failures, intros, the secret chat explainer, Saved Messages sublists,
+forum topics, thread status, the empty chat) goes through
+`chrome().pane_frame()`. In Classic it returns `None` and the body is left as
+it was. In Floating the body is padded clear of the measured pill heights
+and laid in a centred box at most `chat_column` wide with a gutter on each
+side.
+
+Deviation: the plan reused the list's `HistoryInsets` sides here. Those
+sides come from the list's measured pane width, which a placeholder never
+measures (the topic skeleton drew across the whole pane on its first
+frames). The pane frame centres with flex and a max width instead, so it
+needs no width and lands right on the first frame.
+
+The thread root bar and thread info card move into the floating bars when a
+thread is shown. `thread_shown` is one rule for that: no thread pending and
+a thread for the open chat that has not failed. Classic keeps them where
+they were.
+
+The Left tab column becomes a card (`tab_column_frame`: Classic keeps its
+border_r, Floating draws a surface card) set a gutter in from the pane, and
+`left_tabs_reserved` shifts the pill lanes and the row column right by the
+card's width plus a gutter, so the pills centre in the rest. Its active
+marker sits on the card's edge; it is not clipped until the rounded mask
+lands (the `card_clip` seam).
+
+Classic proof: the 23-capture set matches the Step 0 baseline (known noisy
+demos only), and Classic `ready-bot-threads` in Left mode,
+`ready-direct-messages` and `ready-topic-loading` are pixel-identical to
+main.
