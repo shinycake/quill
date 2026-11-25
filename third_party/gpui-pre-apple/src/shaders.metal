@@ -66,6 +66,8 @@ float4 background_color(PreparedBackground prepared, Background background,
 bool has_rounded_corners(Corners_ScaledPixels corner_radii);
 bool has_border(Edges_ScaledPixels border_widths);
 bool is_shaped(Quad quad);
+float rounded_mask_coverage(float2 position, RoundedMask_ScaledPixels mask);
+bool has_rounded_mask(ContentMask_ScaledPixels mask);
 
 struct QuadFragmentInput {
   uint quad_id [[flat]];
@@ -84,7 +86,8 @@ float quad_depth(uint quad_id, float depth_scale) {
 bool is_opaque_rectangle(Quad quad) {
   return quad.background.tag == 0u && quad.background.solid.a >= 1.0 &&
          !has_rounded_corners(quad.corner_radii) &&
-         !has_border(quad.border_widths);
+         !has_border(quad.border_widths) &&
+         !has_rounded_mask(quad.content_mask);
 }
 
 vertex QuadFragmentInput quad_vertex(
@@ -109,7 +112,8 @@ vertex QuadFragmentInput quad_vertex(
       to_device_position_impl(clipped.position, viewport_size);
   device_position.z = quad_depth(quad_id, *depth_scale);
   float4 border_color = hsla_to_rgba(quad.border_color);
-  bool simple = !is_shaped(quad) && quad.background.tag == 0u;
+  bool simple = !is_shaped(quad) && quad.background.tag == 0u &&
+                !has_rounded_mask(quad.content_mask);
   PreparedBackground background = prepare_background(quad.background);
 
   return QuadFragmentInput{
@@ -127,6 +131,8 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
   }
 
   Quad quad = quads[input.quad_id];
+  float mask_coverage =
+      rounded_mask_coverage(input.position.xy, quad.content_mask.rounded);
   float4 background = background_color(input.background, quad.background,
                                        quad.bounds, input.position.xy);
   bool unrounded = !has_rounded_corners(quad.corner_radii);
@@ -188,7 +194,7 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
 
   // Fast path for points that must be part of the background
   if (is_within_inner_straight_border && !is_near_rounded_corner) {
-    return background;
+    return background * float4(1.0, 1.0, 1.0, mask_coverage);
   }
 
   // Signed distance of the point to the outside edge of the quad's border
@@ -403,7 +409,8 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
     color = over(background, border_color);
   }
 
-  return color * float4(1.0, 1.0, 1.0, saturate(antialias_threshold - outer_sdf));
+  return color * float4(1.0, 1.0, 1.0,
+                        saturate(antialias_threshold - outer_sdf) * mask_coverage);
 }
 
 // Returns the dash velocity of a corner given the dash velocity of the two
@@ -619,6 +626,7 @@ fragment float4 shadow_fragment(ShadowFragmentInput input [[stage_in]],
     alpha *= saturate(0.5 - element_distance);
   }
 
+  alpha *= rounded_mask_coverage(input.position.xy, shadow.content_mask.rounded);
   return input.color * float4(1., 1., 1., alpha);
 }
 
@@ -643,7 +651,9 @@ vertex UnderlineFragmentInput underline_vertex(
   return UnderlineFragmentInput{
       device_position,
       color,
-      underline_id | (underline.wavy == 0u ? SIMPLE_PRIMITIVE_FLAG : 0u)};
+      underline_id | (underline.wavy == 0u && !has_rounded_mask(underline.content_mask)
+                          ? SIMPLE_PRIMITIVE_FLAG
+                          : 0u)};
 }
 
 fragment float4 underline_fragment(UnderlineFragmentInput input [[stage_in]],
@@ -674,6 +684,10 @@ fragment float4 underline_fragment(UnderlineFragmentInput input [[stage_in]],
   float distance_from_bottom_border = distance_in_pixels + half_thickness;
   float alpha = saturate(
       0.5 - max(-distance_from_bottom_border, distance_from_top_border));
+  if (underline.wavy == 0u) {
+    alpha = 1.0;
+  }
+  alpha *= rounded_mask_coverage(input.position.xy, underline.content_mask.rounded);
   return input.color * float4(1., 1., 1., alpha);
 }
 
@@ -682,6 +696,7 @@ struct MonochromeSpriteFragmentInput {
   float2 tile_position;
   float4 color [[flat]];
   float4 clip_distance;
+  uint sprite_id [[flat]];
 };
 
 vertex MonochromeSpriteFragmentInput monochrome_sprite_vertex(
@@ -740,7 +755,8 @@ vertex MonochromeSpriteFragmentInput monochrome_sprite_vertex(
       device_position,
       tile_position,
       color,
-      {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
+      {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w},
+      sprite_id};
 }
 
 fragment float4 monochrome_sprite_fragment(
@@ -756,7 +772,9 @@ fragment float4 monochrome_sprite_fragment(
   float4 sample =
       atlas_texture.sample(atlas_texture_sampler, input.tile_position);
   float4 color = input.color;
-  color.a *= sample.a;
+  color.a *= sample.a * rounded_mask_coverage(
+                            input.position.xy,
+                            sprites[input.sprite_id].content_mask.rounded);
   return color;
 }
 
@@ -782,8 +800,9 @@ vertex PolychromeSpriteFragmentInput polychrome_sprite_vertex(
       to_device_position_impl(clipped.position, viewport_size);
   float2 tile_position =
       to_tile_position(clipped.unit_vertex, sprite.tile, atlas_size);
-  bool simple =
-      !has_rounded_corners(sprite.corner_radii) && sprite.grayscale == 0u;
+  bool simple = !has_rounded_corners(sprite.corner_radii) &&
+                sprite.grayscale == 0u &&
+                !has_rounded_mask(sprite.content_mask);
   return PolychromeSpriteFragmentInput{
       device_position,
       tile_position,
@@ -812,7 +831,8 @@ fragment float4 polychrome_sprite_fragment(
   }
   float distance =
       quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);
-  color.a *= input.opacity * saturate(0.5 - distance);
+  color.a *= input.opacity * saturate(0.5 - distance) *
+             rounded_mask_coverage(input.position.xy, sprite.content_mask.rounded);
   return color;
 }
 
@@ -821,6 +841,7 @@ struct PathTileFragmentInput {
   uint tile_id [[flat]];
   float4 curve_box [[flat]];
   PreparedBackground background;
+  uint rounded [[flat]];
 };
 
 vertex PathTileFragmentInput path_tile_vertex(
@@ -850,7 +871,8 @@ vertex PathTileFragmentInput path_tile_vertex(
       tile_id,
       float4(tile.curves_top_left.x, tile.curves_top_left.y,
              tile.curves_bottom_right.x, tile.curves_bottom_right.y),
-      prepare_background(paint.color)};
+      prepare_background(paint.color),
+      has_rounded_mask(paint.content_mask) ? 1u : 0u};
 }
 
 // Solves a*t^2 + b*t + c = 0 for the root in [0, 1] on a monotone piece.
@@ -927,12 +949,18 @@ fragment float4 path_tile_fragment(
     constant PathCurve *curves [[buffer(PathTileInputIndex_Curves)]],
     constant PathPaint *paints [[buffer(PathTileInputIndex_Paints)]]) {
   float2 center = floor(input.position.xy) + 0.5;
-  if (input.background.tag == 0u &&
+  if (input.background.tag == 0u && input.rounded == 0u &&
       (any(center < input.curve_box.xy) || any(center > input.curve_box.zw))) {
     return input.background.color0;
   }
   PathTile tile = tiles[input.tile_id];
   PathPaint paint = paints[tile.paint];
+  float mask_coverage =
+      rounded_mask_coverage(input.position.xy, paint.content_mask.rounded);
+  if (input.background.tag == 0u &&
+      (any(center < input.curve_box.xy) || any(center > input.curve_box.zw))) {
+    return input.background.color0 * float4(1.0, 1.0, 1.0, mask_coverage);
+  }
   float2 reference = float2(tile.reference.x, tile.reference.y);
 
   float2 winding = float2(float(tile.backdrop));
@@ -966,18 +994,36 @@ fragment float4 path_tile_fragment(
 
   float4 color = background_color(input.background, paint.color,
                                   paint.bounds, input.position.xy);
-  return float4(color.rgb, color.a * coverage);
+  return float4(color.rgb, color.a * coverage * mask_coverage);
 }
 
 struct SurfaceVertexOutput {
   float4 position [[position]];
   float2 texture_position;
+  float4 mask_bounds [[flat]];
+  float4 mask_radii [[flat]];
 };
 
 struct SurfaceFragmentInput {
   float4 position [[position]];
   float2 texture_position;
+  float4 mask_bounds [[flat]];
+  float4 mask_radii [[flat]];
 };
+
+// QUILL: a surface's rounded mask, carried to the fragment as flat values.
+float surface_mask_coverage(SurfaceFragmentInput input) {
+  RoundedMask_ScaledPixels mask;
+  mask.bounds.origin.x = input.mask_bounds.x;
+  mask.bounds.origin.y = input.mask_bounds.y;
+  mask.bounds.size.width = input.mask_bounds.z;
+  mask.bounds.size.height = input.mask_bounds.w;
+  mask.radii.top_left = input.mask_radii.x;
+  mask.radii.top_right = input.mask_radii.y;
+  mask.radii.bottom_right = input.mask_radii.z;
+  mask.radii.bottom_left = input.mask_radii.w;
+  return rounded_mask_coverage(input.position.xy, mask);
+}
 
 vertex SurfaceVertexOutput surface_vertex(
     uint vertex_id [[vertex_id]], uint surface_id [[instance_id]],
@@ -995,9 +1041,14 @@ vertex SurfaceVertexOutput surface_vertex(
   // We are going to copy the whole texture, so the texture position corresponds
   // to the vertex's position within the unclipped surface bounds.
   float2 texture_position = clipped.unit_vertex;
+  RoundedMask_ScaledPixels rounded = surface.content_mask.rounded;
   return SurfaceVertexOutput{
       device_position,
-      texture_position};
+      texture_position,
+      float4(rounded.bounds.origin.x, rounded.bounds.origin.y,
+             rounded.bounds.size.width, rounded.bounds.size.height),
+      float4(rounded.radii.top_left, rounded.radii.top_right,
+             rounded.radii.bottom_right, rounded.radii.bottom_left)};
 }
 
 fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
@@ -1015,7 +1066,9 @@ fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
       y_texture.sample(texture_sampler, input.texture_position).r,
       cb_cr_texture.sample(texture_sampler, input.texture_position).rg, 1.0);
 
-  return ycbcrToRGBTransform * ycbcr;
+  float4 rgba = ycbcrToRGBTransform * ycbcr;
+  rgba.a *= surface_mask_coverage(input);
+  return rgba;
 }
 
 struct NativeViewVertexOutput {
@@ -1091,7 +1144,7 @@ fragment float4 hdr_surface_fragment(
     rgb = clamp(rgb, 0.0, 1.0);
   }
   return float4(srgb_encode(rgb.r), srgb_encode(rgb.g), srgb_encode(rgb.b),
-                alpha);
+                alpha * surface_mask_coverage(input));
 }
 
 float4 hsla_to_rgba(Hsla hsla) {
@@ -1269,6 +1322,19 @@ float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
     float2 corner_to_point = fabs(center_to_point) - half_size;
     float2 corner_center_to_point = corner_to_point + corner_radius;
     return quad_sdf_impl(corner_center_to_point, corner_radius);
+}
+
+// QUILL: the coverage of a rounded content mask at a device position, 1 when
+// the mask has no rounded shape (docs/decisions/rounded-content-masks.md).
+float rounded_mask_coverage(float2 position, RoundedMask_ScaledPixels mask) {
+  if (!has_rounded_corners(mask.radii)) {
+    return 1.0;
+  }
+  return saturate(0.5 - quad_sdf(position, mask.bounds, mask.radii));
+}
+
+bool has_rounded_mask(ContentMask_ScaledPixels mask) {
+  return has_rounded_corners(mask.rounded.radii);
 }
 
 // Implementation of quad signed distance field
@@ -1703,6 +1769,8 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
                               [[texture(LensInputIndex_Atlas)]]) {
   BackdropLens lens = lenses[input.lens_id];
   LensSlot slot = slots[input.lens_id];
+  float mask_coverage =
+      rounded_mask_coverage(input.position.xy, lens.content_mask.rounded);
   float2 atlas_size =
       float2((float)atlas_size_px->width, (float)atlas_size_px->height);
   LensShape s = lens_shape(lens);
@@ -1735,7 +1803,7 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
     if (shadow_alpha <= 0.0) {
       discard_fragment();
     }
-    return float4(0.0, 0.0, 0.0, shadow_alpha * lens.opacity);
+    return float4(0.0, 0.0, 0.0, shadow_alpha * lens.opacity * mask_coverage);
   }
 
   // Surface normal from the bevel height field.
@@ -1887,7 +1955,7 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
   if (a <= 1e-5) {
     discard_fragment();
   }
-  return float4(g * mask / a, a * lens.opacity);
+  return float4(g * mask / a, a * lens.opacity * mask_coverage);
 }
 
 struct LensDownsampleVertexOutput {

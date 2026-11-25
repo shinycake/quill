@@ -2340,7 +2340,7 @@ impl gpui::PlatformHeadlessRenderer for MetalHeadlessRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::Point;
+    use gpui::{Corners, Hsla, Point, Quad, point};
     use std::cell::Cell;
     use objc2_core_foundation::{CFDictionary, CFType};
     use objc2_core_video::{
@@ -2661,6 +2661,84 @@ mod tests {
         command_buffer.waitUntilCompleted();
         assert_eq!(command_buffer.status(), MTLCommandBufferStatus::Completed);
         assert_eq!(read_texture_to_image(&target_texture).unwrap(), image);
+    }
+
+    /// QUILL (docs/decisions/rounded-content-masks.md): the coverage the
+    /// shaders give a rounded mask at a pixel centre, computed on the CPU.
+    fn rounded_coverage(x: f32, y: f32, side: f32, radius: f32) -> f32 {
+        let half = side / 2.0;
+        let (cx, cy) = (x - half, y - half);
+        let corner = ((cx.abs() - half) + radius, (cy.abs() - half) + radius);
+        let outside = (corner.0.max(0.0).powi(2) + corner.1.max(0.0).powi(2)).sqrt();
+        let inside = corner.0.max(corner.1).min(0.0);
+        (0.5 - (outside + inside - radius)).clamp(0.0, 1.0)
+    }
+
+    /// QUILL: an opaque white quad filling a 64 x 64 target (cleared to
+    /// black) under a mask rounded to 24 is cut at its corners with the
+    /// coverage the CPU computes, within one grey level; a quad under the same mask but away
+    /// from its corners (culled to the plain path) is whole.
+    #[test]
+    fn a_rounded_mask_cuts_an_opaque_quad_at_its_corners() {
+        let side = 64.0;
+        let target = Bounds {
+            origin: Point::default(),
+            size: size(ScaledPixels(side), ScaledPixels(side)),
+        };
+        let mask = ContentMask::rounded(target, Corners::all(ScaledPixels(24.0)));
+        let white = Hsla {
+            h: 0.0,
+            s: 0.0,
+            l: 1.0,
+            a: 1.0,
+        };
+        let mut scene = Scene::default();
+        scene.insert_primitive(Quad {
+            bounds: target,
+            content_mask: mask,
+            background: white.into(),
+            ..Quad::default()
+        });
+        scene.finish();
+        let mut renderer =
+            MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())))
+                .unwrap();
+        let image = renderer
+            .render_scene_to_image(&scene, size(DevicePixels(64), DevicePixels(64)))
+            .unwrap();
+        let mut worst = (0u8, 0, 0);
+        for (x, y, image::Rgba([red, _, _, _])) in image.enumerate_pixels() {
+            let expected = rounded_coverage(x as f32 + 0.5, y as f32 + 0.5, side, 24.0);
+            let expected = (expected * 255.0).round() as u8;
+            worst = worst.max((red.abs_diff(expected), x, y));
+        }
+        assert!(
+            worst.0 <= 1,
+            "worst difference {worst:?}: {:?}",
+            image.get_pixel(worst.1, worst.2)
+        );
+        let corner = image.get_pixel(0, 0);
+        assert_eq!(corner.0[0], 0, "the corner is cut away");
+
+        // The same mask over a band in the middle: culled, drawn whole.
+        let band = Bounds {
+            origin: point(ScaledPixels(0.0), ScaledPixels(28.0)),
+            size: size(ScaledPixels(side), ScaledPixels(8.0)),
+        };
+        let mut scene = Scene::default();
+        scene.insert_primitive(Quad {
+            bounds: band,
+            content_mask: mask,
+            background: white.into(),
+            ..Quad::default()
+        });
+        scene.finish();
+        assert!(scene.quads.iter().all(|quad| quad.content_mask.rounded.is_none()));
+        let image = renderer
+            .render_scene_to_image(&scene, size(DevicePixels(64), DevicePixels(64)))
+            .unwrap();
+        assert_eq!(image.get_pixel(0, 30).0, [255, 255, 255, 255]);
+        assert_eq!(image.get_pixel(0, 20).0[0], 0);
     }
 }
 
