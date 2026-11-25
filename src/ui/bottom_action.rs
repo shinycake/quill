@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::chrome::bars::BarLine;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -108,8 +109,7 @@ impl QuillApp {
             div()
                 .id("bottom-action-bar")
                 .p_3()
-                .border_t_1()
-                .border_color(cx.theme().border)
+                .map(|this| self.bar_frame(this, BarLine::Over, cx))
                 .flex()
                 .flex_col()
                 .gap_2()

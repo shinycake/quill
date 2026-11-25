@@ -8,6 +8,7 @@ use super::dialogs::TopicEditor;
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -812,9 +813,8 @@ impl QuillApp {
             .gap_2()
             .px_3()
             .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
             .bg(cx.theme().sidebar)
+            .map(|this| self.bar_frame(this, BarLine::Under, cx))
             .child(
                 Button::new("forum-topic-back")
                     .label(tr(keys::Q_PEOPLE_TOPICS))

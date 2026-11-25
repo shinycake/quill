@@ -12,10 +12,12 @@ use super::chat_theme::{accent, bg_canvas, border, danger, text_menu, text_muted
 use super::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
 use super::statistics::format_stat_count;
 use super::statistics_graph::stat_graph_block;
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::status_note::StatusNote;
 use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
@@ -627,9 +629,8 @@ impl QuillApp {
             .gap_1()
             .px_3()
             .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(bg_canvas());
+            .bg(bg_canvas())
+            .map(|this| self.bar_frame(this, BarLine::Under, cx));
         if rows.is_empty() {
             card = card.child(
                 div()

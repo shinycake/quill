@@ -4,6 +4,7 @@
 //! ask which layout is on (`scripts/check-layout-style.py`).
 #![deny(clippy::indexing_slicing)]
 
+pub(in crate::ui) mod bars;
 pub(in crate::ui) mod frame;
 pub(in crate::ui) mod frames;
 pub(in crate::ui) mod miniature;

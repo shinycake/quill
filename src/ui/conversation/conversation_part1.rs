@@ -1,6 +1,7 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -137,7 +138,21 @@ impl QuillApp {
             .then(|| self.call_bar(cx).or_else(|| self.group_call_bar(cx)))
             .flatten();
         let capture_notice = bars.then(|| self.capture_notice(cx)).flatten();
+        let ends = part.bottom() && !self.thread_pending();
+        // Floating: what sits under the history is one card, when there is
+        // something. Its ends are built here to know; Classic builds them
+        // in place, after the history, as it always did.
+        let early = float && !top && ends;
+        let mut footer = early.then(|| self.channel_footer(cx)).flatten();
+        let mut action_bar = early.then(|| self.bottom_action_bar(cx)).flatten();
+        let card = float
+            && !top
+            && (composer.is_some()
+                || composer_note.is_some()
+                || footer.is_some()
+                || action_bar.is_some());
         div()
+            .when(card, |this| self.stack_card(this, cx))
             .relative()
             .flex()
             .flex_col()
@@ -411,26 +426,23 @@ impl QuillApp {
                         .id("composer-note")
                         .px_3()
                         .py(px(self.density().composer_inset_y))
-                        .border_t_1()
-                        .border_color(cx.theme().border)
+                        .map(|this| self.bar_frame(this, BarLine::Over, cx))
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
                         .when(centered, |this| this.text_center())
                         .child(note),
                 )
             })
-            .when_some(
-                (part.bottom() && !self.thread_pending())
-                    .then(|| self.channel_footer(cx))
-                    .flatten(),
-                |this, footer| this.child(footer),
-            )
-            .when_some(
-                (part.bottom() && !self.thread_pending())
-                    .then(|| self.bottom_action_bar(cx))
-                    .flatten(),
-                |this, bar| this.child(bar),
-            )
+            .children(if early {
+                footer.take()
+            } else {
+                ends.then(|| self.channel_footer(cx)).flatten()
+            })
+            .children(if early {
+                action_bar.take()
+            } else {
+                ends.then(|| self.bottom_action_bar(cx)).flatten()
+            })
             // A deleted message's dust drifts over everything.
             .children(dust.map(super::anim_layer::occluder))
             .into_any_element()

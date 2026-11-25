@@ -20,6 +20,7 @@ use super::playback::PlaybackKind;
 use super::playback_state::SeekSite;
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::slider::{SliderEvent, SliderState};
@@ -609,9 +610,8 @@ impl QuillApp {
                 .gap_1()
                 .h(px(48.))
                 .px_3()
-                .border_b_1()
-                .border_color(cx.theme().border)
                 .bg(bg_canvas())
+                .map(|this| self.bar_frame(this, BarLine::Under, cx))
                 .role(Role::Group)
                 .when_some(chat_tag, |this, tag| this.a11y_tag(tag))
                 .aria_label(tr(keys::Q_AV_NOW_PLAYING))

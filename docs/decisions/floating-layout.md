@@ -270,3 +270,55 @@ Classic proof: the 23-capture set matches the Step 0 baseline (known noisy
 demos only), and Classic `ready-bot-threads` in Left mode,
 `ready-direct-messages` and `ready-topic-loading` are pixel-identical to
 main.
+
+## Bars in two cards (step 8f)
+
+Owner direction (2026-11-25), which replaces the plan's one pill per bar:
+in Floating the header and every bar over the history (player, call,
+capture notice, topic strip and info card, top tab strip, saved tags, bot
+info, chat bars, pinned bar and list, pending bot reply, chat search,
+thread root bar and info card) are rows of ONE card: header row on top,
+each bar under it parted by an inset hairline (the theme border at half
+alpha, inset by the header's padding), one radius-24 outline, one
+shadow, the header's column width. With no bars the card is exactly the
+header pill. Under the history the same holds for the composer's card:
+the bottom tab strip and the busy banner sit over the composer row with
+the hairline under them, and the composer note, the channel footer and
+the bottom action bar take the composer's place in the card.
+
+The helpers (`chrome/bars.rs`):
+
+- `bar(el, BarLine)`: Classic draws the hairline the bar drew by hand
+  (under or over it); in a card the bar drops it and takes the card's
+  fill. It is called after the bar's own `bg`.
+- `tinted_bar` / `tinted_tile`: a bar with its own colour (the call bars,
+  the capture notice) becomes a rounded tile inset 6 px in the card,
+  concentric with its corners, so its colour never reaches past the round
+  ends while the renderer's rounded clip is pending (the `card_clip`
+  seam). Classic is unchanged.
+- `strip(el, BarLine)`: a strip over the composer, with the hairline
+  under it in a card.
+- `stack_card`: the card itself (the pill's fill, edge and shadow).
+  `header_frame` and `composer_frame` draw nothing of their own in
+  Floating: they are rows of their cards.
+
+Deviation: the plan's `chrome().bar_reveal(..)` Rise presenter is not
+built. Inside a card a bar opens by height under a rectangular clip, which
+is right there (the clip no longer cuts a pill's round ends or shadow), so
+the pinned bar keeps `slide_open`, and the card's height follows the
+reveal with no state of its own. The hairline above a sliding bar shows
+at full strength while the bar opens.
+
+The bar helpers read `chrome_metrics()` (no theme readings), not
+`chrome(cx)`: reading the full chrome per bar looks up the chat's
+wallpaper each time, and that alone moved Classic's skeleton pulse by one
+level at its corners in `ready-topic-loading`. Only the two cards read
+the full chrome, and only in Floating.
+
+The top card clips its rows (`card_clip`, rectangular until the rounded
+mask lands); the composer's card does not, as its popups hang outside it.
+
+Classic proof: the bars' helpers are identity tests in `chrome/bars.rs`
+(both edges); the 23-capture set matches the baseline (known noisy demos
+only) and `ready-channels`, `ready-voice-playing`, `ready-topic-loading`,
+`ready-bot-chat` and `ready-direct-messages` are pixel-identical to main.

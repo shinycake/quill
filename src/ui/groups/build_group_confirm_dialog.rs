@@ -1,6 +1,7 @@
 //! Methods moved out of `groups.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
@@ -323,8 +324,7 @@ impl QuillApp {
         let footer = div()
             .px_3()
             .py(px(m.composer_inset_y))
-            .border_t_1()
-            .border_color(cx.theme().border)
+            .map(|this| self.bar_frame(this, BarLine::Over, cx))
             .flex()
             .items_center()
             .justify_center()
@@ -347,8 +347,7 @@ impl QuillApp {
             let side = || div().w(px(CHANNEL_BAR_SIDE)).h_full().flex().items_center();
             div()
                 .h(px(m.channel_bar))
-                .border_t_1()
-                .border_color(cx.theme().border)
+                .map(|this| self.bar_frame(this, BarLine::Over, cx))
                 .flex()
                 .items_center()
                 .child(side().pl_2().children(direct))

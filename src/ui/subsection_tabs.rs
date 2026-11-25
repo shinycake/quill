@@ -19,6 +19,7 @@ use super::chat_theme::{accent, accent_strong, text_on_fill};
 use super::folder_tabs_fit::{RevealKey, needs_reveal};
 use super::pressable::PressableDiv;
 use super::subsection_tabs_fit::{LABEL_MAX_WIDTH, label_may_be_cut, selected_child};
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -167,12 +168,11 @@ impl QuillApp {
                 .w_full()
                 .h(px(STRIP_HEIGHT))
                 .bg(cx.theme().background)
-                .border_color(cx.theme().border)
                 .map(|this| {
                     if bottom {
-                        this.border_t_1()
+                        self.strip_frame(this.bg(transparent_black()), BarLine::Over, cx)
                     } else {
-                        this.border_b_1()
+                        self.bar_frame(this, BarLine::Under, cx)
                     }
                 })
                 .role(Role::TabList)

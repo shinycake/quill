@@ -18,10 +18,11 @@ impl QuillApp {
             })
     }
 
-    /// The header slice's content when the bars float: the header pill,
-    /// then the player, call and capture bars, then the chat's own bars,
-    /// a gap apart. Each blocks clicks to the rows under it; the gaps
-    /// between them do not.
+    /// The header slice's content when the bars float: one card with the
+    /// header on top and every bar over the history under it, an inset
+    /// hairline apart (the player, call and capture bars first, then the
+    /// chat's own). With no bars it is the header pill. It blocks clicks
+    /// to the rows under it.
     #[inline(never)]
     pub(super) fn floating_bars(&mut self, mode: PaneMode, cx: &mut Context<Self>) -> AnyElement {
         let (header, bars) = match mode {
@@ -38,18 +39,29 @@ impl QuillApp {
                 .map(IntoElement::into_any_element),
             self.capture_notice(cx).map(IntoElement::into_any_element),
         ];
-        div()
+        let rows: Vec<AnyElement> = header
+            .into_iter()
+            .chain(calls.into_iter().flatten())
+            .chain(bars)
+            .collect();
+        if rows.is_empty() {
+            return Empty.into_any_element();
+        }
+        let inset = px(self.density().header_inset_x);
+        let mut card = div()
+            .id("conversation-bars-card")
             .flex()
             .flex_col()
-            .gap(px(self.chrome_metrics().bar_gap))
-            .children(
-                header
-                    .into_iter()
-                    .chain(calls.into_iter().flatten())
-                    .chain(bars)
-                    .map(|bar| div().block_mouse_except_scroll().child(bar)),
-            )
-            .into_any_element()
+            .block_mouse_except_scroll()
+            .map(|this| self.stack_card(this, cx))
+            .map(crate::ui::chrome::frames::card_clip);
+        for (ix, row) in rows.into_iter().enumerate() {
+            if ix > 0 {
+                card = card.child(crate::ui::chrome::bars::card_divider(inset, cx.theme()));
+            }
+            card = card.child(row);
+        }
+        card.into_any_element()
     }
 
     /// The header, and every other bar above the history's body, top to

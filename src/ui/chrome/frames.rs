@@ -47,7 +47,8 @@ pub(in crate::ui) fn panel_frame<E: Styled + FluentBuilder>(
     }
 }
 
-/// The chat header's frame: Classic's line under it, or a pill.
+/// The chat header's frame: Classic's line under it, or nothing of its
+/// own: it is the first row of the bars' card (`bars::stack_card`).
 pub(in crate::ui) fn header_frame<E: Styled + FluentBuilder>(
     this: E,
     chrome: &Chrome,
@@ -55,11 +56,12 @@ pub(in crate::ui) fn header_frame<E: Styled + FluentBuilder>(
 ) -> E {
     match chrome.metrics.placement {
         Placement::Stacked => this.border_b_1().border_color(theme.border),
-        Placement::Overlaid => pill(this, chrome, theme),
+        Placement::Overlaid => this,
     }
 }
 
-/// The composer's frame: Classic's line over it, or a pill.
+/// The composer's frame: Classic's line over it, or nothing of its own: it
+/// is a row of the composer's card (`bars::stack_card`).
 pub(in crate::ui) fn composer_frame<E: Styled + FluentBuilder>(
     this: E,
     chrome: &Chrome,
@@ -67,7 +69,7 @@ pub(in crate::ui) fn composer_frame<E: Styled + FluentBuilder>(
 ) -> E {
     match chrome.metrics.placement {
         Placement::Stacked => this.border_t_1().border_color(theme.border),
-        Placement::Overlaid => pill(this, chrome, theme),
+        Placement::Overlaid => this,
     }
 }
 
@@ -88,7 +90,7 @@ pub(in crate::ui) fn tab_column_frame<E: Styled + FluentBuilder>(
 
 /// A pill over the history: a card's fill, edge and shadow. It does not
 /// clip, as the composer's popups hang outside it.
-fn pill<E: Styled + FluentBuilder>(this: E, chrome: &Chrome, theme: &Theme) -> E {
+pub(super) fn pill<E: Styled + FluentBuilder>(this: E, chrome: &Chrome, theme: &Theme) -> E {
     surface(this, chrome, theme).when(chrome.elevation == Elevation::Shadowed, |this| {
         this.shadow(card_shadow(theme))
     })
@@ -118,7 +120,7 @@ pub(in crate::ui) fn card<E: Styled + FluentBuilder>(this: E, chrome: &Chrome, t
 }
 
 /// The seam for the renderer's rounded clip: today a rectangular clip.
-fn card_clip<E: Styled>(this: E) -> E {
+pub(in crate::ui) fn card_clip<E: Styled>(this: E) -> E {
     this.overflow_hidden()
 }
 
