@@ -287,10 +287,21 @@ impl Cache {
         });
         self.bytes += bytes;
         // Images on screen are looked up on every paint, so they sit at
-        // the back; the newest one always stays.
+        // the back; the newest one always stays, and so does every picture
+        // a slot shows now: the budget bounds what is kept beyond the
+        // screen. Two windows whose pictures together pass it (a window-wide
+        // wallpaper on a 5K display beside a chat window) would otherwise
+        // retire each other's on every paint. Pictures of closed windows go
+        // in `take_unshown`.
+        let shown: HashSet<u64> = self.shown.values().map(|s| s.key).collect();
         let mut retired = Vec::new();
-        while self.bytes > BUDGET_BYTES && self.entries.len() > 1 {
-            if let Some(old) = self.entries.pop_front() {
+        let mut at = 0;
+        while self.bytes > BUDGET_BYTES && at + 1 < self.entries.len() {
+            if self.entries.get(at).is_some_and(|e| shown.contains(&e.key)) {
+                at += 1;
+                continue;
+            }
+            if let Some(old) = self.entries.remove(at) {
                 self.bytes = self.bytes.saturating_sub(old.bytes);
                 retired.extend(old.composite.map(|c| c.image));
             }
@@ -791,6 +802,29 @@ mod tests {
         assert_eq!(cache.entries.len(), 1);
         assert_eq!(cache.bytes, 3 * 4);
         assert!(cache.get(3, window(MAIN)).is_some());
+    }
+
+    /// The budget never retires a picture a slot shows: two windows whose
+    /// pictures together pass it both keep theirs, and a third picture no
+    /// slot shows is the one that goes.
+    #[test]
+    fn pictures_on_screen_outlive_the_budget() {
+        use super::BUDGET_BYTES;
+        let mut cache = Cache::default();
+        // Each picture is 0.4 of the budget (one row, 4 bytes a pixel).
+        let width = (BUDGET_BYTES * 2 / 5 / 4) as u32;
+        cache.insert(1, Some(composite(width)), window(MAIN));
+        show(&mut cache, 7, 1, MAIN);
+        cache.insert(2, Some(composite(width + 1)), window(CHAT));
+        show(&mut cache, 8, 2, CHAT);
+        cache.insert(3, Some(composite(width + 2)), window(MAIN));
+        assert!(cache.get(1, window(MAIN)).is_some(), "the main window's");
+        assert!(cache.get(2, window(CHAT)).is_some(), "the chat window's");
+        // A fourth: the unshown third goes, the shown two stay over budget.
+        cache.insert(4, Some(composite(width + 3)), window(MAIN));
+        let keys: Vec<u64> = cache.entries.iter().map(|e| e.key).collect();
+        assert!(!keys.contains(&3), "{keys:?}");
+        assert!(keys.contains(&1) && keys.contains(&2) && keys.contains(&4));
     }
 
     #[test]
