@@ -1486,7 +1486,12 @@ float4 polychrome_sprite_fragment_impl(PolychromeSpriteFragmentInput input){
     }
 
     PolychromeSprite sprite = poly_sprites[input.sprite_id];
-    if (sprite.grayscale != 0u) {
+    // QUILL: the flags (`grayscale`): bit 2, the texture holds premultiplied
+    // colour (a snapshot, `snapshots.rs`); bit 1, draw it in grey.
+    if ((sprite.grayscale & 2u) != 0u && color.a > 0.0) {
+        color.rgb /= color.a;
+    }
+    if ((sprite.grayscale & 1u) != 0u) {
         color.rgb = dot(color.rgb, GRAYSCALE_FACTORS);
     }
     float distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);

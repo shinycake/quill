@@ -110,7 +110,19 @@ buffers (`shaders_webgl.wgsl`) reports no support. Recovery drops the pool
 with the device; `snapshot_losses` counts a lost device at once and its
 recovery once more, so what was captured in between is lost too. The
 X11 and Wayland windows forward the three methods through `try_borrow`.
-DirectX 11 skips the batch until its port lands and reports no support.
+DirectX 11 (`gpui-pre-windows/src/snapshots.rs`) gives each live slot a
+`Texture2D` in the SDR swap chain's format with a render-target and a
+shader-resource view, and draws each snapshot scene with the frame's own
+recording (`record`) bound to it: its own viewport and depth view, the
+globals rewritten with SDR output (a snapshot holds SDR colour, like an
+atlas image, and an HDR frame converts it as it does any sprite). The next
+frame's `pre_draw` binds the frame's target, viewport and globals again,
+so nothing has to be restored. The snapshot sprites follow the scene's own
+in the polychrome buffer, as the lens fallbacks follow the quads. A lost
+device drops the pool with the pipelines and counts a loss; frames drawn
+while recovering (`skip_draws`) count their snapshot scenes as lost.
+Direct3D keeps a resource alive until the GPU is done with it, so
+`draw_snapshot` does not wait.
 
 ## Tests
 

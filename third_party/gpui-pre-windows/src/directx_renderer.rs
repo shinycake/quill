@@ -43,6 +43,8 @@ mod backdrop_glass;
 mod hdr_surfaces;
 #[path = "yuv_surfaces.rs"]
 mod yuv_surfaces;
+#[path = "snapshots.rs"]
+mod snapshots;
 
 pub(crate) struct FontInfo {
     pub gamma_ratios: [f32; 4],
@@ -77,6 +79,28 @@ pub(crate) struct DirectXRenderer {
     /// In that case we want to discard the first frame that we draw as we got reset in the middle of a frame
     /// meaning we lost all the allocated gpu textures and scene resources.
     skip_draws: bool,
+    /// QUILL: how many times snapshot textures were lost (a scene not drawn,
+    /// a lost device), for `PlatformWindow::snapshot_losses`.
+    snapshot_losses: u64,
+}
+
+/// QUILL: what a recording draws into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FrameKind {
+    /// The swap chain's buffer: glass, the output mode, the end of the
+    /// frame for video surfaces.
+    Frame,
+    /// A snapshot's texture (`snapshots.rs`), ahead of the frame: no glass,
+    /// SDR output, and the frame still to come.
+    Snapshot,
+}
+
+/// QUILL: the target, depth and viewport a recording binds.
+struct DrawTarget {
+    target: ID3D11RenderTargetView,
+    depth: Option<ID3D11DepthStencilView>,
+    viewport: D3D11_VIEWPORT,
+    kind: FrameKind,
 }
 
 /// Direct3D objects
@@ -120,6 +144,8 @@ struct DirectXRenderPipelines {
     yuv_surfaces: Option<YuvSurfaces>,
     /// Quill: backdrop glass, built on the first frame with glass.
     lenses: LensState,
+    /// QUILL: snapshot textures (`snapshots.rs`), dropped with the device.
+    snapshots: snapshots::SnapshotPool,
 }
 
 struct DirectXGlobalElements {
@@ -231,6 +257,7 @@ impl DirectXRenderer {
             width: 1,
             height: 1,
             skip_draws: false,
+            snapshot_losses: 0,
         })
     }
 
@@ -238,10 +265,9 @@ impl DirectXRenderer {
         self.atlas.clone()
     }
 
-    fn pre_draw(&self, clear_color: &[f32; 4], depth_scale: f32) -> Result<()> {
+    fn pre_draw(&self, clear_color: &[f32; 4], depth_scale: f32, target: &DrawTarget) -> Result<()> {
         // Quill: errors instead of upstream's `expect`/`unwrap`; a renderer whose device-loss
         // recovery failed has no resources or devices.
-        let resources = self.resources.as_ref().context("resources missing")?;
         let device_context = &self
             .devices
             .as_ref()
@@ -255,44 +281,28 @@ impl DirectXRenderer {
                 .context("missing global params buffer")?,
             &[GlobalParams {
                 gamma_ratios: self.font_info.gamma_ratios,
-                viewport_size: [resources.viewport.Width, resources.viewport.Height],
+                viewport_size: [target.viewport.Width, target.viewport.Height],
                 grayscale_enhanced_contrast: self.font_info.grayscale_enhanced_contrast,
                 subpixel_enhanced_contrast: self.font_info.subpixel_enhanced_contrast,
                 is_bgr: self.font_info.is_bgr as u32,
                 depth_scale,
-                hdr_output: self.output.hdr as u32,
+                // QUILL: a snapshot holds SDR colour, like an atlas image.
+                hdr_output: (self.output.hdr && target.kind == FrameKind::Frame) as u32,
                 output_scale: self.output.scale,
             }],
         )?;
+        let depth = target.depth.as_ref().context("missing depth stencil view")?;
         unsafe {
-            device_context.ClearRenderTargetView(
-                resources
-                    .render_target_view
-                    .as_ref()
-                    .context("missing render target view")?,
-                clear_color,
-            );
-            device_context.ClearDepthStencilView(
-                resources
-                    .depth_stencil_view
-                    .as_ref()
-                    .context("missing depth stencil view")?,
-                D3D11_CLEAR_DEPTH.0,
-                0.0,
-                0,
-            );
+            device_context.ClearRenderTargetView(&target.target, clear_color);
+            device_context.ClearDepthStencilView(depth, D3D11_CLEAR_DEPTH.0, 0.0, 0);
             // QUILL: no depth view in a frame drawn without the opaque
             // pre-pass (a zero scale): every depth test then passes, as it
             // does after a lens batch rebinds the target alone.
             device_context.OMSetRenderTargets(
-                Some(slice::from_ref(&resources.render_target_view)),
-                if depth_scale > 0.0 {
-                    resources.depth_stencil_view.as_ref()
-                } else {
-                    None
-                },
+                Some(&[Some(target.target.clone())]),
+                if depth_scale > 0.0 { Some(depth) } else { None },
             );
-            device_context.RSSetViewports(Some(slice::from_ref(&resources.viewport)));
+            device_context.RSSetViewports(Some(slice::from_ref(&target.viewport)));
             device_context
                 .VSSetConstantBuffers(0, Some(slice::from_ref(&self.globals.global_params_buffer)));
             device_context
@@ -303,9 +313,9 @@ impl DirectXRenderer {
         Ok(())
     }
 
-    fn discard_depth_buffer(&self) -> Option<()> {
+    fn discard_depth_buffer(&self, target: &DrawTarget) -> Option<()> {
         let context1 = self.devices.as_ref()?.device_context1.as_ref()?;
-        let depth_stencil_view = self.resources.as_ref()?.depth_stencil_view.as_ref()?;
+        let depth_stencil_view = target.depth.as_ref()?;
         unsafe { context1.DiscardView(depth_stencil_view) };
         Some(())
     }
@@ -351,6 +361,8 @@ impl DirectXRenderer {
             self.direct_composition.take();
             self.devices.take();
         }
+        // QUILL: the snapshot textures go with the device.
+        self.snapshot_losses = self.snapshot_losses.wrapping_add(1);
 
         let devices = DirectXRendererDevices::new(directx_devices, disable_direct_composition)
             .context("Recreating DirectX devices")?;
@@ -404,6 +416,9 @@ impl DirectXRenderer {
         scene: &Scene,
         background_appearance: WindowBackgroundAppearance,
     ) -> Result<()> {
+        // QUILL: the frame's snapshots first; while recovering they can't
+        // be drawn, and count as lost.
+        self.draw_snapshot_scenes(scene);
         if self.skip_draws {
             // skip drawing this frame, we just recovered from a device lost event
             // and so likely do not have the textures anymore that are required for drawing
@@ -424,6 +439,27 @@ impl DirectXRenderer {
         scene: &Scene,
         background_appearance: WindowBackgroundAppearance,
     ) -> Result<()> {
+        let resources = self.resources.as_ref().context("resources missing")?;
+        let target = DrawTarget {
+            target: resources
+                .render_target_view
+                .clone()
+                .context("missing render target view")?,
+            depth: resources.depth_stencil_view.clone(),
+            viewport: resources.viewport,
+            kind: FrameKind::Frame,
+        };
+        let clear = match background_appearance {
+            WindowBackgroundAppearance::Opaque => self.output.opaque_clear(),
+            _ => [0.0f32; 4],
+        };
+        self.record(scene, &clear, &target)
+    }
+
+    /// QUILL: clears `target` and encodes every primitive batch of `scene`
+    /// into it: the frame (`render`) or a snapshot (`snapshots.rs`).
+    fn record(&mut self, scene: &Scene, clear: &[f32; 4], target: &DrawTarget) -> Result<()> {
+        let frame = target.kind == FrameKind::Frame;
         // QUILL: a frame with lenses draws without the opaque pre-pass and
         // without depth (`pre_draw`). A lens batch rebinds the target, and
         // opaque quads drawn ahead would show in the glass's backdrop before
@@ -433,19 +469,19 @@ impl DirectXRenderer {
         } else {
             0.0
         };
-        self.pre_draw(
-            &match background_appearance {
-                WindowBackgroundAppearance::Opaque => self.output.opaque_clear(),
-                _ => [0.0f32; 4],
-            },
-            depth_scale,
-        )?;
+        self.pre_draw(clear, depth_scale, target)?;
         self.upload_scene_buffers(scene)?;
         // QUILL: the frame's slots, planned before anything is drawn. What
         // the atlas holds counts as unknown until every batch drew as
-        // planned.
-        let glass = self.plan_glass(scene);
-        self.pipelines.lenses.forget();
+        // planned. A snapshot draws no glass (a capture never holds a lens)
+        // and leaves the frame's slots alone.
+        let glass = if frame {
+            let glass = self.plan_glass(scene);
+            self.pipelines.lenses.forget();
+            glass
+        } else {
+            None
+        };
         let mut glass_drawn = GlassDrawn::AsPlanned;
 
         let annotation = self
@@ -478,10 +514,10 @@ impl DirectXRenderer {
             // Quad shaders assign each quad its own depth.
             // In every other batch type, the depth is fixed to the position of the quad cursor.
             if matches!(&batch, PrimitiveBatch::Quads(_)) {
-                self.set_viewport_depth_range(0.0, 1.0)?;
+                self.set_viewport_depth_range(&target.viewport, 0.0, 1.0)?;
             } else {
                 let depth = quad_depth(quad_cursor, depth_scale);
-                self.set_viewport_depth_range(depth, depth)?;
+                self.set_viewport_depth_range(&target.viewport, depth, depth)?;
             }
 
             match batch {
@@ -511,9 +547,7 @@ impl DirectXRenderer {
                 PrimitiveBatch::Surfaces(range) => self.draw_surfaces(&scene.surfaces[range]),
                 // Native views are only composited on macOS.
                 PrimitiveBatch::NativeViews(_) => Ok(()),
-                // QUILL: this renderer reports no snapshot support, so no
-                // frame holds one.
-                PrimitiveBatch::Snapshots(_) => Ok(()),
+                PrimitiveBatch::Snapshots(range) => self.draw_snapshots(scene, range),
                 // Quill: glass copies and blurs what is under it
                 // (`backdrop_glass`); else the batch draws as its fallback
                 // quads, uploaded after the scene's own.
@@ -549,7 +583,10 @@ impl DirectXRenderer {
                 )
             })?;
         }
-        self.discard_depth_buffer();
+        self.discard_depth_buffer(target);
+        if !frame {
+            return Ok(());
+        }
         // Quill: video textures not drawn lately go, and a frame without
         // surfaces frees every surface texture (the viewer closed), so they
         // never outlive what's on screen.
@@ -664,14 +701,18 @@ impl DirectXRenderer {
             .context("Failed to build RgbaImage from staging readback")
     }
 
-    fn set_viewport_depth_range(&self, minimum_depth: f32, maximum_depth: f32) -> Result<()> {
+    fn set_viewport_depth_range(
+        &self,
+        viewport: &D3D11_VIEWPORT,
+        minimum_depth: f32,
+        maximum_depth: f32,
+    ) -> Result<()> {
         let devices = self.devices.as_ref().context("devices missing")?;
-        let resources = self.resources.as_ref().context("resources missing")?;
         // Equal endpoints collapse every shader depth to the same value.
         let viewport = D3D11_VIEWPORT {
             MinDepth: minimum_depth,
             MaxDepth: maximum_depth,
-            ..resources.viewport
+            ..*viewport
         };
         unsafe {
             devices
@@ -829,11 +870,27 @@ impl DirectXRenderer {
             )?;
         }
 
-        if !scene.polychrome_sprites.is_empty() {
+        // QUILL: the snapshot quads' sprites follow the scene's own
+        // (`snapshots.rs` draws them from `scene.polychrome_sprites.len()`).
+        if scene.snapshots.is_empty() {
+            if !scene.polychrome_sprites.is_empty() {
+                self.pipelines.poly_sprites.update_buffer(
+                    &devices.device,
+                    &devices.device_context,
+                    &scene.polychrome_sprites,
+                )?;
+            }
+        } else {
+            let sprites: Vec<PolychromeSprite> = scene
+                .polychrome_sprites
+                .iter()
+                .cloned()
+                .chain(scene.snapshots.iter().map(SnapshotQuad::sprite))
+                .collect();
             self.pipelines.poly_sprites.update_buffer(
                 &devices.device,
                 &devices.device_context,
-                &scene.polychrome_sprites,
+                &sprites,
             )?;
         }
 
@@ -1193,6 +1250,7 @@ impl DirectXRenderPipelines {
             hdr_surfaces,
             yuv_surfaces,
             lenses: LensState::default(),
+            snapshots: snapshots::SnapshotPool::default(),
         })
     }
 }

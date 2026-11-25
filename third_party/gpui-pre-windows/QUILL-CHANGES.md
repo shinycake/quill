@@ -651,6 +651,17 @@ assert.
 
 ## Snapshots
 
-Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md):
-the renderer skips a `PrimitiveBatch::Snapshots` batch. Windows on this
-backend don't support snapshots yet, so the scene never holds one.
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
+`src/snapshots.rs` (new): a `Texture2D` per live snapshot in the SDR swap
+chain's format with a render-target and a shader-resource view, drawn from
+`Scene::snapshot_scenes` ahead of the frame and freed with
+`Scene::snapshot_releases`; snapshot quads draw through the polychrome
+pipeline, their sprites after the scene's own in its buffer.
+`src/directx_renderer.rs`: `render` builds the frame's `DrawTarget` and
+`record` draws a scene into any target (`FrameKind::Snapshot` plans no
+glass, writes SDR output and leaves the surfaces' frame alone);
+`pre_draw`, `set_viewport_depth_range` and `discard_depth_buffer` take the
+target; a lost device drops the pool with the pipelines and counts a loss.
+`src/window.rs` forwards `snapshots_supported`, `draw_snapshot` and
+`snapshot_losses` through `try_borrow`. `src/shaders.hlsl`: bit 2 of the
+polychrome flags divides the sample by its alpha.
