@@ -228,6 +228,10 @@ pub struct AppearancePrefs {
     /// (Appearance → Compact mode).
     #[serde(default)]
     pub density: crate::density::Density,
+    /// Appearance → Layout: Classic panels or Floating cards
+    /// (`crate::layout_style`). Classic by default.
+    #[serde(default)]
+    pub layout: crate::layout_style::LayoutStyle,
     /// Appearance → Glass effects: menus, tabs and floating buttons drawn as
     /// glass (`crate::glass`). Solid by default.
     #[serde(default)]
@@ -334,6 +338,7 @@ impl Default for AppearancePrefs {
             follow_omarchy: true,
             interface_scale_pct: INTERFACE_SCALE_DEFAULT,
             density: crate::density::Density::Standard,
+            layout: crate::layout_style::LayoutStyle::Classic,
             material: crate::glass::Material::Solid,
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
@@ -524,6 +529,7 @@ mod tests {
         assert!(defaults.bubbles);
         let old: AppearancePrefs = serde_json::from_str("{}").unwrap();
         assert_eq!(old.density, crate::density::Density::Standard);
+        assert_eq!(old.layout, crate::layout_style::LayoutStyle::Classic);
 
         let prefs = AppearancePrefs {
             theme: ThemeChoice::Dark,
@@ -545,6 +551,7 @@ mod tests {
             follow_omarchy: false,
             interface_scale_pct: 150,
             density: crate::density::Density::Compact,
+            layout: crate::layout_style::LayoutStyle::Floating,
             material: crate::glass::Material::Glass,
             font_size_px: 17,
             bubbles: false,

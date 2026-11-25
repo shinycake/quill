@@ -12,3 +12,6 @@
 "qll_first_run_telegram_title" = "Chats, calls and stories";
 "qll_first_run_telegram_body" = "Groups, channels, voice and video calls, stories, and several accounts side by side.";
 "qll_first_run_replay" = "Show the welcome intro";
+"qll_first_run_style_title" = "Pick a layout";
+"qll_first_run_style_later" = "You can change it in Settings › Appearance.";
+"qll_first_run_style_wallpaper_later" = "It appears after you sign in.";

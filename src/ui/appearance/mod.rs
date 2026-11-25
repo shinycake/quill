@@ -668,6 +668,7 @@ mod night_clock;
 pub(super) use night_clock::NightClock;
 mod appearance_keybindings_section;
 mod density;
+mod layout_row;
 #[cfg(test)]
 mod test_prefs;
 #[cfg(test)]

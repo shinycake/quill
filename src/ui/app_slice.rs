@@ -276,7 +276,7 @@ impl QuillApp {
         cx.observe_self(|this, cx| this.notify_slices(cx)).detach();
     }
 
-    fn notify_slices(&self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn notify_slices(&self, cx: &mut Context<Self>) {
         super::frame_clock::trace_slice_render("(app notified)");
         super::frame_clock::trace_notify_origin();
         let ids: Vec<EntityId> = self

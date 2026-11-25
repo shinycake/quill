@@ -15,6 +15,7 @@ pub(super) struct RowLayout {
     preview_lines: u8,
     bubbles: bool,
     adaptive_for_wide: bool,
+    layout: quill::layout_style::LayoutStyle,
 }
 
 impl RowLayout {
@@ -24,6 +25,7 @@ impl RowLayout {
             preview_lines: prefs.preview_lines,
             bubbles: prefs.bubbles,
             adaptive_for_wide: prefs.adaptive_for_wide,
+            layout: prefs.layout,
         }
     }
 }

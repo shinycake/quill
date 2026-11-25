@@ -36,6 +36,10 @@ pub(in crate::ui) struct WindowSlices {
     /// is sized before its content renders, so the slot takes the measured
     /// height (a change redraws the slot next frame).
     pub(super) composer_height: Rc<Cell<Pixels>>,
+    /// The window's content width as its last render measured it: what
+    /// `QuillApp::chrome` reads for this window (a measurement cache, as
+    /// `composer_height` is).
+    pub(in crate::ui) width: Cell<Pixels>,
     /// What the window's last render did with the conversation.
     conversation_frame: Cell<ConversationFrame>,
     /// A screen reader (or another accessibility client) reads this window:

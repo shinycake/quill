@@ -36,5 +36,6 @@ python3 scripts/check-owned-timers.py
 python3 scripts/check-refcell-borrows.py
 python3 scripts/check-screen-state.py
 python3 scripts/check-window-scope.py
+python3 scripts/check-layout-style.py
 bash scripts/check-file-size.sh
 ```

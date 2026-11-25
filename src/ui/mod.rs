@@ -61,6 +61,7 @@ mod chat_palette;
 mod chat_theme;
 mod chat_ui_state;
 mod chat_window;
+mod chrome;
 mod clipboard_files;
 mod code_highlight;
 mod composer_events;

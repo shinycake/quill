@@ -133,6 +133,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.frame.main_width = window.viewport_size().width;
+        self.note_window_width(self.frame.main_width, cx);
         self.keep_shared_media_search_field(window, cx);
         let layout = self.shell_layout();
         self.settle_sidebar(&layout, window, cx);
