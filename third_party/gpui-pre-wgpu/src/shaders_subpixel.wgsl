@@ -20,6 +20,7 @@ struct SubpixelSpriteOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) tile_position: vec2<f32>,
     @location(1) @interpolate(flat) color: vec4<f32>,
+    @location(2) @interpolate(flat) sprite_id: u32,
     @location(3) clip_distances: vec4<f32>,
 }
 
@@ -38,6 +39,7 @@ fn vs_subpixel_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_i
     out.tile_position = to_tile_position(unit_vertex, sprite.tile);
     out.color = hsla_to_rgba(sprite.color);
     out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask.bounds, sprite.transformation);
+    out.sprite_id = instance_id;
     return out;
 }
 
@@ -56,6 +58,8 @@ fn fs_subpixel_sprite(input: SubpixelSpriteOutput) -> SubpixelSpriteFragmentOutp
 
     var out = SubpixelSpriteFragmentOutput();
     out.foreground = vec4<f32>(input.color.rgb, 1.0);
-    out.alpha = vec4<f32>(input.color.a * alpha_corrected, 1.0);
+    let rounded = b_subpixel_sprites[input.sprite_id].content_mask.rounded;
+    let mask_coverage = rounded_mask_coverage(input.position.xy, rounded);
+    out.alpha = vec4<f32>(input.color.a * alpha_corrected * mask_coverage, 1.0);
     return out;
 }

@@ -569,6 +569,19 @@ fn is_shaped(quad: Quad) -> bool {
     return has_rounded_corners(quad.corner_radii) || has_border(quad.border_widths);
 }
 
+// QUILL: the coverage of a rounded content mask at a device position, 1 when
+// the mask has no rounded shape (docs/decisions/rounded-content-masks.md).
+fn rounded_mask_coverage(position: vec2<f32>, mask: RoundedMask) -> f32 {
+    if (!has_rounded_corners(mask.radii)) {
+        return 1.0;
+    }
+    return saturate(0.5 - quad_sdf(position, mask.bounds, mask.radii));
+}
+
+fn has_rounded_mask(mask: ContentMask) -> bool {
+    return has_rounded_corners(mask.rounded.radii);
+}
+
 const CULLED_POSITION: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 1.0);
 
 fn quad_depth(quad_id: u32) -> f32 {
@@ -580,7 +593,8 @@ fn is_opaque_rectangle(quad: Quad) -> bool {
     return quad.background.tag == 0u
         && quad.background.solid.a >= 1.0
         && !has_rounded_corners(quad.corner_radii)
-        && !has_border(quad.border_widths);
+        && !has_border(quad.border_widths)
+        && !has_rounded_mask(quad.content_mask);
 }
 
 struct QuadVarying {
@@ -609,7 +623,8 @@ fn vs_quad(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
     out.position.z = quad_depth(instance_id);
 
     out.border_color = hsla_to_rgba(quad.border_color);
-    let simple = !is_shaped(quad) && quad.background.tag == 0u;
+    let simple = !is_shaped(quad) && quad.background.tag == 0u
+        && !has_rounded_mask(quad.content_mask);
     out.quad_id = instance_id | select(0u, SIMPLE_PRIMITIVE_FLAG, simple);
     let background = prepare_background(quad.background);
     out.background_color0 = background.color0;
@@ -629,6 +644,7 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
         input.background_tag);
     let background = background_color(prepared, quad.background, quad.bounds, input.position.xy);
     let unrounded = !has_rounded_corners(quad.corner_radii);
+    let mask_coverage = rounded_mask_coverage(input.position.xy, quad.content_mask.rounded);
 
     let size = quad.bounds.size;
     let half_size = size / 2.0;
@@ -693,7 +709,7 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
     // However, that might negatively impact performance in the case of
     // reasonable sizes for rounded corners.
     if (is_within_inner_straight_border && !is_near_rounded_corner) {
-        return blend_color(background, 1.0);
+        return blend_color(background, mask_coverage);
     }
 
     // Signed distance of the point to the outside edge of the quad's border. It
@@ -929,7 +945,7 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
         color = over(background, border_color);
     }
 
-    return blend_color(color, saturate(antialias_threshold - outer_sdf));
+    return blend_color(color, saturate(antialias_threshold - outer_sdf) * mask_coverage);
 }
 
 // Returns the dash velocity of a corner given the dash velocity of the two
@@ -1152,6 +1168,7 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
         alpha *= saturate(0.5 - element_distance);
     }
 
+    alpha *= rounded_mask_coverage(input.position.xy, shadow.content_mask.rounded);
     return blend_color(input.color, alpha);
 }
 
@@ -1194,6 +1211,7 @@ struct PathTileVarying {
     @location(2) @interpolate(flat) background_color1: vec4<f32>,
     @location(3) @interpolate(flat) background_tag: u32,
     @location(4) @interpolate(flat) curve_box: vec4<f32>,
+    @location(5) @interpolate(flat) rounded: u32,
 }
 
 @vertex
@@ -1218,6 +1236,7 @@ fn vs_path_tile(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) 
     out.background_color0 = background.color0;
     out.background_color1 = background.color1;
     out.background_tag = background.tag;
+    out.rounded = select(0u, 1u, has_rounded_mask(paint.content_mask));
     return out;
 }
 
@@ -1286,12 +1305,17 @@ fn correct_for_endpoint(endpoint: vec2<f32>, step: f32, reference: vec2<f32>, ce
 @fragment
 fn fs_path_tile(input: PathTileVarying) -> @location(0) vec4<f32> {
     let center = floor(input.position.xy) + 0.5;
-    if (input.background_tag == 0u
+    if (input.background_tag == 0u && input.rounded == 0u
         && (any(center < input.curve_box.xy) || any(center > input.curve_box.zw))) {
         return blend_color(input.background_color0, 1.0);
     }
     let tile = load_path_tile(input.tile_id);
     let paint = load_path_paint(tile.paint);
+    let mask_coverage = rounded_mask_coverage(input.position.xy, paint.content_mask.rounded);
+    if (input.background_tag == 0u
+        && (any(center < input.curve_box.xy) || any(center > input.curve_box.zw))) {
+        return blend_color(input.background_color0, mask_coverage);
+    }
 
     var winding = vec2<f32>(f32(tile.backdrop));
     var weight = vec2<f32>(0.0);
@@ -1325,7 +1349,7 @@ fn fs_path_tile(input: PathTileVarying) -> @location(0) vec4<f32> {
     let prepared = PreparedBackground(input.background_color0, input.background_color1,
         input.background_tag);
     let color = background_color(prepared, paint.color, paint.bounds, input.position.xy);
-    return blend_color(color, coverage);
+    return blend_color(color, coverage * mask_coverage);
 }
 
 // --- underlines --- //
@@ -1356,7 +1380,8 @@ fn vs_underline(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) 
     let clipped = clip_to_mask(unit_vertex, underline.bounds, underline.content_mask.bounds);
     out.position = to_device_position_impl(clipped.position);
     out.color = hsla_to_rgba(underline.color);
-    out.underline_id = instance_id | select(0u, SIMPLE_PRIMITIVE_FLAG, underline.wavy == 0u);
+    let simple = underline.wavy == 0u && !has_rounded_mask(underline.content_mask);
+    out.underline_id = instance_id | select(0u, SIMPLE_PRIMITIVE_FLAG, simple);
     return out;
 }
 
@@ -1370,6 +1395,10 @@ fn fs_underline(input: UnderlineVarying) -> @location(0) vec4<f32> {
     }
 
     let underline = load_underline(input.underline_id);
+    let mask_coverage = rounded_mask_coverage(input.position.xy, underline.content_mask.rounded);
+    if (underline.wavy == 0u) {
+        return blend_color(input.color, input.color.a * mask_coverage);
+    }
     let half_thickness = underline.thickness * 0.5;
 
     let st = (input.position.xy - underline.bounds.origin) / underline.bounds.size.y - vec2<f32>(0.0, 0.5);
@@ -1383,7 +1412,7 @@ fn fs_underline(input: UnderlineVarying) -> @location(0) vec4<f32> {
     let distance_from_top_border = distance_in_pixels - half_thickness;
     let distance_from_bottom_border = distance_in_pixels + half_thickness;
     let alpha = saturate(0.5 - max(-distance_from_bottom_border, distance_from_top_border));
-    return blend_color(input.color, alpha * input.color.a);
+    return blend_color(input.color, alpha * input.color.a * mask_coverage);
 }
 
 // --- monochrome sprites --- //
@@ -1403,6 +1432,7 @@ struct MonoSpriteVarying {
     @builtin(position) position: vec4<f32>,
     @location(0) tile_position: vec2<f32>,
     @location(1) @interpolate(flat) color: vec4<f32>,
+    @location(2) @interpolate(flat) sprite_id: u32,
     @location(3) clip_distances: vec4<f32>,
 }
 
@@ -1417,6 +1447,7 @@ fn vs_mono_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     out.tile_position = to_tile_position(unit_vertex, sprite.tile);
     out.color = hsla_to_rgba(sprite.color);
     out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask.bounds, sprite.transformation);
+    out.sprite_id = instance_id;
     return out;
 }
 
@@ -1430,7 +1461,9 @@ fn fs_mono_sprite(input: MonoSpriteVarying) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
 
-    return blend_color(input.color, alpha_corrected);
+    let rounded = load_mono_sprite(input.sprite_id).content_mask.rounded;
+    return blend_color(input.color,
+        alpha_corrected * rounded_mask_coverage(input.position.xy, rounded));
 }
 
 // --- polychrome sprites --- //
@@ -1463,7 +1496,8 @@ fn vs_poly_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     let clipped = clip_to_mask(unit_vertex, sprite.bounds, sprite.content_mask.bounds);
     out.position = to_device_position_impl(clipped.position);
     out.tile_position = to_tile_position(clipped.unit_vertex, sprite.tile);
-    let simple = !has_rounded_corners(sprite.corner_radii) && sprite.grayscale == 0u;
+    let simple = !has_rounded_corners(sprite.corner_radii) && sprite.grayscale == 0u
+        && !has_rounded_mask(sprite.content_mask);
     out.sprite_id = instance_id | select(0u, SIMPLE_PRIMITIVE_FLAG, simple);
     out.opacity = sprite.opacity;
     return out;
@@ -1481,7 +1515,8 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
         color = vec4<f32>(vec3<f32>(dot(color.rgb, GRAYSCALE_FACTORS)), color.a);
     }
     let distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);
-    return blend_color(color, input.opacity * saturate(0.5 - distance));
+    let mask_coverage = rounded_mask_coverage(input.position.xy, sprite.content_mask.rounded);
+    return blend_color(color, input.opacity * saturate(0.5 - distance) * mask_coverage);
 }
 
 // --- surfaces --- //
@@ -1494,6 +1529,10 @@ struct SurfaceParams {
     r_row: vec4<f32>,
     g_row: vec4<f32>,
     b_row: vec4<f32>,
+    // QUILL: the rounded part of the content mask (origin, size) and its
+    // radii (top left, top right, bottom right, bottom left).
+    mask_rounded: vec4<f32>,
+    mask_radii: vec4<f32>,
 }
 
 @group(1) @binding(0) var<uniform> surface_locals: SurfaceParams;
@@ -1528,5 +1567,9 @@ fn fs_surface(input: SurfaceVarying) -> @location(0) vec4<f32> {
         dot(surface_locals.r_row, y_cb_cr),
         dot(surface_locals.g_row, y_cb_cr),
         dot(surface_locals.b_row, y_cb_cr)));
-    return blend_color(vec4<f32>(rgb, 1.0), 1.0);
+    let rounded = RoundedMask(
+        Bounds(surface_locals.mask_rounded.xy, surface_locals.mask_rounded.zw),
+        Corners(surface_locals.mask_radii.x, surface_locals.mask_radii.y,
+                surface_locals.mask_radii.z, surface_locals.mask_radii.w));
+    return blend_color(vec4<f32>(rgb, 1.0), rounded_mask_coverage(input.position.xy, rounded));
 }

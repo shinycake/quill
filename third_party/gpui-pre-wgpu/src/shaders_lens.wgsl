@@ -292,6 +292,7 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
     }
     let lens = b_lenses[input.lens_id];
     let slot = b_lens_slots[input.lens_id];
+    let mask_coverage = rounded_mask_coverage(input.position.xy, lens.content_mask.rounded);
     let atlas_size = vec2<f32>(textureDimensions(t_lens_atlas, 0));
     let s = lens_shape(lens);
     let strength = lens.strength;
@@ -319,7 +320,7 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
         if (shadow_alpha <= 0.0) {
             discard;
         }
-        return blend_color(vec4<f32>(0.0, 0.0, 0.0, shadow_alpha), lens.opacity);
+        return blend_color(vec4<f32>(0.0, 0.0, 0.0, shadow_alpha), lens.opacity * mask_coverage);
     }
 
     // Surface normal from the bevel height field.
@@ -449,5 +450,5 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
     if (a <= 1e-5) {
         discard;
     }
-    return blend_color(vec4<f32>(g * mask / a, a), lens.opacity);
+    return blend_color(vec4<f32>(g * mask / a, a), lens.opacity * mask_coverage);
 }
