@@ -49,6 +49,13 @@ impl Wallpaper {
     pub(super) fn backdrop(&self) -> u32 {
         match self {
             Wallpaper::Solid(c) => *c,
+            // A dark theme's pattern shows its fill only through the
+            // pattern, over black: the fill alone is a light flash.
+            Wallpaper::Pattern {
+                intensity,
+                inverted,
+                ..
+            } if pattern_on_black(*intensity, *inverted) => 0x000000,
             Wallpaper::Fill(fill, _) | Wallpaper::Pattern { fill, .. } => fill.average(),
             Wallpaper::Image { .. } => 0x202020,
         }
@@ -146,6 +153,12 @@ pub(super) fn rotate(wallpaper: &Wallpaper) -> bool {
     })
 }
 
+/// Whether a pattern paints its fill only through the pattern, black
+/// elsewhere (Telegram's negative intensity, `PatternMix::inverted`).
+pub(super) fn pattern_on_black(intensity: i32, inverted: bool) -> bool {
+    quill::wallpaper_raster::PatternMix::new(&[], intensity, inverted).inverted
+}
+
 fn fill_wallpaper(fill: &BackgroundFill) -> Wallpaper {
     if let BackgroundFill::Freeform(colors) = fill
         && let [only] = colors.as_slice()
@@ -160,7 +173,7 @@ fn fill_wallpaper(fill: &BackgroundFill) -> Wallpaper {
 
 /// What a Telegram background paints, given the local path of its photo or
 /// pattern (`None` while it downloads: a photo is skipped until then, a
-/// pattern shows its fill).
+/// pattern shows its fill, or black for a pattern over black).
 pub(super) fn background_wallpaper(
     background: &Background,
     image_path: Option<&str>,
@@ -180,6 +193,7 @@ pub(super) fn background_wallpaper(
                 inverted: *inverted,
                 rotation: 0,
             },
+            None if pattern_on_black(*intensity, *inverted) => Wallpaper::Solid(0x000000),
             None => fill_wallpaper(fill),
         }),
         // `is_moving` is not drawn: tdesktop has no motion on desktop.
@@ -508,6 +522,30 @@ mod tests {
             .unwrap()
             .with_blur(false);
         assert!(matches!(sharp, Wallpaper::Image { blurred: false, .. }));
+    }
+
+    #[test]
+    fn dark_patterns_stand_in_as_black_never_their_fill() {
+        let fill = BackgroundFill::Freeform(vec![0x8e9dec, 0x9aa5f0, 0x8c9be8]);
+        let dark = |intensity, inverted| {
+            bg(BackgroundType::Pattern {
+                fill: fill.clone(),
+                intensity,
+                inverted,
+                moving: false,
+            })
+        };
+        for background in [dark(-50, false), dark(50, true)] {
+            assert_eq!(
+                background_wallpaper(&background, None),
+                Some(Wallpaper::Solid(0)),
+                "the pattern file is not read yet"
+            );
+            let drawn = background_wallpaper(&background, Some("/tmp/p.tgv")).unwrap();
+            assert_eq!(drawn.backdrop(), 0, "shown while the picture renders");
+        }
+        let light = background_wallpaper(&dark(50, false), Some("/tmp/p.tgv")).unwrap();
+        assert_eq!(light.backdrop(), fill.average());
     }
 
     #[test]

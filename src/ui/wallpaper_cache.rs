@@ -118,6 +118,12 @@ fn worker() {
                 }
             }
         };
+        // Screenshot demos can hold every render, to capture what an area
+        // shows while its picture is still being made.
+        #[cfg(feature = "demo-capture")]
+        if std::env::var_os("QUILL_DEMO_WALLPAPER_HOLD").is_some() {
+            continue;
+        }
         // A render that panics (a malformed photo or pattern) is a wallpaper
         // that cannot be drawn: the job still finishes, and the worker
         // goes on with the next one. A dead worker would leave every

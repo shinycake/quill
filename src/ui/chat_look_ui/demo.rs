@@ -6,7 +6,12 @@
 //! `ready-chat-wallpaper`: the same chat showing a wallpaper the other person
 //! set, delivered as TDLib's `updateChatBackground`.
 //! `QUILL_DEMO_WALLPAPER` picks it: `photo` (the default), `pattern`,
-//! `gradient`, `freeform` or `fill`; `QUILL_DEMO_DIMMING` is its dimming.
+//! `dark-pattern` (a dark theme's pattern over black), `gradient`,
+//! `freeform` or `fill`; `QUILL_DEMO_DIMMING` is its dimming.
+//! `QUILL_DEMO_WALLPAPER_CLOSED=1` opens another chat instead, so a
+//! scripted click opens this one and the capture shows its first frames.
+//! `QUILL_DEMO_WALLPAPER_HOLD=1` holds every wallpaper render, so the
+//! capture shows what paints while the picture is made.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -96,6 +101,20 @@ fn demo_photo(path: &std::path::Path) -> Option<()> {
     image.save(path).ok()
 }
 
+/// An 8 x 8 grid of dots.
+fn demo_pattern_svg() -> String {
+    let dots: String = (0..64)
+        .map(|i| {
+            format!(
+                r#"<circle cx="{}" cy="{}" r="14"/>"#,
+                20 + (i % 8) * 60,
+                20 + (i / 8) * 60
+            )
+        })
+        .collect();
+    format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480">{dots}</svg>"#)
+}
+
 /// The `background` object `kind` asks for, with a string id as TDLib sends.
 fn demo_background(kind: &str) -> Option<String> {
     let dir = quill::scratch::process_dir("quill-chat-wallpaper");
@@ -103,21 +122,17 @@ fn demo_background(kind: &str) -> Option<String> {
     let body = match kind {
         "pattern" => {
             let path = dir.join("pattern.svg");
-            let dots: String = (0..64)
-                .map(|i| {
-                    format!(
-                        r#"<circle cx="{}" cy="{}" r="14"/>"#,
-                        20 + (i % 8) * 60,
-                        20 + (i / 8) * 60
-                    )
-                })
-                .collect();
-            let svg = format!(
-                r#"<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480">{dots}</svg>"#
-            );
-            std::fs::write(&path, svg).ok()?;
+            std::fs::write(&path, demo_pattern_svg()).ok()?;
             format!(
                 r#""document":{{"@type":"document","document":{}}},"type":{{"@type":"backgroundTypePattern","fill":{{"@type":"backgroundFillFreeformGradient","colors":[2041175,4483703,2968404,5587319]}},"intensity":40,"is_inverted":false,"is_moving":false}}"#,
+                local_file(&path)
+            )
+        }
+        "dark-pattern" => {
+            let path = dir.join("pattern.svg");
+            std::fs::write(&path, demo_pattern_svg()).ok()?;
+            format!(
+                r#""document":{{"@type":"document","document":{}}},"type":{{"@type":"backgroundTypePattern","fill":{{"@type":"backgroundFillFreeformGradient","colors":[9346540,10135024,9214952,8226003]}},"intensity":-50,"is_inverted":true,"is_moving":false}}"#,
                 local_file(&path)
             )
         }
@@ -151,7 +166,21 @@ impl QuillApp {
         let Some(chat_id) = demo_private_chat(session) else {
             return;
         };
-        session.open_chat(ChatId(chat_id));
+        let shown = if std::env::var("QUILL_DEMO_WALLPAPER_CLOSED").is_ok() {
+            session
+                .chats
+                .iter()
+                .filter(|(id, chat)| {
+                    **id != chat_id && matches!(chat.kind, ChatKind::Private { .. })
+                })
+                .map(|(id, _)| *id)
+                .min()
+        } else {
+            Some(chat_id)
+        };
+        if let Some(shown) = shown {
+            session.open_chat(ChatId(shown));
+        }
         let json = format!(
             r#"{{"@type":"updateChatBackground","chat_id":{chat_id},"background":{{"@type":"chatBackground","background":{background},"dark_theme_dimming":{dimming}}}}}"#
         );
