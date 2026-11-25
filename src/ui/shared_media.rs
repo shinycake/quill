@@ -8,6 +8,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{SharedMediaTab, SharedMediaTabStatus};
@@ -84,9 +85,7 @@ impl QuillApp {
             .flex_1()
             .min_w_0()
             .h_full()
-            .border_l_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
+            .map(|this| crate::ui::chrome::frames::panel_frame(this, &self.chrome(cx), cx.theme()))
             .flex()
             .flex_col()
             .child(

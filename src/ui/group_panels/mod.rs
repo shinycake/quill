@@ -414,9 +414,9 @@ impl QuillApp {
                 .flex_1()
                 .min_w_0()
                 .h_full()
-                .border_l_1()
-                .border_color(cx.theme().border)
-                .bg(cx.theme().sidebar)
+                .map(|this| {
+                    crate::ui::chrome::frames::panel_frame(this, &self.chrome(cx), cx.theme())
+                })
                 .flex()
                 .flex_col()
                 .child(

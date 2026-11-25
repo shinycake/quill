@@ -110,6 +110,7 @@ impl QuillApp {
                     .bg(gpui_kit::transparent_black()),
             )
             .child(probe);
+        let chrome = self.chrome(cx);
         div()
             .id("sidebar-glass")
             .relative()
@@ -121,9 +122,7 @@ impl QuillApp {
             .h_full()
             .px(px(m.sidebar_inset_x))
             .pb(px(m.sidebar_inset_y))
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
+            .map(|this| crate::ui::chrome::frames::list_frame(this, &chrome, cx.theme()))
             .child(
                 div().relative().flex_1().min_h_0().w_full().child(
                     div()

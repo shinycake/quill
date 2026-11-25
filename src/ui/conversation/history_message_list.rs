@@ -387,6 +387,7 @@ impl QuillApp {
             .begin_render(surface, target, cx);
         let weak = cx.weak_entity();
         let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
+        let window_backdrop = self.window_backdrop(cx);
         let palette = self.history_palette(&look, cx);
         self.history.palette.set(palette);
         let date_pill =
@@ -422,7 +423,7 @@ impl QuillApp {
         // The deferred work also belongs to the account on screen now.
         let screen = self.screen_epoch();
         super::selectable_text::selection_viewport(
-            super::wallpaper::paint_wallpaper(
+            super::wallpaper::history_backdrop(
                 div()
                     .id(id)
                     // Selecting messages gives the rows the keyboard
@@ -463,13 +464,18 @@ impl QuillApp {
                             this.autoscroll_release(cx);
                         }),
                     ),
+                window_backdrop,
                 // The chat's wallpaper, else the account's (None keeps the
                 // theme background).
                 look.wallpaper.as_ref(),
                 look.dimming,
                 super::wallpaper_cache::Slot::History(cx.entity_id()),
             )
-            .children(self.wallpaper_fade(&look, cx))
+            .children(
+                (!window_backdrop)
+                    .then(|| self.wallpaper_fade(&look, cx))
+                    .flatten(),
+            )
             .child(self.landing_scroll_watch(cx))
             .child(super::history_fx::reveal_viewport(
                 reveal,

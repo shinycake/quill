@@ -153,7 +153,7 @@ impl QuillApp {
         let open = self.session().and_then(|s| s.open_chat_id());
         let list = layout.list.and_then(|list| {
             let column = if self.pane_mode() == PaneMode::Ready {
-                self.docked_sidebar(&layout)?
+                self.docked_sidebar(&layout, cx)?
             } else {
                 self.sidebar(
                     auth,
@@ -183,8 +183,17 @@ impl QuillApp {
             .flex()
             .h_full()
             .children(panels);
+        let gutter = layout.gutter;
         let panels = match layout.panels {
             PanelPane::Hidden => None,
+            PanelPane::Column(width) if gutter > 0. => {
+                let column = self.panel_card_column(row, width, gutter, cx);
+                Some(if layout.panel_column() >= width + gutter {
+                    column.into_any_element()
+                } else {
+                    self.sliding_panels(column, width + gutter, layout.panel_column())
+                })
+            }
             PanelPane::Column(width) if layout.panel_column() >= width => {
                 Some(row.flex_none().w(px(width)).into_any_element())
             }
@@ -192,9 +201,7 @@ impl QuillApp {
                 Some(self.sliding_panels(row, width, layout.panel_column()))
             }
             PanelPane::Fill => Some(row.flex_1().min_w_0().into_any_element()),
-            // Drawn as a card over the chat from step 7; until then beside
-            // it, as a column of its own width.
-            PanelPane::Over(width) => Some(row.flex_none().w(px(width)).into_any_element()),
+            PanelPane::Over(width) => Some(self.panel_over(row, width, gutter, cx)),
         };
         let forum = match layout.forum {
             ForumPane::Hidden => None,
@@ -206,6 +213,8 @@ impl QuillApp {
             .flex()
             .flex_1()
             .min_h_0()
+            // Floating: the wallpaper under the cards.
+            .map(|this| self.paint_window_backdrop(this, cx))
             // Outside the peeking column (it blocks the mouse).
             .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
                 this.sidebar_pointer_moved_away(cx);
@@ -231,6 +240,56 @@ impl QuillApp {
             .children(panels)
             .children(peek)
             .children(self.forward_drag_banner(&layout, cx))
+            .into_any_element()
+    }
+
+    /// A docked panel column as a card: `width` wide, its gutter at the
+    /// window's right edge, top and bottom.
+    fn panel_card_column(
+        &self,
+        row: Stateful<Div>,
+        width: f32,
+        gutter: f32,
+        cx: &App,
+    ) -> Stateful<Div> {
+        let chrome = self.chrome(cx);
+        div()
+            .id("side-panels-card")
+            .flex_none()
+            .h_full()
+            .w(px(width + gutter))
+            .pr(px(gutter))
+            .py(px(gutter))
+            .child(crate::ui::chrome::frames::card(
+                row.size_full(),
+                &chrome,
+                cx.theme(),
+            ))
+    }
+
+    /// A panel with no room beside a full conversation column: a card
+    /// over the chat's right part, sliding in from the window's edge.
+    fn panel_over(&self, row: Stateful<Div>, width: f32, gutter: f32, cx: &App) -> AnyElement {
+        let chrome = self.chrome(cx);
+        let shown = self.frame.panels.shown(self.frame.panels.now());
+        let leaving = self
+            .frame
+            .panels
+            .leaving(self.open_panels(), self.frame.panels.now());
+        div()
+            .id("side-panels-over")
+            .debug_selector(|| "side-panels-over".into())
+            .absolute()
+            .top(px(gutter))
+            .bottom(px(gutter))
+            .right(px(gutter - (1. - shown) * (width + gutter)))
+            .w(px(width))
+            .child(crate::ui::chrome::frames::card(
+                row.size_full(),
+                &chrome,
+                cx.theme(),
+            ))
+            .when(!leaving, |this| this.occlude())
             .into_any_element()
     }
 

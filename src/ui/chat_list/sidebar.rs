@@ -74,6 +74,7 @@ impl QuillApp {
     #[inline(never)]
     fn sidebar_column(&self, mode: PaneMode, cx: &mut Context<Self>) -> Stateful<Div> {
         let m = self.density();
+        let chrome = self.chrome(cx);
         div()
             .id("sidebar")
             .when(mode != PaneMode::Ready, |this| this.overflow_y_scroll())
@@ -84,9 +85,7 @@ impl QuillApp {
             .h_full()
             .px(px(m.sidebar_inset_x))
             .py(px(m.sidebar_inset_y))
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
+            .map(|this| crate::ui::chrome::frames::list_frame(this, &chrome, cx.theme()))
             .flex()
             .flex_col()
             .gap(px(m.sidebar_gap))

@@ -191,6 +191,7 @@ impl QuillApp {
         }
         // Choosing a chat from the list ends the peek at it.
         self.history.forum_peek = crate::ui::history_state::ForumPeek::Off;
+        self.close_sidebar_drawer(window, cx);
         // A chat opened from anywhere (a link, a notification) shows over
         // Settings' place.
         self.close_settings();

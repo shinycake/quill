@@ -319,7 +319,44 @@ pub(super) fn paint_wallpaper<T: Styled + ParentElement>(
     this
 }
 
+/// The history's wallpaper: its own (Classic), or none where the window
+/// paints it under the cards (`window_backdrop`), which also reports the
+/// area gradient bubbles take their colours from.
+pub(super) fn history_backdrop<T: Styled + ParentElement>(
+    this: T,
+    window_backdrop: bool,
+    wallpaper: Option<&Wallpaper>,
+    dimming: u8,
+    slot: Slot,
+) -> T {
+    if window_backdrop {
+        this
+    } else {
+        paint_wallpaper(this, wallpaper, dimming, slot)
+    }
+}
+
 impl QuillApp {
+    /// The window's backdrop under the shell's cards: the viewed chat's
+    /// wallpaper across the window when the layout puts it there, else
+    /// `this` unchanged (the history paints its own).
+    pub(super) fn paint_window_backdrop<T: Styled + ParentElement>(
+        &self,
+        this: T,
+        cx: &Context<Self>,
+    ) -> T {
+        if !self.window_backdrop(cx) {
+            return this;
+        }
+        let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
+        paint_wallpaper(
+            this,
+            look.wallpaper.as_ref(),
+            look.dimming,
+            Slot::History(cx.entity_id()),
+        )
+    }
+
     /// A 56 px tile showing an installed background (fill, gradient, pattern
     /// or photo); the caller adds the click handler.
     pub(super) fn wallpaper_tile(

@@ -37,6 +37,7 @@ use super::anim_layer::{AnimationLayer, Layer};
 use super::app::QuillApp;
 use super::conversation::ConversationPart;
 use super::frame_clock::TickDraw;
+use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use std::cell::Cell;
@@ -573,24 +574,40 @@ impl QuillApp {
 
     /// The chat list, as a cached slice filling its laid-out column,
     /// with its layer painting the animated content just above it.
-    pub(super) fn sidebar_slot(&self) -> AnyElement {
+    /// Floating: the column owns its gutter on the left, top and bottom,
+    /// and the list sits in a card inside it.
+    pub(super) fn sidebar_slot(&self, cx: &App) -> AnyElement {
+        let chrome = self.chrome(cx);
+        let gutter = px(chrome.metrics.gutter);
         let column = div()
             .id("sidebar-slot")
             .role(gpui_kit::Role::Group)
             .a11y_tag(quill::agent::ui_driver::redact::REGION_CHAT_LIST)
             .relative()
-            .w(self.list_width() + px(self.folder_rail_width()))
+            .w(gutter + self.list_width() + px(self.folder_rail_width()))
             .flex_none()
-            .h_full();
+            .h_full()
+            .pl(gutter)
+            .py(gutter);
+        let card = super::chrome::frames::card(
+            div()
+                .debug_selector(|| "sidebar-card".into())
+                .relative()
+                .size_full(),
+            &chrome,
+            cx.theme(),
+        );
         match &self.slices.sidebar {
             Some(parts) => {
                 super::image_budget::slice_shown(parts.slice.entity_id(), None);
                 column
-                    .child(parts.slice.clone().cached(full()))
-                    .child(parts.painter.clone().live())
+                    .child(
+                        card.child(parts.slice.clone().cached(full()))
+                            .child(parts.painter.clone().live()),
+                    )
                     .into_any_element()
             }
-            None => column.into_any_element(),
+            None => column.child(card).into_any_element(),
         }
     }
 

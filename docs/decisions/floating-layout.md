@@ -121,3 +121,37 @@ shown the button or a click at the reveal edge opens the drawer.
 
 No debug assertion holds "a gutter never comes with a width of 600 or
 under" (the never-crash rule); a test does.
+
+## Window backdrop, cards and the drawer (step 7)
+
+`chrome::frames` holds the frames every site passes through: `list_frame`
+and `panel_frame` (Classic's border and fill, or a rounded card fill with a
+hairline when the edge asks for one), `card` (the shadow, corners and clip
+around a slot's content; Classic returns its input) and `peek_surface`.
+The shell paints the viewed chat's wallpaper across the shell area
+(`paint_window_backdrop`) and the history paints none (`history_backdrop`),
+so gradient bubbles read their area from the window. The window backdrop
+reuses the history's wallpaper slot, so the cache keeps one picture per
+window. A chat window does the same on its body.
+
+Seam for the renderer's rounded clip: `frames::card_clip` clips to the
+rectangle until `clip_rounded` lands, and the surface inside rounds its own
+fill. Content that paints to a card's edge (a hovered row at the bottom
+corner, a profile cover) still shows square corners until then.
+
+The list slot owns its gutter (left, top, bottom). A docked panel column is
+a padded card; `PanelPane::Over` is an absolute card at the right gutter,
+offset by `(1 - shown) × (width + gutter)` while it slides. In the drawer
+band the header button holds the drawer open, a click at the reveal edge
+does too, a `DismissLayer` beside it closes it, and opening a chat closes
+it. With no chat open the drawer is shown.
+
+Not in this step: the motion durations and curve from `Motion` (Classic's
+200 ms ease-out cubic still drives every slide); step 11 moves the slides
+onto snapshots and takes its timings then. The title bar keeps the theme's
+background (step 10).
+
+Verification note: screenshot demos stop a slide where it is (a pre-existing
+behaviour of the demo pipeline, the same on main for the Classic sidebar
+toggle), so the held drawer's resting place is proved by
+`chrome/cards_tests.rs` (its card lands at x = 16), not by a capture.

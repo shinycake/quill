@@ -6,10 +6,12 @@
 use super::ShellLayout;
 use crate::ui::actions::ToggleSidebar;
 use crate::ui::app::{PaneMode, QuillApp};
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::sidebar_reveal::{LEAVE_GRACE, Peek, REVEAL_EDGE_WIDTH};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use std::time::Duration;
@@ -33,7 +35,20 @@ impl QuillApp {
     /// Hide or show the chat list column (the button, the shortcut and the
     /// View menu). One column has nothing to hide.
     pub(in crate::ui) fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.sidebar_hideable(&self.shell_layout()) {
+        let layout = self.shell_layout();
+        if !self.sidebar_hideable(&layout) {
+            return;
+        }
+        // In the drawer band the button opens and closes the drawer; the
+        // hidden-column preference is not written there.
+        if layout.drawer() {
+            self.frame
+                .sidebar
+                .toggle_drawer(animate(), self.frame.sidebar.now());
+            if self.frame.sidebar.pointer() != Peek::Held {
+                self.release_sidebar_focus(window, cx);
+            }
+            cx.notify();
             return;
         }
         let hidden = !self.frame.sidebar.hidden();
@@ -61,6 +76,32 @@ impl QuillApp {
             .dismiss(animate(), self.frame.sidebar.now())
         {
             self.release_sidebar_focus(window, cx);
+            cx.notify();
+        }
+    }
+
+    /// A held drawer closes (a chat opened, a click on the chat beside it).
+    pub(in crate::ui) fn close_sidebar_drawer(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .frame
+            .sidebar
+            .close_drawer(animate(), self.frame.sidebar.now())
+        {
+            self.release_sidebar_focus(window, cx);
+            cx.notify();
+        }
+    }
+
+    fn hold_sidebar_drawer(&mut self, cx: &mut Context<Self>) {
+        if self
+            .frame
+            .sidebar
+            .hold_drawer(animate(), self.frame.sidebar.now())
+        {
             cx.notify();
         }
     }
@@ -138,15 +179,15 @@ impl QuillApp {
 
     /// The chat list column in the layout: whole, narrowed while it slides
     /// (the list keeps its width and slides out to the left), or gone.
-    pub(super) fn docked_sidebar(&self, layout: &ShellLayout) -> Option<AnyElement> {
+    pub(super) fn docked_sidebar(&self, layout: &ShellLayout, cx: &App) -> Option<AnyElement> {
         let rail = self.folder_rail_width();
-        let full = layout.list? + rail;
+        let full = layout.gutter + layout.list? + rail;
         let visible = layout.list_column(rail);
         if visible <= 0. {
             return None;
         }
         if visible >= full {
-            return Some(self.sidebar_slot());
+            return Some(self.sidebar_slot(cx));
         }
         Some(
             div()
@@ -163,7 +204,7 @@ impl QuillApp {
                         .bottom_0()
                         .left(px(visible - full))
                         .w(px(full))
-                        .child(self.sidebar_slot()),
+                        .child(self.sidebar_slot(cx)),
                 )
                 .into_any_element(),
         )
@@ -179,9 +220,18 @@ impl QuillApp {
         if !self.sidebar_hideable(layout) || !layout.list_column_hidden() {
             return None;
         }
-        let full = layout.list? + self.folder_rail_width();
-        let pointer = self.frame.sidebar.pointer();
-        let shown = self.frame.sidebar.peek(self.frame.sidebar.now());
+        let full = layout.gutter + layout.list? + self.folder_rail_width();
+        // A drawer with no chat open is shown: there is nothing else to see.
+        let empty_drawer =
+            layout.drawer() && self.session().is_none_or(|s| s.open_chat_id().is_none());
+        let (pointer, shown) = if empty_drawer {
+            (Peek::Held, 1.)
+        } else {
+            (
+                self.frame.sidebar.pointer(),
+                self.frame.sidebar.peek(self.frame.sidebar.now()),
+            )
+        };
         if pointer == Peek::Off && shown <= 0. {
             return Some(
                 div()
@@ -196,25 +246,50 @@ impl QuillApp {
                     .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
                         this.sidebar_pointer_entered(cx);
                     }))
+                    // In the drawer band a click at the edge holds it open.
+                    .when(layout.drawer(), |this| {
+                        this.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.hold_sidebar_drawer(cx);
+                        }))
+                    })
                     .into_any_element(),
             );
         }
-        // Kit's sheet surface: the theme's sidebar fill with the overlay
-        // shadow, sliding from the left edge.
-        let surface = div()
-            .id("sidebar-peek")
-            .debug_selector(|| "sidebar-peek".into())
-            .absolute()
-            .top_0()
-            .bottom_0()
-            .left(px((shown - 1.) * full))
-            .w(px(full))
-            .bg(cx.theme().sidebar)
-            .shadow_xl()
-            .child(self.sidebar_slot());
+        // Kit's sheet surface sliding from the left edge, or the list card
+        // with its own gutter and shadow (`chrome::frames`).
+        let chrome = self.chrome(cx);
+        let surface = crate::ui::chrome::frames::peek_surface(
+            div()
+                .id("sidebar-peek")
+                .debug_selector(|| "sidebar-peek".into())
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(px((shown - 1.) * full))
+                .w(px(full)),
+            &chrome,
+            cx.theme(),
+        )
+        .child(self.sidebar_slot(cx));
         if pointer == Peek::Off {
             // Sliding out: nothing under the pointer brings it back.
             return Some(surface.into_any_element());
+        }
+        if empty_drawer {
+            return Some(surface.occlude().into_any_element());
+        }
+        if pointer == Peek::Held {
+            // A click on the chat beside the held drawer closes it.
+            return Some(
+                DismissLayer::new(
+                    "sidebar-drawer-layer",
+                    cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.close_sidebar_drawer(window, cx);
+                    }),
+                )
+                .content(surface)
+                .into_any_element(),
+            );
         }
         // The whole column's width takes the pointer from the first frame,
         // so a quick move into it does not count as leaving.
@@ -242,7 +317,12 @@ impl QuillApp {
         if !self.sidebar_hideable(&self.shell_layout()) {
             return None;
         }
-        let (icon, label) = if self.frame.sidebar.hidden() {
+        let closed = if self.shell_layout().drawer() {
+            self.frame.sidebar.pointer() != Peek::Held
+        } else {
+            self.frame.sidebar.hidden()
+        };
+        let (icon, label) = if closed {
             (IconName::PanelLeftOpen, tr(keys::Q_CHAT_SHOW_SIDEBAR))
         } else {
             (IconName::PanelLeftClose, tr(keys::Q_CHAT_HIDE_SIDEBAR))

@@ -4,6 +4,7 @@
 //! ask which layout is on (`scripts/check-layout-style.py`).
 #![deny(clippy::indexing_slicing)]
 
+pub(in crate::ui) mod frames;
 pub(in crate::ui) mod miniature;
 pub(in crate::ui) mod radius;
 
@@ -48,6 +49,20 @@ impl QuillApp {
         )
     }
 
+    /// The window is in the drawer band (Floating, 601 to 925 wide).
+    pub(in crate::ui) fn in_drawer_band(&self) -> bool {
+        let width = f32::from(self.slices.window.width.get());
+        self.chrome_metrics()
+            .drawer_to
+            .is_some_and(|to| width <= to)
+    }
+
+    /// The wallpaper is the window's, under the cards (Floating), not the
+    /// history's.
+    pub(in crate::ui) fn window_backdrop(&self, cx: &App) -> bool {
+        self.chrome(cx).metrics.backdrop == quill::layout_style::Backdrop::Window
+    }
+
     /// What the window whose state is in place draws this frame.
     pub(in crate::ui) fn chrome(&self, cx: &App) -> Chrome {
         resolve(
@@ -88,7 +103,7 @@ impl QuillApp {
     /// The wallpaper behind the window's chat: the open chat's own, else
     /// the account's.
     fn window_wallpaper(&self, cx: &App) -> Option<super::wallpaper::Wallpaper> {
-        let chat = self.open_chat_id().map(|chat| chat.0);
+        let chat = self.viewed_chat().map(|chat| chat.0);
         self.chat_look(chat, cx).wallpaper
     }
 
@@ -108,3 +123,8 @@ impl QuillApp {
 #[cfg(feature = "demo-capture")]
 #[path = "chrome_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "cards_tests.rs"]
+mod cards_tests;
