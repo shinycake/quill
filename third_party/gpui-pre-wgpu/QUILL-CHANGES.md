@@ -255,3 +255,17 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
   `src/wgpu_atlas.rs`: `WgpuAtlas::removals`. Inked labels draw in their
   own colour here (the sprite shader ignores the ink) and re-rendered
   backdrops copy the frame like any lens.
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`). `src/shaders.wgsl`,
+`shaders_webgl.wgsl` (its texture decoder reads the wider instances),
+`shaders_subpixel.wgsl`, `shaders_lens.wgsl`: `ContentMask` holds a
+`RoundedMask`; the fragment stages multiply their coverage by it, and a
+quad, underline, polychrome sprite or path tile with a rounded mask leaves
+its fast return and the opaque pre-pass; `QUILL-LAYOUT` lines state each
+struct's size and mask offset. `src/yuv_surfaces.rs`: the NV12 surface
+parameters carry the shape (112 bytes). `src/wgpu_renderer.rs`,
+`src/wgpu_renderer/lens.rs`: `ContentMask::rect`, the instance strides and
+the lens layout asserts.

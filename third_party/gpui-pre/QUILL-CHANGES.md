@@ -780,6 +780,12 @@ GPUI update:
 - `src/scene/backdrop_sharp.rs`: `SlotSpace::mask` maps the rounded shape
   too. The reuse hash of `backdrop_frame.rs` hashes whole instances, so it
   covers the shape; `hash_path` hashes it explicitly.
+- `src/style.rs`: `ContentClip` and `Style::content_clip`; with
+  `ContentClip::Rounded`, `Style::overflow_mask` returns the element's
+  rounded shape inside a visible border. `src/styled.rs`:
+  `Styled::clip_rounded`. `src/window.rs`: the hit test asks the hitbox's
+  mask whether its rounded shape holds the point; `rendered_scene` is also
+  built with `test-support`.
 - `src/elements/list.rs`, `uniform_list.rs`, `style.rs`, `path_winding.rs`,
   `debug_overlay.rs`: `ContentMask::rect`.
 

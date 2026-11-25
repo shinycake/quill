@@ -635,3 +635,16 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
   read-back and `to_output` are unchanged. `src/directx_atlas.rs`:
   `DirectXAtlas::removals`. Inked labels draw in their own colour here and
   re-rendered backdrops copy the frame like any lens.
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`). `src/shaders.hlsl`,
+`shaders_lens.hlsl`: `ContentMask` holds a `RoundedMask`; the pixel shaders
+multiply their coverage by it, and a quad, underline, polychrome sprite or
+path tile with a rounded mask leaves its fast return and the opaque
+pre-pass; the monochrome and subpixel sprites pass their instance index;
+`QUILL-LAYOUT` lines state each struct's size and mask offset.
+`src/hdr_surfaces.rs`, `src/yuv_surfaces.rs`: the surface instances carry
+the shape (80 and 112 bytes). `src/backdrop_glass.rs`: the lens size
+assert.

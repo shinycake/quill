@@ -282,3 +282,17 @@ Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`).
 once), each frame's completion handler prints the command buffer's GPU time
 and the frame's lens count to stderr as `GLASSGPU main <ms> <lenses>`.
 Without it nothing is read or printed.
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`). `vendor/gpui/src/window.rs`:
+`ContentMask` gains `rounded: RoundedMask` and `build.rs` exports
+`RoundedMask` to the shader header, so every instance grows by 32 bytes.
+`src/shaders.metal`: `rounded_mask_coverage` and `has_rounded_mask`; every
+fragment function multiplies its coverage by the mask's; a quad, underline,
+polychrome sprite or path tile with a rounded mask leaves its fast return
+and the opaque pre-pass; monochrome sprites pass their instance index and
+surfaces their mask's shape to the fragment; `QUILL-LAYOUT` lines state each
+struct's size and mask offset. `src/metal_renderer.rs`: `ContentMask::rect`
+and a headless pixel test of the coverage.

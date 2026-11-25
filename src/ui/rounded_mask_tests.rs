@@ -258,3 +258,143 @@ fn shader_layouts_match_the_rust_structs() {
     assert_eq!(size_of::<ContentMask<ScaledPixels>>(), 48);
     assert_eq!(size_of::<RoundedMask<ScaledPixels>>(), 32);
 }
+
+/// A 200 x 200 card at (20, 20) with radius 24, a 40 x 40 child at its
+/// top-left corner and a 30 x 30 child in its middle. `clip` picks the
+/// card's clip; the corner child counts its clicks.
+struct CardView {
+    clip: Clip,
+    clicks: std::rc::Rc<std::cell::Cell<u32>>,
+}
+
+#[derive(Clone, Copy)]
+enum Clip {
+    Rounded,
+    OverflowHidden,
+}
+
+impl gpui_kit::Render for CardView {
+    fn render(
+        &mut self,
+        _window: &mut gpui_kit::Window,
+        _cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
+        use gpui_kit::{
+            InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div, hsla,
+        };
+        let clicks = self.clicks.clone();
+        let card = div()
+            .absolute()
+            .left(px(20.0))
+            .top(px(20.0))
+            .w(px(200.0))
+            .h(px(200.0))
+            .rounded(px(24.0))
+            .bg(hsla(0.0, 0.0, 1.0, 1.0));
+        let card = match self.clip {
+            Clip::Rounded => card.clip_rounded(),
+            Clip::OverflowHidden => card.overflow_hidden(),
+        };
+        div().size_full().child(
+            card.child(
+                div()
+                    .id("corner")
+                    .absolute()
+                    .left_0()
+                    .top_0()
+                    .w(px(40.0))
+                    .h(px(40.0))
+                    .bg(hsla(0.0, 1.0, 0.5, 1.0))
+                    .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(85.0))
+                    .top(px(85.0))
+                    .w(px(30.0))
+                    .h(px(30.0))
+                    .bg(hsla(0.6, 1.0, 0.5, 1.0)),
+            ),
+        )
+    }
+}
+
+fn card_window(
+    cx: &mut gpui_kit::TestAppContext,
+    clip: Clip,
+) -> (
+    gpui_kit::VisualTestContext,
+    std::rc::Rc<std::cell::Cell<u32>>,
+) {
+    use gpui_kit::AppContext;
+    use gpui_kit::test::TestWindowExt;
+    cx.update(gpui_kit::init);
+    let clicks = std::rc::Rc::new(std::cell::Cell::new(0));
+    let view_clicks = clicks.clone();
+    let handle = cx.open_window(size(px(300.0), px(300.0)), move |window, cx| {
+        let view = cx.new(|_| CardView {
+            clip,
+            clicks: view_clicks,
+        });
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let mut vcx = gpui_kit::VisualTestContext::from_window(handle.into(), cx);
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    (vcx, clicks)
+}
+
+/// The rounded part of the mask of each quad `side` pixels wide.
+fn masks_of_width(
+    vcx: &mut gpui_kit::VisualTestContext,
+    side: f32,
+) -> Vec<RoundedMask<ScaledPixels>> {
+    vcx.update(|window, _| {
+        let width = ScaledPixels(side * window.scale_factor());
+        window
+            .rendered_scene()
+            .quads
+            .iter()
+            .filter(|quad| quad.bounds.size.width == width)
+            .map(|quad| quad.content_mask.rounded)
+            .collect()
+    })
+}
+
+#[gpui_kit::test]
+fn clip_rounded_cuts_the_child_at_the_corner_only(cx: &mut gpui_kit::TestAppContext) {
+    let (mut vcx, _) = card_window(cx, Clip::Rounded);
+    let corner = masks_of_width(&mut vcx, 40.0);
+    assert_eq!(corner.len(), 1);
+    assert!(corner.iter().all(|mask| !mask.is_none()));
+    let middle = masks_of_width(&mut vcx, 30.0);
+    assert_eq!(middle.len(), 1);
+    assert!(middle.iter().all(RoundedMask::is_none));
+    // The card's own fill is not under its own mask.
+    let card = masks_of_width(&mut vcx, 200.0);
+    assert!(card.iter().all(RoundedMask::is_none));
+}
+
+#[gpui_kit::test]
+fn overflow_hidden_keeps_its_rectangle(cx: &mut gpui_kit::TestAppContext) {
+    let (mut vcx, _) = card_window(cx, Clip::OverflowHidden);
+    let corner = masks_of_width(&mut vcx, 40.0);
+    assert_eq!(corner.len(), 1);
+    assert!(corner.iter().all(RoundedMask::is_none));
+}
+
+#[gpui_kit::test]
+fn the_cut_away_corner_takes_no_click(cx: &mut gpui_kit::TestAppContext) {
+    let (mut vcx, clicks) = card_window(cx, Clip::Rounded);
+    // Inside the child, outside the card's rounding: (21, 21).
+    vcx.simulate_click(point(px(21.0), px(21.0)), gpui_kit::Modifiers::none());
+    assert_eq!(clicks.get(), 0);
+    // Inside both: (50, 50).
+    vcx.simulate_click(point(px(50.0), px(50.0)), gpui_kit::Modifiers::none());
+    assert_eq!(clicks.get(), 1);
+
+    let (mut vcx, clicks) = card_window(cx, Clip::OverflowHidden);
+    vcx.simulate_click(point(px(21.0), px(21.0)), gpui_kit::Modifiers::none());
+    assert_eq!(clicks.get(), 1);
+}

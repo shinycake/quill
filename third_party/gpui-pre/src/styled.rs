@@ -757,6 +757,16 @@ pub trait Styled: Sized {
         self
     }
 
+    /// QUILL (rounded content masks): clips this element's children to its
+    /// rounded shape: its bounds inside a visible border, with its corner
+    /// radii. A child that reaches a corner is cut by it; pointer hits in
+    /// the cut-away corner go to what is behind. `overflow_hidden` keeps
+    /// its rectangular meaning. See docs/decisions/rounded-content-masks.md.
+    fn clip_rounded(mut self) -> Self {
+        self.style().content_clip = Some(crate::ContentClip::Rounded);
+        self
+    }
+
     /// Sets the grid columns of this element.
     fn grid_cols(mut self, cols: u16) -> Self {
         self.style().grid_cols = Some(GridTemplate {

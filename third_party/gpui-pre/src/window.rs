@@ -1252,7 +1252,8 @@ impl Frame {
         let mut hit_test = HitTest::default();
         for hitbox in self.hitboxes.iter().rev() {
             let bounds = hitbox.bounds.intersect(&hitbox.content_mask.bounds);
-            if bounds.contains(&position) {
+            // QUILL: a rounded mask cuts its corners out of the hitbox.
+            if bounds.contains(&position) && hitbox.content_mask.rounded.contains(&position) {
                 hit_test.ids.push(hitbox.id);
                 if !set_hover_hitbox_count
                     && hitbox.behavior == HitboxBehavior::BlockMouseExceptScroll
@@ -3450,7 +3451,7 @@ impl Window {
 
     /// Borrows the most recently rendered frame's scene, so benchmarks can validate their
     /// output and report batch counts without cloning it.
-    #[cfg(feature = "bench-support")]
+    #[cfg(any(feature = "bench-support", feature = "test-support"))]
     pub fn rendered_scene(&self) -> &Scene {
         &self.rendered_frame.scene
     }
