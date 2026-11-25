@@ -13,7 +13,7 @@ use bytemuck::{Pod, Zeroable};
 use collections::FxHashMap;
 use gpui::{
     AtlasTextureId, BackdropLens, DevicePixels, GpuSpecs, PaintedPath, PrimitiveBatch, Scene,
-    Size, get_gamma_correction_ratios, quad_depth, quad_depth_scale,
+    Size, SnapshotQuad, get_gamma_correction_ratios, quad_depth, quad_depth_scale,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -27,6 +27,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 mod lens;
+mod snapshots;
 
 const MAX_INSTANCE_BUFFER_SIZE: u64 = 256 * 1024 * 1024;
 
@@ -157,6 +158,19 @@ struct InstanceBindings {
     polychrome_sprites: InstanceBinding,
     /// QUILL: each lens's fallback quad, for batches that draw flat.
     lens_fallbacks: InstanceBinding,
+    /// QUILL: each snapshot quad as the polychrome sprite that draws it.
+    snapshot_sprites: InstanceBinding,
+}
+
+/// QUILL: what a recording draws into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FrameKind {
+    /// The window's frame (or a capture of it): glass, the frame's depth
+    /// texture, and the end of the frame for video surfaces.
+    Frame,
+    /// A snapshot's texture (`snapshots.rs`), ahead of the frame: no glass,
+    /// the snapshot depth texture, and the frame still to come.
+    Snapshot,
 }
 
 struct WgpuBindGroupLayouts {
@@ -218,6 +232,8 @@ struct WgpuResources {
     yuv_surfaces: YuvSurfaces,
     /// QUILL: backdrop glass's pipelines, atlas and frame copy (`lens.rs`).
     lens: lens::LensState,
+    /// QUILL: snapshot textures (`snapshots.rs`), dropped with the device.
+    snapshots: snapshots::SnapshotPool,
 }
 
 struct CachedTextureBindGroup {
@@ -282,6 +298,9 @@ pub struct WgpuRenderer {
     needs_redraw: bool,
     // Quill: from the first `recover` after a device loss until it succeeds.
     recovering: Recovering,
+    /// QUILL: how many times snapshot textures were lost (a scene not drawn,
+    /// a device recovery), for `PlatformWindow::snapshot_losses`.
+    snapshot_losses: u64,
 }
 
 impl WgpuRenderer {
@@ -541,6 +560,7 @@ impl WgpuRenderer {
             last_surface_error: None,
             needs_redraw: false,
             recovering: Recovering::default(),
+            snapshot_losses: 0,
         })
     }
 }
@@ -1120,6 +1140,10 @@ impl WgpuRenderer {
             return false;
         }
 
+        // QUILL: the frame's snapshots are drawn first, whether or not the
+        // frame is presented, so a texture never misses its scene.
+        self.draw_snapshot_scenes(scene);
+
         // Bail out early if the surface has been unconfigured (e.g. during
         // Android background/rotation transitions).  Attempting to acquire
         // a texture from an unconfigured surface can block indefinitely on
@@ -1197,6 +1221,61 @@ impl WgpuRenderer {
 
         core.resources.queue.present(frame);
         true
+    }
+
+    /// QUILL: draws the scene's snapshot scenes; a scene not drawn (or no
+    /// device to draw it) counts as a loss.
+    fn draw_snapshot_scenes(&mut self, scene: &Scene) {
+        if scene.snapshot_scenes.is_empty() && scene.snapshot_releases.is_empty() {
+            return;
+        }
+        let lost = match self.core_mut() {
+            Some(core) => core.draw_snapshot_scenes(scene),
+            None => !scene.snapshot_scenes.is_empty(),
+        };
+        if lost {
+            self.snapshot_losses = self.snapshot_losses.wrapping_add(1);
+        }
+    }
+
+    /// QUILL: whether this window can draw snapshots (not on the path
+    /// without storage buffers).
+    pub fn snapshots_supported(&self) -> bool {
+        self.core().is_some_and(WgpuRendererCore::snapshots_supported)
+    }
+
+    /// QUILL: draws one snapshot scene now, outside a frame
+    /// (`Window::snapshot_last_frame`), and waits for the GPU, since the
+    /// atlas tiles it reads may be freed as soon as this returns.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn draw_snapshot(&mut self, snapshot: &gpui::SnapshotScene) -> bool {
+        let drawn = self.core_mut().map(|core| {
+            let submission = core.draw_snapshot(snapshot)?;
+            core.resources
+                .device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(submission),
+                    timeout: Some(std::time::Duration::from_secs(5)),
+                })
+                .map_err(|error| anyhow::anyhow!("waiting for the snapshot failed: {error}"))?;
+            anyhow::Ok(())
+        });
+        match drawn {
+            Some(Ok(())) => true,
+            Some(Err(error)) => {
+                log::error!("snapshot not drawn: {error:#}");
+                self.snapshot_losses = self.snapshot_losses.wrapping_add(1);
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// QUILL: how many times this renderer lost snapshot textures. A lost
+    /// device counts at once, and its recovery once more.
+    pub fn snapshot_losses(&self) -> u64 {
+        self.snapshot_losses
+            .wrapping_add(u64::from(self.device_lost()))
     }
 
     /// Quill: `scene` rendered offscreen at the surface's size with this
@@ -1441,6 +1520,7 @@ impl WgpuRendererCore {
                 instance_data,
                 yuv_surfaces,
                 lens: lens::LensState::default(),
+                snapshots: snapshots::SnapshotPool::default(),
             },
             atlas,
             gamma_offset,
@@ -1501,7 +1581,16 @@ impl WgpuRendererCore {
         );
 
         self.atlas.before_frame();
+        self.write_gamma_params();
 
+        self.record_frame(scene, target, size, clear_color, FrameKind::Frame)
+            .inspect_err(|_| {
+                // Queue writes are staged before encoding; flush them even if the frame fails.
+                self.resources.queue.submit(std::iter::empty());
+            })
+    }
+
+    fn write_gamma_params(&self) {
         let gamma_params = GammaParams {
             gamma_ratios: self.rendering_params.gamma_ratios,
             grayscale_enhanced_contrast: self.rendering_params.grayscale_enhanced_contrast,
@@ -1514,12 +1603,6 @@ impl WgpuRendererCore {
             self.gamma_offset,
             bytemuck::bytes_of(&gamma_params),
         );
-
-        self.record_frame(scene, target, size, clear_color)
-            .inspect_err(|_| {
-                // Queue writes are staged before encoding; flush them even if the frame fails.
-                self.resources.queue.submit(std::iter::empty());
-            })
     }
 
     fn record_frame(
@@ -1528,15 +1611,23 @@ impl WgpuRendererCore {
         target: &wgpu::Texture,
         size: Size<DevicePixels>,
         clear_color: wgpu::Color,
+        kind: FrameKind,
     ) -> Result<wgpu::SubmissionIndex> {
         let frame_view = &target.create_view(&wgpu::TextureViewDescriptor::default());
-        self.release_idle_lens_atlas(scene.lenses.len());
         // QUILL: the frame's slots, planned before anything is drawn. What
         // the atlas holds counts as unknown until the frame is submitted
-        // with every batch drawn as planned.
-        let premultiplied_alpha = self.resources().pipelines.premultiplied_alpha;
-        let glass = self.plan_glass(scene, target, premultiplied_alpha);
-        self.resources.lens.forget();
+        // with every batch drawn as planned. A snapshot draws no glass (a
+        // capture never holds a lens) and leaves the frame's slots alone.
+        let glass = match kind {
+            FrameKind::Frame => {
+                self.release_idle_lens_atlas(scene.lenses.len());
+                let premultiplied_alpha = self.resources().pipelines.premultiplied_alpha;
+                let glass = self.plan_glass(scene, target, premultiplied_alpha);
+                self.resources.lens.forget();
+                glass
+            }
+            FrameKind::Snapshot => None,
+        };
         let mut glass_drawn = lens::GlassDrawn::AsPlanned;
         let mut instance_offset = 0;
         let instance_bindings = self
@@ -1574,14 +1665,20 @@ impl WgpuRendererCore {
             bytemuck::bytes_of(&globals),
         );
         self.prepare_texture_bind_groups(scene);
-        self.ensure_depth_texture(size);
         // Owned: a lens batch borrows the renderer mutably mid-pass.
-        let depth_view = self
-            .depth_texture
-            .as_ref()
-            .context("depth texture missing")?
-            .view
-            .clone();
+        let depth_view = match kind {
+            FrameKind::Frame => {
+                self.ensure_depth_texture(size);
+                self.depth_texture
+                    .as_ref()
+                    .context("depth texture missing")?
+                    .view
+                    .clone()
+            }
+            FrameKind::Snapshot => self
+                .snapshot_depth_view()
+                .context("snapshot depth texture missing")?,
+        };
         // Quads are written first, so their instance indices are their
         // indices in `scene.quads` on both transports, which the quad depths
         // rely on.
@@ -1793,9 +1890,12 @@ impl WgpuRendererCore {
                     }
                     // Native views are only composited by the Metal renderer.
                     PrimitiveBatch::NativeViews(_) => {}
-                    // QUILL: this renderer reports no snapshot support, so
-                    // no frame holds one.
-                    PrimitiveBatch::Snapshots(_) => {}
+                    PrimitiveBatch::Snapshots(range) => self.draw_snapshots(
+                        &instance_bindings.snapshot_sprites,
+                        scene,
+                        range,
+                        &mut pass,
+                    ),
                 }
             }
         }
@@ -1804,7 +1904,9 @@ impl WgpuRendererCore {
             .resources()
             .queue
             .submit(std::iter::once(encoder.finish()));
-        self.resources.yuv_surfaces.end_frame();
+        if kind == FrameKind::Frame {
+            self.resources.yuv_surfaces.end_frame();
+        }
         if let (Some(glass), lens::GlassDrawn::AsPlanned) = (&glass, glass_drawn) {
             self.resources.lens.keep(glass);
         }
@@ -1890,6 +1992,15 @@ impl WgpuRendererCore {
                     .lenses
                     .iter()
                     .map(BackdropLens::fallback_quad)
+                    .collect::<Vec<_>>(),
+            )?,
+            snapshot_sprites: self.write_instance_binding(
+                "snapshot_sprites_bind_group",
+                instance_offset,
+                &scene
+                    .snapshots
+                    .iter()
+                    .map(SnapshotQuad::sprite)
                     .collect::<Vec<_>>(),
             )?,
         })
@@ -2681,6 +2792,9 @@ impl WgpuRenderer {
         self.state = RendererState::Released;
         self.atlas.handle_device_lost(context);
         let is_bgr = self.is_bgr;
+        // QUILL: the pool went with the old device; past the count a lost
+        // device showed, so the window loses what it captured meanwhile.
+        let snapshot_losses = self.snapshot_losses.wrapping_add(2);
         *self = Self::new_internal(
             Some(Rc::clone(gpu_context)),
             context,
@@ -2691,6 +2805,7 @@ impl WgpuRenderer {
             self.atlas.clone(),
         )?;
         self.set_subpixel_layout(is_bgr);
+        self.snapshot_losses = snapshot_losses;
         Ok(())
     }
 }
@@ -2908,6 +3023,11 @@ impl WgpuHeadlessRenderer {
             .ok_or_else(|| anyhow::anyhow!("Headless render target was not created"))?
             .texture
             .clone();
+        // QUILL: a scene's snapshots are drawn ahead of it, as in a window.
+        anyhow::ensure!(
+            !self.core.draw_snapshot_scenes(scene),
+            "a snapshot was not drawn"
+        );
         self.core
             .render_frame(scene, &texture, size, wgpu::Color::BLACK)?;
         Ok(())

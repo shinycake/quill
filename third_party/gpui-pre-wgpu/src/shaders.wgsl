@@ -1511,7 +1511,12 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
     }
 
     let sprite = load_poly_sprite(input.sprite_id);
-    if (sprite.grayscale != 0u) {
+    // QUILL: the flags (`grayscale`): bit 2, the texture holds premultiplied
+    // colour (a snapshot, `snapshots.rs`); bit 1, draw it in grey.
+    if ((sprite.grayscale & 2u) != 0u && color.a > 0.0) {
+        color = vec4<f32>(color.rgb / color.a, color.a);
+    }
+    if ((sprite.grayscale & 1u) != 0u) {
         color = vec4<f32>(vec3<f32>(dot(color.rgb, GRAYSCALE_FACTORS)), color.a);
     }
     let distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);

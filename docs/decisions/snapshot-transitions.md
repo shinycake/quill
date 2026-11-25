@@ -94,8 +94,23 @@ exactly (the Metal test compares them, within 1 of 255).
 
 Metal (`gpui-pre-apple/src/metal_renderer/snapshots.rs`) draws snapshot
 scenes through `draw_scene_into`, each on a command buffer committed ahead
-of the frame. wgpu and DirectX 11 skip the batch until their ports land;
-their windows report no snapshot support, so elements paint live there.
+of the frame.
+
+wgpu (`gpui-pre-wgpu/src/wgpu_renderer/snapshots.rs`) draws each snapshot
+scene with the frame's own recording (`record_frame` with
+`FrameKind::Snapshot`) on a submission of its own ahead of the frame's.
+The globals and instance data are rewritten for each submission; queue
+writes apply in submission order, so each pass reads its own. A snapshot
+pass plans no glass, keeps one depth texture of its own (made again when
+the size changes), and does not end the video surfaces' frame. The
+pipelines are built for the target's format, so the textures use it.
+Snapshot scenes are drawn before the surface texture is acquired, so a
+frame that is not presented still fills them. The path without storage
+buffers (`shaders_webgl.wgsl`) reports no support. Recovery drops the pool
+with the device; `snapshot_losses` counts a lost device at once and its
+recovery once more, so what was captured in between is lost too. The
+X11 and Wayland windows forward the three methods through `try_borrow`.
+DirectX 11 skips the batch until its port lands and reports no support.
 
 ## Tests
 

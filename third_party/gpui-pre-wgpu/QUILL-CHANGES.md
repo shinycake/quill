@@ -272,6 +272,17 @@ the lens layout asserts.
 
 ## Snapshots
 
-Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md):
-the renderer skips a `PrimitiveBatch::Snapshots` batch. Windows on this
-backend don't support snapshots yet, so the scene never holds one.
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
+`src/wgpu_renderer/snapshots.rs` (new): a texture per live snapshot in the
+target's format with a bind group that samples it, drawn from
+`Scene::snapshot_scenes` on submissions ahead of the frame's and freed with
+`Scene::snapshot_releases`; snapshot quads draw through the polychrome
+pipeline with the snapshot's texture bound. Not on the path without storage
+buffers. `src/wgpu_renderer.rs`: `record_frame` takes a `FrameKind` (a
+snapshot draws no glass, uses its own depth texture and leaves the video
+surfaces' frame alone), the snapshot sprites are written with the
+instances, the gamma write is a function of its own, and
+`WgpuRenderer::{snapshots_supported, draw_snapshot, snapshot_losses}`
+(a lost device counts at once and its recovery again). The pool lives in
+`WgpuResources`, so recovery drops it. `src/shaders.wgsl`: bit 2 of the
+polychrome flags divides the sample by its alpha.
