@@ -51,26 +51,36 @@ fn floor(role: GlassRole, dark: bool) -> f32 {
 }
 
 /// The middle's frost as a share of the floor, in the light and dark
-/// themes. Below 1 the glass is clearer than the flat black-and-white rule
-/// allows; the blur averages mixed content behind the labels instead, and
-/// the recipe test holds the rule over that average (a mid grey). Light
-/// glass needs a little more for its grey secondary text. Media glass
-/// keeps the whole floor: a video frame can be flat white.
-const MIDDLE_LIGHT: f32 = 0.78;
-const MIDDLE_DARK: f32 = 0.68;
-/// The frost's blur on slabs and on domes. Light, so the glass reads as a
-/// clear pane with the backdrop softened behind it, not as frosted plastic.
-const BLUR: f32 = 6.0;
-const DOME_BLUR: f32 = 2.0;
+/// themes. Well below 1: the glass is as clear as liquid (Idan picked the
+/// clearest of three steps, 2026-11-25), and the recipe test holds the
+/// rule over mixed content (a mid grey) only. Light glass keeps a little
+/// more for its grey secondary text. Media glass keeps the whole floor: a
+/// video frame can be flat white.
+const MIDDLE_LIGHT: f32 = 0.56;
+const MIDDLE_DARK: f32 = 0.49;
+/// The frost's blur on slabs; domes show the backdrop sharp.
+const BLUR: f32 = 2.0;
+const DOME_BLUR: f32 = 0.0;
 /// Bevel of slabs (menus, panels, the bar): the shaded band inside the
 /// rim. Kept narrow, or a tall slab's corners crease along the diagonals.
 const BEVEL: f32 = 24.0;
-/// How far the rim pulls the backdrop in, and how close to the rim the
-/// pull stays (a steep curve gathers it into a thin refracting band, the
-/// way a real pane's edge bends what is behind it).
-const BEND: f32 = 30.0;
-const BEND_CURVE: f32 = 9.75;
-const BEND_DEPTH: f32 = 1.35;
+/// How far the rim pulls the backdrop in, and how deep into the slab the
+/// pull reaches: a deep lens that curves what is behind it like water.
+const BEND: f32 = 80.0;
+const BEND_CURVE: f32 = 4.0;
+const BEND_DEPTH: f32 = 1.7;
+/// The bar shows only its lower edge: a shallow pull gathered at the rim.
+const BAR_BEND: f32 = 30.0;
+const BAR_BEND_CURVE: f32 = 9.75;
+const BAR_BEND_DEPTH: f32 = 1.35;
+/// The bar sits over rows of text right under its own labels, so it keeps
+/// a thicker frost and blur than the rest, or the rows ghost through.
+const BAR_MIDDLE_LIGHT: f32 = 0.78;
+const BAR_MIDDLE_DARK: f32 = 0.68;
+const BAR_BLUR: f32 = 8.0;
+/// Vibrancy of the bent backdrop, and the top sheen of slabs.
+const SATURATION: f32 = 1.3;
+const SHEEN: f32 = 1.8;
 /// Alpha and width of the light line inside the edge of dark glass.
 const HAIRLINE: f32 = 0.24;
 const HAIRLINE_WIDTH: f32 = 1.3;
@@ -126,9 +136,11 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
     let slab_tune = LensTune {
         bend_curve: BEND_CURVE,
         bend_depth: BEND_DEPTH,
+        saturation: SATURATION,
+        reflection: SHEEN,
         ..tune
     };
-    let slab = |tint: Hsla, shadow: f32| LensStyle {
+    let slab = |tint: Hsla, shadow: f32, bend: f32| LensStyle {
         unit: 1.0,
         bevel: BEVEL,
         band: None,
@@ -139,7 +151,7 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
         color: opaque(tint),
         surface: opaque(tint),
         material: LensMaterial::Clear {
-            bend: LensBend::Radial { amount: px(BEND) },
+            bend: LensBend::Radial { amount: px(bend) },
             frost,
             blur: px(BLUR),
             blur_mix: 1.0,
@@ -166,11 +178,11 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
         surface: opaque(tint),
         material: LensMaterial::Clear {
             bend: LensBend::Edge {
-                refract: 44.0,
-                magnify: 0.0,
-                dispersion: 0.12,
-                blur_center: 0.35,
-                blur_edge: 2.2,
+                refract: 64.0,
+                magnify: 0.18,
+                dispersion: 0.25,
+                blur_center: 0.0,
+                blur_edge: 1.0,
             },
             frost,
             blur: px(DOME_BLUR),
@@ -185,7 +197,7 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
         detail: LensDetail::Copied,
     };
     match role {
-        GlassRole::Menu | GlassRole::Panel => slab(colors.popover, 0.12),
+        GlassRole::Menu | GlassRole::Panel => slab(colors.popover, 0.12, BEND),
         // Only the bar's lower edge shows: a quiet rim, or its light
         // reads as a neon line across the list.
         GlassRole::Bar => LensStyle {
@@ -193,13 +205,28 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
             tune: LensTune {
                 rim: 0.35,
                 fresnel: 0.35,
+                bend_curve: BAR_BEND_CURVE,
+                bend_depth: BAR_BEND_DEPTH,
                 ..slab_tune
             },
-            ..slab(colors.sidebar, 0.0)
+            material: LensMaterial::Clear {
+                bend: LensBend::Radial {
+                    amount: px(BAR_BEND),
+                },
+                frost: floor(role, dark)
+                    * if dark {
+                        BAR_MIDDLE_DARK
+                    } else {
+                        BAR_MIDDLE_LIGHT
+                    },
+                blur: px(BAR_BLUR),
+                blur_mix: 1.0,
+            },
+            ..slab(colors.sidebar, 0.0, BAR_BEND)
         },
         GlassRole::MediaText => LensStyle {
             border: None,
-            ..slab(black(), 0.0)
+            ..slab(black(), 0.0, BEND)
         },
         GlassRole::Control | GlassRole::Selection => dome(colors.background),
         GlassRole::MediaIcon => dome(black()),

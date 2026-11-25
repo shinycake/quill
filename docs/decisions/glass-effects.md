@@ -78,37 +78,47 @@ rather than liquid.
   around frosted plastic: the clear ring drew the eye, the 10 px pull
   spread over the whole slab bent nothing visibly, and the doubled
   saturation turned a photo's edge neon. The recipes now follow the kit's
-  card: the same tint from edge to edge over a 6 px blur (2 px on
-  buttons), saturation 1, the kit's rim light, fresnel, top sheen and
-  caustic (a faint inner shade), and a 30 px radial pull gathered into a thin band at the rim
-  (`bend_curve` 9.75, `bend_depth` 1.35) so the pane's edge bends what is
-  behind it. The slab bevel stays at 24 px and the inner shade at 0.25:
-  wider or stronger, a tall menu's corners crease along the diagonals and
+  card: the same tint from edge to edge and the kit's rim light, fresnel,
+  sheen and caustic, with a faint inner shade (0.25) and a 24 px bevel;
+  stronger or wider, a tall menu's corners crease along the diagonals and
   light glass turns grey.
-- **The middle's tint is unchanged:** 0.78 (light) and 0.68 (dark) of what
-  the flat black-and-white rule would need, 0.65 for light menus, 0.49 for
-  dark. Media glass keeps the full rule (0.44 behind icons, 0.56 behind
-  text), since a video frame can be flat white.
+- **As liquid as it goes** (2026-11-25). Idan asked for more liquid and
+  picked the clearest of three steps: a 2 px blur on slabs and none on
+  buttons, an 80 px radial pull that reaches deep into the slab
+  (`bend_curve` 4, `bend_depth` 1.7) so what is behind curves like it is
+  under water, saturation 1.3 and a 1.8x top sheen on slabs. Buttons bend
+  64 units at the rim, magnify their middle by 0.18 and split colour
+  (0.25) at the edge. The middle's frost is 0.56 (light) and 0.49 (dark)
+  of what the flat black-and-white rule would need: 0.46 for light menus,
+  0.35 for dark.
+- **The chat-list bar stays thicker** (0.78 and 0.68 of the rule, an
+  8 px blur, a 30 px pull gathered at the rim): it sits over rows of text
+  right under its own labels, and thinner glass lets the rows ghost
+  through the folder tabs. Its rim light stays low, or its lower edge
+  reads as a neon line.
+- Media glass keeps the full rule (0.44 behind icons, 0.56 behind text),
+  since a video frame can be flat white.
 - Light glass draws the theme's hairline border so it doesn't melt into a
   light window; dark glass and media glass draw a faint white 1.3 px one,
   and buttons draw none (their rim light is the edge). Menus and panels
-  cast a tight shadow (softness 10, offset 4). The chat-list bar keeps its
-  rim light low, or its lower edge reads as a neon line.
+  cast a tight shadow (softness 10, offset 4).
 
 The contrast test beside the recipes holds the limits in both themes:
 
 | Backdrop | Primary text | Secondary text and icons |
 | --- | --- | --- |
-| Mid grey (what the blur makes of mixed content) | 4.5:1 | 3:1 |
-| Flat pure black or pure white | 3:1 | not held |
+| Mid grey (mixed content behind the labels) | 4.5:1 | 2.4:1 |
+| Flat pure black or pure white | 2:1 | not held |
 | Media glass over flat pure black or white | 4.5:1 (icons 3:1) | 3:1 |
 
-This is weaker than the plan's original rule (4.5:1 over flat black and
-white everywhere), and the trade is known: grey secondary text, such as
-the "Sent yesterday" line in a menu, gets faint when light glass sits over
-a nearly black photo, and dark glass over a flat white area drops primary
-text to about 3.4:1. High contrast and Reduce Transparency never draw
-glass.
+This is much weaker than the plan's original rule (4.5:1 over flat black
+and white everywhere), and Idan chose it knowing labels sit over a nearly
+sharp backdrop. The weak cases: dark glass over a flat white area drops
+primary text to about 2.3:1, grey secondary text such as the "Sent
+yesterday" line is about 2.5:1 to 2.9:1 over mixed content, and text
+behind a menu shows under its labels. Labels that adapt to the glass under
+them (the stage 5 inks) would win this back. High contrast and Reduce
+Transparency never draw glass.
 
 When glass can't be drawn (a lens inside a paint layer, past the last band,
 or an unreadable frame) the lens draws its fallback quad in the glass
