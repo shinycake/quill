@@ -46,6 +46,21 @@ pub(crate) enum Peek {
     Leaving {
         since: Instant,
     },
+    /// The drawer is held open (the drawer band of the Floating layout):
+    /// the header's button, the chat-back key or a click at the reveal
+    /// edge opened it, and it stays until something closes it.
+    Held,
+}
+
+/// The chat list as a drawer over the chat (Floating, 601 to 925 px wide):
+/// held open or not. It holds no task. What closes it: a chat opened, a
+/// click on the chat beside it, Escape, the button again, the window
+/// leaving the band, the window closing (it is dropped with its owner).
+/// The user's hidden-sidebar preference is never written by it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Drawer {
+    Closed,
+    Held,
 }
 
 /// [`Peek`] with the redraw task of the leave grace inside `Leaving`, so
@@ -78,6 +93,7 @@ enum Mode {
 #[derive(Debug)]
 pub(crate) struct SidebarReveal {
     mode: Mode,
+    drawer: Drawer,
     docked: Glide,
     peek: Glide,
     /// A test holds the clock still and moves it by hand, so a slow
@@ -94,6 +110,7 @@ impl SidebarReveal {
             } else {
                 Mode::Docked
             },
+            drawer: Drawer::Closed,
             docked: Glide::settled(if hidden { 0. } else { 1. }, now, ease_out_cubic),
             peek: Glide::settled(0., now, ease_out_cubic),
             #[cfg(test)]
@@ -181,8 +198,57 @@ impl SidebarReveal {
         true
     }
 
+    /// Open the drawer and hold it open. Returns whether it was closed.
+    pub(crate) fn hold_drawer(&mut self, animate: bool, now: Instant) -> bool {
+        if self.drawer == Drawer::Held {
+            return false;
+        }
+        self.drawer = Drawer::Held;
+        self.peek.go(1., SLIDE_DURATION, animate, now);
+        true
+    }
+
+    /// Close a held drawer (a chat opened, a click beside it, the button
+    /// again). Returns whether it was held.
+    pub(crate) fn close_drawer(&mut self, animate: bool, now: Instant) -> bool {
+        if self.drawer == Drawer::Closed {
+            return false;
+        }
+        self.drawer = Drawer::Closed;
+        if !matches!(self.mode, Mode::Hidden(Pointer::Hovering)) {
+            self.peek.go(0., SLIDE_DURATION, animate, now);
+        }
+        true
+    }
+
+    /// The header's button in the drawer band.
+    pub(crate) fn toggle_drawer(&mut self, animate: bool, now: Instant) {
+        if !self.close_drawer(animate, now) {
+            self.hold_drawer(animate, now);
+        }
+    }
+
+    /// The window left the drawer band: a held drawer is gone at once, as
+    /// the docked (or hidden) list takes over by the user's preference.
+    pub(crate) fn leave_drawer_band(&mut self, now: Instant) {
+        if self.drawer == Drawer::Held {
+            self.drawer = Drawer::Closed;
+            if !matches!(self.mode, Mode::Hidden(Pointer::Hovering)) {
+                self.peek = Glide::settled(0., now, ease_out_cubic);
+            }
+        }
+    }
+
     /// Escape: slide the peeking column out now. Returns whether it peeked.
     pub(crate) fn dismiss(&mut self, animate: bool, now: Instant) -> bool {
+        if self.drawer == Drawer::Held {
+            self.drawer = Drawer::Closed;
+            if let Mode::Hidden(pointer) = &mut self.mode {
+                *pointer = Pointer::Off;
+            }
+            self.peek.go(0., SLIDE_DURATION, animate, now);
+            return true;
+        }
         match self.mode {
             Mode::Hidden(Pointer::Hovering | Pointer::Leaving { .. }) => {}
             Mode::Hidden(Pointer::Off) | Mode::Docked => return false,
@@ -201,11 +267,16 @@ impl SidebarReveal {
             && now.saturating_duration_since(*since) >= LEAVE_GRACE
         {
             self.mode = Mode::Hidden(Pointer::Off);
-            self.peek.go(0., SLIDE_DURATION, animate, now);
+            if self.drawer == Drawer::Closed {
+                self.peek.go(0., SLIDE_DURATION, animate, now);
+            }
         }
     }
 
     pub(crate) fn pointer(&self) -> Peek {
+        if self.drawer == Drawer::Held {
+            return Peek::Held;
+        }
         match &self.mode {
             Mode::Hidden(pointer) => pointer.view(),
             Mode::Docked => Peek::Off,
@@ -339,6 +410,76 @@ mod tests {
         assert!(reveal.dismiss(false, t0));
         assert_eq!(reveal.pointer(), Peek::Off);
         assert_eq!(reveal.peek(t0), 0.);
+    }
+
+    #[test]
+    fn the_drawer_holds_until_the_button_closes_it() {
+        let t0 = Instant::now();
+        let mut reveal = SidebarReveal::new(false, t0);
+        assert!(reveal.hold_drawer(true, t0));
+        assert_eq!(reveal.pointer(), Peek::Held);
+        assert!(!reveal.hold_drawer(true, t0), "already held");
+        let open = t0 + SLIDE_DURATION;
+        assert_eq!(reveal.peek(open), 1.);
+        assert_eq!(reveal.docked(open), 1., "the preference is untouched");
+        // Long after: still held, no grace runs out.
+        reveal.settle(false, true, open + LEAVE_GRACE * 10);
+        assert_eq!(reveal.pointer(), Peek::Held);
+        reveal.toggle_drawer(true, open);
+        assert_eq!(reveal.pointer(), Peek::Off);
+        assert_eq!(reveal.peek(open + SLIDE_DURATION), 0.);
+        reveal.toggle_drawer(false, open);
+        assert_eq!(reveal.pointer(), Peek::Held);
+        assert!(!reveal.hidden());
+    }
+
+    #[test]
+    fn a_chat_opened_or_a_click_beside_closes_the_drawer() {
+        let t0 = Instant::now();
+        let mut reveal = SidebarReveal::new(false, t0);
+        reveal.hold_drawer(false, t0);
+        assert!(reveal.close_drawer(true, t0));
+        assert_eq!(reveal.pointer(), Peek::Off);
+        assert!(!reveal.close_drawer(true, t0), "already closed");
+        assert!(reveal.moving(t0 + HALF));
+        assert_eq!(reveal.peek(t0 + SLIDE_DURATION), 0.);
+    }
+
+    #[test]
+    fn escape_closes_the_drawer() {
+        let t0 = Instant::now();
+        let mut reveal = SidebarReveal::new(true, t0);
+        reveal.hold_drawer(false, t0);
+        assert!(reveal.dismiss(false, t0));
+        assert_eq!(reveal.pointer(), Peek::Off);
+        assert_eq!(reveal.peek(t0), 0.);
+        assert!(reveal.hidden(), "the preference is untouched");
+    }
+
+    #[test]
+    fn leaving_the_band_drops_the_drawer_at_once() {
+        let t0 = Instant::now();
+        for hidden in [false, true] {
+            let mut reveal = SidebarReveal::new(hidden, t0);
+            reveal.hold_drawer(true, t0);
+            reveal.leave_drawer_band(t0 + HALF);
+            assert_eq!(reveal.pointer(), Peek::Off);
+            assert_eq!(reveal.peek(t0 + HALF), 0.);
+            assert!(!reveal.moving(t0 + HALF));
+            assert_eq!(reveal.hidden(), hidden, "the preference survives");
+        }
+    }
+
+    #[test]
+    fn a_hover_peek_left_behind_a_held_drawer_keeps_it_open() {
+        let t0 = Instant::now();
+        let mut reveal = SidebarReveal::new(true, t0);
+        reveal.pointer_entered(false, t0);
+        reveal.hold_drawer(false, t0);
+        reveal.pointer_left(t0, || Task::ready(()));
+        reveal.settle(false, false, t0 + LEAVE_GRACE * 2);
+        assert_eq!(reveal.pointer(), Peek::Held);
+        assert_eq!(reveal.peek(t0 + LEAVE_GRACE * 2), 1.);
     }
 
     #[test]

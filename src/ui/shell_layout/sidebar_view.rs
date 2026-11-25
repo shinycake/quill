@@ -95,6 +95,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let now = self.frame.sidebar.now();
+        // Out of the drawer band a held drawer is gone at once.
+        if !layout.drawer() {
+            self.frame.sidebar.leave_drawer_band(now);
+        }
         if self.sidebar_hideable(layout) {
             let held = self.sidebar_peek_held(window, cx);
             self.frame.sidebar.settle(held, animate(), now);

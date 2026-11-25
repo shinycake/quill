@@ -92,3 +92,32 @@ The cache drops the oldest pictures over its budget, but never one shown
 this frame, and always keeps the newest. A window-wide wallpaper at 2560 px
 can then exceed the budget without the picture on screen being evicted and
 decoded again every frame.
+
+## Shell geometry and the drawer band (step 6)
+
+`ShellInput` carries `gutter`, `chat_column` and `drawer_to` from the
+metrics (`QuillApp::chrome_metrics`, which needs no theme, so the shell
+keeps reading its input without a `cx`). The list column owns its left
+gutter, a docked panel column its right one, a forum column the gutter
+before it. With a `chat_column` a panel docks only when the list, a full
+696 column with its two gutters and the panel fit; otherwise it is
+`PanelPane::Over`, a card over the chat that leaves the chat pane its whole
+width. `Fill` is not produced then.
+
+From 601 to 925 the list is a drawer (`ListDock::Drawer`): docked 0 whatever
+the preference, no forum column, no folder rail, its width the dragged
+width less two gutters and a 44 px strip of chat.
+
+Deviation: the plan put `Held` into `Peek`. `Peek` is the view of the
+pointer stage that lives inside the hidden preference (`Mode::Hidden`), so
+a held drawer in a window whose list is not hidden had nowhere to live.
+`SidebarReveal` gains its own two-stage enum, `Drawer { Closed, Held }`,
+next to `Mode`, and `Peek::Held` is how the view reads it. Its exits: a chat
+opened, a click beside it (`DismissLayer`), Escape, the button again, the
+window leaving the band (`leave_drawer_band`, at once), the window closing
+(dropped with its owner). None of them writes the hidden preference. Hover
+peeking in the band works as before when the list is hidden; with the list
+shown the button or a click at the reveal edge opens the drawer.
+
+No debug assertion holds "a gutter never comes with a width of 600 or
+under" (the never-crash rule); a test does.
