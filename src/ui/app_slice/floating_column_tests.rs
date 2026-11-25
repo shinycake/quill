@@ -102,3 +102,44 @@ fn typing_dots_tick_in_the_header_alone(cx: &mut TestAppContext) {
     }
     let _ = take_slice_renders();
 }
+
+/// The rows lay out in the column the pills sit in: their bubble room is
+/// the column's, and every row stays between the pills' edges.
+fn assert_rows_in_column(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, column: f32) {
+    let composer = vcx.debug_bounds("conversation-composer").expect("composer");
+    let (width, rows) = app.read_with(vcx, |app, _| {
+        (
+            app.history.measure.get().width(),
+            app.history.hit_rows.borrow().clone(),
+        )
+    });
+    let laid = quill::bubble_layout::HistoryWidth::new(
+        crate::ui::chat_wide_ui::history_pane_width(column),
+    );
+    assert_eq!(width, laid, "bubbles are laid out for the column");
+    assert!(!rows.is_empty(), "rows painted");
+    for (ix, row) in rows {
+        assert!(
+            row.left() >= composer.left() && row.right() <= composer.right(),
+            "row {ix} at {:?}..{:?}, column {:?}..{:?}",
+            row.left(),
+            row.right(),
+            composer.left(),
+            composer.right()
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn wide_rows_sit_in_the_centred_column(cx: &mut TestAppContext) {
+    let _prefs = own_appearance_prefs("quill-pills-rows-wide");
+    let (app, mut vcx) = open(cx, "ready-chats", 1440., LayoutStyle::Floating);
+    assert_rows_in_column(&app, &mut vcx, 696.);
+}
+
+#[gpui_kit::test]
+fn narrow_rows_take_the_pane_less_its_gutters(cx: &mut TestAppContext) {
+    let _prefs = own_appearance_prefs("quill-pills-rows-narrow");
+    let (app, mut vcx) = open(cx, "ready-chats", 700., LayoutStyle::Floating);
+    assert_rows_in_column(&app, &mut vcx, 700. - 32.);
+}

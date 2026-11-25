@@ -84,7 +84,7 @@ impl QuillApp {
         let metrics = self.chrome_metrics();
         let (top, composer) = self.slices.window.pill_heights();
         let frame = frame::floating_frame(frame::FrameInput {
-            pane: 0.,
+            pane: f32::from(self.history.measure.get().pane()),
             left_reserved: 0.,
             gutter: metrics.gutter,
             bar_gap: metrics.bar_gap,
@@ -92,10 +92,18 @@ impl QuillApp {
             top: f32::from(top),
             composer: f32::from(composer),
         });
-        frame::HistoryInsets {
-            left: px(0.),
-            right: px(0.),
-            ..frame.insets
+        frame.insets
+    }
+
+    /// How the history's rows are placed: across the pane, or in the
+    /// centred column when the bars float.
+    pub(in crate::ui) fn row_column(&self) -> frame::RowColumn {
+        match (self.bars_float(), self.chrome_metrics().chat_column) {
+            (true, Some(column)) => frame::RowColumn::Centred {
+                gutter: self.chrome_metrics().gutter,
+                column,
+            },
+            _ => frame::RowColumn::Pane,
         }
     }
 

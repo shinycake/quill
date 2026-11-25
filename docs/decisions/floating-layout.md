@@ -220,3 +220,20 @@ sit over the composer pill's box.
 Not tested directly: that the tail is kept when the composer grows (the
 kit's tail-follow covers it, as the last row's padding is part of the
 content), and scroll memory across a composer height change.
+
+## The centred column (step 8d)
+
+`chrome::frame::RowColumn` says how rows are placed: across the pane
+(Classic), or in a column centred in it, at most `chat_column` wide and
+a gutter from each edge. The seed and the paint probe lay bubbles out
+for `RowColumn::width_in(pane)`, so the column of 696 lays text, media
+and albums out as a wide Classic pane does, and the wide layout (880)
+never turns on in Floating; the adaptive-wide checkbox hides by its
+own rule. The probe still keeps the pane's width: when only the sides
+move (a resize, the list or a panel sliding), it redraws the history
+for the new row padding without measuring rows again.
+
+The rows' side padding is `HistoryInsets.left/right` plus the kit's
+12 px row inset (the kit's row padding replaces its `px_3`), so
+bubbles sit 12 px inside the pills' edges. `left_reserved` stays 0
+until the left tab column becomes a card (step 8e).

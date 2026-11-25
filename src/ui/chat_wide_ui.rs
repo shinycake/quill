@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::chrome::frame::RowColumn;
 use super::history_anchor::HistoryMeasure;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::*;
@@ -52,10 +53,11 @@ impl QuillApp {
     /// probe is the source of truth from then on.
     pub(in crate::ui) fn seed_history_width(&self, pane: f32) {
         if !self.history.measure.get().is_measured() {
+            let rows = self.row_column().width_in(pane);
             self.history
                 .measure
                 .set(HistoryMeasure::Seeded(HistoryWidth::new(
-                    history_pane_width(pane),
+                    history_pane_width(rows),
                 )));
         }
     }
@@ -76,10 +78,13 @@ impl QuillApp {
         let measure = self.history.measure.clone();
         let app = cx.weak_entity();
         let screen = self.screen_epoch();
+        // Floating lays the rows out in the centred column, whose sides
+        // follow the pane.
+        let column = self.row_column();
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {
-                let width = f32::from(bounds.size.width);
+                let width = column.width_in(f32::from(bounds.size.width));
                 let now = ChatLayout::for_width(width);
                 let measured = HistoryWidth::new(history_pane_width(width));
                 let before = measure.replace(HistoryMeasure::Measured {
@@ -89,6 +94,20 @@ impl QuillApp {
                 });
                 let layout_changed = before.layout() != now;
                 let width_changed = before.width() != measured;
+                // The column's sides moved: the rows' padding follows.
+                let sides_moved = column != RowColumn::Pane && before.pane() != bounds.size.width;
+                if sides_moved && !layout_changed && !width_changed {
+                    let app = app.clone();
+                    window.defer(cx, move |window, cx| {
+                        let _ = app.update(cx, |this, cx| {
+                            this.in_screen_scope(screen, cx, |this, cx| {
+                                this.in_window_of(window, cx, |this, _, cx| {
+                                    this.notify_conversation(cx);
+                                });
+                            });
+                        });
+                    });
+                }
                 if layout_changed || width_changed {
                     let app = app.clone();
                     window.defer(cx, move |window, cx| {

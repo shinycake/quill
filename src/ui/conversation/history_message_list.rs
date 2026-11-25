@@ -536,7 +536,11 @@ impl QuillApp {
                     scroller.with_list_style(
                         StyleRefinement::default()
                             .pt(insets.top + px(8.))
-                            .pb(insets.bottom + px(8.)),
+                            .pb(insets.bottom + px(8.))
+                            // The kit's own row inset stays inside the
+                            // column: these replace its `px_3`.
+                            .pl(insets.left + px(crate::ui::chat_wide_ui::ROW_INSET))
+                            .pr(insets.right + px(crate::ui::chat_wide_ui::ROW_INSET)),
                     )
                 })
                 // Jump to latest: shows the unread count, and replaces a

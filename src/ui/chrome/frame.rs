@@ -62,6 +62,35 @@ impl HistoryInsets {
     }
 }
 
+/// How the rows are placed in a history pane: across it (Classic), or in
+/// a centred column at most `column` wide, `gutter` from its edges.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::ui) enum RowColumn {
+    Pane,
+    Centred { gutter: f32, column: f32 },
+}
+
+impl RowColumn {
+    /// The width rows are laid out for in a pane `pane` wide.
+    pub(in crate::ui) fn width_in(self, pane: f32) -> f32 {
+        match self {
+            Self::Pane => pane,
+            Self::Centred { gutter, column } => {
+                floating_frame(FrameInput {
+                    pane,
+                    left_reserved: 0.,
+                    gutter,
+                    bar_gap: 0.,
+                    chat_column: column,
+                    top: 0.,
+                    composer: 0.,
+                })
+                .column
+            }
+        }
+    }
+}
+
 pub(in crate::ui) fn floating_frame(input: FrameInput) -> FloatingFrame {
     let room = (input.pane - input.left_reserved).max(0.);
     let column = input.chat_column.min(room - 2. * input.gutter).max(0.);
@@ -115,6 +144,18 @@ mod tests {
         }
         assert_eq!(floating_frame(input(700.)).column, 668.);
         assert_eq!(floating_frame(input(1440.)).column, 696.);
+    }
+
+    #[test]
+    fn the_rows_take_the_pane_or_the_centred_column() {
+        assert_eq!(RowColumn::Pane.width_in(1440.), 1440.);
+        let centred = RowColumn::Centred {
+            gutter: 16.,
+            column: 696.,
+        };
+        assert_eq!(centred.width_in(1440.), 696.);
+        assert_eq!(centred.width_in(700.), 668.);
+        assert_eq!(centred.width_in(728.), 696.);
     }
 
     #[test]
