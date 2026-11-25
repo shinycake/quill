@@ -237,7 +237,7 @@ impl QuillApp {
                         .history
                         .viewport
                         .get()
-                        .map_or(f32::MAX, |view| f32::from(view.size.width));
+                        .map_or(f32::MAX, |view| f32::from(view.full.size.width));
                     quill::chat_wide::selection_right(limit, width)
                 });
                 let selection = self.selection_row(row_chat, row_msg, wide_right, cx);

@@ -598,7 +598,7 @@ impl QuillApp {
         target: Target,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let width = f32::from(self.history.viewport.get()?.size.width);
+        let width = f32::from(self.history.viewport.get()?.full.size.width);
         let layout = IndicatorLayout::compute(state, width);
         let palette = self.history.palette.get();
         let (bg, fg) = super::chat_palette::with_palette(palette, false, || {

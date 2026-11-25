@@ -99,7 +99,8 @@ impl QuillApp {
                         .absolute()
                         .left_0()
                         .right_0()
-                        .bottom_0()
+                        // Over the composer pill when it floats.
+                        .bottom(px(self.chrome_metrics().gutter))
                         .h(self.slices.composer_height())
                         .child(toast)
                 }))

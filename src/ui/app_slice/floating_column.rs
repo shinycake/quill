@@ -105,8 +105,14 @@ impl QuillApp {
     }
 
     /// What a measured slice height redraws when it changes: the view that
-    /// sizes the slice's box (`AppOnly`, or the chat window).
-    pub(super) fn height_redraw(&self) -> Option<EntityId> {
-        self.windows.view_in_place().or(self.slices.app_only_id())
+    /// sizes the slice's box (`AppOnly`, or the chat window), and the
+    /// history when its rows clear the pills.
+    pub(super) fn height_redraw(&self) -> Vec<EntityId> {
+        let slot = self.windows.view_in_place().or(self.slices.app_only_id());
+        let history = self
+            .bars_float()
+            .then(|| self.conversation_view_id())
+            .flatten();
+        slot.into_iter().chain(history).collect()
     }
 }

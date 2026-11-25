@@ -176,7 +176,12 @@ impl QuillApp {
         else {
             return;
         };
-        let Some(viewport) = self.history.viewport.get().map(|view| view.size.height) else {
+        let Some(viewport) = self
+            .history
+            .viewport
+            .get()
+            .map(|view| view.readable.size.height)
+        else {
             return;
         };
         let seen = self.inject_key(viewport);

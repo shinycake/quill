@@ -125,6 +125,11 @@ impl WindowSlices {
         self.conversation_frame.get() != ConversationFrame::Absent
     }
 
+    /// The header's and the composer's heights as last laid out.
+    pub(in crate::ui) fn pill_heights(&self) -> (Pixels, Pixels) {
+        (self.top_height.get(), self.composer_height.get())
+    }
+
     /// The slices that show the conversation.
     pub(in crate::ui) fn slice_ids(&self) -> impl Iterator<Item = EntityId> {
         let conversation = self.conversation.as_ref().map(|p| p.slice.entity_id());

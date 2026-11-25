@@ -138,7 +138,9 @@ impl Sim {
     fn wheel(&mut self, dy: f32) {
         let at = self
             .app
-            .update(&mut self.vcx, |app, _| app.history.viewport.get())
+            .update(&mut self.vcx, |app, _| {
+                app.history.viewport.get().map(|view| view.full)
+            })
             .expect("history painted")
             .center();
         self.vcx.simulate_event(ScrollEvent {

@@ -241,13 +241,18 @@ impl QuillApp {
         } else {
             hit.first_id()?
         };
-        let beyond = self.history.viewport.get().map_or(0, |view| {
-            edge_delta(
-                f32::from(pointer.y),
-                f32::from(view.top()),
-                f32::from(view.bottom()),
-            )
-        });
+        let beyond = self
+            .history
+            .viewport
+            .get()
+            .map(|view| view.full)
+            .map_or(0, |view| {
+                edge_delta(
+                    f32::from(pointer.y),
+                    f32::from(view.top()),
+                    f32::from(view.bottom()),
+                )
+            });
         match range.as_mut() {
             None => {
                 if to == press && beyond == 0 {
@@ -491,12 +496,16 @@ impl QuillApp {
                     // scroller listens.
                     let anchor = this
                         .update(cx, |this, _| {
-                            this.history.viewport.get().map(|view| {
-                                point(
-                                    pointer.x.max(view.left()).min(view.right() - px(1.)),
-                                    pointer.y.max(view.top()).min(view.bottom() - px(1.)),
-                                )
-                            })
+                            this.history
+                                .viewport
+                                .get()
+                                .map(|view| view.full)
+                                .map(|view| {
+                                    point(
+                                        pointer.x.max(view.left()).min(view.right() - px(1.)),
+                                        pointer.y.max(view.top()).min(view.bottom() - px(1.)),
+                                    )
+                                })
                         })
                         .ok()
                         .flatten();
@@ -570,7 +579,7 @@ mod tests {
     /// scroller also paints overdraw rows outside the viewport).
     fn rows(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Vec<Row> {
         app.read_with(cx, |app, _| {
-            let viewport = app.history.viewport.get().expect("the list painted");
+            let viewport = app.history.viewport.get().expect("the list painted").full;
             let mut painted: Vec<(usize, Bounds<Pixels>)> = app.history.hit_rows.borrow().clone();
             painted.sort_by_key(|row| row.1.top());
             painted
@@ -798,7 +807,8 @@ mod tests {
         drag(vcx, blank_point(a), blank_point(b));
         let viewport = app
             .read_with(vcx, |app, _| app.history.viewport.get())
-            .expect("the list painted");
+            .expect("the list painted")
+            .full;
         let below = point(blank_point(b).x, viewport.bottom() + px(40.));
         let step = app.update_in(vcx, |app, window, cx| {
             app.selection_drag_pointer(below, window, cx)

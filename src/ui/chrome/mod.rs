@@ -4,6 +4,7 @@
 //! ask which layout is on (`scripts/check-layout-style.py`).
 #![deny(clippy::indexing_slicing)]
 
+pub(in crate::ui) mod frame;
 pub(in crate::ui) mod frames;
 pub(in crate::ui) mod miniature;
 pub(in crate::ui) mod radius;
@@ -72,6 +73,30 @@ impl QuillApp {
     /// The composer's frame in this window (`frames::composer_frame`).
     pub(in crate::ui) fn composer_frame<E: Styled + FluentBuilder>(&self, this: E, cx: &App) -> E {
         frames::composer_frame(this, &self.chrome(cx), cx.theme())
+    }
+
+    /// How far the history's rows keep clear of the pills over them: none
+    /// while the bars are stacked.
+    pub(in crate::ui) fn history_insets(&self) -> frame::HistoryInsets {
+        if !self.bars_float() {
+            return frame::HistoryInsets::ZERO;
+        }
+        let metrics = self.chrome_metrics();
+        let (top, composer) = self.slices.window.pill_heights();
+        let frame = frame::floating_frame(frame::FrameInput {
+            pane: 0.,
+            left_reserved: 0.,
+            gutter: metrics.gutter,
+            bar_gap: metrics.bar_gap,
+            chat_column: metrics.chat_column.unwrap_or(0.),
+            top: f32::from(top),
+            composer: f32::from(composer),
+        });
+        frame::HistoryInsets {
+            left: px(0.),
+            right: px(0.),
+            ..frame.insets
+        }
     }
 
     /// The header and the bars float over the history in their own slice.

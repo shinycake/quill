@@ -552,6 +552,8 @@ mod header_view;
 mod history_message_list;
 mod history_reads;
 mod history_scroll_memory;
+mod history_viewport;
+pub(super) use history_viewport::HistoryViewport;
 pub(super) mod landing;
 mod older_retry;
 mod render_history_row_body;

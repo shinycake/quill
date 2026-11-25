@@ -473,7 +473,11 @@ impl QuillApp {
         let alpha = self.history.scroll_date.opacity(now);
         // The wide layout centres it in its column (`PaintDate` with
         // `chatWide`).
-        let column = div().absolute().top_2().left_0();
+        // Under the header pill when one floats over the rows.
+        let column = div()
+            .absolute()
+            .top(self.history_insets().top + px(8.))
+            .left_0();
         let column = if self.chat_wide() {
             column.w(px(quill::chat_wide::WIDE_CHAT_WIDTH))
         } else {

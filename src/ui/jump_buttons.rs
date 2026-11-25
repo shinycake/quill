@@ -103,11 +103,13 @@ impl QuillApp {
         }
         let weak = cx.weak_entity();
         let glass = crate::ui::glass::lens(crate::ui::glass::GlassRole::Control, cx);
+        // Clear of the composer pill when it floats over the rows.
+        let insets = self.history_insets();
         Some(
             div()
                 .absolute()
-                .right(px(CORNER_INSET))
-                .bottom(px(CORNER_INSET + JUMP_BUTTON_ROOM * lift))
+                .right(px(CORNER_INSET) + insets.right)
+                .bottom(px(CORNER_INSET + JUMP_BUTTON_ROOM * lift) + insets.bottom)
                 .flex()
                 .flex_col()
                 .items_end()

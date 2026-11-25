@@ -163,7 +163,9 @@ fn scrolling_up_from_the_ad_stays_up(cx: &mut TestAppContext) {
     );
     let footer = vcx.debug_bounds("sponsored-ad-9101").expect("ad painted");
     let viewport = app
-        .read_with(vcx, |app, _| app.history.viewport.get())
+        .read_with(vcx, |app, _| {
+            app.history.viewport.get().map(|view| view.full)
+        })
         .expect("history painted");
     assert!(
         footer.bottom() <= viewport.bottom() + px(0.5),
@@ -202,7 +204,9 @@ fn scrolling_past_the_end_adds_the_next_ad(cx: &mut TestAppContext) {
     new_ads(&app, vcx, 0, None);
     assert!(placed(&app, vcx).is_empty(), "no ad before the reader asks");
     let viewport = app
-        .read_with(vcx, |app, _| app.history.viewport.get())
+        .read_with(vcx, |app, _| {
+            app.history.viewport.get().map(|view| view.full)
+        })
         .expect("history painted");
     let last = last_post(&app, vcx);
     assert!(scroll_past_end(&app, vcx));
@@ -227,7 +231,9 @@ fn a_scroll_inside_the_history_adds_no_ad(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     new_ads(&app, vcx, 0, None);
     let viewport = app
-        .read_with(vcx, |app, _| app.history.viewport.get())
+        .read_with(vcx, |app, _| {
+            app.history.viewport.get().map(|view| view.full)
+        })
         .expect("history painted");
     wheel(vcx, viewport.center(), 200.);
     for _ in 0..4 {
@@ -267,7 +273,14 @@ fn ads_go_between_posts_two_screens_apart(cx: &mut TestAppContext) {
             .estimated_row_heights(first_unread + 1..anchor + 1)
             .expect("rows measured");
         let height: f32 = heights.iter().map(|h| f32::from(*h)).sum();
-        let viewport = app.history.viewport.get().expect("painted").size.height;
+        let viewport = app
+            .history
+            .viewport
+            .get()
+            .map(|view| view.full)
+            .expect("painted")
+            .size
+            .height;
         (height, f32::from(viewport))
     });
     assert!(*after - 111 >= 3, "at least three posts apart: {after}");

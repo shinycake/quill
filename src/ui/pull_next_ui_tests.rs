@@ -73,6 +73,7 @@ fn history_centre(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Point<P
         app.history
             .viewport
             .get()
+            .map(|view| view.full)
             .expect("history painted")
             .center()
     })
@@ -113,7 +114,12 @@ fn open_emoji_panel(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Point
     app.update(cx, |app, cx| app.open_media_panel(PanelTab::Emoji, cx));
     frames(cx);
     app.read_with(cx, |app, _| {
-        let history = app.history.viewport.get().expect("history painted");
+        let history = app
+            .history
+            .viewport
+            .get()
+            .map(|view| view.full)
+            .expect("history painted");
         point(history.left() + px(100.), history.bottom() - px(100.))
     })
 }

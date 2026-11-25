@@ -190,3 +190,33 @@ Deviations from the plan, recorded here:
 - The typing test proves the dots tick with no slice rendering and with
   the header's own layer; a typing update itself still redraws every
   conversation slice through the session's notify, as it did.
+
+## The history under the pills (step 8c)
+
+`chrome/frame.rs` holds the pure geometry (`floating_frame`,
+`HistoryInsets`); `QuillApp::history_insets` gives the rows' insets from
+the measured header and composer heights (zero in Classic, so every
+reader below has one path). The list carries them as padding on its
+first and last rows (the kit's 8 px past each pill), and those two rows
+are measured again when an inset changes (`note_history_insets`). A
+change of either pill's height redraws the history as well as the slot
+(`MeasureHeight.redraw` is a list).
+
+`history.viewport` is a `HistoryViewport { full, readable }`. Reads, the
+date pill's top row, the on-screen range, landings, sponsored views and
+paging use `readable`; drag selection, its edge auto-scroll, the pull
+indicator, the wide selection width and the reveal use `full`. The
+landing loop needed no other change: it measures its error against the
+readable top and converges as before. The three open-loop scrolls that
+put a row at the top (Page Up/Down, keyboard selection, accessibility
+focus) go through `scroll_row_to_view_top`, which scrolls the row under
+the header. Scroll memory saves and restores offsets of the same list,
+so it needs none.
+
+The jump button, the corner buttons and the date pill move clear of the
+pills by the insets; the pull hint and a chat window's composer toast
+sit over the composer pill's box.
+
+Not tested directly: that the tail is kept when the composer grows (the
+kit's tail-follow covers it, as the last row's padding is part of the
+content), and scroll memory across a composer height change.

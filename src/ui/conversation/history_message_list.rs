@@ -1,6 +1,7 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chrome::frame::HistoryInsets;
 use crate::ui::history_state::ScrollGoal;
 use quill::lang::{keys, tr, tr_with};
 
@@ -405,6 +406,10 @@ impl QuillApp {
         let landing_probe = self.landing_probe();
         let landing_app = cx.weak_entity();
         let viewport = self.history.viewport.clone();
+        // What floats over the rows (Floating): the first and last rows
+        // carry it as padding, and reads use what is left.
+        let insets = self.history_insets();
+        self.note_history_insets(insets, cx);
         let history_focus = self.message_ui.history_focus.clone();
         let drag_app = cx.weak_entity();
         let reveal = self.history_reveal(cx);
@@ -526,6 +531,14 @@ impl QuillApp {
                 // supplies row px and list py, so the outer div needs
                 // neither.
                 .with_row_style(StyleRefinement::default().pb(px(self.density().message_gap)))
+                // The kit's own 8 px at the list's ends, past the pills.
+                .when(insets != HistoryInsets::ZERO, |scroller| {
+                    scroller.with_list_style(
+                        StyleRefinement::default()
+                            .pt(insets.top + px(8.))
+                            .pb(insets.bottom + px(8.)),
+                    )
+                })
                 // Jump to latest: shows the unread count, and replaces a
                 // window that stops short of the latest message instead of
                 // only scrolling to its end.
@@ -569,12 +582,13 @@ impl QuillApp {
                 // bottom-right corner, where tdesktop puts it
                 // (`historyToDownPosition`), under the "@" / heart stack,
                 // not over the middle of the last message.
-                .wrap_jump_button(|button| {
+                .wrap_jump_button(move |button| {
                     div()
                         .w_full()
                         .flex()
                         .justify_end()
-                        .pr_4()
+                        .pr(insets.right + px(16.))
+                        .pb(insets.bottom)
                         .child(super::anim_layer::occluder(button))
                         .into_any_element()
                 })
@@ -603,7 +617,9 @@ impl QuillApp {
                         if let Ok(mut hits) = hit_rows.try_borrow_mut() {
                             *hits = rows.iter().map(|(ix, row, _)| (*ix, *row)).collect();
                         }
-                        viewport.set(Some(bounds));
+                        viewport.set(Some(HistoryViewport::new(bounds, insets)));
+                        // What a reader sees: under the pills is not read.
+                        let bounds = insets.inside(bounds);
                         let moved = drag_app.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                             if !phase.bubble() {

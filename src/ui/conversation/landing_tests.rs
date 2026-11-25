@@ -10,6 +10,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
+use quill::layout_style::LayoutStyle;
 use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -27,6 +28,16 @@ fn frames(vcx: &mut VisualTestContext) {
 /// The ready-chats demo with incoming messages 1000..`last` in chat A, read
 /// up to `read`.
 fn open(cx: &mut TestAppContext, last: i64, read: i64) -> (Entity<QuillApp>, VisualTestContext) {
+    open_in(cx, last, read, LayoutStyle::Classic)
+}
+
+/// As `open`, with the window's layout `layout`.
+fn open_in(
+    cx: &mut TestAppContext,
+    last: i64,
+    read: i64,
+    layout: LayoutStyle,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
@@ -39,6 +50,11 @@ fn open(cx: &mut TestAppContext, last: i64, read: i64) -> (Entity<QuillApp>, Vis
     });
     let app: Entity<QuillApp> = slot.borrow().clone().expect("app");
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    if layout != LayoutStyle::Classic {
+        app.update(&mut vcx, |app, cx| {
+            app.set_appearance(cx, |a| a.layout = layout)
+        });
+    }
     app.update(&mut vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -97,7 +113,9 @@ fn a_long_unread_run_opens_with_the_bar_at_the_top(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     assert_eq!(bar_anchor(&app, vcx), Some(1_040));
     let bar_top = vcx.debug_bounds("unread-bar").expect("bar painted").top();
-    let viewport = app.update(vcx, |app, _| app.history.viewport.get());
+    let viewport = app.update(vcx, |app, _| {
+        app.history.viewport.get().map(|view| view.readable)
+    });
     let viewport = viewport.expect("history painted");
     assert!(
         (bar_top - viewport.top()).abs() < px(0.5),
@@ -220,11 +238,111 @@ fn a_chat_left_at_its_bar_reopens_at_the_new_bar(cx: &mut TestAppContext) {
     select(&app, vcx, A);
     assert_eq!(bar_anchor(&app, vcx), Some(1_050));
     let bar_top = vcx.debug_bounds("unread-bar").expect("bar painted").top();
-    let viewport = app.update(vcx, |app, _| app.history.viewport.get());
+    let viewport = app.update(vcx, |app, _| {
+        app.history.viewport.get().map(|view| view.readable)
+    });
     let viewport = viewport.expect("history painted");
     assert!(
         (bar_top - viewport.top()).abs() < px(0.5),
         "bar at {bar_top:?}, view at {:?}",
         viewport.top()
     );
+}
+
+/// The history's viewport, whole and readable.
+fn viewport(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+) -> crate::ui::conversation::HistoryViewport {
+    app.update(vcx, |app, _| app.history.viewport.get())
+        .expect("history painted")
+}
+
+/// With the header floating over the rows, the bar lands under it, at the
+/// top of what a reader sees.
+#[gpui_kit::test]
+fn a_floating_header_lands_the_bar_under_it(cx: &mut TestAppContext) {
+    let _prefs = crate::ui::appearance::own_appearance_prefs("quill-landing-floating-bar");
+    let (app, mut vcx) = open_in(cx, 1_080, 1_040, LayoutStyle::Floating);
+    let vcx = &mut vcx;
+    let view = viewport(&app, vcx);
+    let header = vcx.debug_bounds("conversation-top").expect("header");
+    assert!(
+        view.readable.top() >= header.bottom(),
+        "the readable view starts under the header"
+    );
+    assert_eq!(
+        view.readable.top() - view.full.top(),
+        px(16.) + header.size.height + px(8.)
+    );
+    let bar_top = vcx.debug_bounds("unread-bar").expect("bar painted").top();
+    assert!(
+        (bar_top - view.readable.top()).abs() < px(0.5),
+        "bar at {bar_top:?}, view at {:?}",
+        view.readable.top()
+    );
+}
+
+/// A row brought to the view's top (paging, the keyboard) starts under
+/// the header, not behind it.
+#[gpui_kit::test]
+fn a_row_scrolled_to_the_top_clears_the_floating_header(cx: &mut TestAppContext) {
+    let _prefs = crate::ui::appearance::own_appearance_prefs("quill-landing-floating-row");
+    let (app, mut vcx) = open_in(cx, 1_080, 1_040, LayoutStyle::Floating);
+    let vcx = &mut vcx;
+    let ix = app.update(vcx, |app, _| app.history.rows.len() / 2);
+    app.update(vcx, |app, cx| app.scroll_row_to_view_top(ix, cx));
+    frames(vcx);
+    let view = viewport(&app, vcx);
+    let row = app
+        .update(vcx, |app, _| {
+            app.history
+                .hit_rows
+                .borrow()
+                .iter()
+                .find(|(at, _)| *at == ix)
+                .map(|(_, bounds)| *bounds)
+        })
+        .expect("row painted");
+    assert!(
+        (row.top() - view.readable.top()).abs() < px(0.5),
+        "row at {:?}, view at {:?}",
+        row.top(),
+        view.readable.top()
+    );
+}
+
+/// A message seen only through the composer pill is not read yet.
+#[gpui_kit::test]
+fn rows_under_the_composer_pill_are_not_seen(cx: &mut TestAppContext) {
+    let _prefs = crate::ui::appearance::own_appearance_prefs("quill-landing-floating-seen");
+    let (app, mut vcx) = open_in(cx, 1_080, 1_040, LayoutStyle::Floating);
+    let vcx = &mut vcx;
+    let view = viewport(&app, vcx);
+    let (under, seen) = app.update(vcx, |app, _| {
+        let under: Vec<i64> = app
+            .history
+            .hit_rows
+            .borrow()
+            .iter()
+            .filter(|(_, row)| {
+                row.top() >= view.readable.bottom() && row.bottom() <= view.full.bottom()
+            })
+            .filter_map(|(ix, _)| app.history.rows.get(*ix)?.first_id())
+            .map(|id| id.0)
+            .collect();
+        let seen: Vec<i64> = app
+            .history
+            .seen
+            .borrow()
+            .as_ref()
+            .map(|(_, ids)| ids.iter().map(|id| id.0).collect())
+            .unwrap_or_default();
+        (under, seen)
+    });
+    assert!(!under.is_empty(), "rows are drawn under the composer pill");
+    assert!(!seen.is_empty(), "the rows above are seen");
+    for id in under {
+        assert!(!seen.contains(&id), "{id} is under the pill yet seen");
+    }
 }

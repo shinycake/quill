@@ -89,12 +89,12 @@ impl Element for SliceScope {
     }
 }
 
-/// Records its child's laid-out height; when it changed, the slot that
-/// sizes the composer slice is redrawn (`redraw`: `AppOnly`, or the chat
-/// window).
+/// Records its child's laid-out height; when it changed, the views in
+/// `redraw` are redrawn: the slot that sizes the slice (`AppOnly`, or the
+/// chat window), and in Floating the history, whose rows clear the pills.
 pub(super) struct MeasureHeight {
     pub(super) height: Rc<Cell<Pixels>>,
-    pub(super) redraw: Option<EntityId>,
+    pub(super) redraw: Vec<EntityId>,
     pub(super) child: AnyElement,
 }
 
@@ -130,10 +130,10 @@ impl Element for MeasureHeight {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let height = bounds.size.height.ceil();
-        if self.height.replace(height) != height
-            && let Some(id) = self.redraw
-        {
-            cx.notify(id);
+        if self.height.replace(height) != height {
+            for id in &self.redraw {
+                cx.notify(*id);
+            }
         }
         self.child.prepaint(window, cx);
     }
