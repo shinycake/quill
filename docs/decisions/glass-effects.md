@@ -70,20 +70,30 @@ glass. Idan picked it from three candidates on 2026-11-23, after the first
 recipes (one heavy frost from edge to edge, 0.84 to 0.90) read as frosted
 rather than liquid.
 
-- **The rim band is clear.** The lens primitive gained
-  `LensTune::rim_frost`, which thins the frost across the rim band on every
-  backend (Metal, Vulkan/GL, DirectX). The rim shows the backdrop bent
-  (a 10 px radial pull on slabs, edge refraction on buttons), saturated
-  (2.0) and nearly sharp, with a lit edge.
-- **The middle, where labels sit, carries a light tint over a strong blur**
-  (14 px). Its frost is 0.78 (light) and 0.68 (dark) of what the flat
-  black-and-white rule would need: 0.65 for light menus, 0.49 for dark.
-  Media glass keeps the full rule (0.44 behind icons, 0.56 behind text),
-  since a video frame can be flat white.
+- **One even pane, after the source kit's frosted card** (2026-11-25).
+  The first clear look kept the rim band clear, saturated (2.0) and sharp
+  around a middle frosted over a 14 px blur, with the rim light and
+  fresnel at 1.6x and no top sheen. Side by side with the `ready-glass`
+  demo (the gpui-liquid-glass presets) it read as a thick glowing border
+  around frosted plastic: the clear ring drew the eye, the 10 px pull
+  spread over the whole slab bent nothing visibly, and the doubled
+  saturation turned a photo's edge neon. The recipes now follow the kit's
+  card: the same tint from edge to edge over a 6 px blur (2 px on
+  buttons), saturation 1, the kit's rim light, fresnel, top sheen and
+  caustic (a faint inner shade), and a 30 px radial pull gathered into a thin band at the rim
+  (`bend_curve` 9.75, `bend_depth` 1.35) so the pane's edge bends what is
+  behind it. The slab bevel stays at 24 px and the inner shade at 0.25:
+  wider or stronger, a tall menu's corners crease along the diagonals and
+  light glass turns grey.
+- **The middle's tint is unchanged:** 0.78 (light) and 0.68 (dark) of what
+  the flat black-and-white rule would need, 0.65 for light menus, 0.49 for
+  dark. Media glass keeps the full rule (0.44 behind icons, 0.56 behind
+  text), since a video frame can be flat white.
 - Light glass draws the theme's hairline border so it doesn't melt into a
-  light window; dark glass and media glass draw a faint white one. Menus
-  and panels cast a tight shadow (softness 10, offset 4). The chat-list
-  bar keeps its rim light low, or its lower edge reads as a neon line.
+  light window; dark glass and media glass draw a faint white 1.3 px one,
+  and buttons draw none (their rim light is the edge). Menus and panels
+  cast a tight shadow (softness 10, offset 4). The chat-list bar keeps its
+  rim light low, or its lower edge reads as a neon line.
 
 The contrast test beside the recipes holds the limits in both themes:
 
@@ -127,9 +137,9 @@ the command buffer's `GPUEndTime - GPUStartTime` per frame
 (`QUILL_GPU_PROBE=1`, `gpui-pre-apple`), first 30 frames skipped; CPU is
 the frame profiler's draw histogram. Every comparison ran in ABBA order
 (off, on, on, off), twice. The runs used the first, frosted recipes; the
-clear look keeps the same lenses and bands and a smaller blur (14 px
-against 18 to 22), so its cost should not be higher, but it was not
-measured again. These are relative numbers for this decision,
+clear looks keep the same lenses, bands and eight-tap frost and only
+lower the blur (14 px, then 6 px, against 18 to 22), so their cost should
+not be higher, but they were not measured again. These are relative numbers for this decision,
 not public claims.
 
 | Situation | Budget | Result |

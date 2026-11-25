@@ -1,6 +1,6 @@
 //! The limits on every recipe, in the light and dark themes:
 //!
-//! - over a mid grey (what the strong blur makes of mixed content behind
+//! - over a mid grey (what the blur makes of mixed content behind
 //!   the labels), primary text keeps 4.5:1 and secondary text and icons
 //!   3:1;
 //! - over a flat pure black or pure white backdrop, primary text still
@@ -178,20 +178,6 @@ fn every_recipe_keeps_its_labels_readable_in_light() {
 #[test]
 fn every_recipe_keeps_its_labels_readable_in_dark() {
     check("dark", &ThemeColor::dark());
-}
-
-#[test]
-fn every_recipe_clears_at_its_rim() {
-    for colors in [ThemeColor::light(), ThemeColor::dark()] {
-        for role in GlassRole::ALL {
-            let style = recipe(role, &colors);
-            assert!(style.tune.rim_frost < 0.5, "{role:?}");
-            assert!(
-                matches!(style.material, LensMaterial::Clear { frost, .. } if frost > 0.0),
-                "{role:?}"
-            );
-        }
-    }
 }
 
 #[test]
