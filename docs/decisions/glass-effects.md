@@ -59,7 +59,7 @@ budget.
 | MediaText | the media viewer's docked bar, captions, the video controller |
 | Selection | the Chats/Contacts/Calls selection, which slides as clearer glass |
 | Bar | the chat list's header, folder tabs and search field, floating over the rows (Classic only: in Floating the list card is the glass) |
-| Card | the Floating layout's cards: the chat list card, the header-and-bars card, the composer card, the side-panel card and the left tab column. Frosted to the edge, barely bent or lit, a wider blur (docs/decisions/floating-layout.md, "Glass on the cards" and "Appearance review round") |
+| Card | the Floating layout's cards: the chat list card, the header-and-bars card, the composer card, the side-panel card and the left tab column. The liquid look (2026-11-26, after #1508): the bar's 30 px pull gathered at the rim, a quiet rim light (0.35, no glowing frame) and the bar's frost and 8 px blur under the rows (docs/decisions/floating-layout.md, "Glass on the cards") |
 
 Message bubbles, chat rows, wallpapers, service messages and bot buttons
 never get glass (Apple's rule: glass is for controls above content).
@@ -71,35 +71,55 @@ glass. Idan picked it from three candidates on 2026-11-23, after the first
 recipes (one heavy frost from edge to edge, 0.84 to 0.90) read as frosted
 rather than liquid.
 
-- **The rim band is clear.** The lens primitive gained
-  `LensTune::rim_frost`, which thins the frost across the rim band on every
-  backend (Metal, Vulkan/GL, DirectX). The rim shows the backdrop bent
-  (a 10 px radial pull on slabs, edge refraction on buttons), saturated
-  (2.0) and nearly sharp, with a lit edge.
-- **The middle, where labels sit, carries a light tint over a strong blur**
-  (14 px). Its frost is 0.78 (light) and 0.68 (dark) of what the flat
-  black-and-white rule would need: 0.65 for light menus, 0.49 for dark.
-  Media glass keeps the full rule (0.44 behind icons, 0.56 behind text),
+- **One even pane, after the source kit's frosted card** (2026-11-25).
+  The first clear look kept the rim band clear, saturated (2.0) and sharp
+  around a middle frosted over a 14 px blur, with the rim light and
+  fresnel at 1.6x and no top sheen. Side by side with the `ready-glass`
+  demo (the gpui-liquid-glass presets) it read as a thick glowing border
+  around frosted plastic: the clear ring drew the eye, the 10 px pull
+  spread over the whole slab bent nothing visibly, and the doubled
+  saturation turned a photo's edge neon. The recipes now follow the kit's
+  card: the same tint from edge to edge and the kit's rim light, fresnel,
+  sheen and caustic, with a faint inner shade (0.25) and a 24 px bevel;
+  stronger or wider, a tall menu's corners crease along the diagonals and
+  light glass turns grey.
+- **As liquid as it goes** (2026-11-25). Idan asked for more liquid and
+  picked the clearest of three steps: a 2 px blur on slabs and none on
+  buttons, an 80 px radial pull that reaches deep into the slab
+  (`bend_curve` 4, `bend_depth` 1.7) so what is behind curves like it is
+  under water, saturation 1.3 and a 1.8x top sheen on slabs. Buttons bend
+  64 units at the rim, magnify their middle by 0.18 and split colour
+  (0.25) at the edge. The middle's frost is 0.56 (light) and 0.49 (dark)
+  of what the flat black-and-white rule would need: 0.46 for light menus,
+  0.35 for dark.
+- **The chat-list bar stays thicker** (0.78 and 0.68 of the rule, an
+  8 px blur, a 30 px pull gathered at the rim): it sits over rows of text
+  right under its own labels, and thinner glass lets the rows ghost
+  through the folder tabs. Its rim light stays low, or its lower edge
+  reads as a neon line.
+- Media glass keeps the full rule (0.44 behind icons, 0.56 behind text),
   since a video frame can be flat white.
 - Light glass draws the theme's hairline border so it doesn't melt into a
-  light window; dark glass and media glass draw a faint white one. Menus
-  and panels cast a tight shadow (softness 10, offset 4). The chat-list
-  bar keeps its rim light low, or its lower edge reads as a neon line.
+  light window; dark glass and media glass draw a faint white 1.3 px one,
+  and buttons draw none (their rim light is the edge). Menus and panels
+  cast a tight shadow (softness 10, offset 4).
 
 The contrast test beside the recipes holds the limits in both themes:
 
 | Backdrop | Primary text | Secondary text and icons |
 | --- | --- | --- |
-| Mid grey (what the blur makes of mixed content) | 4.5:1 | 3:1 |
-| Flat pure black or pure white | 3:1 | not held |
+| Mid grey (mixed content behind the labels) | 4.5:1 | 2.4:1 |
+| Flat pure black or pure white | 2:1 | not held |
 | Media glass over flat pure black or white | 4.5:1 (icons 3:1) | 3:1 |
 
-This is weaker than the plan's original rule (4.5:1 over flat black and
-white everywhere), and the trade is known: grey secondary text, such as
-the "Sent yesterday" line in a menu, gets faint when light glass sits over
-a nearly black photo, and dark glass over a flat white area drops primary
-text to about 3.4:1. High contrast and Reduce Transparency never draw
-glass.
+This is much weaker than the plan's original rule (4.5:1 over flat black
+and white everywhere), and Idan chose it knowing labels sit over a nearly
+sharp backdrop. The weak cases: dark glass over a flat white area drops
+primary text to about 2.3:1, grey secondary text such as the "Sent
+yesterday" line is about 2.5:1 to 2.9:1 over mixed content, and text
+behind a menu shows under its labels. Labels that adapt to the glass under
+them (the stage 5 inks) would win this back. High contrast and Reduce
+Transparency never draw glass.
 
 When glass can't be drawn (a lens inside a paint layer, past the last band,
 or an unreadable frame) the lens draws its fallback quad in the glass
@@ -128,9 +148,9 @@ the command buffer's `GPUEndTime - GPUStartTime` per frame
 (`QUILL_GPU_PROBE=1`, `gpui-pre-apple`), first 30 frames skipped; CPU is
 the frame profiler's draw histogram. Every comparison ran in ABBA order
 (off, on, on, off), twice. The runs used the first, frosted recipes; the
-clear look keeps the same lenses and bands and a smaller blur (14 px
-against 18 to 22), so its cost should not be higher, but it was not
-measured again. These are relative numbers for this decision,
+clear looks keep the same lenses, bands and eight-tap frost and only
+lower the blur (14 px, then 6 px, against 18 to 22), so their cost should
+not be higher, but they were not measured again. These are relative numbers for this decision,
 not public claims.
 
 | Situation | Budget | Result |
