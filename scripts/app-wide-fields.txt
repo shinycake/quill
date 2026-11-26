@@ -138,7 +138,7 @@ spell.dict_manager * | the dictionary manager box and its download
 spell.dict_filter_input | that box's filter field
 spell.engine_builder | builds the engine
 slices.sidebar * | cached child views of the sidebar: entities that render from the app, holding no state of their own
-slices.window * | the same for the conversation, composer and panel, with measured heights
+slices.window * | the same for the conversation, composer and panel, with measured heights, and the chat switch's pictures of the frames drawn (nothing acts on them)
 slices.viewer | the same for the media viewer
 slices.viewer_chrome | the same for its chrome
 slices.story | the same for the story viewer

@@ -52,6 +52,8 @@ pub(in crate::ui) struct WindowSlices {
     pub(in crate::ui) width: Cell<Pixels>,
     /// What the window's last render did with the conversation.
     conversation_frame: Cell<ConversationFrame>,
+    /// Floating's chat switch (`chat_switch`).
+    pub(super) chat_switch: super::super::page_cross::PageStage<ChatId>,
     /// A screen reader (or another accessibility client) reads this window:
     /// its history rows report the accessibility focus. Each window's
     /// frame writes its own (`per_window_upkeep`).

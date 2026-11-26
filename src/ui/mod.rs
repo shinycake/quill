@@ -129,6 +129,7 @@ mod notify_delivery_state;
 pub(crate) mod notify_state;
 mod on_screen;
 mod owned_image;
+mod page_cross;
 mod paragraph_cache;
 mod payments_state;
 mod peer_color_dialog;

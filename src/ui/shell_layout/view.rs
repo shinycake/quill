@@ -236,7 +236,9 @@ impl QuillApp {
                 })
             })
             .children(forum)
-            .when(layout.chat, |this| this.child(self.conversation_slot(cx)))
+            .when(layout.chat, |this| {
+                this.child(self.chat_switch_slot(window, cx))
+            })
             .children(panels)
             .children(peek)
             .children(self.forward_drag_banner(&layout, cx))
