@@ -12,6 +12,10 @@
 //! scripted click opens this one and the capture shows its first frames.
 //! `QUILL_DEMO_WALLPAPER_HOLD=1` holds every wallpaper render, so the
 //! capture shows what paints while the picture is made.
+//!
+//! `QUILL_DEMO_BACKDROP` gives any demo the account's wallpaper (light and
+//! dark), with the same kinds as `QUILL_DEMO_WALLPAPER`, so a Floating
+//! capture shows the wallpaper behind the cards up to the window's edges.
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
@@ -154,6 +158,35 @@ fn demo_background(kind: &str) -> Option<String> {
 }
 
 impl QuillApp {
+    /// `QUILL_DEMO_BACKDROP=<kind>`: the account's wallpaper, for any demo.
+    pub(in crate::ui) fn demo_backdrop(&mut self, cx: &mut Context<Self>) {
+        let Ok(kind) = std::env::var("QUILL_DEMO_BACKDROP") else {
+            return;
+        };
+        let Some(background) = demo_background(&kind) else {
+            return;
+        };
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        for dark in [false, true] {
+            let json = format!(
+                r#"{{"@type":"updateDefaultBackground","for_dark_theme":{dark},"background":{background}}}"#
+            );
+            let Ok(envelope) = parse_envelope(&json) else {
+                return;
+            };
+            let seq = session.last_seq + 1;
+            session.apply(OwnedEnvelope {
+                seq,
+                client_id: None,
+                envelope,
+            });
+        }
+        self.appearance.wallpaper = quill::settings::WallpaperSource::Telegram;
+        cx.notify();
+    }
+
     fn demo_chat_wallpaper(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let kind = std::env::var("QUILL_DEMO_WALLPAPER").unwrap_or_default();
         let dimming = std::env::var("QUILL_DEMO_DIMMING").unwrap_or_else(|_| "0".into());
