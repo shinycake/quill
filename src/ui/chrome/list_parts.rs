@@ -14,10 +14,18 @@ pub(in crate::ui) fn search_field<E: Styled>(this: E, metrics: &ChromeMetrics) -
 }
 
 /// The folder tabs' indicator: Classic's underline, or a pill that slides
-/// between tabs (the kit's Pill variant).
+/// between tabs (the kit's Pill variant), glass when glass effects are on.
 pub(in crate::ui) fn folder_tabs(bar: TabBar, metrics: &ChromeMetrics) -> TabBar {
+    match folder_tabs_pill(metrics) {
+        false => bar.underline(),
+        true => bar.pill().glass_selection(),
+    }
+}
+
+/// Whether the folder tabs' selection is a pill.
+pub(in crate::ui) fn folder_tabs_pill(metrics: &ChromeMetrics) -> bool {
     match metrics.look {
-        Look::Lines => bar.underline(),
-        Look::Cards => bar.pill(),
+        Look::Lines => false,
+        Look::Cards => true,
     }
 }

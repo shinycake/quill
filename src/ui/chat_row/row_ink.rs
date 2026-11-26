@@ -136,6 +136,18 @@ impl RowInk {
     }
 }
 
+impl RowInk {
+    /// The ink over a glass highlight: the lens is the row's fill, so the
+    /// row keeps the list's own (`rest_fill`) and no hover fill of its own.
+    pub(in crate::ui) fn on_glass(self, rest_fill: Hsla) -> Self {
+        Self {
+            fill: rest_fill,
+            open_hover: None,
+            ..self
+        }
+    }
+}
+
 /// Secondary text on the solid row: the row's text colour, softened.
 const SOLID_SECONDARY_ALPHA: f32 = 0.9;
 

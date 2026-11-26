@@ -80,6 +80,7 @@ impl QuillApp {
                         None,
                         "",
                         photo,
+                        self.list_row_corners(cx),
                         cx,
                         move |this, window, cx| {
                             this.select_search_chat(chat_id, window, cx);
@@ -224,7 +225,7 @@ impl QuillApp {
             .gap_3()
             .px_2()
             .py_1p5()
-            .rounded_md()
+            .rounded(self.list_row_corners(cx))
             .role(gpui_kit::Role::Button)
             .a11y_tag(redact::chat_tag(chat_id.0))
             .aria_label(format!("{label} · {chat_title}"))

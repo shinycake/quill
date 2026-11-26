@@ -8,6 +8,7 @@ use crate::ui::chrome::menu_shape::menu_shape_in;
 use crate::ui::glass::{GlassRole, GlassSurface as _};
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::popover_shape::concentric_radius;
 use gpui_kit::*;
 use quill::layout_style::Look;
 
@@ -24,7 +25,7 @@ pub(crate) trait MenuSurface: Styled + Sized {
         let shape = menu_shape_in(look, cx);
         let this = match &shape {
             Some(shape) => self.rounded(shape.radius).clip_rounded(),
-            None => self.rounded_md(),
+            None => self.rounded(menu_radius(look, cx)),
         };
         this.border_1()
             .text_color(theme.popover_foreground)
@@ -42,6 +43,53 @@ pub(crate) trait MenuSurface: Styled + Sized {
 }
 
 impl<E: Styled> MenuSurface for E {}
+
+/// The corner radius of a menu in a window with this look: Web K's in
+/// Floating, the theme's in Classic.
+pub(crate) fn menu_radius(look: Look, cx: &App) -> Pixels {
+    menu_shape_in(look, cx).map_or(cx.theme().radius, |shape| shape.radius)
+}
+
+/// The corner radius of a row in a menu: concentric with the menu's
+/// corners, `PANEL_INSET` inside them.
+pub(crate) fn menu_row_radius(look: Look, cx: &App) -> Pixels {
+    concentric_radius(menu_radius(look, cx), px(PANEL_INSET))
+}
+
+pub(super) trait MenuRowCorners: Styled + Sized {
+    /// A menu row's corners, concentric with the menu drawing it.
+    fn menu_row_corners(
+        self,
+        items: &crate::ui::context_menu_keys::ContextMenuItems,
+        cx: &App,
+    ) -> Self {
+        self.rounded(menu_row_radius(items.look(), cx))
+    }
+}
+
+impl<E: Styled> MenuRowCorners for E {}
+
+pub(crate) trait RowHighlight: InteractiveElement + Styled + Sized {
+    /// The row is lit (keyboard or selection): a glass highlight while
+    /// glass effects are on, `fill` otherwise.
+    fn lit(self, fill: Hsla, cx: &App) -> Self {
+        match crate::ui::glass::lens(GlassRole::Highlight, cx) {
+            Some(lens) => self.backdrop_glass(Some(lens)),
+            None => self.bg(fill),
+        }
+    }
+
+    /// The pointer lights the row: a glass highlight while glass effects
+    /// are on, `fill` otherwise.
+    fn hover_highlight(self, fill: Hsla, cx: &App) -> Self {
+        match crate::ui::glass::lens(GlassRole::Highlight, cx) {
+            Some(lens) => self.hover(move |style| style.backdrop_glass(Some(lens))),
+            None => self.hover(move |style| style.bg(fill)),
+        }
+    }
+}
+
+impl<E: InteractiveElement + Styled> RowHighlight for E {}
 
 /// Width of a context menu panel and of the submenu beside it.
 pub(crate) const MENU_WIDTH: f32 = 240.;

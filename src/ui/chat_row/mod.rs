@@ -16,6 +16,7 @@ use quill::chatlist_style::ChatListRowStyle;
 use quill::folder_limits::FolderTag;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
+use quill::layout_style::SelectedRow;
 use quill::local_path::sandboxed_display_path;
 use quill::peer_badge::TitleBadge;
 use quill::state::{ChatSummary, RowStatusIcon, Session, SidebarLine};
@@ -340,16 +341,23 @@ pub(super) fn session_chat_row(
         promotion,
         muted_fg,
         rest_fill,
+        corners,
+        glass,
     } = input;
     let id = chat.id;
-    // The open row's colours: Classic's tint, or the solid accent row.
-    let ink = RowInk::of(
-        selected,
-        row_style.selected,
-        rest_fill,
-        muted_fg,
-        cx.theme(),
-    );
+    // The open row's colours: Classic's tint, the solid accent row, or on
+    // glass the theme's text over a glass highlight.
+    let ink = match glass {
+        Some(_) => RowInk::of(selected, SelectedRow::Tint, rest_fill, muted_fg, cx.theme())
+            .on_glass(rest_fill),
+        None => RowInk::of(
+            selected,
+            row_style.selected,
+            rest_fill,
+            muted_fg,
+            cx.theme(),
+        ),
+    };
     let muted_fg = ink.secondary;
     let stamp = match promotion.as_ref() {
         Some(badge) => Some((RowStatusIcon::None, badge.label.clone())),
@@ -486,7 +494,10 @@ pub(super) fn session_chat_row(
         .flex()
         .flex_col()
         .justify_center()
-        .rounded_md()
+        .rounded(corners)
+        .when_some(glass.filter(|_| selected), |this, lens| {
+            this.backdrop_glass(Some(lens))
+        })
         // Plain arrow while hovering: on macOS 26 the pointing hand reads
         // as a drag affordance, which a row you only click isn't.
         .when(!selected, |this| this.pressable(cx.theme()))

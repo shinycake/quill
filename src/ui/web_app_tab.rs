@@ -110,6 +110,7 @@ impl QuillApp {
                             None,
                             query,
                             photo,
+                            self.list_row_corners(cx),
                             cx,
                             move |this, _, cx| this.open_main_web_app(bot_id, "", cx),
                         )

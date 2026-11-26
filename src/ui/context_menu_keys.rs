@@ -34,10 +34,12 @@
 use super::app::QuillApp;
 use super::menu_aim::MenuAimRow as _;
 use super::menu_states::ChatMenuSubmenu;
+use super::menu_surface::MenuRowCorners as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
+use quill::layout_style::Look;
 use std::cell::Cell;
 
 /// Run `f` on the vector in `cell`: taken out, changed, put back. A `Cell`
@@ -68,6 +70,9 @@ pub(super) struct ContextMenuItems {
     pub(super) aim: super::menu_aim::MenuAim,
     /// Where the menu panel and its submenu were drawn, for the aim.
     pub(super) panels: super::menu_aim::MenuPanels,
+    /// The look of the window drawing the menu, noted with the claims at
+    /// the top of its frame; the rows' corners follow it.
+    look: Cell<Option<Look>>,
 }
 
 /// One window's focus hand-off for its context menus and hand-drawn
@@ -168,6 +173,17 @@ impl ContextMenuItems {
     pub(super) fn reset_claims(&self) {
         drop(self.keys.take());
         drop(self.parents.take());
+    }
+
+    /// The frame about to draw the menu has this look.
+    pub(super) fn note_look(&self, look: Look) {
+        self.look.set(Some(look));
+    }
+
+    /// The look of the window drawing the menu (Classic's until a frame
+    /// noted it).
+    pub(super) fn look(&self) -> Look {
+        self.look.get().unwrap_or(Look::Lines)
     }
 
     /// The row at `row_key(order)` drawn this frame opens `submenu`.
@@ -381,7 +397,7 @@ pub(super) fn context_menu_item(
         .gap_3()
         .px_3()
         .py_1p5()
-        .rounded_md()
+        .menu_row_corners(items, cx)
         .text_sm()
         .text_color(color)
         .role(Role::MenuItem)
@@ -392,7 +408,7 @@ pub(super) fn context_menu_item(
         let position = items.claimed();
         let key = row_key(u8::try_from(position).unwrap_or(u8::MAX));
         item.cursor_pointer()
-            .menu_hover(hover, items)
+            .menu_hover(hover, items, cx)
             .menu_key_target(key, items, cx)
     } else {
         item.opacity(0.5)
@@ -407,6 +423,7 @@ impl QuillApp {
     /// action moved it on purpose. Then the same for the hand-drawn layers.
     pub(super) fn menu_focus_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.frame.menu.items.reset_claims();
+        self.frame.menu.items.note_look(self.look());
         let menu_open = self.context_menu_open();
         self.frame.menu.settle(menu_open, window, cx);
         self.track_layer_focus(window, cx);

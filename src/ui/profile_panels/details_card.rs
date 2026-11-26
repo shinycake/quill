@@ -263,6 +263,9 @@ impl QuillApp {
             .flex_col()
             .w_full()
             .rounded_lg()
+            // Rows run edge to edge: the card's corners cut the first and
+            // last row's hover.
+            .clip_rounded()
             .border_1()
             .border_color(cx.theme().border);
         let muted = cx.theme().muted_foreground;
