@@ -18,9 +18,7 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_badge::TitleBadge;
-use quill::row_fx::RowFx;
 use quill::state::{ChatSummary, RowStatusIcon, Session, SidebarLine};
-use quill::story_ring::StoryRing;
 use quill::telegram::envelope::{
     ChatKind, EphemeralMessageContent, MessageContent, effective_content,
 };
@@ -312,68 +310,37 @@ pub(super) fn row_text_lines(m: &quill::density::DensityMetrics) -> Div {
 }
 
 pub(super) fn session_chat_row(
-    chat: &ChatSummary,
-    selected: bool,
-    // Parity slice: `(folder id, name, colour)` for folder-tag chips.
-    folders: &[(i32, String, i32)],
-    // The folder being viewed (its own chip is not repeated).
-    viewing_folder: Option<i32>,
-    // Parity slice: show folder-tag chips (`are_folder_tags_enabled`).
-    show_tags: bool,
-    // Parity slice: sandboxed display path for the downloaded chat photo
-    // (`chat.photo.small`), if any; the avatar falls back to colored
-    // initials otherwise.
-    photo_path: Option<&std::path::Path>,
-    // Slice CL2: pinned rows are drag-reorderable, but only on the
-    // unfiltered list with at least two pinned chats (TGX
-    // `ChatsAdapter`); the caller computes this.
-    draggable: bool,
-    // Slice CL2: which pinned list the row is in (`setPinnedChats`
-    // takes main or archive).
-    archived: bool,
-    // Slice CL3: multi-select mode — the row toggles selection instead
-    // of opening the chat, and shows the check circle.
-    selecting: bool,
-    checked: bool,
-    // Animated progress for this frame: the online dot on the avatar of
-    // a private chat whose user is online, and a newly shown unread badge.
-    fx: RowFx,
-    // Verified / Premium / SCAM mark after the title.
-    title_badge: Option<TitleBadge>,
-    // Still image for a Premium emoji status, once downloaded.
-    badge_emoji: Option<crate::ui::status_emoji::StatusGlyph>,
-    // The verifying bot's icon before the title, once downloaded.
-    verify_icon: Option<std::path::PathBuf>,
-    // Slice chatlist-list-style: preview line count, media icons, and
-    // formatted preview (Settings → Appearance → Chat list rows), and the
-    // density.
-    row_style: ChatListRowStyle,
-    // The height declared to the `VirtualList` (`chat_row_height`).
-    height: Pixels,
-    // The chat with yourself: "Saved Messages" with a bookmark avatar.
-    saved: bool,
-    // Group previews lead with the sender ("Dad: …", "You: …").
-    preview_sender: Option<String>,
-    // Images for custom emoji in the preview.
-    preview_emoji: super::sticker_player::PreviewEmoji,
-    // Telegram Desktop marks groups, channels and bots before the title.
-    kind_icon: Option<IconName>,
-    // A forum row (`displayAsForum`): its topics fill the second line, the
-    // last message the third.
-    forum: Option<topic_titles::ForumLine>,
-    // Active stories: the ring around the avatar (unread: accent gradient,
-    // read: grey).
-    story_ring: Option<StoryRing>,
-    video: Option<UserpicFrame>,
-    // A promoted chat's badge ("Proxy sponsor", "PSA") in place of the date,
-    // and the announcement text in place of the preview.
-    promotion: Option<quill::promotion::RowBadge>,
-    muted_fg: Hsla,
-    // The fill of a row that is not selected: the list's, or none on a
-    // glass card (`QuillApp::list_row_fill`).
-    rest_fill: Hsla,
+    input: ChatRowInput<'_>,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement + Styled + StatefulInteractiveElement + use<> {
+    let ChatRowInput {
+        chat,
+        selected,
+        folders,
+        viewing_folder,
+        show_tags,
+        photo_path,
+        draggable,
+        archived,
+        selecting,
+        checked,
+        fx,
+        title_badge,
+        badge_emoji,
+        verify_icon,
+        row_style,
+        height,
+        saved,
+        preview_sender,
+        preview_emoji,
+        kind_icon,
+        forum,
+        story_ring,
+        video,
+        promotion,
+        muted_fg,
+        rest_fill,
+    } = input;
     let id = chat.id;
     // The open row's colours: Classic's tint, or the solid accent row.
     let ink = RowInk::of(
@@ -984,6 +951,8 @@ pub(super) fn with_presence_dot_scaled(
 pub(in crate::ui) const CHAT_ROW_AVATAR: f32 = 46.;
 
 mod folder_tag_context;
+mod row_input;
+pub(in crate::ui) use row_input::ChatRowInput;
 mod pin_lift;
 pub(in crate::ui) use folder_tag_context::FolderTagContext;
 mod promoted_demo;
