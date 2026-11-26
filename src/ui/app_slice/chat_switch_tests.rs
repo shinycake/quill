@@ -159,6 +159,21 @@ fn with_animations_off_the_chat_appears(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn with_reduced_motion_the_chat_appears(cx: &mut TestAppContext) {
+    let _prefs = own_appearance_prefs("quill-chat-switch-reduced");
+    let (app, mut vcx) = new_app(cx, LayoutStyle::Floating);
+    let vcx = &mut vcx;
+    vcx.update(|_, cx| cx.set_reduce_motion(true));
+    let ids = chats(&app, vcx);
+    let (Some(a), Some(b)) = (ids.first().copied(), ids.get(1).copied()) else {
+        panic!("the demo has two chats");
+    };
+    open(&app, vcx, Some(a));
+    open(&app, vcx, Some(b));
+    assert_eq!(crossing(&app, vcx), None);
+}
+
+#[gpui_kit::test]
 fn classic_cuts(cx: &mut TestAppContext) {
     let _prefs = own_appearance_prefs("quill-chat-switch-classic");
     let (app, mut vcx) = new_app(cx, LayoutStyle::Classic);

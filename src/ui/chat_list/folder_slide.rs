@@ -59,7 +59,9 @@ impl QuillApp {
             .get(selected_slot(&slots, view.filter(), view.folder()))
             .map(|slot| slot.kind);
         let at = |kind: FolderSlotKind| slots.iter().position(|slot| slot.kind == kind);
-        let animate = !interface_animations_off();
+        // The OS's reduce-motion preference cuts too, as a menu's pop does
+        // (`with_snapshot_animation`).
+        let animate = !interface_animations_off() && !cx.reduce_motion();
         let running = self.chat_list.folder_slide.settle(
             shown,
             animate,

@@ -67,11 +67,11 @@ impl QuillApp {
     }
 
     /// How many milliseconds the rows take to follow the composer's new
-    /// height (Web K's W12): 0, at once, in Classic.
-    pub(in crate::ui) fn composer_glide_ms(&self) -> u16 {
+    /// height (Web K's W12): 0, at once, in Classic and with reduced motion.
+    pub(in crate::ui) fn composer_glide_ms(&self, cx: &App) -> u16 {
         match self.look() {
-            Look::Lines => 0,
-            Look::Cards => COMPOSER_GLIDE_MS,
+            Look::Cards if !cx.reduce_motion() => COMPOSER_GLIDE_MS,
+            Look::Lines | Look::Cards => 0,
         }
     }
 

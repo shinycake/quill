@@ -57,7 +57,9 @@ impl QuillApp {
         }
         let now = cx.background_executor().now();
         let open = self.open_chat_id();
-        let animate = !interface_animations_off();
+        // The OS's reduce-motion preference cuts too, as a menu's pop does
+        // (`with_snapshot_animation`).
+        let animate = !interface_animations_off() && !cx.reduce_motion();
         let running = self.slices.window.chat_switch.settle(
             open,
             animate,

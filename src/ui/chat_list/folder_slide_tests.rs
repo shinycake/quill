@@ -107,6 +107,16 @@ fn classic_folder_pages_cut(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn with_reduced_motion_the_page_cuts(cx: &mut TestAppContext) {
+    let _prefs = own_appearance_prefs("quill-folder-slide-reduced");
+    let (app, mut vcx) = new_app(cx, LayoutStyle::Floating);
+    let vcx = &mut vcx;
+    vcx.update(|_, cx| cx.set_reduce_motion(true));
+    show(&app, vcx, ChatListFilter::Unread);
+    assert_eq!(sliding(&app, vcx), None);
+}
+
+#[gpui_kit::test]
 fn with_animations_off_the_page_cuts(cx: &mut TestAppContext) {
     let _prefs = own_appearance_prefs("quill-folder-slide-off");
     quill::power_saving::isolate_for_tests();
