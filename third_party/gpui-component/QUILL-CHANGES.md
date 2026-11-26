@@ -183,7 +183,9 @@ shadow reach (`popover_shape::shadow_reach`: three blurs plus the offset
 and spread), so the shadow is never clipped during the pop.
 The shape also carries `dialog_radius`: `src/dialog/dialog.rs` rounds the
 dialog surface with it instead of the theme's `radius_lg` while the hook
-answers `Some` (Floating's dialogs take its card radius).
+answers `Some` (Floating's dialogs take its card radius). Likewise
+`section_radius`: `src/group_box.rs` rounds its surface with it instead of
+the theme's `radius` (Floating's settings groups).
 
 ## Rounded content masks
 

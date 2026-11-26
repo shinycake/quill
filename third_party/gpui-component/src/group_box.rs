@@ -139,7 +139,9 @@ impl GroupBoxVariants for GroupBox {
 }
 
 impl RenderOnce for GroupBox {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let radius = crate::popover_shape::popover_shape(window, cx)
+            .map_or(cx.theme().radius, |shape| shape.section_radius);
         let (bg, border, has_paddings): (Option<Background>, _, _) = match self.variant {
             GroupBoxVariant::Normal => (None, None, false),
             GroupBoxVariant::Fill => (Some(cx.theme().tokens.group_box.into()), None, true),
@@ -173,7 +175,7 @@ impl RenderOnce for GroupBox {
                             .text_color(cx.theme().group_box_foreground)
                             .when(has_paddings, |this| this.p_4())
                             .gap_4()
-                            .rounded(cx.theme().radius)
+                            .rounded(radius)
                             .refine_style(&self.content_style)
                             .children(self.children),
                     )
