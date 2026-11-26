@@ -163,12 +163,33 @@ it and the rounded part is ignored. Quill hosts no native view inside a card.
   x86_64-pc-windows-msvc. Neither ran on a GPU here: lavapipe and WARP in
   CI, and real Windows and Linux hardware, are still to see them.
 
+## Classic GPU time (2026-11-26, this Mac, Metal)
+
+Method: debug builds with `demo-capture` (the shader compile flags match
+release), `QUILL_GPU_PROBE=1` (command-buffer GPU time per frame),
+`QUILL_GLASS=0`, Classic, `ready-unread-landing` at 1200x800 scrolled by
+the wheel script of the glass budget runs, first 30 frames dropped. Runs
+in A-B-B-A order against main 299d015e2, eight runs each, about 400
+frames a run.
+
+- Both builds draw the same scene each frame (147 quads, 2 shadows, about
+  928 glyphs, counted with a temporary probe).
+- Median frame: 0.30 ms on both, every run.
+- Scroll frames (GPU time over 0.8 ms, about 100 a run): mean of the run
+  means 1.41 ms on main (0.11 between runs), 1.50 ms on the branch
+  (0.12). The 0.09 ms gap is about 1.6 standard errors; paired runs go
+  both ways (from 0.33 ms slower to 0.09 ms faster).
+- A build with every rounded-mask read stubbed out of the Metal shaders
+  measured 1.53 ms on the same frames, so the fragment work for masks is
+  not what is left. If the gap is real, the suspect is the 32 bytes per
+  instance each vertex fetches.
+
 ## Not done here
 
 - The native view ignores the rounded part (an OS view).
 - A video surface tile is not in the demo: the NV12 and HDR paths carry
   the shape (Metal, wgpu, DirectX) but no capture shows it.
-- The frame-profile measurement of the 32 bytes (plan section 13: release
-  build with the frame profiler, A-B-B-A against main) was not taken in
-  this step; the side table stays the lever if it shows.
+- A release-build measurement of the 32 bytes: the debug-build GPU timing
+  below leans slower but does not settle it; the side table stays the
+  lever if a longer or release run confirms it.
 
