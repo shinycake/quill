@@ -24,9 +24,10 @@ impl GlassRole {
         is_media(self)
     }
 
-    const ALL: [GlassRole; 7] = [
+    const ALL: [GlassRole; 8] = [
         GlassRole::Menu,
         GlassRole::Panel,
+        GlassRole::Card,
         GlassRole::Control,
         GlassRole::MediaIcon,
         GlassRole::MediaText,
@@ -54,7 +55,7 @@ fn labels(role: GlassRole, colors: &ThemeColor) -> Labels {
             primary: colors.foreground,
             secondary: colors.muted_foreground,
         },
-        GlassRole::Bar => Labels {
+        GlassRole::Bar | GlassRole::Card => Labels {
             primary: colors.sidebar_foreground,
             secondary: colors.muted_foreground,
         },
@@ -180,10 +181,16 @@ fn every_recipe_keeps_its_labels_readable_in_dark() {
     check("dark", &ThemeColor::dark());
 }
 
+/// Every slab and dome shows the backdrop bent and clear at its rim,
+/// except Floating's cards, which are frosted to the edge: a clear rim the
+/// window's height reads as a glowing frame.
 #[test]
 fn every_recipe_clears_at_its_rim() {
     for colors in [ThemeColor::light(), ThemeColor::dark()] {
-        for role in GlassRole::ALL {
+        for role in GlassRole::ALL
+            .into_iter()
+            .filter(|role| *role != GlassRole::Card)
+        {
             let style = recipe(role, &colors);
             assert!(style.tune.rim_frost < 0.5, "{role:?}");
             assert!(
@@ -191,6 +198,16 @@ fn every_recipe_clears_at_its_rim() {
                 "{role:?}"
             );
         }
+    }
+}
+
+#[test]
+fn a_card_is_frosted_to_its_edge() {
+    for colors in [ThemeColor::light(), ThemeColor::dark()] {
+        let card = recipe(GlassRole::Card, &colors);
+        let menu = recipe(GlassRole::Menu, &colors);
+        assert!(card.tune.rim_frost >= 1.0);
+        assert!(card.tune.rim < menu.tune.rim && card.tune.fresnel < menu.tune.fresnel);
     }
 }
 

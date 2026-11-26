@@ -159,7 +159,8 @@ impl QuillApp {
             .pressable(cx.theme())
             .role(Role::Button)
             .aria_label(format!("{} — {}", title(), summary.text()))
-            .bg(cx.theme().sidebar)
+            // Clear on glass cards, as every chat row is.
+            .bg(self.list_row_fill(cx))
             .on_click(cx.listener(|this, _, _, cx| this.open_archive_folder(cx)))
             .on_mouse_down(
                 MouseButton::Right,
@@ -212,7 +213,8 @@ impl QuillApp {
             .pressable(cx.theme())
             .role(Role::Button)
             .aria_label(title())
-            .bg(cx.theme().sidebar)
+            // Clear on glass cards, as every chat row is.
+            .bg(self.list_row_fill(cx))
             .on_click(cx.listener(|this, _, _, cx| this.open_archive_folder(cx)))
             .on_mouse_down(
                 MouseButton::Right,

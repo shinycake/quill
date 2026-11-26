@@ -147,13 +147,13 @@ impl QuillApp {
     }
 
     /// The glass the Floating cards draw while Glass effects is on and
-    /// resolves to glass (the `Panel` recipe), else `None`: the opaque
+    /// resolves to glass (the `Card` recipe), else `None`: the opaque
     /// card. Classic has no cards, so never any.
     pub(in crate::ui) fn card_glass(&self, cx: &App) -> Option<LensStyle> {
         match self.chrome_metrics().clip {
             quill::layout_style::Clip::Square => None,
             quill::layout_style::Clip::Rounded => {
-                super::glass::lens(super::glass::GlassRole::Panel, cx)
+                super::glass::lens(super::glass::GlassRole::Card, cx)
             }
         }
     }
@@ -165,6 +165,47 @@ impl QuillApp {
             Some(_) => transparent_black(),
             None => cx.theme().sidebar,
         }
+    }
+
+    /// A chat row's fill: [`Self::list_row_fill`], with the hover fill
+    /// over it in Floating while the row's menu is open, so the menu shows
+    /// which chat it is for (Web K marks the row under its menu).
+    pub(in crate::ui) fn row_fill_under_menu(&self, chat: quill::ids::ChatId, cx: &App) -> Hsla {
+        let fill = self.list_row_fill(cx);
+        let target = self
+            .message_ui
+            .menu
+            .row()
+            .is_some_and(|menu| menu.chat_id == chat);
+        match target && self.chrome_metrics().clip == quill::layout_style::Clip::Rounded {
+            true => fill.blend(crate::ui::pressable::hover_fill(cx.theme())),
+            false => fill,
+        }
+    }
+
+    /// The bars sit in a card over the history (Floating's header card).
+    pub(in crate::ui) fn bars_in_card(&self) -> bool {
+        self.chrome_metrics().placement == quill::layout_style::Placement::Overlaid
+    }
+
+    /// Menus open over cards (Floating): the header's ⋮ menu opens from
+    /// its button's right edge, inside the card, and carries icons.
+    pub(in crate::ui) fn menus_in_cards(&self) -> bool {
+        self.chrome_metrics().clip == quill::layout_style::Clip::Rounded
+    }
+
+    /// Whether Floating marks this message: its menu is open.
+    pub(in crate::ui) fn menu_on_row(
+        &self,
+        chat: quill::ids::ChatId,
+        message: quill::ids::MessageId,
+    ) -> bool {
+        self.chrome_metrics().clip == quill::layout_style::Clip::Rounded
+            && self
+                .message_ui
+                .menu
+                .open()
+                .is_some_and(|open| open.at.chat_id == chat && open.at.message_id == message)
     }
 
     /// The header and the bars float over the history in their own slice.
