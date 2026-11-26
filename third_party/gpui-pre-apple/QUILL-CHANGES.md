@@ -316,5 +316,8 @@ from `Scene::snapshot_scenes` ahead of the frame and freed with
 pipeline with the snapshot's texture bound. `src/metal_renderer.rs`: the
 pool, the batch arm, and `draw_primitives_to_texture` takes its clear
 colour. `src/metal_renderer/scene_target.rs`: `draw_scene_into` takes a
-clear colour. `src/shaders.metal`: bit 2 of the polychrome flags divides
-the sample by its alpha.
+clear colour and adds the video textures it reads to the caller's list,
+which keeps them until its command buffer completes. Snapshot scenes are
+drawn at the top of `MetalRenderer::draw`, before a frame can be skipped,
+and first in the headless entry points. `src/shaders.metal`: bit 2 of the
+polychrome flags divides the sample by its alpha.

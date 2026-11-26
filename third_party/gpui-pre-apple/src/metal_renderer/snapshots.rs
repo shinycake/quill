@@ -20,12 +20,36 @@ use objc2_metal::{
 };
 use std::{mem, ptr};
 
-use super::{InstanceBindings, InstanceBufferWriter, MetalRenderer, SpriteInputIndex};
+use super::{
+    InstanceBindings, InstanceBuffer, InstanceBufferPool, InstanceBufferWriter, MetalRenderer,
+    SpriteInputIndex,
+};
+use block2::RcBlock;
+use objc2_core_foundation::CFRetained;
+use objc2_core_video::CVMetalTexture;
+use parking_lot::Mutex;
+use std::{cell::Cell, sync::Arc};
 
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
 
 /// The snapshot textures of one renderer (one window).
 pub(super) type SnapshotPool = gpui::SnapshotPool<Texture>;
+
+/// What the snapshot command buffers of one frame read, kept until the
+/// last of them completes: the instance buffer goes back to its pool then.
+struct HeldUntilDrawn {
+    pool: Arc<Mutex<InstanceBufferPool>>,
+    buffer: Option<InstanceBuffer>,
+    _surfaces: Vec<CFRetained<CVMetalTexture>>,
+}
+
+impl Drop for HeldUntilDrawn {
+    fn drop(&mut self) {
+        if let Some(buffer) = self.buffer.take() {
+            self.pool.lock().release(buffer);
+        }
+    }
+}
 
 /// What a snapshot's texture is cleared to.
 fn clear_color(backing: Option<Hsla>) -> MTLClearColor {
@@ -49,19 +73,34 @@ fn clear_color(backing: Option<Hsla>) -> MTLClearColor {
 }
 
 impl MetalRenderer {
-    /// Releases the textures of dropped snapshots and encodes the frame's
+    /// Releases the textures of dropped snapshots and draws the frame's
     /// snapshot scenes, each into its texture on a command buffer of its
-    /// own, to be committed ahead of the frame's. A scene that can't be
-    /// drawn loses its texture.
-    pub(super) fn draw_snapshot_scenes(
-        &mut self,
-        scene: &Scene,
-        writer: &mut InstanceBufferWriter,
-    ) -> Vec<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
+    /// own, committed now, ahead of the frame's. Their instance buffer and
+    /// the video textures they read are kept until the last of them
+    /// completes. A scene that can't be drawn loses its texture.
+    pub(super) fn draw_snapshot_scenes(&mut self, scene: &Scene) {
         self.snapshots.release(&scene.snapshot_releases);
+        if scene.snapshot_scenes.is_empty() {
+            return;
+        }
+        let mut writer = match InstanceBufferWriter::new(
+            &self.device,
+            &self.instance_buffer_pool,
+            self.is_unified_memory,
+        ) {
+            Ok(writer) => writer,
+            Err(error) => {
+                log::error!("snapshots not drawn: {error:#}");
+                for snapshot in &scene.snapshot_scenes {
+                    self.snapshots.lose(snapshot.slot);
+                }
+                return;
+            }
+        };
+        let mut surfaces = Vec::new();
         let mut renders = Vec::new();
         for snapshot in &scene.snapshot_scenes {
-            match self.encode_snapshot(snapshot, writer) {
+            match self.encode_snapshot(snapshot, &mut writer, &mut surfaces) {
                 Ok(command_buffer) => renders.push(command_buffer),
                 Err(error) => {
                     log::error!("snapshot not drawn: {error:#}");
@@ -69,13 +108,28 @@ impl MetalRenderer {
                 }
             }
         }
-        renders
+        let held = Arc::new(HeldUntilDrawn {
+            pool: self.instance_buffer_pool.clone(),
+            buffer: Some(writer.finish()),
+            _surfaces: surfaces,
+        });
+        for command_buffer in &renders {
+            let held = Cell::new(Some(held.clone()));
+            let block = RcBlock::new(
+                move |_: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| drop(held.take()),
+            );
+            // SAFETY: Metal copies the live block and calls it once, after
+            // this command buffer completes; it only drops its share.
+            unsafe { command_buffer.addCompletedHandler(RcBlock::as_ptr(&block)) };
+            command_buffer.commit();
+        }
     }
 
     fn encode_snapshot(
         &mut self,
         snapshot: &SnapshotScene,
         writer: &mut InstanceBufferWriter,
+        surfaces: &mut Vec<CFRetained<CVMetalTexture>>,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let format = self.drawable_format;
         let device = self.device.clone();
@@ -93,6 +147,7 @@ impl MetalRenderer {
             writer,
             &texture,
             clear_color(snapshot.backing),
+            surfaces,
         )
     }
 
@@ -106,11 +161,13 @@ impl MetalRenderer {
                 &self.instance_buffer_pool,
                 self.is_unified_memory,
             )?;
-            let command_buffer = self.encode_snapshot(snapshot, &mut writer)?;
+            let mut surfaces = Vec::new();
+            let command_buffer = self.encode_snapshot(snapshot, &mut writer, &mut surfaces)?;
             let buffer = writer.finish();
             command_buffer.commit();
             command_buffer.waitUntilCompleted();
             self.instance_buffer_pool.lock().release(buffer);
+            drop(surfaces);
             Ok(())
         });
         match drawn {

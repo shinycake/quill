@@ -160,7 +160,15 @@ exactly (the Metal test compares them, within 1 of 255).
 
 Metal (`gpui-pre-apple/src/metal_renderer/snapshots.rs`) draws snapshot
 scenes through `draw_scene_into`, each on a command buffer committed ahead
-of the frame.
+of the frame. They are drawn at the top of `draw`, before the drawable is
+taken, so a frame skipped for want of a drawable (or drawn outside its
+display link's update) still fills and releases them; the headless entry
+points draw them first too. Their instance buffer, and the video textures
+a captured surface reads, stay alive until the last of their command
+buffers completes (the sharp magnifier's backdrops keep their video
+textures with the frame's the same way). A frame that fails after them
+loses nothing: the snapshot command buffers were committed on their own,
+so their textures hold the picture the window counts on.
 
 wgpu (`gpui-pre-wgpu/src/wgpu_renderer/snapshots.rs`) draws each snapshot
 scene with the frame's own recording (`record_frame` with
