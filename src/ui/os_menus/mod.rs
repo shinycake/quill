@@ -218,6 +218,47 @@ fn raise(window: &mut Window, cx: &mut App) {
     window.activate_window();
 }
 
+/// The app menu's and Help menu's items and their keys (⌘, ⌘L) while no
+/// Quill window is key (the main window closed to the Dock): they bring the
+/// main window back and run there. A key window answers them itself.
+fn register_app_menu_actions(handle: AnyWindowHandle, app: &WeakEntity<QuillApp>, cx: &mut App) {
+    use super::actions::{LockApp, OpenHelp, OpenSettings, OpenShortcuts};
+    fn command(
+        handle: AnyWindowHandle,
+        app: &WeakEntity<QuillApp>,
+        f: fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>),
+    ) -> impl Fn(&mut App) + 'static {
+        let app = app.clone();
+        move |cx: &mut App| {
+            if cx.active_window().is_some() {
+                return;
+            }
+            on_app(cx, handle, app.clone(), move |this, window, cx| {
+                raise(window, cx);
+                // Locked, the lock screen is all the window shows.
+                if !this.refused_while_locked() {
+                    f(this, window, cx);
+                }
+            });
+        }
+    }
+    let settings = command(handle, app, |this, window, cx| {
+        this.navigate(NavigationAction::Settings, window, cx);
+    });
+    cx.on_action(move |_: &OpenSettings, cx| settings(cx));
+    let shortcuts = command(handle, app, |this, _, cx| {
+        this.open_settings(Some(quill::settings_catalog::Page::Shortcuts), cx);
+        cx.notify();
+    });
+    cx.on_action(move |_: &OpenShortcuts, cx| shortcuts(cx));
+    let lock = command(handle, app, |this, _, cx| this.lock_by_passcode(cx));
+    cx.on_action(move |_: &LockApp, cx| lock(cx));
+    let help = command(handle, app, |this, _, cx| {
+        this.open_link("https://github.com/shinycake/quill", cx);
+    });
+    cx.on_action(move |_: &OpenHelp, cx| help(cx));
+}
+
 /// Run `f` on the app in its window, after the current dispatch.
 fn on_app(
     cx: &mut App,
@@ -322,6 +363,7 @@ pub(crate) fn register_actions(handle: AnyWindowHandle, app: WeakEntity<QuillApp
     cx.on_action(move |_: &WindowMenuNewChannel, cx| new_channel(cx));
     let show_main = window_command(WindowCommand::ShowMain);
     cx.on_action(move |_: &WindowMenuShowMain, cx| show_main(cx));
+    register_app_menu_actions(handle, &app, cx);
     let weak = app.clone();
     cx.on_action(move |action: &DockOpenAccount, cx| {
         let key = AccountKey(action.key.clone());

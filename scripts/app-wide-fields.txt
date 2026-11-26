@@ -77,6 +77,7 @@ frame.capture_blocked | screen capture protection is on, for the process
 frame.capture_notice_dismissed | its notice was dismissed, for the run
 frame.menu * | the window's menu focus hand-off (focus, items, open flag, focus to give back, layer focus); each chat window swaps in its own (WindowSlot::menu)
 frame.draft_timer * | the one debounced draft timer: a token the driver on screen ignores unless it issued it (`commit_debounced_draft`)
+frame.keyboard * | the main native window's keyboard home and its focus-lost hook; window chrome, not an account's
 language.open * | the language box: languages are the app's
 language.writes * | language file write counters
 language.recent | recently picked languages
