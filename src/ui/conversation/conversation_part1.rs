@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ui::chrome::bars::BarLine;
+use crate::ui::chrome::frame::ConversationFrame;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -17,7 +18,10 @@ impl QuillApp {
     ) -> AnyElement {
         // Floating: the header and the bars float in their own slice, and
         // the strips under the history join the composer's.
-        let float = self.bars_float();
+        let float = match self.conversation_frame() {
+            ConversationFrame::Floating(_) => true,
+            ConversationFrame::Stacked => false,
+        };
         if part == ConversationPart::Bars {
             return self.floating_bars(self.pane_mode(), cx);
         }
@@ -545,7 +549,7 @@ impl QuillApp {
         let saved_mode = self.saved_mode();
         let saved_rows = self.saved_rows_input(highlight_id);
         // A pane in the list's place keeps clear of the pills.
-        let frame = self.pane_frame();
+        let frame = self.conversation_frame().pane_frame();
         let pane = move |pane: AnyElement| match frame {
             Some(frame) => frame.wrap(pane),
             None => pane,
@@ -742,7 +746,7 @@ impl QuillApp {
     #[inline(never)]
     fn thread_history_pane(&mut self, list: AnyElement, cx: &mut Context<Self>) -> AnyElement {
         // Floating: the two bars float with the others (`history_bars`).
-        if self.bars_float() {
+        if let ConversationFrame::Floating(_) = self.conversation_frame() {
             return list;
         }
         div()

@@ -11,8 +11,6 @@ use gpui_kit::{AnyElement, Bounds, IntoElement, ParentElement, Pixels, Styled, d
 pub(in crate::ui) struct FrameInput {
     /// The history pane's measured width.
     pub pane: f32,
-    /// A left tab column's width, when the chat has one.
-    pub left_reserved: f32,
     pub gutter: f32,
     pub bar_gap: f32,
     /// The widest conversation column.
@@ -79,7 +77,6 @@ impl RowColumn {
             Self::Centred { gutter, column } => {
                 floating_frame(FrameInput {
                     pane,
-                    left_reserved: 0.,
                     gutter,
                     bar_gap: 0.,
                     chat_column: column,
@@ -93,9 +90,11 @@ impl RowColumn {
 }
 
 pub(in crate::ui) fn floating_frame(input: FrameInput) -> FloatingFrame {
-    let room = (input.pane - input.left_reserved).max(0.);
-    let column = input.chat_column.min(room - 2. * input.gutter).max(0.);
-    let side = ((room - column) / 2.).max(0.);
+    let column = input
+        .chat_column
+        .min(input.pane - 2. * input.gutter)
+        .max(0.);
+    let side = ((input.pane - column) / 2.).max(0.);
     let top = if input.top > 0. {
         input.gutter + input.top + input.bar_gap
     } else {
@@ -112,94 +111,9 @@ pub(in crate::ui) fn floating_frame(input: FrameInput) -> FloatingFrame {
         insets: HistoryInsets {
             top: px(top),
             bottom: px(bottom),
-            left: px(input.left_reserved + side),
+            left: px(side),
             right: px(side),
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gpui_kit::{point, size};
-
-    fn input(pane: f32) -> FrameInput {
-        FrameInput {
-            pane,
-            left_reserved: 0.,
-            gutter: 16.,
-            bar_gap: 8.,
-            chat_column: 696.,
-            top: 56.,
-            composer: 52.,
-        }
-    }
-
-    #[test]
-    fn the_column_never_exceeds_its_width_and_keeps_the_gutters() {
-        for pane in [320., 700., 728., 900., 1440., 2560.] {
-            let frame = floating_frame(input(pane));
-            assert!(frame.column <= 696., "pane {pane}");
-            assert!(frame.side >= 16., "pane {pane}");
-            assert!((frame.column + 2. * frame.side - pane).abs() < 1e-3);
-        }
-        assert_eq!(floating_frame(input(700.)).column, 668.);
-        assert_eq!(floating_frame(input(1440.)).column, 696.);
-    }
-
-    #[test]
-    fn the_rows_take_the_pane_or_the_centred_column() {
-        assert_eq!(RowColumn::Pane.width_in(1440.), 1440.);
-        let centred = RowColumn::Centred {
-            gutter: 16.,
-            column: 696.,
-        };
-        assert_eq!(centred.width_in(1440.), 696.);
-        assert_eq!(centred.width_in(700.), 668.);
-        assert_eq!(centred.width_in(728.), 696.);
-    }
-
-    #[test]
-    fn a_left_column_shifts_the_centre() {
-        let frame = floating_frame(FrameInput {
-            left_reserved: 72.,
-            ..input(1440.)
-        });
-        assert_eq!(frame.column, 696.);
-        assert_eq!(frame.side, (1440. - 72. - 696.) / 2.);
-        assert_eq!(frame.insets.left, px(72. + frame.side));
-        assert_eq!(frame.insets.right, px(frame.side));
-    }
-
-    #[test]
-    fn insets_clear_the_pills_and_zero_heights_clear_nothing() {
-        let frame = floating_frame(input(1440.));
-        assert_eq!(frame.insets.top, px(16. + 56. + 8.));
-        assert_eq!(frame.insets.bottom, px(8. + 52. + 16.));
-        let bare = floating_frame(FrameInput {
-            top: 0.,
-            composer: 0.,
-            ..input(1440.)
-        });
-        assert_eq!((bare.insets.top, bare.insets.bottom), (px(0.), px(0.)));
-    }
-
-    #[test]
-    fn zero_insets_leave_a_rectangle_as_it_is() {
-        let bounds = Bounds {
-            origin: point(px(10.), px(20.)),
-            size: size(px(300.), px(400.)),
-        };
-        assert_eq!(HistoryInsets::ZERO.inside(bounds), bounds);
-        let insets = HistoryInsets {
-            top: px(80.),
-            bottom: px(76.),
-            left: px(0.),
-            right: px(0.),
-        };
-        let readable = insets.inside(bounds);
-        assert_eq!(readable.origin.y, px(100.));
-        assert_eq!(readable.size.height, px(244.));
     }
 }
 
@@ -237,5 +151,139 @@ impl PaneFrame {
                     .child(pane),
             )
             .into_any_element()
+    }
+}
+
+/// Where the conversation's parts sit in a window's frame: one value
+/// that the pill lanes, the rows' column, their insets and a pane in the
+/// list's place all read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::ui) enum ConversationFrame {
+    /// Classic: the bars stack over the history, the rows run across it.
+    Stacked,
+    /// Floating: the header and the composer float over the history.
+    Floating(Pills),
+}
+
+/// The Floating conversation's pills and the room they take.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::ui) struct Pills {
+    /// Window edge to pill, pill to rows.
+    pub gutter: Pixels,
+    /// The widest conversation column.
+    pub column: Option<Pixels>,
+    /// A left tab column card's room, which the pill lanes keep clear of.
+    pub lanes_left: Pixels,
+    /// How far the rows keep clear of the pills.
+    pub insets: HistoryInsets,
+}
+
+impl ConversationFrame {
+    /// How far the history's rows keep clear of what floats over them.
+    pub(in crate::ui) fn insets(&self) -> HistoryInsets {
+        match self {
+            Self::Stacked => HistoryInsets::ZERO,
+            Self::Floating(pills) => pills.insets,
+        }
+    }
+
+    /// Where a body that is not the list sits: `None` leaves it as it is.
+    pub(in crate::ui) fn pane_frame(&self) -> Option<PaneFrame> {
+        match self {
+            Self::Stacked => None,
+            Self::Floating(pills) => Some(PaneFrame {
+                top: pills.insets.top,
+                bottom: pills.insets.bottom,
+                gutter: pills.gutter,
+                column: pills.column,
+            }),
+        }
+    }
+
+    /// How the history's rows are placed.
+    pub(in crate::ui) fn row_column(&self) -> RowColumn {
+        match self {
+            Self::Floating(Pills {
+                gutter,
+                column: Some(column),
+                ..
+            }) => RowColumn::Centred {
+                gutter: f32::from(*gutter),
+                column: f32::from(*column),
+            },
+            Self::Floating(Pills { column: None, .. }) | Self::Stacked => RowColumn::Pane,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::{point, size};
+
+    fn input(pane: f32) -> FrameInput {
+        FrameInput {
+            pane,
+            gutter: 16.,
+            bar_gap: 8.,
+            chat_column: 696.,
+            top: 56.,
+            composer: 52.,
+        }
+    }
+
+    #[test]
+    fn the_column_never_exceeds_its_width_and_keeps_the_gutters() {
+        for pane in [320., 700., 728., 900., 1440., 2560.] {
+            let frame = floating_frame(input(pane));
+            assert!(frame.column <= 696., "pane {pane}");
+            assert!(frame.side >= 16., "pane {pane}");
+            assert!((frame.column + 2. * frame.side - pane).abs() < 1e-3);
+        }
+        assert_eq!(floating_frame(input(700.)).column, 668.);
+        assert_eq!(floating_frame(input(1440.)).column, 696.);
+    }
+
+    #[test]
+    fn the_rows_take_the_pane_or_the_centred_column() {
+        assert_eq!(RowColumn::Pane.width_in(1440.), 1440.);
+        let centred = RowColumn::Centred {
+            gutter: 16.,
+            column: 696.,
+        };
+        assert_eq!(centred.width_in(1440.), 696.);
+        assert_eq!(centred.width_in(700.), 668.);
+        assert_eq!(centred.width_in(728.), 696.);
+    }
+
+    #[test]
+    fn insets_clear_the_pills_and_zero_heights_clear_nothing() {
+        let frame = floating_frame(input(1440.));
+        assert_eq!(frame.insets.top, px(16. + 56. + 8.));
+        assert_eq!(frame.insets.bottom, px(8. + 52. + 16.));
+        let bare = floating_frame(FrameInput {
+            top: 0.,
+            composer: 0.,
+            ..input(1440.)
+        });
+        assert_eq!((bare.insets.top, bare.insets.bottom), (px(0.), px(0.)));
+    }
+
+    #[test]
+    fn zero_insets_leave_a_rectangle_as_it_is() {
+        let bounds = Bounds {
+            origin: point(px(10.), px(20.)),
+            size: size(px(300.), px(400.)),
+        };
+        assert_eq!(HistoryInsets::ZERO.inside(bounds), bounds);
+        let insets = HistoryInsets {
+            top: px(80.),
+            bottom: px(76.),
+            left: px(0.),
+            right: px(0.),
+        };
+        let readable = insets.inside(bounds);
+        assert_eq!(readable.origin.y, px(100.));
+        assert_eq!(readable.size.height, px(244.));
     }
 }

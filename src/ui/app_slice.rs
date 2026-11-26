@@ -37,6 +37,7 @@ use super::anim_layer::{AnimationLayer, Layer};
 use super::app::QuillApp;
 use super::conversation::ConversationPart;
 use super::frame_clock::TickDraw;
+use crate::ui::chrome::frame::ConversationFrame;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -715,10 +716,10 @@ impl QuillApp {
             history = history.a11y_tag(tag.clone());
             composer = composer.a11y_tag(tag.clone());
         }
-        if self.bars_float()
-            && let Some(header) = &slices.header
+        if let (ConversationFrame::Floating(pills), Some(header)) =
+            (self.conversation_frame(), &slices.header)
         {
-            return self.floating_column(column, history, header, composer, chat, cx);
+            return self.floating_column(column, history, header, composer, &pills, chat, cx);
         }
         let hint = self.pull_hint_overlay(cx).map(|hint| {
             div()

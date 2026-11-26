@@ -3,6 +3,7 @@
 //! the same order (docs/decisions/floating-layout.md).
 
 use super::*;
+use crate::ui::chrome::frame::ConversationFrame;
 
 impl QuillApp {
     /// The history shows a reply thread's list (`history_body`).
@@ -113,7 +114,9 @@ impl QuillApp {
         }
         // A reply thread's root bar and info card sit over its list
         // (`thread_history_pane`); floating, they join the bars.
-        if self.bars_float() && self.thread_shown() {
+        if let (ConversationFrame::Floating(_), true) =
+            (self.conversation_frame(), self.thread_shown())
+        {
             bars.extend(self.thread_root_bar(cx));
             if self.chat_ui.info_card.thread() {
                 bars.extend(self.thread_info_card(cx));

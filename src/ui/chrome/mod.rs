@@ -36,6 +36,15 @@ pub(in crate::ui) fn luminance(color: Hsla) -> f32 {
     0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b)
 }
 
+/// Where a chat's wallpaper is painted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::ui) enum WallpaperSeat {
+    /// Behind the history, which reports its area for gradient bubbles.
+    History,
+    /// Under the whole window, title strip included, behind the cards.
+    Window,
+}
+
 /// How one page gives way to another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::ui) enum PageSwitch {
@@ -115,10 +124,13 @@ impl QuillApp {
         }
     }
 
-    /// The wallpaper is the window's, under the cards (Floating), not the
-    /// history's.
-    pub(in crate::ui) fn window_backdrop(&self) -> bool {
-        self.look() == Look::Cards
+    /// Where the chat's wallpaper is painted: behind the history
+    /// (Classic), or under the whole window, behind the cards (Floating).
+    pub(in crate::ui) fn wallpaper_seat(&self) -> WallpaperSeat {
+        match self.look() {
+            Look::Lines => WallpaperSeat::History,
+            Look::Cards => WallpaperSeat::Window,
+        }
     }
 
     /// The chat header's frame: Classic's line under it, or nothing of its
@@ -139,52 +151,35 @@ impl QuillApp {
         }
     }
 
-    /// How far the history's rows keep clear of the pills over them: none
-    /// while the bars are stacked.
+    /// Where the conversation's parts sit in this window's frame, from
+    /// the pane's measured width and the pills' measured heights.
+    pub(in crate::ui) fn conversation_frame(&self) -> frame::ConversationFrame {
+        let metrics = self.chrome_metrics();
+        match metrics.look {
+            Look::Lines => frame::ConversationFrame::Stacked,
+            Look::Cards => {
+                let (top, composer) = self.slices.window.pill_heights();
+                let placed = frame::floating_frame(frame::FrameInput {
+                    pane: f32::from(self.history.measure.get().pane()),
+                    gutter: metrics.gutter,
+                    bar_gap: metrics.bar_gap,
+                    chat_column: metrics.chat_column.unwrap_or(0.),
+                    top: f32::from(top),
+                    composer: f32::from(composer),
+                });
+                frame::ConversationFrame::Floating(frame::Pills {
+                    gutter: px(metrics.gutter),
+                    column: metrics.chat_column.map(px),
+                    lanes_left: px(self.left_tabs_reserved()),
+                    insets: placed.insets,
+                })
+            }
+        }
+    }
+
+    /// How far the history's rows keep clear of the pills over them.
     pub(in crate::ui) fn history_insets(&self) -> frame::HistoryInsets {
-        if !self.bars_float() {
-            return frame::HistoryInsets::ZERO;
-        }
-        let metrics = self.chrome_metrics();
-        let (top, composer) = self.slices.window.pill_heights();
-        let frame = frame::floating_frame(frame::FrameInput {
-            pane: f32::from(self.history.measure.get().pane()),
-            left_reserved: 0.,
-            gutter: metrics.gutter,
-            bar_gap: metrics.bar_gap,
-            chat_column: metrics.chat_column.unwrap_or(0.),
-            top: f32::from(top),
-            composer: f32::from(composer),
-        });
-        frame.insets
-    }
-
-    /// The frame a body that is not the list sits in, or `None` when the
-    /// bars stack (Classic), which leaves the body as it is.
-    pub(in crate::ui) fn pane_frame(&self) -> Option<frame::PaneFrame> {
-        if !self.bars_float() {
-            return None;
-        }
-        let insets = self.history_insets();
-        let metrics = self.chrome_metrics();
-        Some(frame::PaneFrame {
-            top: insets.top,
-            bottom: insets.bottom,
-            gutter: px(metrics.gutter),
-            column: metrics.chat_column.map(px),
-        })
-    }
-
-    /// How the history's rows are placed: across the pane, or in the
-    /// centred column when the bars float.
-    pub(in crate::ui) fn row_column(&self) -> frame::RowColumn {
-        match (self.bars_float(), self.chrome_metrics().chat_column) {
-            (true, Some(column)) => frame::RowColumn::Centred {
-                gutter: self.chrome_metrics().gutter,
-                column,
-            },
-            _ => frame::RowColumn::Pane,
-        }
+        self.conversation_frame().insets()
     }
 
     /// A chat's left tab column: Classic's lined column, or a card.
@@ -285,11 +280,6 @@ impl QuillApp {
             (Look::Cards, true) => Some(cx.theme().selection.opacity(MENU_TARGET_TINT)),
             (Look::Cards, false) | (Look::Lines, _) => None,
         }
-    }
-
-    /// The header and the bars float over the history in their own slice.
-    pub(in crate::ui) fn bars_float(&self) -> bool {
-        self.look() == Look::Cards
     }
 
     /// What the window whose state is in place draws this frame, as its

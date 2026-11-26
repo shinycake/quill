@@ -42,6 +42,12 @@ SENTINEL = re.compile(
     r"(\b(?:gutter|divider|bar_gap)\b|metrics(?:\(\))?\.radius)\s*[<>]=?\s*0"
 )
 
+# A look compared for equality, or a `-> bool` that answers "is it
+# Floating", hides the other case: match on the `Look` (or ask for a value,
+# such as `WallpaperSeat` or `ConversationFrame`). This one holds in the
+# chrome folder too.
+LOOK_TEST = re.compile(r"(?:[!=]=\s*Look::|Look::\w+\s*[!=]=)")
+
 # Files and folders that decide the look (paths relative to the repo root).
 ALLOW = [
     "src/layout_style.rs",
@@ -75,9 +81,12 @@ def main():
         if is_test_file(path):
             continue
         rel = path.relative_to(ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        for n, line in enumerate(text.splitlines(), 1):
+            if LOOK_TEST.search(line.split("//", 1)[0]):
+                hits.append(f"{rel}:{n}: tests a Look for equality; match on it")
         if allowed(rel):
             continue
-        text = path.read_text(encoding="utf-8")
         pattern = USE if "layout_style" in text else ONLY_CHOICE
         for n, line in enumerate(text.splitlines(), 1):
             code = line.split("//", 1)[0]

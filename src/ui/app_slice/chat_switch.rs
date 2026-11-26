@@ -14,6 +14,7 @@ use super::super::app::QuillApp;
 use super::super::motion::interface_animations_off;
 use super::super::page_cross::CrossLook;
 use crate::ui::chrome::PageSwitch;
+use crate::ui::chrome::frame::ConversationFrame;
 use gpui_kit::*;
 use std::time::Duration;
 
@@ -72,11 +73,13 @@ impl QuillApp {
             self.request_app_tick(60, cx);
         }
         let slot = self.conversation_slot(cx);
-        if self.bars_float() {
+        match self.conversation_frame() {
             // The floating column draws the stage around its history.
-            return slot;
+            ConversationFrame::Floating(_) => slot,
+            ConversationFrame::Stacked => {
+                self.slices.window.chat_switch.draw(slot, &CHAT_SWITCH, now)
+            }
         }
-        self.slices.window.chat_switch.draw(slot, &CHAT_SWITCH, now)
     }
 }
 

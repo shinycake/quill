@@ -53,7 +53,7 @@ impl QuillApp {
     /// probe is the source of truth from then on.
     pub(in crate::ui) fn seed_history_width(&self, pane: f32) {
         if !self.history.measure.get().is_measured() {
-            let rows = self.row_column().width_in(pane);
+            let rows = self.conversation_frame().row_column().width_in(pane);
             self.history
                 .measure
                 .set(HistoryMeasure::Seeded(HistoryWidth::new(
@@ -80,7 +80,7 @@ impl QuillApp {
         let screen = self.screen_epoch();
         // Floating lays the rows out in the centred column, whose sides
         // follow the pane.
-        let column = self.row_column();
+        let column = self.conversation_frame().row_column();
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {

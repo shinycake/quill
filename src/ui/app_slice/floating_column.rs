@@ -8,6 +8,7 @@ use super::super::app::QuillApp;
 use super::super::conversation::ConversationPart;
 use super::slice_elements::MeasureHeight;
 use super::{SliceParts, full};
+use crate::ui::chrome::frame::{ConversationFrame, Pills};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -20,17 +21,17 @@ impl QuillApp {
         history: Stateful<Div>,
         header: &SliceParts,
         composer: Stateful<Div>,
+        pills: &Pills,
         chat: Option<String>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let slices = &self.slices.window;
         super::super::image_budget::slice_shown(header.slice.entity_id(), self.windows.scope);
-        let metrics = self.chrome_metrics();
-        let gutter = px(metrics.gutter);
+        let gutter = pills.gutter;
         // A left tab column card takes the pane's left; the pills centre
         // in the rest.
-        let reserved = px(self.left_tabs_reserved());
-        let width = metrics.chat_column.map(px);
+        let reserved = pills.lanes_left;
+        let width = pills.column;
         let lane = |id: &'static str| {
             div()
                 .id(id)
@@ -147,10 +148,10 @@ impl QuillApp {
     /// history when its rows clear the pills.
     pub(super) fn height_redraw(&self) -> Vec<EntityId> {
         let slot = self.windows.view_in_place().or(self.slices.app_only_id());
-        let history = self
-            .bars_float()
-            .then(|| self.conversation_view_id())
-            .flatten();
+        let history = match self.conversation_frame() {
+            ConversationFrame::Floating(_) => self.conversation_view_id(),
+            ConversationFrame::Stacked => None,
+        };
         slot.into_iter().chain(history).collect()
     }
 }

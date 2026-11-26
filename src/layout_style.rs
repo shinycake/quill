@@ -281,9 +281,9 @@ pub fn metrics_of(look: Look) -> &'static ChromeMetrics {
 /// read them). The first matching row wins
 /// (docs/decisions/floating-layout.md).
 pub fn resolve(look: Look, readings: impl FnOnce() -> Readings) -> Chrome {
-    if look == Look::Lines {
+    let Look::Cards = look else {
         return Chrome::CLASSIC;
-    }
+    };
     let readings = readings();
     let plain_low = matches!(
         readings.backdrop,

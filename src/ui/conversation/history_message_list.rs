@@ -1,6 +1,7 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chrome::WallpaperSeat;
 use crate::ui::chrome::frame::HistoryInsets;
 use crate::ui::history_state::ScrollGoal;
 use quill::lang::{keys, tr, tr_with};
@@ -388,7 +389,7 @@ impl QuillApp {
             .begin_render(surface, target, cx);
         let weak = cx.weak_entity();
         let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
-        let window_backdrop = self.window_backdrop();
+        let seat = self.wallpaper_seat();
         let palette = self.history_palette(&look, cx);
         self.history.palette.set(palette);
         let date_pill =
@@ -469,18 +470,17 @@ impl QuillApp {
                             this.autoscroll_release(cx);
                         }),
                     ),
-                window_backdrop,
+                seat,
                 // The chat's wallpaper, else the account's (None keeps the
                 // theme background).
                 look.wallpaper.as_ref(),
                 look.dimming,
                 super::wallpaper_cache::Slot::History(cx.entity_id()),
             )
-            .children(
-                (!window_backdrop)
-                    .then(|| self.wallpaper_fade(&look, cx))
-                    .flatten(),
-            )
+            .children(match seat {
+                WallpaperSeat::History => self.wallpaper_fade(&look, cx),
+                WallpaperSeat::Window => None,
+            })
             .child(self.landing_scroll_watch(cx))
             .child(super::history_fx::reveal_viewport(
                 reveal,
