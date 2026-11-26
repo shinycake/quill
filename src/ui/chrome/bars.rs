@@ -105,16 +105,18 @@ pub(in crate::ui) fn strip<E: Styled + ParentElement + FluentBuilder>(
     }
 }
 
-/// The card the bars gather in: a pill's fill, edge and shadow. Classic
+/// The card the bars gather in: a pill's fill, edge and shadow, or its
+/// glass. Classic
 /// has none, so it returns `this`.
 pub(in crate::ui) fn stack_card<E: Styled + FluentBuilder>(
     this: E,
     chrome: &Chrome,
     theme: &Theme,
+    glass: Option<&LensStyle>,
 ) -> E {
     match chrome.metrics.placement {
         Placement::Stacked => this,
-        Placement::Overlaid => pill(this, chrome, theme),
+        Placement::Overlaid => pill(this, chrome, theme, glass),
     }
 }
 
@@ -147,7 +149,12 @@ impl QuillApp {
 
     /// [`stack_card`] in this window.
     pub(in crate::ui) fn stack_card<E: Styled + FluentBuilder>(&self, this: E, cx: &App) -> E {
-        stack_card(this, &self.chrome(cx), cx.theme())
+        stack_card(
+            this,
+            &self.chrome(cx),
+            cx.theme(),
+            self.card_glass(cx).as_ref(),
+        )
     }
 }
 
@@ -190,7 +197,7 @@ mod tests {
         }
         let mut tile = tinted_tile(div(), classic.metrics, &theme);
         assert!(tile.style().clone() == div().style().clone());
-        let mut card = stack_card(div(), &classic, &theme);
+        let mut card = stack_card(div(), &classic, &theme, None);
         assert!(card.style().clone() == div().style().clone());
     }
 
@@ -207,7 +214,7 @@ mod tests {
             assert!(tinted.style().border_widths.top.is_none(), "no line");
             assert!(tinted.style().corner_radii.top_left.is_some(), "a tile");
         }
-        let mut card = stack_card(div(), &floating, &theme);
+        let mut card = stack_card(div(), &floating, &theme, None);
         assert!(card.style().box_shadow.is_some(), "the card casts a shadow");
     }
 }

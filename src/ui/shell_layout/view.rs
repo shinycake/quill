@@ -264,6 +264,7 @@ impl QuillApp {
                 row.size_full(),
                 &chrome,
                 cx.theme(),
+                self.card_glass(cx).as_ref(),
             ))
     }
 
@@ -288,6 +289,7 @@ impl QuillApp {
                 row.size_full(),
                 &chrome,
                 cx.theme(),
+                self.card_glass(cx).as_ref(),
             ))
             .when(!leaving, |this| this.occlude())
             .into_any_element()

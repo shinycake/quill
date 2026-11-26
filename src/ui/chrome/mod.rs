@@ -130,7 +130,33 @@ impl QuillApp {
         this: E,
         cx: &App,
     ) -> E {
-        frames::tab_column_frame(this, &self.chrome(cx), cx.theme())
+        frames::tab_column_frame(
+            this,
+            &self.chrome(cx),
+            cx.theme(),
+            self.card_glass(cx).as_ref(),
+        )
+    }
+
+    /// The glass the Floating cards draw while Glass effects is on and
+    /// resolves to glass (the `Panel` recipe), else `None`: the opaque
+    /// card. Classic has no cards, so never any.
+    pub(in crate::ui) fn card_glass(&self, cx: &App) -> Option<LensStyle> {
+        match self.chrome_metrics().clip {
+            quill::layout_style::Clip::Square => None,
+            quill::layout_style::Clip::Rounded => {
+                super::glass::lens(super::glass::GlassRole::Panel, cx)
+            }
+        }
+    }
+
+    /// A chat row's resting fill: the list's own, or none on a glass card,
+    /// where an opaque row would hide the glass.
+    pub(in crate::ui) fn list_row_fill(&self, cx: &App) -> Hsla {
+        match self.card_glass(cx) {
+            Some(_) => transparent_black(),
+            None => cx.theme().sidebar,
+        }
     }
 
     /// The header and the bars float over the history in their own slice.

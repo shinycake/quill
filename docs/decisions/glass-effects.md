@@ -58,7 +58,8 @@ budget.
 | MediaIcon | the media viewer's arrows, the story viewer's arrows, the plain call buttons |
 | MediaText | the media viewer's docked bar, captions, the video controller |
 | Selection | the Chats/Contacts/Calls selection, which slides as clearer glass |
-| Bar | the chat list's header, folder tabs and search field, floating over the rows |
+| Bar | the chat list's header, folder tabs and search field, floating over the rows (Classic only: in Floating the list card is the glass) |
+| Panel (Floating) | the Floating layout's cards: the chat list card, the header-and-bars card, the composer card, the side-panel card and the left tab column (docs/decisions/floating-layout.md, "Glass on the cards") |
 
 Message bubbles, chat rows, wallpapers, service messages and bot buttons
 never get glass (Apple's rule: glass is for controls above content).
@@ -142,6 +143,7 @@ not public claims.
 | Video under the viewer's controls | at most +0.5 ms GPU per frame | median 2.10 ms off, 2.13 ms on |
 | Power during a 60 s scripted scroll | within 2% or inside run-to-run noise | system load (SMC `AccumulatedSystemLoad`, on AC power) averaged 29.0 W off and 32.2 W on, with runs of the same setting ranging 18 to 39 W: inside noise, and too noisy to resolve 2% |
 | Memory | at most +16 MB with glass on screen, back after | footprint 89 MB off, 89 to 90 MB on with a menu open, unchanged after it closed |
+| Floating cards, scrolling a chat under them (2026-11-25) | as the scroll row | median 0.98 to 1.00 ms off, 3.26 to 3.38 ms on (+2.3 ms), p99 9.0 to 9.9 ms on: over budget, open for the owner (floating-layout.md) |
 | Amount of glass | at most 8 lenses in 2 bands; always-visible glass under 15% of the window | scene test: a steady main window stays within 8 lenses and 2 bands; the header bar is about 6% of a 1200 by 800 window |
 
 The power row is the weakest. The Mac was on AC power with other work

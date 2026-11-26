@@ -85,7 +85,14 @@ impl QuillApp {
             .h_full()
             .px(px(m.sidebar_inset_x))
             .py(px(m.sidebar_inset_y))
-            .map(|this| crate::ui::chrome::frames::list_frame(this, &chrome, cx.theme()))
+            .map(|this| {
+                crate::ui::chrome::frames::list_frame(
+                    this,
+                    &chrome,
+                    cx.theme(),
+                    self.card_glass(cx).as_ref(),
+                )
+            })
             .flex()
             .flex_col()
             .gap(px(m.sidebar_gap))

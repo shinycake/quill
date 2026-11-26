@@ -85,7 +85,14 @@ impl QuillApp {
             .flex_1()
             .min_w_0()
             .h_full()
-            .map(|this| crate::ui::chrome::frames::panel_frame(this, &self.chrome(cx), cx.theme()))
+            .map(|this| {
+                crate::ui::chrome::frames::panel_frame(
+                    this,
+                    &self.chrome(cx),
+                    cx.theme(),
+                    self.card_glass(cx).as_ref(),
+                )
+            })
             .flex()
             .flex_col()
             .child(

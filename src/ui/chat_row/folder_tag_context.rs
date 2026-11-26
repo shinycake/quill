@@ -220,6 +220,7 @@ impl QuillApp {
                         Some(s.chat_list.psa_labels.row(promotion))
                     }),
                     muted_fg,
+                    self.list_row_fill(cx),
                     cx,
                 );
                 let row = self

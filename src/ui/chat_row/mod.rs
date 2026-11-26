@@ -374,6 +374,9 @@ pub(super) fn session_chat_row(
     // and the announcement text in place of the preview.
     promotion: Option<quill::promotion::RowBadge>,
     muted_fg: Hsla,
+    // The fill of a row that is not selected: the list's, or none on a
+    // glass card (`QuillApp::list_row_fill`).
+    rest_fill: Hsla,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement + Styled + StatefulInteractiveElement + use<> {
     let id = chat.id;
@@ -532,7 +535,7 @@ pub(super) fn session_chat_row(
         .bg(if selected {
             cx.theme().primary.opacity(0.25)
         } else {
-            cx.theme().sidebar
+            rest_fill
         })
         .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
             // Slice CL3: in multi-select mode a row click toggles the

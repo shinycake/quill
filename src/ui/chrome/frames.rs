@@ -17,33 +17,37 @@ use gpui_kit::*;
 use quill::layout_style::{Chrome, Clip, Edge, Elevation, Placement};
 
 /// The chat list column's own frame, inside its slot: Classic's right
-/// border, or a card's rounded fill.
+/// border, or a card's rounded fill (none over glass: the slot's card
+/// draws the lens, `glass`).
 pub(in crate::ui) fn list_frame<E: Styled + FluentBuilder>(
     this: E,
     chrome: &Chrome,
     theme: &Theme,
+    glass: Option<&LensStyle>,
 ) -> E {
     match chrome.metrics.clip {
         Clip::Square => this
             .border_r_1()
             .border_color(theme.border)
             .bg(theme.sidebar),
-        Clip::Rounded => surface(this, chrome, theme),
+        Clip::Rounded => surface(this, chrome, theme, glass),
     }
 }
 
-/// A side panel's frame: Classic's left border, or a card's rounded fill.
+/// A side panel's frame: Classic's left border, or a card's rounded fill
+/// (none over glass: the panels' card draws the lens).
 pub(in crate::ui) fn panel_frame<E: Styled + FluentBuilder>(
     this: E,
     chrome: &Chrome,
     theme: &Theme,
+    glass: Option<&LensStyle>,
 ) -> E {
     match chrome.metrics.clip {
         Clip::Square => this
             .border_l_1()
             .border_color(theme.border)
             .bg(theme.sidebar),
-        Clip::Rounded => surface(this, chrome, theme),
+        Clip::Rounded => surface(this, chrome, theme, glass),
     }
 }
 
@@ -78,44 +82,79 @@ pub(in crate::ui) fn tab_column_frame<E: Styled + FluentBuilder>(
     this: E,
     chrome: &Chrome,
     theme: &Theme,
+    glass: Option<&LensStyle>,
 ) -> E {
     match chrome.metrics.clip {
         Clip::Square => this
             .bg(theme.background)
             .border_r_1()
             .border_color(theme.border),
-        Clip::Rounded => card(surface(this, chrome, theme), chrome, theme),
+        Clip::Rounded => card(surface(this, chrome, theme, glass), chrome, theme, glass),
     }
 }
 
-/// A pill over the history: a card's fill, edge and shadow. It does not
-/// clip, as the composer's popups hang outside it.
-pub(super) fn pill<E: Styled + FluentBuilder>(this: E, chrome: &Chrome, theme: &Theme) -> E {
-    surface(this, chrome, theme).when(chrome.elevation == Elevation::Shadowed, |this| {
-        this.shadow(card_shadow(theme))
-    })
+/// A pill over the history: a card's fill, edge and shadow, or its glass.
+/// It does not clip, as the composer's popups hang outside it.
+pub(super) fn pill<E: Styled + FluentBuilder>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+    glass: Option<&LensStyle>,
+) -> E {
+    match glass {
+        Some(lens) => lens_on(this, chrome, theme, lens),
+        None => surface(this, chrome, theme, None)
+            .when(chrome.elevation == Elevation::Shadowed, |this| {
+                this.shadow(card_shadow(theme))
+            }),
+    }
 }
 
-/// A card's fill and edge, rounded.
-fn surface<E: Styled + FluentBuilder>(this: E, chrome: &Chrome, theme: &Theme) -> E {
-    this.bg(theme.sidebar)
-        .rounded(card_in(chrome.metrics, theme))
-        .when(chrome.edge == Edge::Hairline, |this| {
-            this.border_1().border_color(theme.border)
-        })
+/// A card's fill and edge, rounded. Over glass it draws neither: the lens
+/// is the fill, the rim and the shadow (docs/decisions/glass-effects.md).
+fn surface<E: Styled + FluentBuilder>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+    glass: Option<&LensStyle>,
+) -> E {
+    let this = this.rounded(card_in(chrome.metrics, theme));
+    match glass {
+        Some(_) => this,
+        None => this
+            .bg(theme.sidebar)
+            .when(chrome.edge == Edge::Hairline, |this| {
+                this.border_1().border_color(theme.border)
+            }),
+    }
 }
 
-/// The card around a slot's content: its shadow, its corners and its
-/// clip. Classic has no card, so it returns `this` unchanged.
-pub(in crate::ui) fn card<E: Styled + FluentBuilder>(this: E, chrome: &Chrome, theme: &Theme) -> E {
+/// The glass of a card, rounded as the card.
+fn lens_on<E: Styled>(this: E, chrome: &Chrome, theme: &Theme, lens: &LensStyle) -> E {
+    this.rounded(card_in(chrome.metrics, theme))
+        .backdrop_glass(Some(*lens))
+}
+
+/// The card around a slot's content: its shadow (or its glass), its
+/// corners and its clip. Classic has no card, so it returns `this`
+/// unchanged. The lens sits here, outside the slot's cached view, so it
+/// reads the window's backdrop.
+pub(in crate::ui) fn card<E: Styled + FluentBuilder>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+    glass: Option<&LensStyle>,
+) -> E {
     match chrome.metrics.clip {
         Clip::Square => this,
-        Clip::Rounded => card_clip(
-            this.rounded(card_in(chrome.metrics, theme))
+        Clip::Rounded => card_clip(match glass {
+            Some(lens) => lens_on(this, chrome, theme, lens),
+            None => this
+                .rounded(card_in(chrome.metrics, theme))
                 .when(chrome.elevation == Elevation::Shadowed, |this| {
                     this.shadow(card_shadow(theme))
                 }),
-        ),
+        }),
     }
 }
 

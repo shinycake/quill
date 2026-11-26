@@ -173,3 +173,32 @@ fn the_chat_list_scrolls_under_a_glass_header_and_the_keys_stay_below_it(cx: &mu
     };
     assert_eq!(click_below_bar(&app, vcx, bar), Some(target));
 }
+
+#[gpui_kit::test]
+fn floating_cards_are_glass_only_while_the_look_is_glass(cx: &mut TestAppContext) {
+    // Its own appearance file: the layout it saves never reaches the
+    // other tests' shared app root.
+    quill::settings::use_isolated_app_root(quill::scratch::process_dir("quill-glass-floating"));
+    let _prefs = crate::ui::appearance::own_appearance_prefs("quill-glass-floating-prefs");
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.set_appearance(cx, |appearance| {
+            appearance.layout = quill::layout_style::LayoutStyle::Floating;
+        });
+    });
+    set_material(&app, vcx, Material::Solid);
+    assert_eq!(glass(vcx), (0, 0), "solid: the cards are opaque");
+    set_material(&app, vcx, Material::Glass);
+    let (lenses, bands) = glass(vcx);
+    // The list card and the conversation's two cards, at least.
+    assert!(lenses >= 3, "glass on: {lenses} lenses");
+    assert!(lenses <= 8, "steady floating window: {lenses} lenses");
+    assert!(bands <= 2, "steady floating window: {bands} bands");
+    assert!(
+        vcx.debug_bounds("chat-list-glass-bar").is_none(),
+        "the list card is the glass: no header bar over it"
+    );
+    set_material(&app, vcx, Material::Solid);
+    assert_eq!(glass(vcx), (0, 0), "switching off removes every lens");
+}

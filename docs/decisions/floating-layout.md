@@ -322,3 +322,56 @@ Classic proof: the bars' helpers are identity tests in `chrome/bars.rs`
 (both edges); the 23-capture set matches the baseline (known noisy demos
 only) and `ready-channels`, `ready-voice-playing`, `ready-topic-loading`,
 `ready-bot-chat` and `ready-direct-messages` are pixel-identical to main.
+
+## Glass on the cards
+
+Owner direction (2026-11-25): glass works in both layouts. Classic keeps
+#1497's glass exactly. In Floating, with Settings › Appearance › Glass
+effects on, the list card, the header-and-bars card, the composer card,
+the side-panel card and the left tab column are backdrop glass over the
+window's wallpaper, with the `Panel` role's recipe
+(docs/decisions/glass-effects.md); no new style system.
+
+- `chrome.card_glass(cx)` is the one question: `None` in Classic (square
+  clip), else `glass::lens(GlassRole::Panel, cx)`, which is `None`
+  whenever the look resolves solid (switch off, Reduce Transparency, high
+  contrast, saving power, a software adapter). Every frame helper
+  (`list_frame`, `panel_frame`, `tab_column_frame`, `card`, `pill`,
+  `stack_card`) takes that lens: with it the card draws the lens, rounded
+  as the card, and no fill, edge or shadow of its own (the lens is all
+  three); without it the opaque card as before.
+- The lens sits on the slot's card, outside the slot's cached view, and on
+  the conversation's two cards, which sit outside the history's paint
+  layer, so each reads the window's backdrop rather than degrading to its
+  fallback quad.
+- Chat rows rest on `list_row_fill`: transparent over glass, so the card
+  shows through, the sidebar fill otherwise. Hover and selection keep
+  their own fills.
+- The chat list's own glass header (#1497) floats only when the list has
+  no glass card (`chat_list_bar_glass`), so glass never sits over glass.
+
+Deviation from glass-effects.md's budget: the always-visible glass is the
+list card and the two conversation cards, well over 15% of the window,
+because the owner asked for exactly these surfaces. The lens count and
+bands stay inside the budget (scene test
+`floating_cards_are_glass_only_while_the_look_is_glass`).
+
+Cost, measured 2026-11-25 on Idan's M-series Mac with #1497's method
+(release build with `demo-capture,frame-profiler`, `QUILL_GPU_PROBE=1`,
+1200 by 800 at 2x, `ready-unread-landing` scrolled up and down under the
+cards, first 30 frames skipped, ABBA twice). Relative numbers for this
+decision only:
+
+| Layout | GPU p50 off | GPU p50 on | p99 off | p99 on | lenses on |
+| --- | --- | --- | --- | --- | --- |
+| Floating | 0.98 to 1.00 ms | 3.26 to 3.38 ms (+2.3 ms) | 5.0 to 5.4 ms | 9.0 to 9.9 ms | 6 |
+| Classic (same build) | 0.53 ms | 1.70 to 1.75 ms (+1.2 ms) | 3.5 to 3.8 ms | 7.3 to 7.5 ms | 4 |
+
+CPU draw medians stayed at 5.5 to 6.2 ms in every run, on or off.
+Floating glass is over #1497's scroll budget (+1.0 ms GPU, p99 under
+8.3 ms): every lens re-blurs its backdrop each frame while the history
+moves, and the list card is a tall lens whose backdrop (the wallpaper)
+does not change. This is open for the owner; the remedies, in order, are
+a renderer that reuses a lens's blur while its backdrop region is
+unchanged, then fewer lenses (the list card solid while the history
+scrolls), then solid cards on battery.

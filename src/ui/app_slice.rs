@@ -606,6 +606,7 @@ impl QuillApp {
                 .size_full(),
             &chrome,
             cx.theme(),
+            self.card_glass(cx).as_ref(),
         );
         match &self.slices.sidebar {
             Some(parts) => {
