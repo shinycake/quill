@@ -6,6 +6,7 @@ use super::super::command_shortcuts::CommandActions;
 use super::super::frame_clock::follow_app_unless_held;
 use super::super::glyph_sweep;
 use super::super::image_budget::{BoundedImageCache, CacheScope, WindowDraw};
+use super::super::keyboard_home::KeyboardHome;
 use super::super::shell::QuillShell;
 use super::super::window_actions::WindowActions;
 use super::cover::WindowPlace;
@@ -34,6 +35,8 @@ pub(crate) struct ChatWindowView {
     /// This window is kept out of screen capture (a secret chat, or its
     /// viewer showing a secret chat's media): each window has its own.
     capture_blocked: bool,
+    /// Where this window's keyboard goes when what had it is gone.
+    keyboard: KeyboardHome,
     _observe: Subscription,
     /// The window's activation, bounds and display (`cover`).
     _placed: [Subscription; 3],
@@ -49,6 +52,8 @@ impl ChatWindowView {
         let slot = owner.update(cx, |app, cx| WindowSlot::new(app, chat_id, window, cx));
         let shell = cx.new(|_| QuillShell::new(owner.clone()));
         let observe = follow_app_unless_held(&owner, window.window_handle().window_id(), cx);
+        let mut keyboard = KeyboardHome::new(cx);
+        keyboard.watch(window, cx, |_, _| Vec::new());
         let placed = [
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() {
@@ -82,6 +87,7 @@ impl ChatWindowView {
             shell,
             title_shown: String::new(),
             capture_blocked: false,
+            keyboard,
             _observe: observe,
             _placed: placed,
         }
@@ -314,6 +320,7 @@ impl Render for ChatWindowView {
             // Window-wide text selection, as in the main window.
             .child(gpui_kit::base::TextSelectionLayer)
             .child(scope_probe(self.owner.clone(), Some(chat_id)))
+            .child(self.keyboard.anchor())
             // Input here keeps the user online and the auto-lock away, as
             // input in the main window does.
             .child(crate::ui::presence::input_probe())

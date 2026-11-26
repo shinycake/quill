@@ -151,6 +151,19 @@ impl Render for QuillApp {
             .session()
             .map(|session| session.connection)
             .and_then(connection_indicator);
+        // A focus left on something no longer drawn comes back where the
+        // root's actions reach it: Settings while open, else the chat's
+        // composer, else the chat list.
+        self.frame.keyboard.watch(window, cx, |app, cx| {
+            let settings = app.settings.open().then(|| app.settings.focus.clone());
+            settings
+                .into_iter()
+                .chain([
+                    app.composer.read(cx).focus_handle(cx),
+                    app.focus_sidebar.clone(),
+                ])
+                .collect()
+        });
         let root = div()
             .flex()
             .flex_col()
@@ -164,6 +177,7 @@ impl Render for QuillApp {
             .child(gpui_kit::base::TextSelectionLayer)
             // Input in the main window puts its own state in place.
             .child(super::chat_window::scope_probe(cx.weak_entity(), None))
+            .child(self.frame.keyboard.anchor())
             // Batch 4: input clock for the online/idle presence.
             .child(super::presence::input_probe())
             // The viewer's Space hold ends on the key-up (key-downs reach it

@@ -107,6 +107,9 @@ pub(crate) struct FrameUi {
     /// App-wide like the driver's pending draft it commits: a chat
     /// window's state swapped in when it fires must not hide it.
     pub(super) draft_timer: super::draft_timer::DraftTimer,
+    /// Where the main window's keyboard goes when what had it is gone
+    /// (`keyboard_home.rs`).
+    pub(super) keyboard: super::keyboard_home::KeyboardHome,
 }
 
 /// Whether the frame clock's loop is going; the stage owns the task of the
@@ -138,6 +141,7 @@ impl FrameUi {
     /// over again. Every per-native-window cache resets here.
     pub(super) fn forget_native_window(&mut self) {
         self.window_title_shown.get_mut().clear();
+        self.keyboard.forget_window();
         self.capture_blocked = false;
         // The timer ran in the window that is gone; the next move asks again.
         self.window_state_save = StateSaveTimer::Idle;
@@ -183,6 +187,7 @@ impl FrameUi {
             capture_notice_dismissed: false,
             menu: super::context_menu_keys::MenuFocus::new(cx),
             draft_timer: Default::default(),
+            keyboard: super::keyboard_home::KeyboardHome::new(cx),
         }
     }
 }
