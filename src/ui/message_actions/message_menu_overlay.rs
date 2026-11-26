@@ -3,6 +3,7 @@
 use super::*;
 use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_surface::MenuSurface;
+use crate::ui::menu_surface::{MenuRowCorners as _, RowHighlight as _};
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -104,11 +105,11 @@ impl QuillApp {
                         .gap_3()
                         .px_3()
                         .py_1p5()
-                        .rounded_md()
+                        .menu_row_corners(&self.frame.menu.items, $cx)
                         .cursor_pointer()
                         .text_sm()
                         .text_color(if danger { danger_bright() } else { text_menu() })
-                        .hover(|style| style.bg(row_hover))
+                        .hover_highlight(row_hover, $cx)
                         .menu_key_target(row_key($order), &self.frame.menu.items, $cx)
                         .role(gpui_kit::Role::MenuItem)
                         .aria_label($label)
@@ -181,11 +182,11 @@ impl QuillApp {
                     .gap_3()
                     .px_3()
                     .py_1p5()
-                    .rounded_md()
+                    .menu_row_corners(&self.frame.menu.items, cx)
                     .cursor_pointer()
                     .text_sm()
                     .text_color(text_menu())
-                    .hover(|style| style.bg(row_hover))
+                    .hover_highlight(row_hover, cx)
                     .menu_key_target(row_key(order::REPLY_TIMECODE), &self.frame.menu.items, cx)
                     .role(gpui_kit::Role::MenuItem)
                     .aria_label(tr_with(
@@ -803,12 +804,12 @@ impl QuillApp {
                     .id("menu-emoji-packs")
                     .px_3()
                     .py_1p5()
-                    .rounded_md()
+                    .menu_row_corners(&self.frame.menu.items, cx)
                     .cursor_pointer()
                     .text_xs()
                     .max_w(px(260.))
                     .text_color(text_muted())
-                    .hover(|style| style.bg(row_hover))
+                    .hover_highlight(row_hover, cx)
                     .menu_key_target(row_key(order::EMOJI_PACKS), &self.frame.menu.items, cx)
                     .role(gpui_kit::Role::MenuItem)
                     .aria_label(format!("{before}{bold}{after}"))

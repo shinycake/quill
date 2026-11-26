@@ -7,7 +7,7 @@ use super::app::{ChatListFilter, QuillApp};
 use super::chat_theme::{accent, accent_strong, text_on_fill};
 use super::folder_glyphs::folder_glyph;
 use super::folder_tabs_drag::folder_tab_drag;
-use super::folder_tabs_fit::{FADE_WIDTH, RevealKey, fade_edges, needs_reveal};
+use super::folder_tabs_fit::{FADE_WIDTH, FadeEdges, RevealKey, fade_edges, needs_reveal};
 use super::pressable::PressableDiv;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -101,12 +101,16 @@ pub(super) fn selected_slot(
 }
 
 /// The unread-chats counter on a folder tab: accent when something unmuted
-/// is unread, muted gray when every counted chat is muted.
-fn folder_badge_pill(badge: FolderBadge, cx: &App) -> AnyElement {
-    let bg = if badge.muted {
-        cx.theme().muted_foreground.opacity(0.55)
-    } else {
-        Hsla::from(accent_strong())
+/// is unread, muted gray when every counted chat is muted. On the solid
+/// accent pill of the selected tab it inverts, or it would vanish into it.
+fn folder_badge_pill(badge: FolderBadge, on_accent: bool, cx: &App) -> AnyElement {
+    let (bg, fg) = match (on_accent, badge.muted) {
+        (true, _) => (Hsla::from(text_on_fill()), Hsla::from(accent_strong())),
+        (false, true) => (
+            cx.theme().muted_foreground.opacity(0.55),
+            Hsla::from(text_on_fill()),
+        ),
+        (false, false) => (Hsla::from(accent_strong()), Hsla::from(text_on_fill())),
     };
     let label = if badge.count > 999 {
         format!("{}K", badge.count / 1000)
@@ -124,7 +128,7 @@ fn folder_badge_pill(badge: FolderBadge, cx: &App) -> AnyElement {
         .items_center()
         .justify_center()
         .bg(bg)
-        .text_color(text_on_fill())
+        .text_color(fg)
         .text_size(px(10.))
         .font_semibold()
         .aria_label(tr_with(
@@ -141,6 +145,7 @@ fn folder_badge_pill(badge: FolderBadge, cx: &App) -> AnyElement {
 /// instead.
 fn folder_tab(
     slot: &FolderSlot,
+    on_accent: bool,
     show_icon: bool,
     show_text: bool,
     premium: bool,
@@ -150,15 +155,18 @@ fn folder_tab(
     let mut tab = Tab::new().label(slot.name.clone());
     tab = match (show_icon, show_text) {
         (true, false) => tab.icon(slot.glyph).aria_label(slot.name.clone()),
-        (true, true) => tab.prefix(
-            Icon::new(slot.glyph)
-                .size(px(14.))
-                .text_color(cx.theme().muted_foreground),
-        ),
+        // The icon takes the label's colour: on the accent pill a muted
+        // grey would not show.
+        (true, true) => tab.prefix(Icon::new(slot.glyph).size(px(14.)).map(
+            |icon| match on_accent {
+                true => icon.text_color(text_on_fill()),
+                false => icon.text_color(cx.theme().muted_foreground),
+            },
+        )),
         _ => tab,
     };
     if let Some(badge) = slot.badge {
-        tab = tab.suffix(folder_badge_pill(badge, cx));
+        tab = tab.suffix(folder_badge_pill(badge, on_accent, cx));
     }
     // Right-click: Edit / Mark as read / Remove (the All tab:
     // Mark all as read / Edit folders).
@@ -360,6 +368,12 @@ impl QuillApp {
             f32::from(scroll.max_offset().x),
         );
         let fade_color = cx.theme().sidebar;
+        // Over glass an opaque fade would be a block of the list's colour:
+        // the strip only clips there.
+        let fades = match super::glass::look(cx).is_glass() {
+            true => FadeEdges::default(),
+            false => fades,
+        };
         let weak = cx.weak_entity();
         // The strip clips at its own edge, so the chevron and the gear sit
         // beside it as flex_none siblings and can never overlap a tab. A
@@ -413,9 +427,17 @@ impl QuillApp {
             .resolved(self.appearance.folder_tabs_view);
         let weak = cx.weak_entity();
         let premium = self.session().is_some_and(|s| s.my_is_premium());
+        // The selected tab sits on a solid accent pill in Floating unless
+        // the pill is glass.
+        let accent_pill = super::chrome::list_parts::folder_tabs_pill(self.chrome_metrics())
+            && !super::glass::look(cx).is_glass();
         let tabs: Vec<Tab> = slots
             .iter()
-            .map(|slot| folder_tab(slot, show_icon, show_text, premium, &weak, cx))
+            .enumerate()
+            .map(|(ix, slot)| {
+                let on_accent = accent_pill && ix == selected;
+                folder_tab(slot, on_accent, show_icon, show_text, premium, &weak, cx)
+            })
             .collect();
         let kinds: Vec<FolderSlotKind> = slots.iter().map(|s| s.kind).collect();
         let bar = TabBar::new("folder-tabs")
@@ -521,7 +543,7 @@ impl QuillApp {
                             .absolute()
                             .top(px(2.))
                             .right(px(6.))
-                            .child(folder_badge_pill(badge, cx)),
+                            .child(folder_badge_pill(badge, false, cx)),
                     )
                 })
                 .when(active, |this| {

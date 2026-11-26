@@ -76,6 +76,7 @@ fn kit_glass(surface: PopoverGlassSurface, cx: &App) -> Option<LensStyle> {
     match surface {
         PopoverGlassSurface::Popover => lens(GlassRole::Menu, cx),
         PopoverGlassSurface::Toast => lens(GlassRole::Panel, cx),
+        PopoverGlassSurface::Highlight => lens(GlassRole::Highlight, cx),
         PopoverGlassSurface::TabSelection { travel } => {
             lens(GlassRole::Selection, cx).map(|style| recipes::sliding(style, travel))
         }

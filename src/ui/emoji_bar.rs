@@ -10,6 +10,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::glass::{GlassRole, GlassSurface as _};
+use crate::ui::menu_surface::{RowHighlight as _, menu_radius, menu_row_radius};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -306,7 +307,7 @@ impl QuillApp {
             .flex()
             .items_center()
             .justify_center()
-            .rounded_md()
+            .rounded(menu_row_radius(self.look(), cx))
             .text_size(px(22.))
             .role(gpui_kit::Role::ListBoxOption)
             .aria_label(if item.name.is_empty() {
@@ -316,9 +317,9 @@ impl QuillApp {
             })
             .cursor_pointer()
             .when(Some(index) == spec.selected, |this| {
-                this.bg(cx.theme().selection)
+                this.lit(cx.theme().selection, cx)
             })
-            .hover(|style| style.bg(cx.theme().accent))
+            .hover_highlight(cx.theme().accent, cx)
             // On press: the composer's blur would close the bar before a
             // click could land.
             .on_mouse_down(
@@ -346,11 +347,11 @@ impl QuillApp {
             .flex()
             .items_center()
             .justify_center()
-            .rounded_md()
+            .rounded(menu_row_radius(self.look(), cx))
             .cursor_pointer()
             .role(gpui_kit::Role::Button)
             .aria_label(label)
-            .hover(|style| style.bg(cx.theme().accent))
+            .hover_highlight(cx.theme().accent, cx)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -461,7 +462,7 @@ impl QuillApp {
             .gap_1()
             .p_1()
             .w_full()
-            .rounded_lg()
+            .rounded(menu_radius(self.look(), cx))
             .border_1()
             .glass_or(GlassRole::Panel, cx, |this| {
                 this.border_color(theme.border)

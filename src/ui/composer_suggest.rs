@@ -9,6 +9,7 @@
 use super::app::QuillApp;
 use super::emoji_bar::{BarOwner, EmojiBarUi};
 use crate::ui::glass::{GlassRole, GlassSurface as _};
+use crate::ui::menu_surface::{RowHighlight as _, menu_radius, menu_row_radius};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -684,7 +685,7 @@ impl QuillApp {
             .mx_4()
             .mb_2()
             .p_1()
-            .rounded_md()
+            .rounded(menu_radius(self.look(), cx))
             .border_1()
             .glass_or(GlassRole::Menu, cx, |this| {
                 this.border_color(cx.theme().border)
@@ -708,14 +709,14 @@ impl QuillApp {
                             .items_center()
                             .px_2()
                             .py_1()
-                            .rounded_md()
+                            .rounded(menu_row_radius(self.look(), cx))
                             .role(gpui_kit::Role::ListBoxOption)
                             .aria_label(format!("#{}", item.name))
                             .cursor_pointer()
                             .when(Some(index) == selected, |this| {
-                                this.bg(cx.theme().selection)
+                                this.lit(cx.theme().selection, cx)
                             })
-                            .hover(|style| style.bg(cx.theme().accent))
+                            .hover_highlight(cx.theme().accent, cx)
                             // On press: the composer's blur closes the
                             // popup before a click could land.
                             .on_mouse_down(

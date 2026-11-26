@@ -10,6 +10,7 @@ use super::app::QuillApp;
 use super::context_menu_keys::{ContextMenuItems, MenuKeyTarget, row_key};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::menu_surface::{MenuRowCorners as _, RowHighlight as _};
 use crate::ui::status_note::StatusNote;
 use crate::ui::vanish::Deletion;
 use gpui_kit::assets::IconName;
@@ -95,11 +96,11 @@ pub(super) fn menu_row(
             .gap_3()
             .px_3()
             .py_1p5()
-            .rounded_md()
+            .menu_row_corners(items, cx)
             .cursor_pointer()
             .text_sm()
             .text_color(if danger { danger_bright() } else { text_menu() })
-            .hover(|style| style.bg(row_hover))
+            .hover_highlight(row_hover, cx)
             .menu_key_target(row_key(order), items, cx)
             .role(gpui_kit::Role::MenuItem)
             .aria_label(label.clone())

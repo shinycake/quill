@@ -25,7 +25,7 @@ impl GlassRole {
         is_media(self)
     }
 
-    const ALL: [GlassRole; 8] = [
+    const ALL: [GlassRole; 9] = [
         GlassRole::Menu,
         GlassRole::Panel,
         GlassRole::Card,
@@ -34,6 +34,7 @@ impl GlassRole {
         GlassRole::MediaText,
         GlassRole::Bar,
         GlassRole::Selection,
+        GlassRole::Highlight,
     ];
 }
 
@@ -73,6 +74,10 @@ fn labels(role: GlassRole, colors: &ThemeColor) -> Labels {
         },
         GlassRole::Selection => Labels {
             primary: colors.foreground,
+            secondary: colors.muted_foreground,
+        },
+        GlassRole::Highlight => Labels {
+            primary: colors.popover_foreground,
             secondary: colors.muted_foreground,
         },
     }

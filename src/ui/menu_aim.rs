@@ -14,6 +14,7 @@
 
 use super::app::QuillApp;
 use super::context_menu_keys::ContextMenuItems;
+use super::menu_surface::RowHighlight as _;
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::menu::{AimGeometry, AimPointer, SubmenuAim};
 use gpui_kit::*;
@@ -64,15 +65,15 @@ impl<E: ParentElement> MenuAimPanel for E {}
 
 /// A row of a menu with submenus.
 pub(super) trait MenuAimRow: StatefulInteractiveElement + Styled + Sized {
-    /// The pointer lights the row with `fill`, except while the menu aims
-    /// at its open submenu: the rows the pointer crosses on the way stay
-    /// dark, as in Telegram Desktop.
-    fn menu_hover(self, fill: Hsla, items: &ContextMenuItems) -> Self {
+    /// The pointer lights the row with `fill` (a glass highlight while
+    /// glass effects are on), except while the menu aims at its open
+    /// submenu: the rows the pointer crosses on the way stay dark, as in
+    /// Telegram Desktop.
+    fn menu_hover(self, fill: Hsla, items: &ContextMenuItems, cx: &App) -> Self {
         if items.aim.holds() {
-            self
-        } else {
-            self.hover(move |style| style.bg(fill))
+            return self;
         }
+        self.hover_highlight(fill, cx)
     }
 
     /// The row at `key` takes the hover through the aim: hovering it opens

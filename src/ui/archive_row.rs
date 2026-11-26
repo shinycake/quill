@@ -154,7 +154,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .justify_center()
-            .rounded_md()
+            .rounded(self.list_row_corners(cx))
             .cursor_pointer()
             .pressable(cx.theme())
             .role(Role::Button)

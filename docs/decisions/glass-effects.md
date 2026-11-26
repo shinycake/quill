@@ -130,7 +130,7 @@ colour.
 Settings › Appearance › Glass effects shows a tuning panel under the
 switch while glass is drawn (2026-11-26, Idan: sliders on the current
 look, not the edge look of the closed PR 1509). Each of its 14 sliders is
-one knob of the recipes above, named by its value on a menu: Bend (80 px),
+one knob of the recipes above, labelled with the value it has on a plain slab (menus and the bar keep their own thicker frost and blur, scaled by the same dial): Bend (80 px),
 Bend depth (1.70), Bend curve (4.00), Frost (56%), Backdrop blur (2.0 px),
 Saturation (1.30), Sheen (1.80), Rim light (1.00), Inner shade (0.25),
 Edge line (24%), Shadow (100%), and for buttons Button refraction (64),

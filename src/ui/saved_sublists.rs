@@ -516,7 +516,7 @@ impl QuillApp {
             .flex()
             .items_center()
             .gap_3()
-            .rounded_md()
+            .rounded(self.list_row_corners(cx))
             .bg(cx.theme().sidebar)
             .pressable(cx.theme())
             .role(Role::Button)

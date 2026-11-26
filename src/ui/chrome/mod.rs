@@ -217,6 +217,32 @@ impl QuillApp {
         }
     }
 
+    /// A list row's corners, concentric with the card the list sits in
+    /// (inset by the column's padding and the card's edge). Classic's list
+    /// has no rounded card, so its rows keep the theme radius.
+    pub(in crate::ui) fn list_row_corners(&self, cx: &App) -> Pixels {
+        let theme = cx.theme();
+        let chrome = self.chrome();
+        match chrome.metrics.look {
+            Look::Lines => theme.radius,
+            Look::Cards => gpui_kit::component::popover_shape::concentric_radius(
+                radius::card_in(chrome.metrics, theme),
+                px(self.density().sidebar_inset_x)
+                    + match self.card_glass(cx) {
+                        Some(_) => px(0.),
+                        None => frames::edge_width(&chrome, theme),
+                    },
+            ),
+        }
+    }
+
+    /// The glass a lit list row wears on a glass card (the `Highlight`
+    /// recipe), else `None`: rows keep their fills.
+    pub(in crate::ui) fn list_row_glass(&self, cx: &App) -> Option<LensStyle> {
+        self.card_glass(cx)
+            .and_then(|_| super::glass::lens(super::glass::GlassRole::Highlight, cx))
+    }
+
     /// A chat row's resting fill: the list's own, or none on a glass card,
     /// where an opaque row would hide the glass.
     pub(in crate::ui) fn list_row_fill(&self, cx: &App) -> Hsla {

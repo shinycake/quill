@@ -43,6 +43,10 @@ pub(crate) enum GlassRole {
     /// The selected tab's capsule (segmented tabs): frosted at rest,
     /// clearing while it slides ([`sliding`]).
     Selection,
+    /// The lit row of a menu or list (hover, keyboard, selection): a clear
+    /// dome over the menu's glass, tinted towards the accent so it reads as
+    /// the highlight without a flat fill.
+    Highlight,
 }
 
 /// The frost each role would need in the middle for its labels to keep
@@ -110,9 +114,11 @@ fn is_media(role: GlassRole) -> bool {
 
 /// The middle's frost for `role` in a theme: `light` or `dark` of the
 /// floor, scaled by the frost dial. Media glass keeps the whole floor
-/// whatever the dial: a video frame can be flat white.
+/// whatever the dial (a video frame can be flat white), and so does a
+/// highlight: it sits over a menu, often glass itself, and holds the row's
+/// label and its shortcut.
 fn frost_of(role: GlassRole, dark: bool, (light, dark_share): (f32, f32), t: &GlassTuning) -> f32 {
-    let share = match (is_media(role), dark) {
+    let share = match (is_media(role) || role == GlassRole::Highlight, dark) {
         (true, _) => return floor(role, dark),
         (false, false) => light,
         (false, true) => dark_share,
@@ -232,7 +238,20 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor, t: &GlassTuning) -> L
         detail: LensDetail::Copied,
     };
     match role {
-        GlassRole::Menu | GlassRole::Panel => slab(colors.popover, 0.12, BEND),
+        // Menus and panels hold rows of small labels over whatever is
+        // behind them (often the chat list's own text): the bar's thicker
+        // frost and blur, so what is behind reads as texture, not text.
+        GlassRole::Menu | GlassRole::Panel => LensStyle {
+            material: LensMaterial::Clear {
+                bend: LensBend::Radial {
+                    amount: px(bend(BEND)),
+                },
+                frost: bar_frost,
+                blur: blur(BAR_BLUR),
+                blur_mix: 1.0,
+            },
+            ..slab(colors.popover, 0.12, BEND)
+        },
         GlassRole::Card => LensStyle {
             tune: LensTune {
                 rim: rim(CARD_RIM),
@@ -269,8 +288,28 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor, t: &GlassTuning) -> L
             ..slab(black(), 0.0, BEND)
         },
         GlassRole::Control | GlassRole::Selection => dome(colors.background),
+        GlassRole::Highlight => LensStyle {
+            shadow: 0.0,
+            ..dome(mix(colors.background, colors.primary, HIGHLIGHT_TINT))
+        },
         GlassRole::MediaIcon => dome(black()),
     }
+}
+
+/// How far the highlight's tint leans from the background to the accent.
+const HIGHLIGHT_TINT: f32 = 0.25;
+
+/// `from` moved `t` of the way to `to`, in sRGB.
+fn mix(from: Hsla, to: Hsla, t: f32) -> Hsla {
+    let (a, b) = (Rgba::from(from), Rgba::from(to));
+    let lerp = |x: f32, y: f32| x + (y - x) * t;
+    Rgba {
+        r: lerp(a.r, b.r),
+        g: lerp(a.g, b.g),
+        b: lerp(a.b, b.b),
+        a: 1.0,
+    }
+    .into()
 }
 
 fn black() -> Hsla {

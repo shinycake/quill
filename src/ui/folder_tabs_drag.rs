@@ -94,6 +94,9 @@ impl QuillApp {
         if std::env::var_os("QUILL_DEMO_FOLDER_RAIL").is_some() {
             self.appearance.folder_tabs_view = quill::folder_icons::FolderTabsView::Left;
         }
+        if std::env::var_os("QUILL_DEMO_FOLDER_ICONS").is_some() {
+            self.appearance.folder_tabs_mode = quill::folder_icons::FolderTabsMode::TextAndIcons;
+        }
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
@@ -116,12 +119,19 @@ impl QuillApp {
         )
         .collect();
         session.chat_list.main_list_position = position;
+        if std::env::var_os("QUILL_DEMO_FOLDER_ICONS").is_some() {
+            // Counters on the tabs, one of them on the selected tab.
+            let pair = |n| quill::state::UnreadPair { all: n, unmuted: n };
+            session.chat_list.unread_totals.main.chats = Some(pair(3));
+            session.chat_list.folder_unread_chats.insert(1, pair(12));
+        }
     }
 }
 
 crate::ui::screenshot_demo::register_demos![
     // `QUILL_DEMO_MAIN_LIST_POSITION` places "All chats" among the folders;
-    // `QUILL_DEMO_FOLDER_RAIL=1` shows the folder column.
+    // `QUILL_DEMO_FOLDER_RAIL=1` shows the folder column,
+    // `QUILL_DEMO_FOLDER_ICONS=1` icons beside the tab names.
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-folder-tabs")
         .setup(|app, _, _| app.demo_folder_tabs()),
 ];

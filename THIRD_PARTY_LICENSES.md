@@ -13,7 +13,7 @@ under `licenses/`.
 
 ## Overview
 
-- MIT License: 690
+- MIT License: 691
 - Apache License 2.0: 43
 - Unicode License v3: 27
 - ISC License: 22
@@ -11609,6 +11609,7 @@ Used by:
 - [objc2-core-text 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-core-video 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-encode 4.1.0](https://github.com/madsmtm/objc2)
+- [objc2-exception-helper 0.1.1](https://github.com/madsmtm/objc2)
 - [objc2-foundation 0.2.2](https://github.com/madsmtm/objc2)
 - [objc2-foundation 0.3.2](https://github.com/madsmtm/objc2)
 - [objc2-image-io 0.3.2](https://github.com/madsmtm/objc2)

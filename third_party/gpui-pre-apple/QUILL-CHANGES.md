@@ -325,3 +325,14 @@ and first in the headless entry points. `src/shaders.metal`: bit 2 of the
 polychrome flags divides the sample by its alpha.
 `vendor/gpui/src/scene.rs` mirrors `SpriteFlags` and the `flags` field for
 the generated shader header.
+
+## Glass under a display link
+
+Changed by the Quill project in 2026 (docs/decisions/glass-display-link.md).
+`src/metal_renderer/drawables.rs` (new): which drawable a frame draws into.
+A frame in a `CAMetalDisplayLink` update never calls `-[CAMetalLayer
+nextDrawable]`, which throws `CAMetalLayerInvalidOperation` there: glass on a
+framebuffer-only link drawable draws flat, a link drawable in the wrong
+format is skipped, and either frame is presented again in the next update
+(`MetalRenderer::owes_present`). `src/metal_renderer.rs`: `draw` uses it, and
+`release_idle_drawables` no longer makes the layer framebuffer-only again.

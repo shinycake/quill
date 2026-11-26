@@ -168,6 +168,8 @@ impl QuillApp {
                 });
                 let row = session_chat_row(
                     ChatRowInput {
+                        corners: self.list_row_corners(cx),
+                        glass: self.list_row_glass(cx),
                         chat,
                         selected,
                         folders: &folder_tags.names,
