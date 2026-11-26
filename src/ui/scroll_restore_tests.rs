@@ -53,7 +53,9 @@ fn a_chat_left_mid_history_reopens_at_its_unread_bar(cx: &mut TestAppContext) {
     select(&app, vcx, A);
     assert_ne!(top(&app, vcx).map(|t| t.0), Some(left.0));
     let bar_top = vcx.debug_bounds("unread-bar").expect("bar painted").top();
-    let viewport = app.update(vcx, |app, _| app.history.viewport.get());
+    let viewport = app.update(vcx, |app, _| {
+        app.history.viewport.get().map(|view| view.full)
+    });
     let viewport = viewport.expect("history painted");
     assert!(
         (bar_top - viewport.top()).abs() < px(0.5),
@@ -133,6 +135,7 @@ fn swiping_back_to_the_newest_message_resumes_following(cx: &mut TestAppContext)
         app.history
             .viewport
             .get()
+            .map(|view| view.full)
             .expect("history painted")
             .center()
     });

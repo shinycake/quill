@@ -310,7 +310,7 @@ impl Render for CodeActionMenu {
                 div()
                     .flex()
                     .child(
-                        editor_popover("code-action-menu", cx)
+                        editor_popover("code-action-menu", window, cx)
                             .test_support()
                             .max_w(max_width)
                             .min_w(px(120.))

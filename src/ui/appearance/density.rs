@@ -15,6 +15,7 @@ pub(super) struct RowLayout {
     preview_lines: u8,
     bubbles: bool,
     adaptive_for_wide: bool,
+    layout: quill::layout_style::LayoutStyle,
 }
 
 impl RowLayout {
@@ -24,14 +25,25 @@ impl RowLayout {
             preview_lines: prefs.preview_lines,
             bubbles: prefs.bubbles,
             adaptive_for_wide: prefs.adaptive_for_wide,
+            layout: prefs.layout,
         }
     }
 }
 
 impl QuillApp {
-    /// The sizes the chosen density draws with.
+    /// The sizes the chosen density draws with (Quill's row scale; the
+    /// chat list's rows read [`Self::row_density`]).
     pub(in crate::ui) fn density(&self) -> &'static DensityMetrics {
         self.appearance.density.metrics()
+    }
+
+    /// The chat list's row sizes in this window's layout: Web K's taller
+    /// rows, larger photos and search field in Floating
+    /// (`ChromeMetrics::rows`). Only these differ between the scales.
+    pub(in crate::ui) fn row_density(&self) -> &'static DensityMetrics {
+        self.appearance
+            .density
+            .metrics_in(self.chrome_metrics().rows)
     }
 
     /// The kit size of the density's controls (`DensityMetrics::control`).

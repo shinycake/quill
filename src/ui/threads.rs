@@ -9,6 +9,7 @@ use super::history_state::ScrollGoal;
 use super::message_text::kit_avatar_element;
 use super::nested_click::SwallowPress;
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::history_state::ScrollAim;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -385,9 +386,8 @@ impl QuillApp {
                 .gap_2()
                 .px_3()
                 .py_1p5()
-                .border_b_1()
-                .border_color(cx.theme().border)
                 .bg(bg_canvas())
+                .map(|this| self.bar_frame(this, BarLine::Under, cx))
                 .cursor_pointer()
                 .role(gpui_kit::Role::Button)
                 .aria_label(tr(keys::Q_OPS_GO_TO_THE_ORIGINAL_POST))

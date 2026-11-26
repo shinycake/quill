@@ -920,12 +920,10 @@ impl CutLeft {
     /// What still shows: everything right of the front.
     fn kept(&self, bounds: Bounds<Pixels>) -> ContentMask<Pixels> {
         let right = bounds.right().max(self.front);
-        ContentMask {
-            bounds: Bounds::from_corners(
-                point(self.front, bounds.top() - px(1000.)),
-                point(right + px(1000.), bounds.bottom() + px(1000.)),
-            ),
-        }
+        ContentMask::rect(Bounds::from_corners(
+            point(self.front, bounds.top() - px(1000.)),
+            point(right + px(1000.), bounds.bottom() + px(1000.)),
+        ))
     }
 }
 

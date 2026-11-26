@@ -72,6 +72,9 @@ jobs:
       # Issue #1401: app-wide handlers need the kit's state in every window.
       - name: window root
         run: python3 scripts/check-window-root.py
+      # The window layout is decided in src/ui/chrome, never at a render site.
+      - name: layout style
+        run: python3 scripts/check-layout-style.py
       # A request a box waits on has a box that takes its answer by request id.
       - name: dialog answers
         run: python3 scripts/check-dialog-answers.py

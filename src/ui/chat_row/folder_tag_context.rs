@@ -153,7 +153,7 @@ impl QuillApp {
                     &chat.kind,
                     selected,
                     saved,
-                    self.density().avatar,
+                    self.row_density().avatar,
                     cx,
                 );
                 // Swipe action for this row (none while selecting).
@@ -167,59 +167,63 @@ impl QuillApp {
                     (view.offset(chat.id.0, now), view.lift(chat.id.0, now))
                 });
                 let row = session_chat_row(
-                    chat,
-                    selected,
-                    &folder_tags.names,
-                    self.chat_list.view.folder(),
-                    folder_tags.show,
-                    photo.as_deref(),
-                    draggable,
-                    archived,
-                    selecting,
-                    checked,
-                    fx,
-                    title_badge,
-                    badge_emoji,
-                    self.bot_verify_icon_path(chat),
-                    // Slice chatlist-list-style: Settings → Appearance.
-                    ChatListRowStyle::new(
-                        self.session().map_or(self.appearance.preview_lines, |s| {
-                            s.chat_row_lines(chat.id, self.appearance.preview_lines)
+                    ChatRowInput {
+                        chat,
+                        selected,
+                        folders: &folder_tags.names,
+                        viewing_folder: self.chat_list.view.folder(),
+                        show_tags: folder_tags.show,
+                        photo_path: photo.as_deref(),
+                        draggable,
+                        archived,
+                        selecting,
+                        checked,
+                        fx,
+                        title_badge,
+                        badge_emoji,
+                        verify_icon: self.bot_verify_icon_path(chat),
+                        // Slice chatlist-list-style: Settings → Appearance.
+                        row_style: ChatListRowStyle::new(
+                            self.session().map_or(self.appearance.preview_lines, |s| {
+                                s.chat_row_lines(chat.id, self.appearance.preview_lines)
+                            }),
+                            self.appearance.chat_list_media_icons,
+                            self.appearance.chat_list_rich_preview,
+                            self.appearance.density,
+                            self.chrome_metrics(),
+                        ),
+                        height,
+                        saved,
+                        preview_sender: self.session().and_then(|s| s.chat_preview_sender(chat)),
+                        preview_emoji: self.preview_emoji_images(chat, cx),
+                        kind_icon: match chat.kind {
+                            ChatKind::BasicGroup { .. }
+                            | ChatKind::Supergroup {
+                                is_channel: false, ..
+                            } => Some(IconName::Users),
+                            ChatKind::Supergroup {
+                                is_channel: true, ..
+                            } => Some(IconName::Megaphone),
+                            ChatKind::Private { user_id }
+                                if self
+                                    .session()
+                                    .and_then(|s| s.user(user_id.0))
+                                    .is_some_and(|u| u.is_bot) =>
+                            {
+                                Some(IconName::Bot)
+                            }
+                            _ => None,
+                        },
+                        forum,
+                        story_ring,
+                        video,
+                        promotion: self.session().and_then(|s| {
+                            let promotion = quill::promotion::top_promotion(s, chat)?;
+                            Some(s.chat_list.psa_labels.row(promotion))
                         }),
-                        self.appearance.chat_list_media_icons,
-                        self.appearance.chat_list_rich_preview,
-                        self.appearance.density,
-                    ),
-                    height,
-                    saved,
-                    self.session().and_then(|s| s.chat_preview_sender(chat)),
-                    self.preview_emoji_images(chat, cx),
-                    match chat.kind {
-                        ChatKind::BasicGroup { .. }
-                        | ChatKind::Supergroup {
-                            is_channel: false, ..
-                        } => Some(IconName::Users),
-                        ChatKind::Supergroup {
-                            is_channel: true, ..
-                        } => Some(IconName::Megaphone),
-                        ChatKind::Private { user_id }
-                            if self
-                                .session()
-                                .and_then(|s| s.user(user_id.0))
-                                .is_some_and(|u| u.is_bot) =>
-                        {
-                            Some(IconName::Bot)
-                        }
-                        _ => None,
+                        muted_fg,
+                        rest_fill: self.row_fill_under_menu(chat.id, cx),
                     },
-                    forum,
-                    story_ring,
-                    video,
-                    self.session().and_then(|s| {
-                        let promotion = quill::promotion::top_promotion(s, chat)?;
-                        Some(s.chat_list.psa_labels.row(promotion))
-                    }),
-                    muted_fg,
                     cx,
                 );
                 let row = self

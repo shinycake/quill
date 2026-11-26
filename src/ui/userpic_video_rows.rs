@@ -119,11 +119,18 @@ impl QuillApp {
         }
         let lit = self.chat_list.keys.list_highlighted(ListRow::Chat(chat));
         let theme = cx.theme();
-        let fill = match (selected, lit) {
-            (true, true) => super::chat_row::open_row_hover_fill(theme),
-            (true, false) => theme.primary.opacity(0.25),
-            (false, true) => super::pressable::hover_fill(theme),
-            (false, false) => transparent_black(),
+        let ink = super::chat_row::RowInk::of(
+            selected,
+            self.selected_row(),
+            transparent_black(),
+            theme.muted_foreground,
+            theme,
+        );
+        let fill = match (ink.open_hover, lit) {
+            (Some((hover, _)), true) => hover,
+            (Some(_), false) => ink.fill,
+            (None, true) => super::pressable::hover_fill(theme),
+            (None, false) => transparent_black(),
         };
         let behind = theme.sidebar.blend(fill);
         self.userpic_frame(Surface::ChatList, user_id.0, size, behind, cx)

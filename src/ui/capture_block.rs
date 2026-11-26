@@ -14,6 +14,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::chrome::bars::BarLine;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatKind;
@@ -141,8 +143,7 @@ impl QuillApp {
                 .gap_2()
                 .px_3()
                 .py_2()
-                .border_b_1()
-                .border_color(cx.theme().border)
+                .map(|this| self.tinted_bar_frame(this, BarLine::Under, cx))
                 .bg(cx.theme().secondary)
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)

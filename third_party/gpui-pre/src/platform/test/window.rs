@@ -1,10 +1,12 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `capture_image` answers with `render_to_image`. See third_party/gpui-pre/QUILL-CHANGES.md.
+// `capture_image` answers with `render_to_image`; a fake snapshot renderer
+// for tests (`TestWindow::set_snapshots_supported`). See
+// third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{
     AnyWindowHandle, Bounds, Decorations, DevicePixels, DispatchEventResult, DisplayId, GpuSpecs,
     HeadlessAtlas, KeyDownEvent, NativeViewId, Pixels, Platform, PlatformAtlas, PlatformDisplay,
     PlatformHeadlessRenderer, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
-    PromptButton, RequestFrameOptions, Scene, Size, TestDisplay, TestPlatform,
+    PromptButton, RequestFrameOptions, Scene, Size, SnapshotSlot, TestDisplay, TestPlatform,
     TextInputConfiguration, TextInputStateChange, WindowAppearance, WindowBackgroundAppearance,
     WindowBounds, WindowControlArea, WindowInsets, WindowParams, WindowVisibility,
 };
@@ -35,6 +37,8 @@ pub(crate) struct TestWindowState {
     close_callback: Option<Box<dyn FnOnce()>>,
     hit_test_window_control_callback: Option<Box<dyn FnMut() -> Option<WindowControlArea>>>,
     attached_native_views: Rc<Cell<usize>>,
+    /// QUILL: the fake snapshot renderer (`TestWindow::set_snapshots_supported`).
+    snapshots: TestSnapshots,
     focused_native_view: Option<NativeViewId>,
     hit_test_native_view_callback: Option<Box<dyn FnMut(Point<Pixels>) -> Option<NativeViewId>>>,
     native_view_focused_callback: Option<Box<dyn FnMut(NativeViewId)>>,
@@ -71,6 +75,48 @@ pub(crate) struct TestWindowState {
 
 #[derive(Clone)]
 pub struct TestWindow(pub(crate) Rc<Mutex<TestWindowState>>);
+
+/// QUILL: a test window's stand-in for a renderer's snapshot textures: it
+/// draws nothing and keeps what it was asked. Off by default, so tests run
+/// every owner's fallback unless they turn it on.
+#[derive(Default)]
+struct TestSnapshots {
+    renderer: TestSnapshotRenderer,
+    losses: crate::SnapshotLosses,
+    /// Every snapshot drawn, by a frame or at once, in order.
+    drawn: Vec<SnapshotSlot>,
+    /// Every texture a frame released, in order.
+    released: Vec<SnapshotSlot>,
+}
+
+/// What the fake snapshot renderer does.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum TestSnapshotRenderer {
+    /// No snapshots.
+    #[default]
+    Unsupported,
+    /// Every snapshot is drawn.
+    Draws,
+    /// Every snapshot fails to draw.
+    Fails,
+}
+
+impl TestSnapshots {
+    /// Draws `slot`, or records its loss.
+    fn draw(&mut self, slot: SnapshotSlot) -> bool {
+        match self.renderer {
+            TestSnapshotRenderer::Draws => {
+                self.drawn.push(slot);
+                true
+            }
+            TestSnapshotRenderer::Fails => {
+                self.losses.add_slot(slot);
+                false
+            }
+            TestSnapshotRenderer::Unsupported => false,
+        }
+    }
+}
 
 // Test windows are not backed by a real platform window, so there is no raw
 // handle to report; `NotSupported` is `raw_window_handle`'s variant for exactly this.
@@ -131,6 +177,7 @@ impl TestWindow {
             display_changed_callback: None,
             appearance_change_callback: None,
             attached_native_views: Rc::new(Cell::new(0)),
+            snapshots: TestSnapshots::default(),
             focused_native_view: None,
             hit_test_native_view_callback: None,
             native_view_focused_callback: None,
@@ -282,6 +329,40 @@ impl TestWindow {
             lock.bounds.size
         };
         self.simulate_resize(size);
+    }
+
+    /// QUILL: whether the window reports snapshot support.
+    pub fn set_snapshots_supported(&self, supported: bool) {
+        self.0.lock().snapshots.renderer = if supported {
+            TestSnapshotRenderer::Draws
+        } else {
+            TestSnapshotRenderer::Unsupported
+        };
+    }
+
+    /// QUILL: whether every snapshot fails to draw from now on (support
+    /// stays on).
+    pub fn set_snapshot_draws_fail(&self, fail: bool) {
+        self.0.lock().snapshots.renderer = if fail {
+            TestSnapshotRenderer::Fails
+        } else {
+            TestSnapshotRenderer::Draws
+        };
+    }
+
+    /// QUILL: the renderer loses every snapshot texture, as a device loss does.
+    pub fn simulate_snapshot_loss(&self) {
+        self.0.lock().snapshots.losses = crate::SnapshotLosses::All;
+    }
+
+    /// QUILL: the snapshots drawn so far, in order.
+    pub fn drawn_snapshots(&self) -> Vec<SnapshotSlot> {
+        self.0.lock().snapshots.drawn.clone()
+    }
+
+    /// QUILL: the snapshot textures released so far, in order.
+    pub fn released_snapshots(&self) -> Vec<SnapshotSlot> {
+        self.0.lock().snapshots.released.clone()
     }
 
     /// How many native views are attached to the window.
@@ -687,9 +768,27 @@ impl PlatformWindow for TestWindow {
         self.0.lock().appearance_change_callback = Some(callback);
     }
 
+    fn snapshot_max_side(&self) -> Option<u32> {
+        (self.0.lock().snapshots.renderer != TestSnapshotRenderer::Unsupported)
+            .then_some(crate::SNAPSHOT_MAX_SIDE)
+    }
+
+    fn draw_snapshot(&self, snapshot: &crate::SnapshotScene) -> bool {
+        self.0.lock().snapshots.draw(snapshot.slot)
+    }
+
+    fn take_snapshot_losses(&self) -> crate::SnapshotLosses {
+        std::mem::take(&mut self.0.lock().snapshots.losses)
+    }
+
     fn draw(&self, scene: &Scene) {
         let scale_factor = self.scale_factor();
         let mut state = self.0.lock();
+        // QUILL: the fake snapshot renderer keeps what each frame draws.
+        for snapshot in &scene.snapshot_scenes {
+            state.snapshots.draw(snapshot.slot);
+        }
+        state.snapshots.released.extend(scene.snapshot_releases.iter().copied());
         state.frame_callback_pending = true;
         state.frame_scheduled = true;
         let device_size: Size<DevicePixels> = state.bounds.size.to_device_pixels(scale_factor);

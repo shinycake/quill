@@ -301,7 +301,7 @@ impl ListPopup {
     /// handlers, and only while they have something to do: otherwise Up and
     /// Down move the caret, Escape and Enter reach the input as usual. The
     /// list never takes focus, so its own key bindings do not run.
-    pub(super) fn attach<E>(self, element: E, cx: &App) -> E
+    pub(super) fn attach<E>(self, element: E, window: &Window, cx: &App) -> E
     where
         E: InteractiveElement + ParentElement,
     {
@@ -383,7 +383,7 @@ impl ListPopup {
                 }
             });
         if visible {
-            element.extend([popup(&menu, &input, &*list, size, field, cx)]);
+            element.extend([popup(&menu, &input, &*list, size, field, window, cx)]);
         }
         element
     }
@@ -397,6 +397,7 @@ fn popup(
     list: &dyn InputList,
     size: Size,
     field: Bounds<Pixels>,
+    window: &Window,
     cx: &App,
 ) -> AnyElement {
     deferred(crate::popover::dropdown_popup(
@@ -405,7 +406,7 @@ fn popup(
         v_flex()
             .occlude()
             .w(field.size.width)
-            .popover_style(cx)
+            .popover_style(window, cx)
             // Claimed in the capture phase, before the list's focus handle
             // would take focus from the input.
             .capture_any_mouse_down(|_, window, _| window.prevent_default())
@@ -421,6 +422,7 @@ fn popup(
                 }
             })
             .child(list.render(size)),
+        window,
         cx,
     ))
     .with_priority(gpui_base::POPUP_PRIORITY)

@@ -46,7 +46,7 @@ const MAX_SIDE_LEVEL_10: u32 = 8192;
 // `BackdropLens` in shaders_lens.hlsl: a structured buffer packs its fields
 // at 4 bytes, as `#[repr(C)]` lays out these all-4-byte fields.
 const _: () = {
-    assert!(std::mem::size_of::<BackdropLens>() == 296);
+    assert!(std::mem::size_of::<BackdropLens>() == 328);
     assert!(std::mem::size_of::<LensSlot>() == 32);
     assert!(std::mem::size_of::<LensDownsampleSlot>() == 32);
 };
@@ -442,7 +442,7 @@ pub(super) enum GlassDrawn {
 }
 
 /// The largest atlas side the device takes, a whole number of steps.
-fn max_atlas_side(device: &ID3D11Device) -> u32 {
+pub(super) fn max_atlas_side(device: &ID3D11Device) -> u32 {
     // SAFETY: a plain query of a live device.
     let level = unsafe { device.GetFeatureLevel() };
     if level.0 >= D3D_FEATURE_LEVEL_11_0.0 {

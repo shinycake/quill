@@ -31,11 +31,15 @@ impl HeaderInset {
 const BAR_REACH: f32 = 24.0;
 
 impl QuillApp {
-    /// The bar's look while the chat rows show and the look is glass.
+    /// The bar's look while the chat rows show and the look is glass. Where
+    /// the list is a glass card (Floating) the card is the glass and the
+    /// bar draws none of its own: glass over glass would double it.
     pub(super) fn chat_list_bar_glass(&self, cx: &App) -> Option<LensStyle> {
-        (self.chat_list.tab == SidebarTab::Chats && !self.search_is_open())
-            .then(|| crate::ui::glass::lens(GlassRole::Bar, cx))
-            .flatten()
+        (self.chat_list.tab == SidebarTab::Chats
+            && !self.search_is_open()
+            && self.card_glass(cx).is_none())
+        .then(|| crate::ui::glass::lens(GlassRole::Bar, cx))
+        .flatten()
     }
 
     /// The list's top padding: the bar's height while it floats.
@@ -110,6 +114,7 @@ impl QuillApp {
                     .bg(gpui_kit::transparent_black()),
             )
             .child(probe);
+        let chrome = self.chrome();
         div()
             .id("sidebar-glass")
             .relative()
@@ -121,9 +126,14 @@ impl QuillApp {
             .h_full()
             .px(px(m.sidebar_inset_x))
             .pb(px(m.sidebar_inset_y))
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
+            .map(|this| {
+                crate::ui::chrome::frames::list_frame(
+                    this,
+                    &chrome,
+                    cx.theme(),
+                    self.card_glass(cx).as_ref(),
+                )
+            })
             .child(
                 div().relative().flex_1().min_h_0().w_full().child(
                     div()

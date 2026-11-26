@@ -8,6 +8,7 @@
 //! whole windows instead). `None` keeps the value the element inherits.
 #![deny(clippy::indexing_slicing)]
 
+use crate::layout_style::RowScale;
 use serde::{Deserialize, Serialize};
 
 /// How tightly the chat list and the conversation are laid out.
@@ -20,11 +21,19 @@ pub enum Density {
 }
 
 impl Density {
-    /// The sizes this density draws with.
+    /// The sizes this density draws with in Quill's own row scale.
     pub fn metrics(self) -> &'static DensityMetrics {
-        match self {
-            Density::Standard => &STANDARD,
-            Density::Compact => &COMPACT,
+        self.metrics_in(RowScale::Quill)
+    }
+
+    /// The sizes this density draws with in a layout's row scale: Web K's
+    /// taller rows and larger photos are Standard's alone; Compact keeps
+    /// its own (docs/decisions/floating-layout.md).
+    pub fn metrics_in(self, rows: RowScale) -> &'static DensityMetrics {
+        match (self, rows) {
+            (Density::Standard, RowScale::Quill) => &STANDARD,
+            (Density::Standard, RowScale::WebK) => &STANDARD_WEBK,
+            (Density::Compact, _) => &COMPACT,
         }
     }
 }
@@ -146,6 +155,15 @@ pub const STANDARD: DensityMetrics = DensityMetrics {
     search_field: 40.,
 };
 
+/// Standard in the Floating layout: Web K's 72 px rows, 54 px photos and
+/// 44 px search field; everything else is Standard's.
+pub const STANDARD_WEBK: DensityMetrics = DensityMetrics {
+    row_base: 72.,
+    avatar: 54.,
+    search_field: 44.,
+    ..STANDARD
+};
+
 /// Compact mode: the kit's Small controls, tighter rows and bars. The title
 /// bar is the kit's XSmall row step (`Size::table_row_height`), which holds a
 /// Small (24px) button.
@@ -191,7 +209,7 @@ mod tests {
 
     #[test]
     fn rows_fit_their_photo_and_text_lines() {
-        for m in [&STANDARD, &COMPACT] {
+        for m in [&STANDARD, &STANDARD_WEBK, &COMPACT] {
             assert!(m.avatar <= m.row_base);
             if let Some(line) = m.line_height {
                 assert!(2. * line + m.row_lines_gap <= m.row_base);
@@ -202,7 +220,7 @@ mod tests {
 
     #[test]
     fn the_pinned_bar_guess_covers_its_lines_padding_and_border() {
-        for m in [&STANDARD, &COMPACT] {
+        for m in [&STANDARD, &STANDARD_WEBK, &COMPACT] {
             assert!(m.pinned_bar >= m.pinned_lines + 2. * m.pinned_inset_y + 1.);
         }
     }

@@ -522,7 +522,7 @@ impl QuillApp {
                 .max_w(px(420.))
                 .px_2()
                 .py_1()
-                .menu_surface(cx)
+                .menu_surface(self.look(), cx)
                 .text_xs()
                 .text_color(text_menu())
                 .child(tooltip.text.clone())
@@ -611,7 +611,7 @@ impl QuillApp {
                     .min_w(px(180.))
                     .px_1()
                     .py_1()
-                    .menu_surface(cx)
+                    .menu_surface(self.look(), cx)
                     .when(!card_title.is_empty(), |panel| {
                         panel.child(
                             div()
@@ -675,6 +675,8 @@ impl QuillApp {
                                 this.open_link(&url, cx);
                             }))
                     })),
+                self.look(),
+                cx,
             )
             .into_any_element(),
         )

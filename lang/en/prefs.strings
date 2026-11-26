@@ -297,8 +297,16 @@
 "qll_prefs_code" = "Code";
 "qll_prefs_compact_mode" = "Compact mode";
 "qll_prefs_compact_mode_about" = "Fit more chats and messages on screen with tighter spacing.";
+"qll_prefs_layout" = "Layout";
+"qll_prefs_layout_classic" = "Classic";
+"qll_prefs_layout_classic_about" = "Panels side by side, divided by lines.";
+"qll_prefs_layout_floating" = "Floating";
+"qll_prefs_layout_floating_about" = "Rounded cards and bars over the chat wallpaper.";
+"qll_prefs_layout_wallpaper_hint" = "Floating looks best over a wallpaper.";
+"qll_prefs_layout_wallpaper_use_pattern" = "Use the Telegram pattern";
+"qll_prefs_layout_wallpaper_use_yours" = "Use your Telegram wallpaper";
 "qll_prefs_glass_effects" = "Glass effects";
-"qll_prefs_glass_effects_about" = "Menus, tabs and floating buttons show a frosted view of what is behind them.";
+"qll_prefs_glass_effects_about" = "Menus, tabs and floating buttons show a frosted view of what is behind them. In the Floating layout, the cards turn to glass too, which takes more graphics work while you scroll.";
 "qll_prefs_glass_experimental" = "Experimental";
 "qll_prefs_glass_paused_transparency" = "Paused while Reduce Transparency is on.";
 "qll_prefs_glass_paused_transparency_windows" = "Paused while transparency effects are off.";

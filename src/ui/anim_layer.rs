@@ -914,9 +914,7 @@ mod tests {
     }
 
     fn mask() -> ContentMask<gpui_kit::Pixels> {
-        ContentMask {
-            bounds: rect(0., 0., 1000., 1000.),
-        }
+        ContentMask::rect(rect(0., 0., 1000., 1000.))
     }
 
     /// Animated content at 10 fps.
@@ -965,9 +963,7 @@ mod tests {
         layer.register(
             frames(),
             rect(2000., 2000., 20., 20.),
-            ContentMask {
-                bounds: rect(0., 0., 10., 10.),
-            },
+            ContentMask::rect(rect(0., 0., 10., 10.)),
             None,
             None,
         );

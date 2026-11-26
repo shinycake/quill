@@ -152,7 +152,15 @@ pub trait ThemeStyled: Styled + Sized {
     /// This is the one surface every popup shares — Popover, PopupMenu, Select,
     /// Combobox, DatePicker and the editor's hover popovers — so they cannot
     /// drift apart. See [`popover_shadow`] for what the shadow is modelled on.
-    fn popover_style(self, cx: &App) -> Self;
+    fn popover_style(self, window: &Window, cx: &App) -> Self;
+
+    /// [`Self::popover_style`] with the app's shape given (`None`: the
+    /// kit's own), for a caller that knows its window's look.
+    fn popover_style_shaped(
+        self,
+        shape: Option<crate::popover_shape::PopoverShape>,
+        cx: &App,
+    ) -> Self;
 
     /// Round this element as far as its size allows — a circle if it is square,
     /// a pill if it is not — unless the theme squares its corners.
@@ -183,24 +191,45 @@ impl<T: Styled + Sized> ThemeStyled for T {
         focus_style(self, FocusLine::Edge, window, cx)
     }
 
-    fn popover_style(self, cx: &App) -> Self {
+    fn popover_style(self, window: &Window, cx: &App) -> Self {
+        self.popover_style_shaped(crate::popover_shape::popover_shape(window, cx), cx)
+    }
+
+    fn popover_style_shaped(
+        self,
+        shape: Option<crate::popover_shape::PopoverShape>,
+        cx: &App,
+    ) -> Self {
         let theme = cx.theme();
+        // QUILL (Floating layout): the app's shape replaces the radius and
+        // the edge, and the content is clipped to the corners.
+        let radius = shape.as_ref().map_or(theme.radius, |shape| shape.radius);
+        let this = match shape.is_some() {
+            true => self.rounded(radius).clip_rounded(),
+            false => self.rounded(radius),
+        };
         // QUILL (glass effects): the app's glass replaces the fill and the
         // ring-and-shadow edge; the lens draws its own rim and shadow.
         if let Some(lens) =
             crate::popover_glass::popover_glass(crate::popover_glass::PopoverGlassSurface::Popover, cx)
         {
-            return self
+            return this
                 .text_color(theme.popover_foreground)
-                .rounded(theme.radius)
                 .backdrop_glass(Some(lens));
         }
         // No border: the edge is the ring inside `popover_shadow`, which is how
         // shadcn draws it and the only way the shadow can show through it.
-        self.bg(theme.popover)
+        let (fill, edge, shadow) = match shape {
+            Some(shape) => (shape.fill.unwrap_or(theme.popover), shape.edge, shape.shadow),
+            None => (theme.popover, None, popover_shadow(popover_ring(cx), 1.)),
+        };
+        let this = match edge {
+            Some(edge) => this.border_1().border_color(edge),
+            None => this,
+        };
+        this.bg(fill)
             .text_color(theme.popover_foreground)
-            .shadow(popover_shadow(popover_ring(cx), 1.))
-            .rounded(theme.radius)
+            .shadow(shadow)
     }
 }
 

@@ -1,6 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::lean_buttons::ghost_text_button;
 use crate::ui::status_note::StatusNote;
 use crate::ui::surface_reveal::{self, PinnedShown};
@@ -268,9 +269,9 @@ impl QuillApp {
                 .gap_2()
                 .px_3()
                 .py(px(m.pinned_inset_y))
-                .border_b_1()
-                .border_color(cx.theme().border)
                 .bg(bg_canvas())
+                .map(|this| self.bar_frame(this, BarLine::Under, cx))
+                .map(|this| self.pinned_bar_frame(this))
                 .child(
                     div()
                         .id("pinned-message-jump")
@@ -422,9 +423,8 @@ impl QuillApp {
                 .id("pinned-list-panel")
                 .flex()
                 .flex_col()
-                .border_b_1()
-                .border_color(cx.theme().border)
                 .bg(bg_canvas())
+                .map(|this| self.bar_frame(this, BarLine::Under, cx))
                 .child(
                     div()
                         .px_3()

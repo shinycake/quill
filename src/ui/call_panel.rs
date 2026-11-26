@@ -292,6 +292,7 @@ impl QuillApp {
             div()
                 .id("call-bar")
                 .h(px(38.))
+                .map(|this| self.tinted_tile_frame(this, cx))
                 .flex_none()
                 .flex()
                 .items_center()

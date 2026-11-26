@@ -1,5 +1,5 @@
 //! Screenshot demos of the first-run onboarding: the intro clip, the
-//! experimental notice and the highlights.
+//! experimental notice, the highlights and the layout choice.
 #![deny(clippy::indexing_slicing)]
 
 use super::connect_ui::ConnectStage;
@@ -25,6 +25,12 @@ register_demos![
     DemoSpec::signed_out("first-run-highlights", signed_out).setup(|app, _, _| {
         let now = Instant::now();
         app.first_run = FirstRun::Highlights {
+            since: now.checked_sub(CARD_IN).unwrap_or(now),
+        };
+    }),
+    DemoSpec::signed_out("first-run-style", signed_out).setup(|app, _, _| {
+        let now = Instant::now();
+        app.first_run = FirstRun::Style {
             since: now.checked_sub(CARD_IN).unwrap_or(now),
         };
     }),

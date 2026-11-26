@@ -158,7 +158,7 @@ impl Element for Popover {
                 .occlude()
                 .p_1()
                 .text_xs()
-                .popover_style(cx)
+                .popover_style(window, cx)
                 .shadow_md()
                 .max_w(max_width)
                 .max_h(max_height)

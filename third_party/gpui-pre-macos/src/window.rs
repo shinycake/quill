@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre-macos 0.3.9 (Apache-2.0):
-// the display link stops while the window is idle; `capture_image`. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
+// the display link stops while the window is idle; `capture_image`; snapshot
+// textures through the renderer. See third_party/gpui-pre-macos/QUILL-CHANGES.md.
 use crate::{
     BoolExt, MacDisplay, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
@@ -2221,6 +2222,19 @@ impl PlatformWindow for MacWindow {
         native_views::apply_layout(&self.0, native_view_layout);
         crate::frame_presented();
         crate::platform::read_keyboard_layout_after_first_frame();
+    }
+
+    // QUILL: snapshot textures (docs/decisions/snapshot-transitions.md).
+    fn snapshot_max_side(&self) -> Option<u32> {
+        Some(self.0.lock().renderer.snapshot_max_side())
+    }
+
+    fn draw_snapshot(&self, snapshot: &gpui::SnapshotScene) -> bool {
+        self.0.lock().renderer.draw_snapshot(snapshot)
+    }
+
+    fn take_snapshot_losses(&self) -> gpui::SnapshotLosses {
+        self.0.lock().renderer.take_snapshot_losses()
     }
 
     unsafe fn attach_native_view(

@@ -8,6 +8,7 @@ use super::bar_report::{BarKind, BarWork, BlockPlan};
 use super::chat_row::chat_avatar;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -110,9 +111,8 @@ impl QuillApp {
             .px_3()
             .py_1()
             .min_h(px(40.))
-            .border_b_1()
-            .border_color(cx.theme().border)
             .bg(bg_canvas())
+            .map(|this| self.bar_frame(this, BarLine::Under, cx))
     }
 
     pub(super) fn bar_button(id: String, label: impl Into<SharedString>, danger: bool) -> Button {

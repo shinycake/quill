@@ -1144,6 +1144,11 @@ impl From<SubpixelSprite> for Primitive {
     }
 }
 
+/// QUILL: mirror of gpui-pre's `SpriteFlags`, for the shader header.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct SpriteFlags(u32);
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 #[expect(missing_docs)]
@@ -1151,7 +1156,8 @@ pub struct PolychromeSprite {
     pub order: DrawOrder,
     pub pad: u32,
     pub tile: AtlasTile,
-    pub grayscale: PaddedBool32,
+    /// QUILL: was `grayscale: PaddedBool32`.
+    pub flags: SpriteFlags,
     pub opacity: f32,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,

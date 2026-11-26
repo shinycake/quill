@@ -7,7 +7,7 @@
 use std::slice;
 
 use anyhow::{Context, Result};
-use gpui::{Bounds, PaintSurface, ScaledPixels, SurfaceFormat, SurfaceFrame};
+use gpui::{Bounds, PaintSurface, RoundedMask, ScaledPixels, SurfaceFormat, SurfaceFrame};
 use gpui_util::ResultExt;
 use windows::Win32::Graphics::{
     Direct3D11::*,
@@ -37,9 +37,12 @@ pub(super) struct HdrSurfaceInstance {
     content_mask: Bounds<ScaledPixels>,
     headroom: f32,
     _pad: [u32; 3],
+    /// QUILL: the rounded part of the content mask
+    /// (docs/decisions/rounded-content-masks.md).
+    rounded_mask: RoundedMask<ScaledPixels>,
 }
 
-const _: () = assert!(std::mem::size_of::<HdrSurfaceInstance>() == 48);
+const _: () = assert!(std::mem::size_of::<HdrSurfaceInstance>() == 80);
 
 pub(super) struct HdrSurfaces {
     pipeline: PipelineState<HdrSurfaceInstance>,
@@ -99,6 +102,7 @@ impl HdrSurfaces {
                     content_mask: surface.content_mask.bounds,
                     headroom: surface.frame.headroom(),
                     _pad: [0; 3],
+                    rounded_mask: surface.content_mask.rounded,
                 }],
             )?;
             self.pipeline.draw_with_texture(

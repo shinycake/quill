@@ -775,7 +775,7 @@ mod tests {
         scene.insert_primitive(PaintedPath::new(
             path,
             1.5,
-            ContentMask { bounds: mask },
+            ContentMask::rect(mask),
             black().into(),
         ));
         scene.finish();

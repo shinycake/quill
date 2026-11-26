@@ -117,7 +117,9 @@ use it.
   what lies under the lens again at that many texels per device pixel, with
   glyphs and icons rasterized again at that scale, so an enlarging loupe
   stays crisp. Metal only: the sub-scene draws on its own command buffer
-  into a pooled canvas that is blitted into the slot. wgpu and DirectX copy
+  into a pooled canvas that is blitted into the slot (through
+  `MetalRenderer::draw_scene_into`, `metal_renderer/scene_target.rs`, the
+  function snapshot transitions are planned to share). wgpu and DirectX copy
   the frame as for any lens (the magnifier still reads its slot finer where
   it enlarges, which helps a little). A lens over a path or a video surface
   copies on Metal too.

@@ -16,3 +16,4 @@ ChecklistDraft::others_can_mark_tasks_as_done the frozen "Allow Others to Mark A
 ReceivedGift::is_saved TDLib's receivedGift.is_saved: whether the gift is shown on the profile page, the server's own setting, flipped only after the server confirmed toggleGiftIsSaved; not a stage of anything Quill runs
 Step::started the one-shot answer of a wheel call (a pull began this call): returned to the caller, merged per call, never stored, so it is no stage
 Readings::saving_power a snapshot of what the OS reports (battery saver or heat) for quill::glass::resolve, not a stage of anything
+ChatRowInput::saved the row's chat is Saved Messages (the chat with yourself): a fact about the chat read when the list builds the row, not a stage

@@ -177,9 +177,9 @@ impl Sim {
     }
 
     fn viewport(&mut self) -> Bounds<Pixels> {
-        let viewport = self
-            .app
-            .update(&mut self.vcx, |app, _| app.history.viewport.get());
+        let viewport = self.app.update(&mut self.vcx, |app, _| {
+            app.history.viewport.get().map(|view| view.full)
+        });
         viewport.expect("history painted")
     }
 

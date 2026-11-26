@@ -1351,7 +1351,7 @@ impl Element for Scrollbar {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let bounds = self.resolved_viewport_bounds(bounds);
-        let hitbox = window.with_content_mask(Some(ContentMask { bounds }), |window| {
+        let hitbox = window.with_content_mask(Some(ContentMask::rect(bounds)), |window| {
             window.insert_hitbox(bounds, HitboxBehavior::Normal)
         });
 
@@ -1619,7 +1619,7 @@ impl Element for Scrollbar {
             let thumb_fill_bounds =
                 Bounds::from_anchor_and_size(thumb_anchor, thumb_origin, thumb_size(thumb_width));
 
-            let bar_hitbox = window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            let bar_hitbox = window.with_content_mask(Some(ContentMask::rect(bounds)), |window| {
                 window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal)
             });
 
@@ -1666,288 +1666,282 @@ impl Element for Scrollbar {
         let hitbox_bounds = prepaint.hitbox.bounds;
         let is_hover_to_show = mode.is_hover();
 
-        window.with_content_mask(
-            Some(ContentMask {
-                bounds: hitbox_bounds,
-            }),
-            |window| {
-                for state in prepaint.states.iter() {
-                    let axis = state.axis;
-                    let mut radius = state.radius;
-                    if theme.tokens.radius.md.is_zero() {
-                        radius = px(0.);
-                    }
-                    radius = clamp_thumb_radius(radius, state.thumb_fill_bounds);
-                    let thumb_bounds = state.thumb_bounds;
-                    let geometry = state.geometry;
-                    let active_geometry = state.active_geometry;
-                    let is_vertical = axis.is_vertical();
-                    let visibility_opacity = state.visibility_opacity;
-                    let is_visible = state.visibility_requested || visibility_opacity > 0.0;
-                    let translation = visibility_translation(
-                        axis,
-                        self.placement,
-                        state.track_width,
-                        state.visibility_position,
+        window.with_content_mask(Some(ContentMask::rect(hitbox_bounds)), |window| {
+            for state in prepaint.states.iter() {
+                let axis = state.axis;
+                let mut radius = state.radius;
+                if theme.tokens.radius.md.is_zero() {
+                    radius = px(0.);
+                }
+                radius = clamp_thumb_radius(radius, state.thumb_fill_bounds);
+                let thumb_bounds = state.thumb_bounds;
+                let geometry = state.geometry;
+                let active_geometry = state.active_geometry;
+                let is_vertical = axis.is_vertical();
+                let visibility_opacity = state.visibility_opacity;
+                let is_visible = state.visibility_requested || visibility_opacity > 0.0;
+                let translation = visibility_translation(
+                    axis,
+                    self.placement,
+                    state.track_width,
+                    state.visibility_position,
+                );
+                let painted_bounds = state.bounds + translation;
+                let painted_thumb_bounds = state.thumb_fill_bounds + translation;
+                let painted_track_bg = state.bg.opacity(visibility_opacity);
+                let painted_border = state.border.opacity(visibility_opacity);
+                let painted_thumb_bg = state.thumb_bg.clone().opacity(visibility_opacity);
+
+                window.set_cursor_style(CursorStyle::default(), &state.bar_hitbox);
+
+                let paint = |cx: &mut Window| {
+                    cx.paint_quad(fill(painted_bounds, painted_track_bg));
+
+                    cx.paint_quad(PaintQuad {
+                        bounds: painted_bounds,
+                        corner_radii: (0.).into(),
+                        background: gpui::transparent_black().into(),
+                        border_widths: if is_vertical {
+                            Edges {
+                                top: px(0.),
+                                right: px(0.),
+                                bottom: px(0.),
+                                left: px(0.),
+                            }
+                        } else {
+                            Edges {
+                                top: px(0.),
+                                right: px(0.),
+                                bottom: px(0.),
+                                left: px(0.),
+                            }
+                        },
+                        border_color: painted_border,
+                        border_style: BorderStyle::default(),
+                    });
+
+                    cx.paint_quad(
+                        fill(painted_thumb_bounds, painted_thumb_bg).corner_radii(radius),
                     );
-                    let painted_bounds = state.bounds + translation;
-                    let painted_thumb_bounds = state.thumb_fill_bounds + translation;
-                    let painted_track_bg = state.bg.opacity(visibility_opacity);
-                    let painted_border = state.border.opacity(visibility_opacity);
-                    let painted_thumb_bg = state.thumb_bg.clone().opacity(visibility_opacity);
+                };
+                // GPUI Fast keeps the layer bounds to record scroll layers.
+                #[cfg(feature = "gpui-fast")]
+                window.paint_layer(hitbox_bounds, paint);
+                #[cfg(not(feature = "gpui-fast"))]
+                window.paint_layer(paint);
 
-                    window.set_cursor_style(CursorStyle::default(), &state.bar_hitbox);
+                window.on_mouse_event({
+                    let state = scrollbar_state.clone();
+                    let scroll_handle = self.scroll_handle.clone();
 
-                    let paint = |cx: &mut Window| {
-                        cx.paint_quad(fill(painted_bounds, painted_track_bg));
-
-                        cx.paint_quad(PaintQuad {
-                            bounds: painted_bounds,
-                            corner_radii: (0.).into(),
-                            background: gpui::transparent_black().into(),
-                            border_widths: if is_vertical {
-                                Edges {
-                                    top: px(0.),
-                                    right: px(0.),
-                                    bottom: px(0.),
-                                    left: px(0.),
-                                }
-                            } else {
-                                Edges {
-                                    top: px(0.),
-                                    right: px(0.),
-                                    bottom: px(0.),
-                                    left: px(0.),
-                                }
-                            },
-                            border_color: painted_border,
-                            border_style: BorderStyle::default(),
-                        });
-
-                        cx.paint_quad(
-                            fill(painted_thumb_bounds, painted_thumb_bg).corner_radii(radius),
-                        );
-                    };
-                    // GPUI Fast keeps the layer bounds to record scroll layers.
-                    #[cfg(feature = "gpui-fast")]
-                    window.paint_layer(hitbox_bounds, paint);
-                    #[cfg(not(feature = "gpui-fast"))]
-                    window.paint_layer(paint);
-
-                    window.on_mouse_event({
-                        let state = scrollbar_state.clone();
-                        let scroll_handle = self.scroll_handle.clone();
-
-                        move |event: &ScrollEvent, phase, _, cx| {
-                            if phase.bubble() && hitbox_bounds.contains(&event.position) {
-                                if scroll_handle.offset() != state.get().last_scroll_offset {
-                                    state.set(state.get().with_last_scroll(
-                                        scroll_handle.offset(),
-                                        Some(cx.background_executor().now()),
-                                    ));
-                                    cx.notify(view_id);
-                                }
-                            }
-                        }
-                    });
-
-                    // A thumb follows the finger, unlike content panning. Claim
-                    // this touch before the window turns it into wheel deltas.
-                    window.on_mouse_event({
-                        let state = scrollbar_state.clone();
-                        let scroll_handle = self.scroll_handle.clone();
-                        let max_fps_duration = Duration::from_secs_f64(1. / self.max_fps as f64);
-                        move |event: &TouchDragEvent, phase, window, cx| {
-                            if !phase.bubble() {
-                                return;
-                            }
-                            if event.phase == TouchPhase::Started {
-                                if !is_visible
-                                    || window.default_prevented()
-                                    || !thumb_bounds.contains(&event.start_position)
-                                {
-                                    return;
-                                }
-                                scroll_handle.start_drag();
-                                state.set(state.get().with_drag_pos(
-                                    axis,
-                                    event.start_position - thumb_bounds.origin,
-                                    cx.background_executor().now(),
-                                ));
-                            } else if state.get().dragged_axis != Some(axis) {
-                                return;
-                            }
-                            if event.phase != TouchPhase::Cancelled {
-                                scroll_handle.set_offset(active_geometry.drag_offset(
-                                    axis,
-                                    event.position,
-                                    state.get().drag_pos,
+                    move |event: &ScrollEvent, phase, _, cx| {
+                        if phase.bubble() && hitbox_bounds.contains(&event.position) {
+                            if scroll_handle.offset() != state.get().last_scroll_offset {
+                                state.set(state.get().with_last_scroll(
                                     scroll_handle.offset(),
+                                    Some(cx.background_executor().now()),
                                 ));
-                            }
-                            if matches!(event.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
-                                scroll_handle.end_drag();
-                                let now = cx.background_executor().now();
-                                state.set(state.get().with_unset_drag_pos(now));
-                            }
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            if event.phase == TouchPhase::Moved {
-                                state.notify_drag(
-                                    cx.background_executor().now(),
-                                    max_fps_duration,
-                                    view_id,
-                                    window,
-                                    cx,
-                                );
-                            } else {
                                 cx.notify(view_id);
                             }
                         }
-                    });
-
-                    if is_visible {
-                        window.on_mouse_event({
-                            // The hitbox rather than the bounds, so that an
-                            // element above the bar (a menu, a dialog) keeps
-                            // the press.
-                            let bar_hitbox = state.bar_hitbox.clone();
-                            let state = scrollbar_state.clone();
-                            let scroll_handle = self.scroll_handle.clone();
-
-                            move |event: &MouseDownEvent, phase, window, cx| {
-                                if phase.bubble()
-                                    && event.button == MouseButton::Left
-                                    && bar_hitbox.is_hovered(window)
-                                {
-                                    cx.stop_propagation();
-
-                                    if thumb_bounds.contains(&event.position) {
-                                        // click on the thumb bar, set the drag position
-                                        let pos = event.position - thumb_bounds.origin;
-
-                                        scroll_handle.start_drag();
-                                        let now = cx.background_executor().now();
-                                        state.set(state.get().with_drag_pos(axis, pos, now));
-                                        // Active styling can change the inset or minimum length.
-                                        // Keep the original grab point under the pointer on that frame.
-                                        scroll_handle.set_offset(active_geometry.drag_offset(
-                                            axis,
-                                            event.position,
-                                            pos,
-                                            scroll_handle.offset(),
-                                        ));
-                                    } else {
-                                        // click on the scrollbar, jump to the position
-                                        // Set the thumb bar center to the click position
-                                        let center =
-                                            point(geometry.length / 2., geometry.length / 2.);
-                                        scroll_handle.set_offset(geometry.drag_offset(
-                                            axis,
-                                            event.position,
-                                            center,
-                                            scroll_handle.offset(),
-                                        ));
-                                    }
-
-                                    cx.notify(view_id);
-                                }
-                            }
-                        });
                     }
+                });
 
-                    window.on_mouse_event({
-                        let bar_hitbox = state.bar_hitbox.clone();
-                        let scroll_handle = self.scroll_handle.clone();
-                        let state = scrollbar_state.clone();
-                        let max_fps_duration = Duration::from_secs_f64(1. / self.max_fps as f64);
-
-                        move |event: &MouseMoveEvent, _, window, cx| {
-                            let now = cx.background_executor().now();
-                            let mut notify = false;
-                            // When is hover to show mode or it was visible,
-                            // we need to update the hovered state and increase the last_scroll_time.
-                            let need_hover_to_update = is_hover_to_show || is_visible;
-                            // Update hovered state for scrollbar
-                            let bar_hovered = bar_hitbox.is_hovered(window);
-                            if bar_hovered && need_hover_to_update {
-                                let hover_changed = state.get().hovered_axis != Some(axis);
-                                state.set(state.get().with_hovered(Some(axis), now));
-                                notify |= hover_changed;
-                            } else if state.get().hovered_axis == Some(axis) {
-                                state.set(state.get().with_hovered(None, now));
-                                notify = true;
-                            }
-
-                            // Update hovered state for scrollbar thumb
-                            if tracks_thumb_hover(mode, is_visible)
-                                && bar_hovered
-                                && thumb_bounds.contains(&event.position)
+                // A thumb follows the finger, unlike content panning. Claim
+                // this touch before the window turns it into wheel deltas.
+                window.on_mouse_event({
+                    let state = scrollbar_state.clone();
+                    let scroll_handle = self.scroll_handle.clone();
+                    let max_fps_duration = Duration::from_secs_f64(1. / self.max_fps as f64);
+                    move |event: &TouchDragEvent, phase, window, cx| {
+                        if !phase.bubble() {
+                            return;
+                        }
+                        if event.phase == TouchPhase::Started {
+                            if !is_visible
+                                || window.default_prevented()
+                                || !thumb_bounds.contains(&event.start_position)
                             {
-                                if state.get().hovered_on_thumb != Some(axis) {
-                                    state.set(state.get().with_hovered_on_thumb(Some(axis), now));
-                                    notify = true;
-                                }
-                            } else {
-                                if state.get().hovered_on_thumb == Some(axis) {
-                                    state.set(state.get().with_hovered_on_thumb(None, now));
-                                    notify = true;
-                                }
-                            }
-
-                            // Move thumb position on dragging
-                            if state.get().dragged_axis == Some(axis) && event.dragging() {
-                                // Stop the event propagation to avoid selecting text or other side effects.
-                                cx.stop_propagation();
-
-                                let offset = active_geometry.drag_offset(
-                                    axis,
-                                    event.position,
-                                    state.get().drag_pos,
-                                    scroll_handle.offset(),
-                                );
-                                if scroll_handle.offset() != offset {
-                                    // Coalesce rendering, never discard the newest pointer position.
-                                    scroll_handle.set_offset(offset);
-                                    notify = true;
-                                }
-                                if notify {
-                                    state.notify_drag(now, max_fps_duration, view_id, window, cx);
-                                }
                                 return;
                             }
-
-                            if notify {
-                                cx.notify(view_id);
-                            }
+                            scroll_handle.start_drag();
+                            state.set(state.get().with_drag_pos(
+                                axis,
+                                event.start_position - thumb_bounds.origin,
+                                cx.background_executor().now(),
+                            ));
+                        } else if state.get().dragged_axis != Some(axis) {
+                            return;
                         }
-                    });
+                        if event.phase != TouchPhase::Cancelled {
+                            scroll_handle.set_offset(active_geometry.drag_offset(
+                                axis,
+                                event.position,
+                                state.get().drag_pos,
+                                scroll_handle.offset(),
+                            ));
+                        }
+                        if matches!(event.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                            scroll_handle.end_drag();
+                            let now = cx.background_executor().now();
+                            state.set(state.get().with_unset_drag_pos(now));
+                        }
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        if event.phase == TouchPhase::Moved {
+                            state.notify_drag(
+                                cx.background_executor().now(),
+                                max_fps_duration,
+                                view_id,
+                                window,
+                                cx,
+                            );
+                        } else {
+                            cx.notify(view_id);
+                        }
+                    }
+                });
 
+                if is_visible {
                     window.on_mouse_event({
+                        // The hitbox rather than the bounds, so that an
+                        // element above the bar (a menu, a dialog) keeps
+                        // the press.
+                        let bar_hitbox = state.bar_hitbox.clone();
                         let state = scrollbar_state.clone();
                         let scroll_handle = self.scroll_handle.clone();
 
-                        move |event: &MouseUpEvent, phase, _, cx| {
+                        move |event: &MouseDownEvent, phase, window, cx| {
                             if phase.bubble()
                                 && event.button == MouseButton::Left
-                                && state.get().dragged_axis == Some(axis)
+                                && bar_hitbox.is_hovered(window)
                             {
-                                scroll_handle.set_offset(active_geometry.drag_offset(
-                                    axis,
-                                    event.position,
-                                    state.get().drag_pos,
-                                    scroll_handle.offset(),
-                                ));
-                                scroll_handle.end_drag();
-                                let now = cx.background_executor().now();
-                                state.set(state.get().with_unset_drag_pos(now));
+                                cx.stop_propagation();
+
+                                if thumb_bounds.contains(&event.position) {
+                                    // click on the thumb bar, set the drag position
+                                    let pos = event.position - thumb_bounds.origin;
+
+                                    scroll_handle.start_drag();
+                                    let now = cx.background_executor().now();
+                                    state.set(state.get().with_drag_pos(axis, pos, now));
+                                    // Active styling can change the inset or minimum length.
+                                    // Keep the original grab point under the pointer on that frame.
+                                    scroll_handle.set_offset(active_geometry.drag_offset(
+                                        axis,
+                                        event.position,
+                                        pos,
+                                        scroll_handle.offset(),
+                                    ));
+                                } else {
+                                    // click on the scrollbar, jump to the position
+                                    // Set the thumb bar center to the click position
+                                    let center = point(geometry.length / 2., geometry.length / 2.);
+                                    scroll_handle.set_offset(geometry.drag_offset(
+                                        axis,
+                                        event.position,
+                                        center,
+                                        scroll_handle.offset(),
+                                    ));
+                                }
+
                                 cx.notify(view_id);
                             }
                         }
                     });
                 }
-            },
-        );
+
+                window.on_mouse_event({
+                    let bar_hitbox = state.bar_hitbox.clone();
+                    let scroll_handle = self.scroll_handle.clone();
+                    let state = scrollbar_state.clone();
+                    let max_fps_duration = Duration::from_secs_f64(1. / self.max_fps as f64);
+
+                    move |event: &MouseMoveEvent, _, window, cx| {
+                        let now = cx.background_executor().now();
+                        let mut notify = false;
+                        // When is hover to show mode or it was visible,
+                        // we need to update the hovered state and increase the last_scroll_time.
+                        let need_hover_to_update = is_hover_to_show || is_visible;
+                        // Update hovered state for scrollbar
+                        let bar_hovered = bar_hitbox.is_hovered(window);
+                        if bar_hovered && need_hover_to_update {
+                            let hover_changed = state.get().hovered_axis != Some(axis);
+                            state.set(state.get().with_hovered(Some(axis), now));
+                            notify |= hover_changed;
+                        } else if state.get().hovered_axis == Some(axis) {
+                            state.set(state.get().with_hovered(None, now));
+                            notify = true;
+                        }
+
+                        // Update hovered state for scrollbar thumb
+                        if tracks_thumb_hover(mode, is_visible)
+                            && bar_hovered
+                            && thumb_bounds.contains(&event.position)
+                        {
+                            if state.get().hovered_on_thumb != Some(axis) {
+                                state.set(state.get().with_hovered_on_thumb(Some(axis), now));
+                                notify = true;
+                            }
+                        } else {
+                            if state.get().hovered_on_thumb == Some(axis) {
+                                state.set(state.get().with_hovered_on_thumb(None, now));
+                                notify = true;
+                            }
+                        }
+
+                        // Move thumb position on dragging
+                        if state.get().dragged_axis == Some(axis) && event.dragging() {
+                            // Stop the event propagation to avoid selecting text or other side effects.
+                            cx.stop_propagation();
+
+                            let offset = active_geometry.drag_offset(
+                                axis,
+                                event.position,
+                                state.get().drag_pos,
+                                scroll_handle.offset(),
+                            );
+                            if scroll_handle.offset() != offset {
+                                // Coalesce rendering, never discard the newest pointer position.
+                                scroll_handle.set_offset(offset);
+                                notify = true;
+                            }
+                            if notify {
+                                state.notify_drag(now, max_fps_duration, view_id, window, cx);
+                            }
+                            return;
+                        }
+
+                        if notify {
+                            cx.notify(view_id);
+                        }
+                    }
+                });
+
+                window.on_mouse_event({
+                    let state = scrollbar_state.clone();
+                    let scroll_handle = self.scroll_handle.clone();
+
+                    move |event: &MouseUpEvent, phase, _, cx| {
+                        if phase.bubble()
+                            && event.button == MouseButton::Left
+                            && state.get().dragged_axis == Some(axis)
+                        {
+                            scroll_handle.set_offset(active_geometry.drag_offset(
+                                axis,
+                                event.position,
+                                state.get().drag_pos,
+                                scroll_handle.offset(),
+                            ));
+                            scroll_handle.end_drag();
+                            let now = cx.background_executor().now();
+                            state.set(state.get().with_unset_drag_pos(now));
+                            cx.notify(view_id);
+                        }
+                    }
+                });
+            }
+        });
     }
 }
 

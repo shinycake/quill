@@ -228,6 +228,14 @@ pub struct AppearancePrefs {
     /// (Appearance → Compact mode).
     #[serde(default)]
     pub density: crate::density::Density,
+    /// Appearance → Layout: Classic panels or Floating cards
+    /// (`crate::layout_style`). Classic by default, and Classic for a
+    /// value this build does not know, so the rest of the file still loads.
+    #[serde(
+        default,
+        deserialize_with = "crate::layout_style::LayoutStyle::deserialize_or_classic"
+    )]
+    pub layout: crate::layout_style::LayoutStyle,
     /// Appearance → Glass effects: menus, tabs and floating buttons drawn as
     /// glass (`crate::glass`). Solid by default.
     #[serde(default)]
@@ -334,6 +342,7 @@ impl Default for AppearancePrefs {
             follow_omarchy: true,
             interface_scale_pct: INTERFACE_SCALE_DEFAULT,
             density: crate::density::Density::Standard,
+            layout: crate::layout_style::LayoutStyle::Classic,
             material: crate::glass::Material::Solid,
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
@@ -524,6 +533,14 @@ mod tests {
         assert!(defaults.bubbles);
         let old: AppearancePrefs = serde_json::from_str("{}").unwrap();
         assert_eq!(old.density, crate::density::Density::Standard);
+        assert_eq!(old.layout, crate::layout_style::LayoutStyle::Classic);
+        // A layout from a newer build keeps the other choices.
+        let newer: Option<AppearancePrefs> =
+            serde_json::from_str(r#"{"layout":"stacked","font_size_px":17}"#).ok();
+        assert_eq!(
+            newer.map(|p| (p.layout, p.font_size_px)),
+            Some((crate::layout_style::LayoutStyle::Classic, 17))
+        );
 
         let prefs = AppearancePrefs {
             theme: ThemeChoice::Dark,
@@ -545,6 +562,7 @@ mod tests {
             follow_omarchy: false,
             interface_scale_pct: 150,
             density: crate::density::Density::Compact,
+            layout: crate::layout_style::LayoutStyle::Floating,
             material: crate::glass::Material::Glass,
             font_size_px: 17,
             bubbles: false,

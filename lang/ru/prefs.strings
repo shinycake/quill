@@ -70,6 +70,11 @@
 "qll_prefs_code" = "Код";
 "qll_prefs_compact_mode" = "Компактный режим";
 "qll_prefs_compact_mode_about" = "Помещает больше чатов и сообщений на экран за счёт более плотных отступов.";
+"qll_prefs_layout" = "Макет";
+"qll_prefs_layout_classic" = "Классический";
+"qll_prefs_layout_classic_about" = "Панели рядом, разделённые линиями.";
+"qll_prefs_layout_floating" = "Плавающий";
+"qll_prefs_layout_floating_about" = "Скруглённые карточки и панели поверх обоев чата.";
 "qll_prefs_composer" = "Поле ввода";
 "qll_prefs_confirm_before_calling" = "Подтверждать перед звонком";
 "qll_prefs_confirm_new_passcode" = "Подтвердите новый код-пароль";

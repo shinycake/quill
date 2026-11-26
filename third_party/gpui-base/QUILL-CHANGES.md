@@ -273,3 +273,10 @@ after a Hebrew or Arabic point removes only that point
 Arabic letters at an even level (a left-to-right override) one grapheme at a
 time, so the platform cannot reorder them; `input/bidi_paragraph.rs` adds
 `BidiParagraph::row_shapes` (each row's width and direction).
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`): gpui-pre's `ContentMask` gained
+a rounded part, so the masks built here are made with `ContentMask::rect`
+instead of a struct literal. Nothing else changes.

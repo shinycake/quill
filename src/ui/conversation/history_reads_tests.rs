@@ -77,7 +77,12 @@ fn snapshot(
             .filter(|(chat, _)| *chat == A)
             .map(|(_, ids)| ids.clone())
             .unwrap_or_default();
-        let viewport = app.history.viewport.get().expect("history painted");
+        let viewport = app
+            .history
+            .viewport
+            .get()
+            .map(|view| view.readable)
+            .expect("history painted");
         let (mut shown, mut off) = (Vec::new(), Vec::new());
         for (ix, bounds) in app.history.hit_rows.borrow().iter() {
             let ids = app

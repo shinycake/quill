@@ -1,6 +1,7 @@
 //! Methods moved out of `search_ui.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
@@ -134,8 +135,7 @@ impl QuillApp {
             .id("chat-search")
             .px_3()
             .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
+            .map(|this| self.bar_frame(this, BarLine::Under, cx))
             .flex()
             .flex_col()
             .gap_2()
@@ -531,11 +531,12 @@ impl QuillApp {
                             this.open_search_ui(window, cx);
                         }
                     }))
-                    .child(
+                    .child(crate::ui::chrome::list_parts::search_field(
                         Textarea::new(&self.search_ui.input)
                             .aria_label(tr(keys::Q_CHAT_SEARCH))
-                            .h(px(self.density().search_field)),
-                    ),
+                            .h(px(self.row_density().search_field)),
+                        self.chrome_metrics(),
+                    )),
             )
             .children(story_stack)
             .when(self.search_is_open(), |this| {

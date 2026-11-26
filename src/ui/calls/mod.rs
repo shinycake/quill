@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::calls_state::CallTick;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -867,9 +868,8 @@ impl QuillApp {
                 .gap_2()
                 .px_3()
                 .py_2()
-                .border_b_1()
-                .border_color(cx.theme().border)
                 .bg(cx.theme().accent.opacity(0.12))
+                .map(|this| self.strip_frame(this, BarLine::Under, cx))
                 .child(div().text_sm().flex_1().child(trn_with(
                     keys::Q_LEFTOVERS_MISSED_CALLS_BUSY,
                     declined.len(),

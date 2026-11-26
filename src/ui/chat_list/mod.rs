@@ -191,6 +191,7 @@ impl QuillApp {
         }
         // Choosing a chat from the list ends the peek at it.
         self.history.forum_peek = crate::ui::history_state::ForumPeek::Off;
+        self.close_sidebar_drawer(window, cx);
         // A chat opened from anywhere (a link, a notification) shows over
         // Settings' place.
         self.close_settings();
@@ -650,7 +651,7 @@ impl QuillApp {
                     let height = chat_row_height(
                         chat_row_has_tags(chat, &names, tags, viewing),
                         session.chat_row_lines(chat.id, setting),
-                        self.density(),
+                        self.row_density(),
                     );
                     Some((*id, f32::from(height)))
                 })
@@ -822,6 +823,7 @@ impl QuillApp {
 mod drop_on_row;
 mod drop_on_row_tests;
 mod drop_topic;
+mod folder_slide;
 mod forward_drop_tests;
 mod media_drag_tests;
 mod pin_drag_tests;

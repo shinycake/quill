@@ -206,7 +206,7 @@ fn paint_inline_hint(
             return;
         }
     }
-    window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
+    window.with_content_mask(Some(ContentMask::rect(clip)), |window| {
         let _ = line.paint(
             point(left, rect.top()),
             rect.size.height,

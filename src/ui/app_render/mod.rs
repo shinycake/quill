@@ -157,6 +157,8 @@ impl Render for QuillApp {
             .size_full()
             .relative()
             .bg(cx.theme().background)
+            // Floating: the wallpaper under the strip and the cards.
+            .children(self.window_backdrop_layer(cx))
             // Window-wide text selection: message text can be selected and
             // copied within a message (Telegram Desktop).
             .child(gpui_kit::base::TextSelectionLayer)
@@ -341,6 +343,7 @@ impl Render for QuillApp {
                 // the title row (macOS uses the native menu bar installed by
                 // `setup_app_menus`).
                 cfg!(not(target_os = "macos")).then(|| self.menu_bar.clone()),
+                self.look(),
                 cx,
             ))
             .children(self.frozen_banner(cx))
@@ -573,7 +576,7 @@ impl Render for QuillApp {
                                 this.close_media_panel(cx);
                             }),
                         )
-                        .anchored(position, panel)
+                        .anchored(position, panel, self.look(), cx)
                         .decorations(self.panel_painter()),
                     )
                 },

@@ -228,7 +228,10 @@ impl QuillApp {
                 .occlude()
                 .flex()
                 .flex_col()
-                .popover_style(cx)
+                .popover_style_shaped(
+                    crate::ui::chrome::menu_shape::menu_shape_in(self.look(), cx),
+                    cx,
+                )
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                     if event.keystroke.key == "escape" {
                         this.close_send_menu(cx);

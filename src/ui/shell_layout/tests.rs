@@ -11,6 +11,7 @@ fn input(width: f32) -> ShellInput {
         panels: None,
         docked: 1.,
         panels_shown: 1.,
+        columns: Columns::Lined,
     }
 }
 
@@ -400,4 +401,185 @@ fn a_panel_filling_the_chat_place_does_not_slide() {
     assert_eq!(layout.panels, PanelPane::Fill);
     assert_eq!(layout.panels_shown, 1.);
     assert_eq!(layout.panel_column(), 0.);
+}
+
+// Floating (docs/decisions/floating-layout.md): gutters, the centred
+// column's room, the drawer band.
+
+fn floating(width: f32) -> ShellInput {
+    ShellInput {
+        columns: Columns::of(&quill::layout_style::FLOATING),
+        ..input(width)
+    }
+}
+
+#[test]
+fn the_list_column_owns_its_left_gutter() {
+    let layout = shell_layout(floating(1440.));
+    assert_eq!(layout.list_dock, ListDock::Beside);
+    assert_eq!(layout.list, Some(300.));
+    assert_eq!(layout.list_column(0.), 316.);
+    assert_eq!(layout.list_column(72.), 388.);
+    let input = floating(1440.);
+    assert_eq!(chat_pane_width(input, &layout), 1440. - 316.);
+}
+
+#[test]
+fn the_drag_limit_leaves_the_chat_its_minimum_and_the_gutters() {
+    assert_eq!(
+        max_list_width(1000., 0., false, 16.),
+        1000. - 16. - CHAT_MIN_WIDTH
+    );
+    assert_eq!(
+        max_list_width(1000., 0., true, 16.),
+        1000. - 16. - 16. - FORUM_COLUMN_WIDTH - CHAT_MIN_WIDTH
+    );
+    assert_eq!(max_list_width(1000., 0., false, 0.), 1000. - CHAT_MIN_WIDTH);
+}
+
+#[test]
+fn a_panel_docks_only_beside_a_full_column() {
+    // 316 list column, then panel 300 + 16 and a 696 column with its two
+    // gutters: 316 + 316 + 728 = 1360.
+    let fits = shell_layout(ShellInput {
+        panels: Some(INFO_PANEL_WIDTH),
+        ..floating(1360.)
+    });
+    assert_eq!(fits.panels, PanelPane::Column(INFO_PANEL_WIDTH));
+    assert_eq!(fits.panel_column(), INFO_PANEL_WIDTH + 16.);
+    let short = shell_layout(ShellInput {
+        panels: Some(INFO_PANEL_WIDTH),
+        ..floating(1359.)
+    });
+    assert_eq!(short.panels, PanelPane::Over(INFO_PANEL_WIDTH));
+    assert!(short.chat);
+    // Over leaves the pane its width.
+    assert_eq!(short.panel_column(), 0.);
+    assert_eq!(chat_pane_width(floating(1359.), &short), 1359. - 316.);
+    assert_eq!(short.chat_insets(0.), (316., 0.));
+}
+
+#[test]
+fn a_classic_panel_never_floats_over_the_chat() {
+    for width in (620..2600).step_by(7) {
+        let layout = shell_layout(ShellInput {
+            panels: Some(INFO_PANEL_WIDTH),
+            ..input(width as f32)
+        });
+        assert!(!matches!(layout.panels, PanelPane::Over(_)), "{width}");
+        assert_eq!(layout.list_dock, ListDock::Beside);
+    }
+}
+
+#[test]
+fn forum_columns_take_their_gutter() {
+    let beside = shell_layout(ShellInput {
+        forum: ForumColumn::Beside,
+        ..floating(1440.)
+    });
+    let input = floating(1440.);
+    assert_eq!(
+        chat_pane_width(input, &beside),
+        1440. - 316. - 16. - FORUM_COLUMN_WIDTH
+    );
+    let replacing = shell_layout(ShellInput {
+        forum: ForumColumn::Replacing,
+        ..floating(1440.)
+    });
+    assert_eq!(replacing.list, None);
+    assert_eq!(
+        chat_pane_width(input, &replacing),
+        1440. - 16. - FORUM_COLUMN_WIDTH
+    );
+    assert_eq!(replacing.chat_insets(0.).0, 16. + FORUM_COLUMN_WIDTH);
+}
+
+#[test]
+fn webk_bands_at_600_601_925_926() {
+    // 600: the window resolved to Classic's metrics, so the shell sees no
+    // drawer band and lays out Classic's one column.
+    let at_600 = shell_layout(input(600.));
+    assert!(at_600.one_column);
+    assert_eq!(at_600.list_dock, ListDock::Beside);
+    for width in [601., 925.] {
+        let layout = shell_layout(floating(width));
+        assert_eq!(layout.list_dock, ListDock::Drawer, "{width}");
+        assert!(!layout.one_column && layout.chat);
+        assert_eq!(layout.docked, 0.);
+        assert_eq!(layout.list_column(72.), 0., "no rail, no column");
+        assert!(layout.list_column_hidden());
+        assert!(!layout.resize_handle());
+        assert!(layout.sidebar_toggle());
+        assert_eq!(chat_pane_width(floating(width), &layout), width);
+    }
+    let at_926 = shell_layout(floating(926.));
+    assert_eq!(at_926.list_dock, ListDock::Beside);
+    assert_eq!(at_926.docked, 1.);
+}
+
+#[test]
+fn the_drawer_ignores_docked_and_keeps_the_dragged_width() {
+    let hidden = shell_layout(ShellInput {
+        docked: 1.,
+        list_width: 360.,
+        ..floating(800.)
+    });
+    assert_eq!(hidden.docked, 0.);
+    assert_eq!(hidden.list, Some(360.));
+    // At 601 the drawer leaves 44 px of chat beside it and the gutters.
+    let narrow = shell_layout(ShellInput {
+        list_width: 900.,
+        ..floating(601.)
+    });
+    assert_eq!(narrow.list, Some(601. - 32. - DRAWER_CHAT_PEEK));
+}
+
+#[test]
+fn a_panel_in_the_drawer_band_is_over_the_chat() {
+    for width in [601., 700., 925.] {
+        let layout = shell_layout(ShellInput {
+            panels: Some(SHARED_MEDIA_PANEL_WIDTH),
+            ..floating(width)
+        });
+        assert_eq!(layout.panels, PanelPane::Over(SHARED_MEDIA_PANEL_WIDTH));
+        assert!(layout.chat);
+    }
+}
+
+#[test]
+fn forums_in_the_drawer_band_hide_the_topic_column() {
+    for forum in [ForumColumn::Beside, ForumColumn::Replacing] {
+        let layout = shell_layout(ShellInput {
+            forum,
+            topic_open: true,
+            ..floating(800.)
+        });
+        assert_eq!(layout.forum, ForumPane::Hidden);
+        assert_eq!(layout.list_dock, ListDock::Drawer);
+        assert!(
+            !ShellInput {
+                forum,
+                topic_open: true,
+                ..floating(800.)
+            }
+            .back_to_topics()
+        );
+    }
+}
+
+#[test]
+fn above_the_band_the_pane_keeps_the_chat_minimum() {
+    for width in 926..2600 {
+        let width = width as f32;
+        let input = ShellInput {
+            list_width: 2000.,
+            ..floating(width)
+        };
+        let layout = shell_layout(input);
+        assert!(chat_pane_width(input, &layout) >= CHAT_MIN_WIDTH, "{width}");
+    }
+    for width in 601..=925 {
+        let input = floating(width as f32);
+        assert_eq!(chat_pane_width(input, &shell_layout(input)), width as f32);
+    }
 }

@@ -128,6 +128,7 @@ pub mod large_alloc;
 pub mod launch_lines;
 pub mod launch_prewarm;
 pub mod layout;
+pub mod layout_style;
 pub mod lifecycle;
 pub mod limit_steps;
 pub mod link_handler;

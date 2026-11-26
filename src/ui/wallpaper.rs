@@ -10,6 +10,7 @@
 
 use super::app::QuillApp;
 use super::bubble_theme::{OutgoingFill, note_history_area};
+use super::chrome::WallpaperSeat;
 use super::wallpaper_cache::{Slot, wallpaper_layer};
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -276,7 +277,7 @@ pub(super) fn paint_wallpaper<T: Styled + ParentElement>(
     dimming: u8,
     slot: Slot,
 ) -> T {
-    let history = matches!(slot, Slot::History(_));
+    let history = matches!(slot, Slot::History(_) | Slot::Window(_));
     // The history reports its area every frame: gradient bubbles take
     // their colors from where they sit in it.
     let area_probe = || {
@@ -319,7 +320,52 @@ pub(super) fn paint_wallpaper<T: Styled + ParentElement>(
     this
 }
 
+/// The history's wallpaper: its own (Classic), or none where the window
+/// paints it under the cards (`WallpaperSeat`), which also reports the
+/// area gradient bubbles take their colours from.
+pub(super) fn history_backdrop<T: Styled + ParentElement>(
+    this: T,
+    seat: WallpaperSeat,
+    wallpaper: Option<&Wallpaper>,
+    dimming: u8,
+    slot: Slot,
+) -> T {
+    match seat {
+        WallpaperSeat::Window => this,
+        WallpaperSeat::History => paint_wallpaper(this, wallpaper, dimming, slot),
+    }
+}
+
 impl QuillApp {
+    /// Floating's wallpaper as a layer under the whole window, title strip
+    /// included; `None` in Classic, where the history draws its own.
+    pub(super) fn window_backdrop_layer(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        match self.wallpaper_seat() {
+            WallpaperSeat::History => None,
+            WallpaperSeat::Window => Some(
+                self.paint_window_backdrop(div().absolute().top_0().left_0().size_full(), cx)
+                    .into_any_element(),
+            ),
+        }
+    }
+
+    pub(super) fn paint_window_backdrop<T: Styled + ParentElement>(
+        &self,
+        this: T,
+        cx: &Context<Self>,
+    ) -> T {
+        let WallpaperSeat::Window = self.wallpaper_seat() else {
+            return this;
+        };
+        let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
+        paint_wallpaper(
+            this,
+            look.wallpaper.as_ref(),
+            look.dimming,
+            Slot::Window(cx.entity_id()),
+        )
+    }
+
     /// A 56 px tile showing an installed background (fill, gradient, pattern
     /// or photo); the caller adds the click handler.
     pub(super) fn wallpaper_tile(

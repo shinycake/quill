@@ -1745,7 +1745,7 @@ mod tests {
                         sprite.order,
                         sprite.bounds,
                         sprite.content_mask,
-                        sprite.grayscale,
+                        sprite.flags,
                         sprite.opacity
                     )
                 }))

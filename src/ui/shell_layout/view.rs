@@ -3,8 +3,9 @@
 //! back button for one-column windows.
 
 use super::{
-    DOWNLOADS_PANEL_WIDTH, ForumPane, INFO_PANEL_WIDTH, PanelPane, SHARED_MEDIA_PANEL_WIDTH,
-    ShellInput, ShellLayout, chat_pane_width, max_list_width, shell_layout,
+    Columns, DOWNLOADS_PANEL_WIDTH, ForumPane, INFO_PANEL_WIDTH, PanelPane,
+    SHARED_MEDIA_PANEL_WIDTH, ShellInput, ShellLayout, chat_pane_width, max_list_width,
+    shell_layout,
 };
 use crate::ui::app::{PaneMode, QuillApp};
 use crate::ui::navigation::SidebarResize;
@@ -37,6 +38,7 @@ impl QuillApp {
     fn shell_input(&self) -> ShellInput {
         let width = f32::from(self.frame.main_width);
         let session = self.session();
+        let metrics = self.chrome_metrics();
         ShellInput {
             width,
             rail: self.folder_rail_width(),
@@ -53,6 +55,7 @@ impl QuillApp {
                 1.
             },
             panels_shown: self.frame.panels.shown(self.frame.panels.now()),
+            columns: Columns::of(metrics),
         }
     }
 
@@ -78,7 +81,12 @@ impl QuillApp {
     pub(in crate::ui) fn max_list_width(&self) -> Pixels {
         let input = self.shell_input();
         let forum_beside = input.forum == ForumColumn::Beside;
-        px(max_list_width(input.width, input.rail, forum_beside))
+        px(max_list_width(
+            input.width,
+            input.rail,
+            forum_beside,
+            input.columns.gutter(),
+        ))
     }
 
     /// The panels open in the side column, from state.
@@ -133,6 +141,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.frame.main_width = window.viewport_size().width;
+        self.note_window_width(window, cx);
         self.keep_shared_media_search_field(window, cx);
         let layout = self.shell_layout();
         self.settle_sidebar(&layout, window, cx);
@@ -143,7 +152,7 @@ impl QuillApp {
         let open = self.session().and_then(|s| s.open_chat_id());
         let list = layout.list.and_then(|list| {
             let column = if self.pane_mode() == PaneMode::Ready {
-                self.docked_sidebar(&layout)?
+                self.docked_sidebar(&layout, cx)?
             } else {
                 self.sidebar(
                     auth,
@@ -173,8 +182,17 @@ impl QuillApp {
             .flex()
             .h_full()
             .children(panels);
+        let gutter = layout.gutter();
         let panels = match layout.panels {
             PanelPane::Hidden => None,
+            PanelPane::Column(width) if matches!(layout.columns, Columns::Cards { .. }) => {
+                let column = self.panel_card_column(row, width, gutter, cx);
+                Some(if layout.panel_column() >= width + gutter {
+                    column.into_any_element()
+                } else {
+                    self.sliding_panels(column, width + gutter, layout.panel_column())
+                })
+            }
             PanelPane::Column(width) if layout.panel_column() >= width => {
                 Some(row.flex_none().w(px(width)).into_any_element())
             }
@@ -182,6 +200,7 @@ impl QuillApp {
                 Some(self.sliding_panels(row, width, layout.panel_column()))
             }
             PanelPane::Fill => Some(row.flex_1().min_w_0().into_any_element()),
+            PanelPane::Over(width) => Some(self.panel_over(row, width, gutter, cx)),
         };
         let forum = match layout.forum {
             ForumPane::Hidden => None,
@@ -214,10 +233,64 @@ impl QuillApp {
                 })
             })
             .children(forum)
-            .when(layout.chat, |this| this.child(self.conversation_slot(cx)))
+            .when(layout.chat, |this| {
+                this.child(self.chat_switch_slot(window, cx))
+            })
             .children(panels)
             .children(peek)
             .children(self.forward_drag_banner(&layout, cx))
+            .into_any_element()
+    }
+
+    /// A docked panel column as a card: `width` wide, its gutter at the
+    /// window's right edge, top and bottom.
+    fn panel_card_column(
+        &self,
+        row: Stateful<Div>,
+        width: f32,
+        gutter: f32,
+        cx: &App,
+    ) -> Stateful<Div> {
+        let chrome = self.chrome();
+        div()
+            .id("side-panels-card")
+            .flex_none()
+            .h_full()
+            .w(px(width + gutter))
+            .pr(px(gutter))
+            .py(px(gutter))
+            .child(crate::ui::chrome::frames::card(
+                row.size_full(),
+                &chrome,
+                cx.theme(),
+                self.card_glass(cx).as_ref(),
+            ))
+    }
+
+    /// A panel with no room beside a full conversation column: a card
+    /// over the chat's right part, sliding in from the window's edge.
+    fn panel_over(&self, row: Stateful<Div>, width: f32, gutter: f32, cx: &App) -> AnyElement {
+        let chrome = self.chrome();
+        let shown = self.frame.panels.shown(self.frame.panels.now());
+        let leaving = self
+            .frame
+            .panels
+            .leaving(self.open_panels(), self.frame.panels.now());
+        div()
+            .id("side-panels-over")
+            .debug_selector(|| "side-panels-over".into())
+            .absolute()
+            .top(px(gutter))
+            .bottom(px(gutter))
+            .right(px(gutter - (1. - shown) * (width + gutter)))
+            .w(px(width))
+            .child(crate::ui::chrome::frames::card(
+                row.size_full(),
+                &chrome,
+                cx.theme(),
+                self.card_glass(cx).as_ref(),
+            ))
+            .when(!leaving, |this| this.occlude())
             .into_any_element()
     }
 

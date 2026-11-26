@@ -186,9 +186,12 @@ pub(crate) struct HistoryUi {
     /// the next paint: drag selection hit-tests the pointer against them.
     pub(super) hit_rows: std::rc::Rc<std::cell::RefCell<Vec<(usize, Bounds<Pixels>)>>>,
     pub(super) row_hover: super::history::RowHover,
-    /// The list's window bounds at the last paint (drag selection
-    /// autoscrolls when the pointer leaves them).
-    pub(super) viewport: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// The list's window bounds at the last paint, whole and less what
+    /// floats over it (drag selection autoscrolls when the pointer leaves
+    /// the whole; reads and landings use what a reader sees).
+    pub(super) viewport: std::rc::Rc<std::cell::Cell<Option<super::conversation::HistoryViewport>>>,
+    /// The insets the history's first and last rows were laid out with.
+    pub(super) insets_laid: std::cell::Cell<super::chrome::frame::HistoryInsets>,
     /// The open chat's palette (its emoji theme, its wallpaper's tone),
     /// set when the history renders and applied while rows are built.
     pub(super) palette: std::cell::Cell<Option<super::chat_palette::ChatPalette>>,
@@ -313,6 +316,7 @@ impl HistoryUi {
             hit_rows: Default::default(),
             row_hover: Default::default(),
             viewport: Default::default(),
+            insets_laid: std::cell::Cell::new(super::chrome::frame::HistoryInsets::ZERO),
             palette: Default::default(),
             pinned_cursor: HashMap::new(),
             hidden_pinned: HashMap::new(),

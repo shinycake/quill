@@ -176,6 +176,10 @@ impl QuillApp {
                 self.first_run_highlights(cx),
                 progress(elapsed_since(*since, now), CARD_IN),
             ),
+            FirstRun::Style { since } => (
+                self.first_run_style(cx),
+                progress(elapsed_since(*since, now), CARD_IN),
+            ),
             FirstRun::Done => return None,
             _ => (
                 self.first_run_notice(cx),
@@ -323,7 +327,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn finish_first_run(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn finish_first_run(&mut self, cx: &mut Context<Self>) {
         if let Some(root) = quill::settings::safe_app_root()
             && let Err(err) = quill::settings::mark_first_run_done(&root)
         {
@@ -383,19 +387,22 @@ impl QuillApp {
             .child(
                 div()
                     .w_full()
-                    .debug_selector(|| "first-run-start".into())
+                    .debug_selector(|| "first-run-continue".into())
                     .child(
-                        Button::new("first-run-start")
-                            .label(tr(keys::START_MSGS))
+                        Button::new("first-run-continue")
+                            .label(tr(keys::CONTINUE))
                             .primary()
                             .w_full()
-                            .on_click(cx.listener(|this, _, _, cx| this.finish_first_run(cx))),
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.first_run.choose_style(Instant::now());
+                                cx.notify();
+                            })),
                     ),
             )
     }
 }
 
-fn card() -> Div {
+pub(super) fn card() -> Div {
     div()
         .w(px(CARD_WIDTH))
         .max_w_full()
@@ -405,7 +412,7 @@ fn card() -> Div {
         .gap_6()
 }
 
-fn heading(text: &'static str) -> impl IntoElement {
+pub(super) fn heading(text: &'static str) -> impl IntoElement {
     div()
         .id("first-run-title")
         .role(Role::Heading)

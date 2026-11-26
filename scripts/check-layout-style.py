@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Reject feature code that asks which window layout is on.
+
+The window layout (Classic or Floating, `src/layout_style.rs`) is decided in
+one place. Render sites read numbers from `chrome().metrics` or pass their
+element through a frame helper in `src/ui/chrome/`; they never branch on the
+layout. So outside the files below, naming `LayoutStyle::` or one of the
+metrics' enums fails: a new bar calls `chrome().bar(..)`, a new card calls
+`chrome().list_card(..)` or `panel_card(..)`, and is right in both layouts
+without knowing either (docs/decisions/floating-layout.md).
+
+Test files (`tests.rs`, `*_tests.rs`, anything under a `tests/` folder) are
+skipped.
+"""
+
+import pathlib
+import re
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+SRC = ROOT / "src"
+
+NAMES = [
+    "LayoutStyle",
+    "Look",
+    "SelectedRow",
+    "RowScale",
+    "MenuEnter",
+    "PageSwitch",
+    "Elevation",
+    "Edge",
+]
+USE = re.compile(r"\b(" + "|".join(NAMES) + r")::")
+# `LayoutStyle` names nothing else; the metrics' enum names (`Edge`, `Look`)
+# are common, so they count only in a file that reaches `layout_style`.
+ONLY_CHOICE = re.compile(r"\b(LayoutStyle)::")
+
+# A layout number compared with zero stands in for "is Floating": a
+# gutter, divider, radius or gap that is 0 only in Classic. Read the
+# number, or ask a chrome helper for a value.
+SENTINEL = re.compile(
+    r"(\b(?:gutter|divider|bar_gap)\b|metrics(?:\(\))?\.radius)\s*[<>]=?\s*0"
+)
+
+# A look compared for equality, or a `-> bool` that answers "is it
+# Floating", hides the other case: match on the `Look` (or ask for a value,
+# such as `WallpaperSeat` or `ConversationFrame`). This one holds in the
+# chrome folder too.
+LOOK_TEST = re.compile(r"(?:[!=]=\s*Look::|Look::\w+\s*[!=]=)")
+
+# Files and folders that decide the look (paths relative to the repo root).
+ALLOW = [
+    "src/layout_style.rs",
+    "src/settings/appearance.rs",
+    "src/density.rs",
+    "src/ui/chrome/",
+    "src/ui/shell_layout/",
+    "src/ui/app_slice/",
+    "src/ui/chat_row/row_ink.rs",
+    "src/ui/appearance/",
+    "src/ui/chat_list/folder_slide.rs",
+]
+
+
+def is_test_file(path):
+    rel = path.relative_to(SRC)
+    return (
+        path.name == "tests.rs"
+        or path.name.endswith("_tests.rs")
+        or "tests" in rel.parts[:-1]
+    )
+
+
+def allowed(rel):
+    return any(rel == a or (a.endswith("/") and rel.startswith(a)) for a in ALLOW)
+
+
+def main():
+    hits = []
+    for path in sorted(SRC.rglob("*.rs")):
+        if is_test_file(path):
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        for n, line in enumerate(text.splitlines(), 1):
+            if LOOK_TEST.search(line.split("//", 1)[0]):
+                hits.append(f"{rel}:{n}: tests a Look for equality; match on it")
+        if allowed(rel):
+            continue
+        pattern = USE if "layout_style" in text else ONLY_CHOICE
+        for n, line in enumerate(text.splitlines(), 1):
+            code = line.split("//", 1)[0]
+            m = pattern.search(code)
+            if m:
+                hits.append(f"{rel}:{n}: names {m.group(1)}::")
+            m = SENTINEL.search(code)
+            if m:
+                hits.append(f"{rel}:{n}: compares {m.group(1)} with 0")
+    if hits:
+        print("Feature code asks which layout is on. Use chrome().metrics or a")
+        print("frame helper in src/ui/chrome/ instead (docs/decisions/floating-layout.md):")
+        for hit in hits:
+            print("  " + hit)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

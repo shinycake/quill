@@ -188,14 +188,19 @@ pub(super) fn unread_pill(
     count: i32,
     dot: bool,
     muted: bool,
+    ink: BadgeInk,
     // 0..1 scale-in progress (1 = settled); see `quill::row_fx`.
     scale: f32,
     cx: &App,
 ) -> AnyElement {
-    let bg = if muted {
-        cx.theme().muted_foreground.opacity(0.55)
-    } else {
-        Hsla::from(accent_strong())
+    let (bg, fg) = match (ink, muted) {
+        (BadgeInk::Own, true) => (
+            cx.theme().muted_foreground.opacity(0.55),
+            Hsla::from(text_on_fill()),
+        ),
+        (BadgeInk::Own, false) => (Hsla::from(accent_strong()), Hsla::from(text_on_fill())),
+        (BadgeInk::OnFill { fill, text }, true) => (text.opacity(0.7), fill),
+        (BadgeInk::OnFill { fill, text }, false) => (text, fill),
     };
     let label = if count > 999 {
         format!("{}K", count / 1000)
@@ -227,7 +232,7 @@ pub(super) fn unread_pill(
         .items_center()
         .justify_center()
         .bg(bg)
-        .text_color(text_on_fill())
+        .text_color(fg)
         .text_xs()
         .font_semibold()
         .aria_label(if dot {
@@ -272,11 +277,14 @@ pub(in crate::ui) fn unread_badge(anchor: AnyElement, count: i32, dot: bool) -> 
 /// Slice CL3 / kit Phase 4: the @ mention badge (TGX `TGChat.mentionCounter`
 /// — shown when `unread_mention_count > 0`) as a kit `Badge` (Icon variant)
 /// on a 16px anchor — the badge exactly fills its anchor by construction.
-pub(super) fn mention_badge() -> impl IntoElement {
+pub(super) fn mention_badge(ink: BadgeInk) -> impl IntoElement {
     // Telegram Desktop: a bare "@" in the accent color, no badge.
     Icon::new(IconName::AtSign)
         .size(px(16.))
-        .text_color(accent_strong())
+        .text_color(match ink {
+            BadgeInk::Own => Hsla::from(accent_strong()),
+            BadgeInk::OnFill { text, .. } => text,
+        })
         .into_any_element()
 }
 

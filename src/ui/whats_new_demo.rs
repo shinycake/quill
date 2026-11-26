@@ -5,6 +5,7 @@ use quill::release_notes::ReleaseNote;
 
 const NEWEST: &str = "## Highlights
 
+- **A second layout, Floating.** The chat list, the bars and the side panels float as rounded cards over your chat wallpaper. Choose it in Settings › Appearance.
 - **Linux on arm64.** Linux packages now ship for arm64 machines next to x86_64.
 - **One-line installers for Linux and Windows.** Paste one command in a terminal or PowerShell to install Quill.
 - **Drop files on a chat in the list.** Drag files onto any chat row to send them there without opening it first.

@@ -10,6 +10,7 @@ use super::*;
 pub(in crate::ui) fn row_badges(
     id: ElementId,
     pinned: bool,
+    ink: BadgeInk,
     muted_fg: Hsla,
     muted: bool,
     unread_indicator: Option<(i32, bool)>,
@@ -24,9 +25,11 @@ pub(in crate::ui) fn row_badges(
         .items_center()
         .gap_1()
         .when(has_reactions, |this| this.child(reaction_badge(muted)))
-        .when(has_mentions, |this| this.child(mention_badge()))
+        .when(has_mentions, |this| this.child(mention_badge(ink)))
         .map(|this| match unread_indicator {
-            Some((count, dot)) => this.child(unread_pill(id, count, dot, muted, badge_scale, cx)),
+            Some((count, dot)) => {
+                this.child(unread_pill(id, count, dot, muted, ink, badge_scale, cx))
+            }
             None if pinned && !has_mentions && !has_reactions => {
                 this.child(row_glyph(IconName::Pin, muted_fg))
             }

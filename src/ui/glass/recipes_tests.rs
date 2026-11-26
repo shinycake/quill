@@ -25,9 +25,10 @@ impl GlassRole {
         is_media(self)
     }
 
-    const ALL: [GlassRole; 7] = [
+    const ALL: [GlassRole; 8] = [
         GlassRole::Menu,
         GlassRole::Panel,
+        GlassRole::Card,
         GlassRole::Control,
         GlassRole::MediaIcon,
         GlassRole::MediaText,
@@ -55,7 +56,7 @@ fn labels(role: GlassRole, colors: &ThemeColor) -> Labels {
             primary: colors.foreground,
             secondary: colors.muted_foreground,
         },
-        GlassRole::Bar => Labels {
+        GlassRole::Bar | GlassRole::Card => Labels {
             primary: colors.sidebar_foreground,
             secondary: colors.muted_foreground,
         },
@@ -182,6 +183,17 @@ fn every_recipe_keeps_its_labels_readable_in_light() {
 #[test]
 fn every_recipe_keeps_its_labels_readable_in_dark() {
     check("dark", &ThemeColor::dark());
+}
+
+/// Floating's cards run the window's height: their rim light stays below
+/// a menu's, or the edge reads as a glowing frame.
+#[test]
+fn a_card_keeps_a_quieter_rim_than_a_menu() {
+    for colors in [ThemeColor::light(), ThemeColor::dark()] {
+        let card = recipe(GlassRole::Card, &colors);
+        let menu = recipe(GlassRole::Menu, &colors);
+        assert!(card.tune.rim < menu.tune.rim && card.tune.fresnel < menu.tune.fresnel);
+    }
 }
 
 #[test]

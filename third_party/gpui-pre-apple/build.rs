@@ -60,6 +60,8 @@ mod apple_build {
             "Pixels".into(),
             "Hsla".into(),
             "ContentMask".into(),
+            // QUILL: rounded content masks.
+            "RoundedMask".into(),
             "Uniforms".into(),
             "AtlasTile".into(),
             "GlobalInputIndex".into(),

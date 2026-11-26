@@ -71,6 +71,8 @@ pub(super) const ENTRIES: &[Entry] = &[
         keys::Q_PREFS_INTERFACE_SCALE,
     )
     .keywords(&["zoom", "dpi", "size"]),
+    Entry::new("appearance.layout", P, keys::Q_PREFS_LAYOUT)
+        .keywords(&["layout", "floating", "classic", "cards", "rounded"]),
     Entry::new("appearance.compact_mode", P, keys::Q_PREFS_COMPACT_MODE).keywords(&[
         "density",
         "spacing",

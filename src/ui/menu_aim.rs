@@ -115,6 +115,7 @@ impl QuillApp {
                     cx.notify();
                 }
             }),
+            self.look(),
             cx,
         )
     }

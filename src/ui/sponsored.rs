@@ -404,10 +404,13 @@ impl QuillApp {
             let seen_probe = canvas(
                 |_, _, _| {},
                 move |bounds, _, _, _| {
-                    let seen = viewport.get().is_some_and(|view| {
-                        bounds.bottom() > view.top()
-                            && view.bottom() >= bounds.bottom() - SPONSORED_VIEWED_SLACK
-                    });
+                    let seen = viewport
+                        .get()
+                        .map(|view| view.readable)
+                        .is_some_and(|view| {
+                            bounds.bottom() > view.top()
+                                && view.bottom() >= bounds.bottom() - SPONSORED_VIEWED_SLACK
+                        });
                     if seen && let Ok(mut shown) = rendered.try_borrow_mut() {
                         shown.push((chat_id, ad_id));
                     }

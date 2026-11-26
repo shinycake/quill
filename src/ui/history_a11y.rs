@@ -218,10 +218,10 @@ impl QuillApp {
             for row in previous_row.into_iter().chain([ix]) {
                 let _ = state.remeasure_items(row..row + 1, cx);
             }
-            if !on_screen {
-                state.scroll_to_item(ix, cx);
-            }
         });
+        if !on_screen {
+            self.scroll_row_to_view_top(ix, cx);
+        }
         cx.notify();
     }
 

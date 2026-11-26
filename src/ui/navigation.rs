@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::agent::ui_driver::guard::{self, HardSurface};
 use quill::new_chat::NewChatKind;
@@ -321,7 +322,9 @@ impl QuillApp {
                     .left(px(-3.))
                     .w(px(6.))
                     .cursor_col_resize()
-                    .hover(|style| style.bg(cx.theme().border))
+                    .map(|this| {
+                        crate::ui::chrome::frames::resize_handle(this, &self.chrome(), cx.theme())
+                    })
                     .on_drag(SidebarResize, |_, _, _, cx| cx.new(|_| SidebarResize))
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         if event.click_count() == 2 {

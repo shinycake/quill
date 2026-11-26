@@ -133,6 +133,7 @@ impl QuillApp {
         }
         if let Some(demo) = demo {
             demo.setup(&mut app, window, cx);
+            app.demo_look(cx);
             app.seed_demo_attachments(pending_attachments);
         }
 

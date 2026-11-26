@@ -37,6 +37,8 @@ use super::anim_layer::{AnimationLayer, Layer};
 use super::app::QuillApp;
 use super::conversation::ConversationPart;
 use super::frame_clock::TickDraw;
+use crate::ui::chrome::frame::ConversationFrame;
+use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use std::cell::Cell;
@@ -44,6 +46,9 @@ use std::rc::Rc;
 
 mod slice_elements;
 use slice_elements::{MeasureHeight, SliceScope};
+mod chat_switch;
+mod composer_glide;
+mod floating_column;
 mod window_slices;
 pub(super) use window_slices::WindowSlices;
 
@@ -55,6 +60,9 @@ pub(super) enum SliceKind {
     /// Header and history of the open chat (with the composer when there
     /// is no composer slice).
     Conversation,
+    /// The header and the bars above the history, floating over it
+    /// (Floating; Classic draws them in the conversation).
+    Header,
     /// The open chat's composer, its popups, or the note / channel footer
     /// in its place: typing and the caret's blink redraw only this, not
     /// the history above it.
@@ -175,6 +183,7 @@ impl Slices {
     /// Whether content being built now belongs to the conversation.
     pub(super) fn in_conversation(&self) -> bool {
         self.in_slice(self.window.conversation.as_ref())
+            || self.in_slice(self.window.header.as_ref())
     }
 
     fn in_slice(&self, parts: Option<&SliceParts>) -> bool {
@@ -225,10 +234,15 @@ impl Slices {
     }
 
     fn layered(&self) -> impl Iterator<Item = EntityId> {
-        [&self.sidebar, &self.window.conversation, &self.window.panel]
-            .into_iter()
-            .flatten()
-            .flat_map(|parts| [parts.slice.entity_id(), parts.painter.entity_id()])
+        [
+            &self.sidebar,
+            &self.window.conversation,
+            &self.window.header,
+            &self.window.panel,
+        ]
+        .into_iter()
+        .flatten()
+        .flat_map(|parts| [parts.slice.entity_id(), parts.painter.entity_id()])
     }
 
     pub(super) fn under_viewer(&self, id: EntityId) -> bool {
@@ -276,7 +290,7 @@ impl QuillApp {
         cx.observe_self(|this, cx| this.notify_slices(cx)).detach();
     }
 
-    fn notify_slices(&self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn notify_slices(&self, cx: &mut Context<Self>) {
         super::frame_clock::trace_slice_render("(app notified)");
         super::frame_clock::trace_notify_origin();
         let ids: Vec<EntityId> = self
@@ -573,24 +587,41 @@ impl QuillApp {
 
     /// The chat list, as a cached slice filling its laid-out column,
     /// with its layer painting the animated content just above it.
-    pub(super) fn sidebar_slot(&self) -> AnyElement {
+    /// Floating: the column owns its gutter on the left, top and bottom,
+    /// and the list sits in a card inside it.
+    pub(super) fn sidebar_slot(&self, cx: &App) -> AnyElement {
+        let chrome = self.chrome();
+        let gutter = px(chrome.metrics.gutter);
         let column = div()
             .id("sidebar-slot")
             .role(gpui_kit::Role::Group)
             .a11y_tag(quill::agent::ui_driver::redact::REGION_CHAT_LIST)
             .relative()
-            .w(self.list_width() + px(self.folder_rail_width()))
+            .w(gutter + self.list_width() + px(self.folder_rail_width()))
             .flex_none()
-            .h_full();
+            .h_full()
+            .pl(gutter)
+            .py(gutter);
+        let card = super::chrome::frames::card(
+            div()
+                .debug_selector(|| "sidebar-card".into())
+                .relative()
+                .size_full(),
+            &chrome,
+            cx.theme(),
+            self.card_glass(cx).as_ref(),
+        );
         match &self.slices.sidebar {
             Some(parts) => {
                 super::image_budget::slice_shown(parts.slice.entity_id(), None);
                 column
-                    .child(parts.slice.clone().cached(full()))
-                    .child(parts.painter.clone().live())
+                    .child(
+                        card.child(parts.slice.clone().cached(full()))
+                            .child(parts.painter.clone().live()),
+                    )
                     .into_any_element()
             }
-            None => column.into_any_element(),
+            None => column.child(card).into_any_element(),
         }
     }
 
@@ -658,15 +689,6 @@ impl QuillApp {
         super::image_budget::slice_shown(parts.slice.entity_id(), window);
         super::image_budget::slice_shown(composer.entity_id(), window);
         let height = slices.composer_height.get();
-        let hint = self.pull_hint_overlay(cx).map(|hint| {
-            div()
-                .absolute()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .h(height)
-                .child(hint)
-        });
         // The frame says which chat it drew: redaction follows this tag, not
         // the open chat of the moment an agent reads the frame (07-027).
         let chat = self
@@ -690,10 +712,24 @@ impl QuillApp {
             .w_full()
             .h(height)
             .child(composer.clone().cached(full()));
-        if let Some(tag) = chat {
+        if let Some(tag) = &chat {
             history = history.a11y_tag(tag.clone());
-            composer = composer.a11y_tag(tag);
+            composer = composer.a11y_tag(tag.clone());
         }
+        if let (ConversationFrame::Floating(pills), Some(header)) =
+            (self.conversation_frame(), &slices.header)
+        {
+            return self.floating_column(column, history, header, composer, &pills, chat, cx);
+        }
+        let hint = self.pull_hint_overlay(cx).map(|hint| {
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .h(height)
+                .child(hint)
+        });
         column
             .flex_col()
             .child(history)
@@ -748,6 +784,7 @@ impl QuillApp {
         match kind {
             SliceKind::Sidebar => self.slices.sidebar.as_ref(),
             SliceKind::Conversation => self.slices.window.conversation.as_ref(),
+            SliceKind::Header => self.slices.window.header.as_ref(),
             SliceKind::Composer
             | SliceKind::Viewer
             | SliceKind::ViewerChrome
@@ -827,11 +864,12 @@ impl QuillApp {
                     .child(self.conversation(ConversationPart::Top, forum_on_screen, cx))
                     .into_any_element()
             }
+            SliceKind::Header => self.header_slice(cx),
             SliceKind::Composer => {
                 // Laid out at the bottom of its box: while the box still
                 // has last frame's height, a taller composer grows over
                 // the history (as its popups do) for that one frame.
-                let redraw = self.windows.view_in_place().or(self.slices.app_only_id());
+                let redraw = self.height_redraw();
                 div()
                     .size_full()
                     .flex()
@@ -865,6 +903,8 @@ impl Render for AppSlice {
             (SliceKind::Sidebar, _) => "sidebar",
             (SliceKind::Conversation, None) => "conversation",
             (SliceKind::Conversation, Some(_)) => "chat window conversation",
+            (SliceKind::Header, None) => "header",
+            (SliceKind::Header, Some(_)) => "chat window header",
             (SliceKind::Composer, None) => "composer",
             (SliceKind::Composer, Some(_)) => "chat window composer",
             (SliceKind::Viewer, _) => "viewer",
@@ -911,3 +951,8 @@ mod scene_replay_tests;
 #[cfg(feature = "demo-capture")]
 #[path = "drag_redraw_tests.rs"]
 mod drag_redraw_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "app_slice/floating_column_tests.rs"]
+mod floating_column_tests;

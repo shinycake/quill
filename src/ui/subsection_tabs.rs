@@ -19,6 +19,7 @@ use super::chat_theme::{accent, accent_strong, text_on_fill};
 use super::folder_tabs_fit::{RevealKey, needs_reveal};
 use super::pressable::PressableDiv;
 use super::subsection_tabs_fit::{LABEL_MAX_WIDTH, label_may_be_cut, selected_child};
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -167,12 +168,11 @@ impl QuillApp {
                 .w_full()
                 .h(px(STRIP_HEIGHT))
                 .bg(cx.theme().background)
-                .border_color(cx.theme().border)
                 .map(|this| {
                     if bottom {
-                        this.border_t_1()
+                        self.strip_frame(this.bg(transparent_black()), BarLine::Over, cx)
                     } else {
-                        this.border_b_1()
+                        self.bar_frame(this, BarLine::Under, cx)
                     }
                 })
                 .role(Role::TabList)
@@ -181,6 +181,17 @@ impl QuillApp {
                 .child(row)
                 .into_any_element(),
         )
+    }
+
+    /// How much of the pane's left the tab column takes when it is a card
+    /// (Floating): the pills centre in the rest.
+    pub(super) fn left_tabs_reserved(&self) -> f32 {
+        let Some(gutter) = self.card_gutter() else {
+            return 0.;
+        };
+        self.subsection_tabs_snapshot()
+            .filter(|t| t.mode == SubsectionTabsMode::Left)
+            .map_or(0., |_| COLUMN_WIDTH + gutter)
     }
 
     /// The Left layout's column, if the open chat uses it.
@@ -211,9 +222,7 @@ impl QuillApp {
                 .w(px(COLUMN_WIDTH))
                 .h_full()
                 .min_h_0()
-                .bg(cx.theme().background)
-                .border_r_1()
-                .border_color(cx.theme().border)
+                .map(|this| self.tab_column_frame(this, cx))
                 .role(Role::TabList)
                 .aria_label(tr(keys::Q_MISC_TOPICS))
                 .child(
@@ -662,7 +671,25 @@ impl QuillApp {
 
 /// The Left layout: the tab column beside the history (or the history
 /// alone when the chat doesn't use the Left layout).
-pub(super) fn with_left_column(column: Option<AnyElement>, history: AnyElement) -> AnyElement {
+pub(super) fn with_left_column(
+    column: Option<AnyElement>,
+    gutter: Pixels,
+    history: AnyElement,
+) -> AnyElement {
+    // Floating: the column is a card a gutter in from the pane's edges.
+    let column = column.map(|column| {
+        if gutter > px(0.) {
+            div()
+                .flex()
+                .flex_none()
+                .pl(gutter)
+                .py(gutter)
+                .child(column)
+                .into_any_element()
+        } else {
+            column
+        }
+    });
     match column {
         None => history,
         Some(column) => div()

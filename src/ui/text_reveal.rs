@@ -377,7 +377,7 @@ fn masked(
     if bounds.size.width <= px(0.) || bounds.size.height <= px(0.) {
         return;
     }
-    window.with_content_mask(Some(ContentMask { bounds }), |window| {
+    window.with_content_mask(Some(ContentMask::rect(bounds)), |window| {
         window.with_element_opacity(opacity, |window| draw(window, cx));
     });
 }

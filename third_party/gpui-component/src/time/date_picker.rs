@@ -792,7 +792,7 @@ impl RenderOnce for DatePicker {
                         div()
                             .occlude()
                             .p_3()
-                            .popover_style(cx)
+                            .popover_style(window, cx)
                             .on_mouse_up_out(
                                 MouseButton::Left,
                                 window.listener_for(&self.state, |view, _, window, cx| {
@@ -848,6 +848,7 @@ impl RenderOnce for DatePicker {
                                             }),
                                     ),
                             ),
+                        window,
                         cx,
                     ))
                     .with_priority(gpui_base::POPUP_PRIORITY),

@@ -452,8 +452,8 @@ impl Render for CompletionMenu {
                     .items_start()
                     .when(vertical_layout, |this| this.flex_col())
                     .child(
-                        editor_popover("completion-menu", cx)
-                            .popover_style(cx)
+                        editor_popover("completion-menu", window, cx)
+                            .popover_style(window, cx)
                             .text_sm()
                             // Each virtual row includes the menu's inter-item gap.
                             .pb_0p5()
@@ -473,8 +473,8 @@ impl Render for CompletionMenu {
 
                         this.child(
                             div().child(
-                                editor_popover("completion-menu", cx)
-                                    .popover_style(cx)
+                                editor_popover("completion-menu", window, cx)
+                                    .popover_style(window, cx)
                                     .text_sm()
                                     .w(configured_max)
                                     .px_2()

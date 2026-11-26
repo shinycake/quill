@@ -923,7 +923,7 @@ impl RenderOnce for Input {
             })
             .relative()
             .children(overlays.floating)
-            .when_some(list_popup, |this, popup| popup.attach(this, cx))
+            .when_some(list_popup, |this, popup| popup.attach(this, window, cx))
             .when_some(paste_handler, |this, handler| {
                 this.capture_action(move |_: &gpui_base::input::Paste, window, cx| {
                     if let Some(clipboard) = cx.read_from_clipboard() {

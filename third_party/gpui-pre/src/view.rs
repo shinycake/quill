@@ -343,6 +343,9 @@ impl<V: View> ViewElement<V> {
 pub(crate) struct ViewElementState {
     prepaint_range: Range<PrepaintStateIndex>,
     paint_range: Range<PaintIndex>,
+    /// QUILL: the frame (`Window::scenes_drawn`) that last painted the view.
+    /// Its ranges index that frame, so only the next one may replay them.
+    painted_in: u64,
     cache_key: ViewElementCacheKey,
     /// The entities the view accessed while it was last drawn, in any phase,
     /// restored when its prepaint is reused so the window stays subscribed.
@@ -585,6 +588,7 @@ fn prepaint_view(
                     && element_state.cache_key.text_style == text_style
                     && element_state.cache_key.opacity.to_bits() == opacity.to_bits()
                     && !window.dirty_views.contains(&entity_id)
+                    && element_state.painted_in.wrapping_add(1) == window.scenes_drawn
                     && !window.refreshing
                     && !window.a11y_focus_moved(&element_state.prepaint_range)
                 {
@@ -616,6 +620,7 @@ fn prepaint_view(
                         accessed_entities,
                         prepaint_range: prepaint_start..prepaint_end,
                         paint_range: PaintIndex::default()..PaintIndex::default(),
+                        painted_in: window.scenes_drawn,
                         cache_key: ViewElementCacheKey {
                             bounds,
                             content_mask,
@@ -685,6 +690,7 @@ fn paint_view(
 
                     let paint_end = window.paint_index();
                     element_state.paint_range = paint_start..paint_end;
+                    element_state.painted_in = window.scenes_drawn;
 
                     ((), element_state)
                 },

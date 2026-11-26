@@ -286,6 +286,8 @@ impl QuillApp {
     pub(super) fn folder_rail_active(&self) -> bool {
         self.appearance.folder_tabs_view == FolderTabsView::Left
             && self.pane_mode() == super::app::PaneMode::Ready
+            // Web K hides its folder column while the list is a drawer.
+            && self.list_dock_by_width() == super::shell_layout::ListDock::Beside
     }
 
     /// Width the column takes from the chat-list column (0 when the tabs
@@ -416,10 +418,10 @@ impl QuillApp {
             .map(|slot| folder_tab(slot, show_icon, show_text, premium, &weak, cx))
             .collect();
         let kinds: Vec<FolderSlotKind> = slots.iter().map(|s| s.kind).collect();
-        TabBar::new("folder-tabs")
+        let bar = TabBar::new("folder-tabs")
             .children(tabs)
-            .selected_index(selected)
-            .underline()
+            .selected_index(selected);
+        super::chrome::list_parts::folder_tabs(bar, self.chrome_metrics())
             .with_size(self.control_size())
             .max_width(px(140.))
             .track_scroll(scroll)

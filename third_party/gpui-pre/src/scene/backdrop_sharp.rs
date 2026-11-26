@@ -115,8 +115,19 @@ impl SlotSpace {
             origin: Point::default(),
             size: self.size,
         };
+        // QUILL: the rounded shape maps with the rectangle
+        // (docs/decisions/rounded-content-masks.md).
+        let rounded = if m.rounded.is_none() {
+            crate::RoundedMask::default()
+        } else {
+            crate::RoundedMask {
+                bounds: self.bounds(m.rounded.bounds),
+                radii: self.corners(m.rounded.radii),
+            }
+        };
         ContentMask {
             bounds: self.bounds(m.bounds).intersect(&slot),
+            rounded,
         }
     }
 

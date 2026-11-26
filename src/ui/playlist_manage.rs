@@ -527,7 +527,7 @@ impl QuillApp {
             .min_w(px(200.))
             .px_1()
             .py_1()
-            .menu_surface(cx)
+            .menu_surface(self.look(), cx)
             .children(rows);
         DismissLayer::new(
             "playlist-menu-overlay",
@@ -537,7 +537,7 @@ impl QuillApp {
             }),
         )
         .layer(|layer| layer.track_focus(&self.frame.menu.focus))
-        .anchored(position, panel)
+        .anchored(position, panel, self.look(), cx)
         .focus_trap("playlist-menu-focus", &self.frame.menu.focus)
     }
 

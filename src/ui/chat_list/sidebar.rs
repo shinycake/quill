@@ -23,7 +23,7 @@ impl QuillApp {
         show_code: bool,
         show_password: bool,
         show_qr: bool,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mode = self.pane_mode();
@@ -74,6 +74,7 @@ impl QuillApp {
     #[inline(never)]
     fn sidebar_column(&self, mode: PaneMode, cx: &mut Context<Self>) -> Stateful<Div> {
         let m = self.density();
+        let chrome = self.chrome();
         div()
             .id("sidebar")
             .when(mode != PaneMode::Ready, |this| this.overflow_y_scroll())
@@ -84,9 +85,14 @@ impl QuillApp {
             .h_full()
             .px(px(m.sidebar_inset_x))
             .py(px(m.sidebar_inset_y))
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
+            .map(|this| {
+                crate::ui::chrome::frames::list_frame(
+                    this,
+                    &chrome,
+                    cx.theme(),
+                    self.card_glass(cx).as_ref(),
+                )
+            })
             .flex()
             .flex_col()
             .gap(px(m.sidebar_gap))
@@ -115,7 +121,7 @@ impl QuillApp {
         &mut self,
         mut list: Stateful<Div>,
         focus_visible: bool,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         if self.chat_list.tab == SidebarTab::Contacts {
@@ -167,7 +173,7 @@ impl QuillApp {
         &mut self,
         mut list: Stateful<Div>,
         focus_visible: bool,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let folder = self.chat_list.view.folder();
@@ -177,7 +183,7 @@ impl QuillApp {
         let mut chats: Vec<&ChatSummary> = self.listed_main_chats();
         // Slice CL2: the Archived category shows only the archive section.
         let show_main_list = filter != ChatListFilter::Archived;
-        let m = self.density();
+        let m = self.row_density();
         // Slice CL3: multi-select mode — rows toggle the check instead of
         // opening the chat. Defined once here so the select bar, the main
         // loop, and the archive loop all see it.
@@ -353,6 +359,7 @@ impl QuillApp {
         self.chat_list.items = items;
         self.chat_list.folder_tags = folder_tags;
         let rows = self.chat_list_rows(sizes, focus_visible, window, cx);
+        let rows = self.folder_slide_rows(rows, window, cx);
         match self.chat_list_bar_glass(cx) {
             Some(lens) => self.float_chat_list_header(list, rows, lens, cx),
             None => list.child(rows),

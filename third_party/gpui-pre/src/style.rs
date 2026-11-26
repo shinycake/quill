@@ -299,6 +299,10 @@ pub struct Style {
     /// several on the stack. See third_party/gpui-pre/QUILL-CHANGES.md.
     pub backdrop_glass: Option<Box<LensStyle>>,
 
+    /// QUILL (rounded content masks): what this element's children are
+    /// clipped to. See [`ContentClip`] and third_party/gpui-pre/QUILL-CHANGES.md.
+    pub content_clip: ContentClip,
+
     /// The text style of this element
     #[refineable]
     pub text: TextStyleRefinement,
@@ -648,6 +652,9 @@ impl Style {
         bounds: Bounds<Pixels>,
         rem_size: Pixels,
     ) -> Option<ContentMask<Pixels>> {
+        if self.content_clip == ContentClip::Rounded {
+            return Some(self.rounded_clip_mask(bounds, rem_size));
+        }
         match self.overflow {
             Point {
                 x: Overflow::Visible,
@@ -687,7 +694,7 @@ impl Style {
                     (false, false) => Bounds::from_corners(min, max),
                 };
 
-                Some(ContentMask { bounds })
+                Some(ContentMask::rect(bounds))
             }
         }
     }
@@ -773,6 +780,32 @@ impl Style {
         }
     }
 
+    /// QUILL: the mask of [`ContentClip::Rounded`]: the element's bounds
+    /// inside a visible border, with its corner radii less the border.
+    fn rounded_clip_mask(&self, bounds: Bounds<Pixels>, rem_size: Pixels) -> ContentMask<Pixels> {
+        let radii = self
+            .corner_radii
+            .to_pixels(rem_size)
+            .clamp_radii_for_quad_size(bounds.size);
+        if !self.is_border_visible() {
+            return ContentMask::rounded(bounds, radii);
+        }
+        let border = self.border_widths.to_pixels(rem_size);
+        let min = point(bounds.left() + border.left, bounds.top() + border.top);
+        let max = point(
+            (bounds.right() - border.right).max(min.x),
+            (bounds.bottom() - border.bottom).max(min.y),
+        );
+        let less = |radius: Pixels, a: Pixels, b: Pixels| (radius - a.max(b)).max(px(0.0));
+        let inner = Corners {
+            top_left: less(radii.top_left, border.left, border.top),
+            top_right: less(radii.top_right, border.right, border.top),
+            bottom_right: less(radii.bottom_right, border.right, border.bottom),
+            bottom_left: less(radii.bottom_left, border.left, border.bottom),
+        };
+        ContentMask::rounded(Bounds::from_corners(min, max), inner)
+    }
+
     fn is_border_visible(&self) -> bool {
         self.border_color
             .is_some_and(|color| !color.is_transparent())
@@ -819,6 +852,7 @@ impl Default for Style {
             corner_radii: Corners::default(),
             box_shadow: Default::default(),
             backdrop_glass: None,
+            content_clip: ContentClip::Overflow,
             text: TextStyleRefinement::default(),
             mouse_cursor: None,
             opacity: None,
@@ -1201,6 +1235,19 @@ pub enum FlexDirection {
     ///
     /// Items will be added from bottom to top in a column.
     ColumnReverse,
+}
+
+/// QUILL (rounded content masks): what an element's children are clipped
+/// to (docs/decisions/rounded-content-masks.md).
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub enum ContentClip {
+    /// The rectangle that [`Style::overflow`] asks for, if any (GPUI's own
+    /// meaning: corner radii are not followed).
+    #[default]
+    Overflow,
+    /// The element's rounded shape, on both axes: its bounds inside a
+    /// visible border, with its corner radii (`Styled::clip_rounded`).
+    Rounded,
 }
 
 /// How children overflowing their container should affect layout

@@ -4,25 +4,39 @@
 //! as a stuck focus ring.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::chrome::menu_shape::menu_shape_in;
 use crate::ui::glass::{GlassRole, GlassSurface as _};
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
+use quill::layout_style::Look;
 
 pub(crate) trait MenuSurface: Styled + Sized {
     /// Rounded popover surface with the theme's border and a shadow, or
     /// glass while glass effects are on (`ui/glass`). The glass keeps a
     /// clear hairline where the border was, so rows sit where they do on
     /// the solid surface.
-    fn menu_surface(self, cx: &App) -> Self {
+    ///
+    /// In Floating it takes Web K's shape instead (`chrome::menu_shape`):
+    /// the corner radius and shadow, rows clipped to the corners.
+    fn menu_surface(self, look: Look, cx: &App) -> Self {
         let theme = cx.theme();
-        self.rounded_md()
-            .border_1()
+        let shape = menu_shape_in(look, cx);
+        let this = match &shape {
+            Some(shape) => self.rounded(shape.radius).clip_rounded(),
+            None => self.rounded_md(),
+        };
+        this.border_1()
             .text_color(theme.popover_foreground)
-            .glass_or(GlassRole::Menu, cx, |this| {
-                this.border_color(theme.border)
+            .glass_or(GlassRole::Menu, cx, |this| match shape {
+                Some(shape) => this
+                    .border_color(shape.edge.unwrap_or(theme.border))
+                    .bg(shape.fill.unwrap_or(theme.popover))
+                    .shadow(shape.shadow),
+                None => this
+                    .border_color(theme.border)
                     .bg(theme.popover)
-                    .shadow_lg()
+                    .shadow_lg(),
             })
     }
 }
@@ -50,6 +64,7 @@ pub(crate) fn submenu_panel(
     rows: Vec<AnyElement>,
     on_bounds: impl FnOnce(Bounds<Pixels>) + 'static,
     on_pointer: impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static,
+    look: Look,
     cx: &App,
 ) -> AnyElement {
     // The parent menu's outer left and right edges, relative to the row,
@@ -73,7 +88,7 @@ pub(crate) fn submenu_panel(
                 .flex_col()
                 .w(px(MENU_WIDTH))
                 .p_1()
-                .menu_surface(cx)
+                .menu_surface(look, cx)
                 .on_mouse_move(on_pointer)
                 .children(rows)
                 .on_prepaint(move |bounds, _, _| on_bounds(bounds)),

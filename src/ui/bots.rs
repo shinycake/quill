@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::lean_buttons::ghost_text_button;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -11,6 +12,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputContentType};
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
@@ -531,9 +533,8 @@ impl QuillApp {
             .gap_1()
             .px_4()
             .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
             .bg(cx.theme().sidebar)
+            .map(|this| self.bar_frame(this, BarLine::Under, cx))
             .child(
                 div()
                     .text_xs()

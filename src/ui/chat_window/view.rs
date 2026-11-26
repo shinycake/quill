@@ -227,9 +227,10 @@ impl Render for ChatWindowView {
             shell.sync_kit_dialogs_in(Some(chat_id), window, cx)
         });
         let dialog_open = self.shell.read(cx).dialog_open();
-        let (body, autoscroll, capture_blocked) = app.update(cx, |app, cx| {
+        let (body, autoscroll, capture_blocked, (strip, backdrop)) = app.update(cx, |app, cx| {
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
+            app.note_window_width(window, cx);
             app.seed_history_width(f32::from(window.viewport_size().width));
             // The window's half of the frame upkeep, with its state in
             // place (a window whose view is gone runs none of it). Its
@@ -243,7 +244,8 @@ impl Render for ChatWindowView {
             // A submenu opened by key focuses its first row once drawn.
             app.frame.menu.items.apply_pending_focus(window, cx);
             let capture_blocked = app.capture_block_wanted();
-            (body, app.autoscroll_layer(cx), capture_blocked)
+            let strip = (app.look(), app.window_backdrop_layer(cx));
+            (body, app.autoscroll_layer(cx), capture_blocked, strip)
         });
         if capture_blocked != self.capture_blocked
             && super::super::capture_block::apply_sharing(window, capture_blocked)
@@ -258,6 +260,7 @@ impl Render for ChatWindowView {
         let view = cx.weak_entity();
         super::super::window_frame::sync(window, cx, app.read(cx).appearance.native_window_frame);
         let title_bar = super::super::window_frame::FrameTitleBar::new()
+            .strip(strip)
             .on_close_window({
                 let view = view.clone();
                 move |_, window, cx| {
@@ -277,6 +280,8 @@ impl Render for ChatWindowView {
             .relative()
             .flex()
             .flex_col()
+            // Floating: the wallpaper under the strip and the cards.
+            .children(backdrop)
             .on_action({
                 let view = view.clone();
                 move |_: &super::super::actions::CloseWindow, window, cx| {
@@ -360,7 +365,7 @@ impl ChatWindowView {
             window.set_window_title(&title);
             self.title_shown = title;
         }
-        let body = app.update(cx, |app, cx| {
+        let (body, (strip, backdrop)) = app.update(cx, |app, cx| {
             // A locked window is not looked at, focused or not: its chat
             // notifies and sounds (`shown_in_active_window`).
             app.set_window_chat_active(chat_id, false);
@@ -370,11 +375,13 @@ impl ChatWindowView {
             // screen Space here too, before its deadline passes unseen.
             app.viewer_follow_window_fullscreen(window);
             let body = app.chat_window_body(chat_id, window, cx);
+            let strip = (app.look(), app.window_backdrop_layer(cx));
             app.set_window_scope(outer);
-            body
+            (body, strip)
         });
         let view = cx.weak_entity();
         let title_bar = super::super::window_frame::FrameTitleBar::new()
+            .strip(strip)
             .on_close_window({
                 let view = view.clone();
                 move |_, window, cx| {
@@ -396,6 +403,7 @@ impl ChatWindowView {
             .on_action(move |_: &super::super::actions::CloseWindow, window, cx| {
                 let _ = view.update(cx, |this, cx| this.close(window, cx));
             })
+            .children(backdrop)
             .child(scope_probe(self.owner.clone(), Some(chat_id)))
             .child(title_bar)
             .child(WindowScope {

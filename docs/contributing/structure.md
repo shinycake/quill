@@ -59,6 +59,17 @@ Register it next to its builder with `register_dialogs!`, with a free
 priority number. No change to `ui/shell.rs`. Details:
 `docs/decisions/codex-refactor-2.md`.
 
+### Something that looks different in the Floating layout
+
+Never ask which layout is on. Read numbers from `chrome().metrics`, or
+pass the element through a helper in `src/ui/chrome/` (`bars.rs` for the
+header and composer pills, `frames.rs` for cards, the drawer and the
+title strip, `menu_shape.rs` for menus, `list_parts.rs` for the chat
+list's parts). If no helper fits, add one there, answering both layouts,
+and call it from the render site. `scripts/check-layout-style.py`
+rejects `LayoutStyle::` or the metrics' enums anywhere else (tests
+excepted). Details: `docs/decisions/floating-layout.md`.
+
 ### A request or an update handler
 
 - New request: add the variant to `src/state/domains/<domain>/purpose.rs`

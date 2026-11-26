@@ -23,6 +23,10 @@ pub(crate) enum GlassRole {
     Menu,
     /// Larger floating panels: the main menu grid, the emoji panel, toasts.
     Panel,
+    /// Floating's cards (the chat list, the side panels, the header and
+    /// composer pills): large and always on screen, so a quiet rim, a pull
+    /// gathered at the edge, and the bar's frost under their rows.
+    Card,
     /// Floating buttons over the history: jump buttons, the date pill.
     Control,
     /// Buttons over photos and video (viewer, stories, calls): always the
@@ -44,7 +48,7 @@ fn floor(role: GlassRole, dark: bool) -> f32 {
     match (role, dark) {
         (GlassRole::MediaIcon, _) => 0.44,
         (GlassRole::MediaText, _) => 0.56,
-        (GlassRole::Bar, false) => 0.85,
+        (GlassRole::Bar | GlassRole::Card, false) => 0.85,
         (_, false) => 0.83,
         (_, true) => 0.72,
     }
@@ -78,6 +82,13 @@ const BAR_BEND_DEPTH: f32 = 1.35;
 const BAR_MIDDLE_LIGHT: f32 = 0.78;
 const BAR_MIDDLE_DARK: f32 = 0.68;
 const BAR_BLUR: f32 = 8.0;
+/// Floating's cards run the window's height with rows of text on them:
+/// the liquid look with a pull gathered at the rim (the bar's), so a card
+/// curves what is behind its edges without warping the middle, a quiet rim
+/// light (no glowing frame), and the bar's frost, so rows stay readable
+/// over a busy wallpaper.
+const CARD_BEND: f32 = 30.0;
+const CARD_RIM: f32 = 0.35;
 /// Vibrancy of the bent backdrop, and the top sheen of slabs.
 const SATURATION: f32 = 1.3;
 const SHEEN: f32 = 1.8;
@@ -198,6 +209,29 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
     };
     match role {
         GlassRole::Menu | GlassRole::Panel => slab(colors.popover, 0.12, BEND),
+        GlassRole::Card => LensStyle {
+            tune: LensTune {
+                rim: CARD_RIM,
+                fresnel: CARD_RIM,
+                bend_curve: BAR_BEND_CURVE,
+                bend_depth: BAR_BEND_DEPTH,
+                ..slab_tune
+            },
+            material: LensMaterial::Clear {
+                bend: LensBend::Radial {
+                    amount: px(CARD_BEND),
+                },
+                frost: floor(role, dark)
+                    * if dark {
+                        BAR_MIDDLE_DARK
+                    } else {
+                        BAR_MIDDLE_LIGHT
+                    },
+                blur: px(BAR_BLUR),
+                blur_mix: 1.0,
+            },
+            ..slab(colors.sidebar, 0.08, CARD_BEND)
+        },
         // Only the bar's lower edge shows: a quiet rim, or its light
         // reads as a neon line across the list.
         GlassRole::Bar => LensStyle {

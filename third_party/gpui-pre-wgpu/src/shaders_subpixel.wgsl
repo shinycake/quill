@@ -1,11 +1,16 @@
 // --- subpixel sprites --- //
 
+// QUILL: instance layouts, in bytes: each struct's size and the offset of
+// its `content_mask`. src/ui/rounded_mask_tests.rs checks these lines
+// against the Rust structs, so a struct changed on one side fails a test.
+// QUILL-LAYOUT SubpixelSprite size=144 mask=56
+
 struct SubpixelSprite {
     order: u32,
     pad: u32,
     tile: AtlasTile,
     bounds: Bounds,
-    content_mask: Bounds,
+    content_mask: ContentMask,
     color: Hsla,
     transformation: TransformationMatrix,
 }
@@ -15,7 +20,10 @@ struct SubpixelSpriteOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) tile_position: vec2<f32>,
     @location(1) @interpolate(flat) color: vec4<f32>,
+    @location(2) @interpolate(flat) sprite_id: u32,
     @location(3) clip_distances: vec4<f32>,
+    // QUILL: 1 when the sprite's mask has a rounded shape.
+    @location(4) @interpolate(flat) rounded: u32,
 }
 
 struct SubpixelSpriteFragmentOutput {
@@ -32,7 +40,9 @@ fn vs_subpixel_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_i
     out.position = to_device_position_transformed(unit_vertex, sprite.bounds, sprite.transformation);
     out.tile_position = to_tile_position(unit_vertex, sprite.tile);
     out.color = hsla_to_rgba(sprite.color);
-    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask, sprite.transformation);
+    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask.bounds, sprite.transformation);
+    out.sprite_id = instance_id;
+    out.rounded = select(0u, 1u, has_rounded_mask(sprite.content_mask));
     return out;
 }
 
@@ -51,6 +61,11 @@ fn fs_subpixel_sprite(input: SubpixelSpriteOutput) -> SubpixelSpriteFragmentOutp
 
     var out = SubpixelSpriteFragmentOutput();
     out.foreground = vec4<f32>(input.color.rgb, 1.0);
-    out.alpha = vec4<f32>(input.color.a * alpha_corrected, 1.0);
+    var coverage = alpha_corrected;
+    if (input.rounded != 0u) {
+        let rounded = b_subpixel_sprites[input.sprite_id].content_mask.rounded;
+        coverage *= rounded_mask_coverage(input.position.xy, rounded);
+    }
+    out.alpha = vec4<f32>(input.color.a * coverage, 1.0);
     return out;
 }

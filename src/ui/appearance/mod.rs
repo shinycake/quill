@@ -668,6 +668,8 @@ mod night_clock;
 pub(super) use night_clock::NightClock;
 mod appearance_keybindings_section;
 mod density;
+mod layout_row;
+pub(in crate::ui) use layout_row::ONBOARDING_PREVIEW;
 #[cfg(test)]
 mod test_prefs;
 #[cfg(test)]

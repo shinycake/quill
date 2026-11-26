@@ -299,7 +299,7 @@ impl QuillApp {
                         .history
                         .viewport
                         .get()
-                        .map_or(px(0.), |v| v.size.height);
+                        .map_or(px(0.), |v| v.readable.size.height);
                     self.sponsored_bottom_request(page, cx);
                 }
                 let target = if key == HistoryKey::PageUp {
@@ -307,12 +307,13 @@ impl QuillApp {
                 } else {
                     page_down_target(first, last, count)
                 };
-                self.history.scroller.update(cx, |state, cx| match target {
-                    PageTarget::Row(row) => {
-                        state.scroll_to_item(row, cx);
-                    }
-                    PageTarget::End => state.scroll_to_end(cx),
-                });
+                match target {
+                    PageTarget::Row(row) => self.scroll_row_to_view_top(row, cx),
+                    PageTarget::End => self
+                        .history
+                        .scroller
+                        .update(cx, |state, cx| state.scroll_to_end(cx)),
+                }
                 if key == HistoryKey::PageUp && first == 0 {
                     self.maybe_auto_load_older(cx);
                 }
@@ -439,9 +440,7 @@ impl QuillApp {
             .get()
             .is_some_and(|(first, last)| first < index && index < last);
         if !on_screen {
-            self.history.scroller.update(cx, |state, cx| {
-                state.scroll_to_item(index, cx);
-            });
+            self.scroll_row_to_view_top(index, cx);
         }
     }
 

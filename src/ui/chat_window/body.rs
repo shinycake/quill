@@ -99,7 +99,8 @@ impl QuillApp {
                         .absolute()
                         .left_0()
                         .right_0()
-                        .bottom_0()
+                        // Over the composer pill when it floats.
+                        .bottom(px(self.chrome_metrics().gutter))
                         .h(self.slices.composer_height())
                         .child(toast)
                 }))
@@ -143,7 +144,7 @@ impl QuillApp {
                             this.close_media_panel(cx);
                         }),
                     )
-                    .anchored(target.position, panel)
+                    .anchored(target.position, panel, self.look(), cx)
                     .decorations(self.panel_painter()),
                 )
             })

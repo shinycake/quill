@@ -10,6 +10,7 @@ use super::app::{QuillApp, pane_placeholder};
 use super::chat_row::{chat_avatar, saved_messages_avatar};
 use super::pressable::PressableDiv;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::chrome::bars::BarLine;
 use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -680,8 +681,7 @@ impl QuillApp {
                 .h(px(40.))
                 .px_2()
                 .bg(cx.theme().background)
-                .border_b_1()
-                .border_color(cx.theme().border)
+                .map(|this| self.bar_frame(this, BarLine::Under, cx))
                 .role(Role::TabList)
                 .aria_label(tr(keys::Q_PEOPLE_TAGS))
                 .child(row)

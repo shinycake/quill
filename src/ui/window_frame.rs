@@ -12,10 +12,12 @@
 //! own frame and shows no switch.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::chrome::frames::title_strip;
 use gpui_kit::component::{ActiveTheme, TITLE_BAR_HEIGHT, TitleBar};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::agent::ui_driver::redact::{WINDOW_CHROME, WINDOW_CHROME_CONTENT};
+use quill::layout_style::Look;
 use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -252,6 +254,8 @@ pub(crate) struct FrameTitleBar {
     on_close_window: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     /// Overrides [`use_native`] (tests draw both frames on any platform).
     native: Option<bool>,
+    /// The window's strip (`ChromeMetrics::title`).
+    strip: Look,
 }
 
 impl FrameTitleBar {
@@ -262,7 +266,14 @@ impl FrameTitleBar {
             children: SmallVec::new(),
             on_close_window: None,
             native: None,
+            strip: quill::layout_style::CLASSIC.look,
         }
+    }
+
+    /// The window's title strip, from its chrome (`QuillApp::look`).
+    pub(crate) fn strip(mut self, strip: Look) -> Self {
+        self.strip = strip;
+        self
     }
 
     #[cfg(test)]
@@ -336,6 +347,7 @@ impl RenderOnce for FrameTitleBar {
                 .bg(theme.title_bar)
                 .border_b_1()
                 .border_color(theme.title_bar_border)
+                .map(|this| title_strip(this, self.strip))
                 .children(menu)
                 .children(self.children)
                 .into_any_element();
@@ -366,7 +378,7 @@ impl RenderOnce for FrameTitleBar {
             .id("window-chrome")
             .a11y_tag(WINDOW_CHROME)
             .child(
-                TitleBar::new()
+                title_strip(TitleBar::new(), self.strip)
                     .when_some(on_close, |bar, close| {
                         bar.on_close_window(move |event, window, cx| {
                             if !quill::agent::ui_driver::guard::refuse_hard_if_injecting(

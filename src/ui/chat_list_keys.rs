@@ -433,7 +433,7 @@ impl QuillApp {
             .and_then(|row| rows.iter().position(|(_, candidate)| *candidate == row));
         let page = rows_per_page(
             self.chat_list.scroll.bounds().size.height,
-            chat_row_height(false, self.appearance.preview_lines, self.density()),
+            chat_row_height(false, self.appearance.preview_lines, self.row_density()),
         );
         let Some(&(item, row)) =
             step(key, current, rows.len(), page, false).and_then(|next| rows.get(next))
@@ -542,7 +542,7 @@ impl QuillApp {
             .first()
             .and_then(|row| keys.search_bounds_of(row).map(|b| b.size.height))
             .unwrap_or_else(|| {
-                chat_row_height(false, self.appearance.preview_lines, self.density())
+                chat_row_height(false, self.appearance.preview_lines, self.row_density())
             });
         let page = rows_per_page(
             self.search_ui.results_scroll.bounds().size.height,
@@ -655,6 +655,7 @@ impl QuillApp {
         E: IntoElement + Styled + StatefulInteractiveElement,
     {
         let highlighted = self.chat_list.keys.list_highlighted(key);
+        let open = open.then(|| self.selected_row());
         row.when(highlighted, |row| row.bg(nav_fill(open, cx.theme())))
             .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(move |this, hovered: &bool, _, _| {
@@ -671,7 +672,7 @@ impl QuillApp {
     ) -> Stateful<Div> {
         let highlighted = self.chat_list.keys.search_highlighted(key);
         self.chat_list.keys.push_search_row(key);
-        row.when(highlighted, |row| row.bg(nav_fill(false, cx.theme())))
+        row.when(highlighted, |row| row.bg(nav_fill(None, cx.theme())))
             .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(move |this, hovered: &bool, _, _| {
                 this.chat_list.keys.search.hover(key, *hovered);
@@ -734,9 +735,9 @@ impl QuillApp {
 
 /// The selected row's fill: the hover fill of a row, or of the open chat's
 /// row (tdesktop paints the keyboard selection as the pointer's).
-fn nav_fill(open: bool, theme: &Theme) -> Hsla {
-    if open {
-        super::chat_row::open_row_hover_fill(theme)
+fn nav_fill(open: Option<quill::layout_style::SelectedRow>, theme: &Theme) -> Hsla {
+    if let Some(selected) = open {
+        super::chat_row::open_row_hover_fill(selected, theme)
     } else {
         super::pressable::hover_fill(theme)
     }

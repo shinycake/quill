@@ -50,6 +50,10 @@ pub(super) enum Slot {
     /// The history of one window (the canvas adds the window id). The
     /// entity re-renders when a crossfade starts.
     History(EntityId),
+    /// The window's own backdrop under the Floating cards (the canvas adds
+    /// the window id). It is shown however far past the budget it goes:
+    /// a window-wide picture on a large display can pass it alone.
+    Window(EntityId),
     /// The wallpaper preview in a dialog (the canvas adds the window id).
     Preview,
     /// A gallery thumbnail: fixed size, never replaced or delayed.
@@ -205,6 +209,16 @@ struct Shown {
     identity: u64,
     area: (u32, u32),
     window: WindowId,
+    keep: Keep,
+}
+
+/// What the budget may retire of a picture a slot shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Keep {
+    /// It goes in age order like any other (the history's, the preview's).
+    Budget,
+    /// It stays while shown (a window's backdrop).
+    Shown,
 }
 
 /// A crossfade from the pictures a wallpaper showed before it turned: one
@@ -287,10 +301,25 @@ impl Cache {
         });
         self.bytes += bytes;
         // Images on screen are looked up on every paint, so they sit at
-        // the back; the newest one always stays.
+        // the back; the newest one always stays, and so does a window's
+        // backdrop while shown: two windows whose backdrops together pass
+        // the budget (a window-wide wallpaper on a 5K display beside a chat
+        // window) would otherwise retire each other's on every paint.
+        // Pictures of closed windows go in `take_unshown`.
+        let kept: HashSet<u64> = self
+            .shown
+            .values()
+            .filter(|s| s.keep == Keep::Shown)
+            .map(|s| s.key)
+            .collect();
         let mut retired = Vec::new();
-        while self.bytes > BUDGET_BYTES && self.entries.len() > 1 {
-            if let Some(old) = self.entries.pop_front() {
+        let mut at = 0;
+        while self.bytes > BUDGET_BYTES && at + 1 < self.entries.len() {
+            if self.entries.get(at).is_some_and(|e| kept.contains(&e.key)) {
+                at += 1;
+                continue;
+            }
+            if let Some(old) = self.entries.remove(at) {
                 self.bytes = self.bytes.saturating_sub(old.bytes);
                 retired.extend(old.composite.map(|c| c.image));
             }
@@ -497,6 +526,7 @@ fn lookup(
     thumb: bool,
     (width, height): (u32, u32),
     window: WindowId,
+    keep: Keep,
 ) -> Lookup {
     let key = image_key(wallpaper, width, height);
     let shown = Shown {
@@ -504,6 +534,7 @@ fn lookup(
         identity: if thumb { key } else { wallpaper.identity() },
         area: (width, height),
         window,
+        keep,
     };
     // `made`: the picture is new, which is activity for the idle trim
     // (`release_unshown`); one more frame lets `QuillApp::render`
@@ -642,22 +673,27 @@ pub(super) fn wallpaper_layer(
             slot.hash(&mut hasher);
             // A history and a preview are one per window: the same slot in
             // two windows must not replace each other's job.
-            if let Slot::History(_) | Slot::Preview = slot {
+            if let Slot::History(_) | Slot::Window(_) | Slot::Preview = slot {
                 window
                     .window_handle()
                     .window_id()
                     .as_u64()
                     .hash(&mut hasher);
             }
+            let keep = match slot {
+                Slot::Window(_) => Keep::Shown,
+                Slot::History(_) | Slot::Preview | Slot::Thumb => Keep::Budget,
+            };
             let found = lookup(
                 &wallpaper,
                 hasher.finish(),
                 slot == Slot::Thumb,
                 (width, height),
                 window.window_handle().window_id(),
+                keep,
             );
             if found.fade_started()
-                && let Slot::History(entity) = slot
+                && let Slot::History(entity) | Slot::Window(entity) = slot
             {
                 cx.notify(entity);
             }
@@ -730,11 +766,16 @@ mod tests {
     }
 
     fn show(cache: &mut Cache, slot: u64, key: u64, in_window: u64) {
+        show_kept(cache, slot, key, in_window, super::Keep::Budget);
+    }
+
+    fn show_kept(cache: &mut Cache, slot: u64, key: u64, in_window: u64, keep: super::Keep) {
         let shown = Shown {
             key,
             identity: 0,
             area: (key as u32, 1),
             window: window(in_window),
+            keep,
         };
         cache.shown.insert(slot, shown);
     }
@@ -791,6 +832,44 @@ mod tests {
         assert_eq!(cache.entries.len(), 1);
         assert_eq!(cache.bytes, 3 * 4);
         assert!(cache.get(3, window(MAIN)).is_some());
+    }
+
+    /// The budget never retires a picture a slot shows: two windows whose
+    /// pictures together pass it both keep theirs, and a third picture no
+    /// slot shows is the one that goes.
+    #[test]
+    fn window_backdrops_outlive_the_budget() {
+        use super::{BUDGET_BYTES, Keep};
+        let mut cache = Cache::default();
+        // Each picture is 0.4 of the budget (one row, 4 bytes a pixel).
+        let width = (BUDGET_BYTES * 2 / 5 / 4) as u32;
+        cache.insert(1, Some(composite(width)), window(MAIN));
+        show_kept(&mut cache, 7, 1, MAIN, Keep::Shown);
+        cache.insert(2, Some(composite(width + 1)), window(CHAT));
+        show_kept(&mut cache, 8, 2, CHAT, Keep::Shown);
+        cache.insert(3, Some(composite(width + 2)), window(MAIN));
+        assert!(cache.get(1, window(MAIN)).is_some(), "the main window's");
+        assert!(cache.get(2, window(CHAT)).is_some(), "the chat window's");
+        // A fourth: the unshown third goes, the shown two stay over budget.
+        cache.insert(4, Some(composite(width + 3)), window(MAIN));
+        let keys: Vec<u64> = cache.entries.iter().map(|e| e.key).collect();
+        assert!(!keys.contains(&3), "{keys:?}");
+        assert!(keys.contains(&1) && keys.contains(&2) && keys.contains(&4));
+    }
+
+    #[test]
+    fn other_shown_pictures_go_in_age_order_past_the_budget() {
+        use super::BUDGET_BYTES;
+        let mut cache = Cache::default();
+        let width = (BUDGET_BYTES * 2 / 5 / 4) as u32;
+        cache.insert(1, Some(composite(width)), window(MAIN));
+        show(&mut cache, 7, 1, MAIN);
+        cache.insert(2, Some(composite(width + 1)), window(CHAT));
+        show(&mut cache, 8, 2, CHAT);
+        cache.insert(3, Some(composite(width + 2)), window(MAIN));
+        let keys: Vec<u64> = cache.entries.iter().map(|e| e.key).collect();
+        assert!(!keys.contains(&1), "the oldest goes though shown: {keys:?}");
+        assert!(keys.contains(&3), "the newest stays");
     }
 
     #[test]
@@ -879,6 +958,7 @@ mod tests {
             identity: 5,
             area: (10, 10),
             window: window(in_window),
+            keep: super::Keep::Budget,
         };
         settle(&mut cache, 1, shown(10, MAIN), None);
         settle(&mut cache, 2, shown(11, CHAT), None);

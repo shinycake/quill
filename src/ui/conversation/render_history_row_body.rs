@@ -237,7 +237,7 @@ impl QuillApp {
                         .history
                         .viewport
                         .get()
-                        .map_or(f32::MAX, |view| f32::from(view.size.width));
+                        .map_or(f32::MAX, |view| f32::from(view.full.size.width));
                     quill::chat_wide::selection_right(limit, width)
                 });
                 let selection = self.selection_row(row_chat, row_msg, wide_right, cx);
@@ -273,6 +273,10 @@ impl QuillApp {
                     .when(selection_tint > 0., |this| {
                         this.bg(cx.theme().selection.opacity(selection_tint))
                     })
+                    .when_some(
+                        self.menu_target_tint(row_chat, row_msg, cx),
+                        |this, tint| this.bg(tint),
+                    )
                     // M1: failed sends stay visibly marked so the retry
                     // affordance is noticed (`updateMessageSendFailed`).
                     .when(failed, |this| this.bg(cx.theme().danger.opacity(0.08)))

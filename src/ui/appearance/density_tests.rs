@@ -79,7 +79,8 @@ fn set_density(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, density: Den
 #[gpui_kit::test]
 fn the_compact_switch_saves_the_density_and_the_app_follows_it(cx: &mut TestAppContext) {
     let _prefs = own_appearance_prefs("quill-density-switch");
-    let (app, mut vcx) = new_app(cx, 1600.);
+    // Tall enough for the Appearance page down to the compact switch.
+    let (app, mut vcx) = new_app(cx, 1900.);
     let vcx = &mut vcx;
     let standard_row = bounds(vcx, chat_row(11)).size.height;
     assert_eq!(standard_row, declared(&app, vcx, 11));

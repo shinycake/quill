@@ -49,14 +49,14 @@ const MAX_SIDE: u32 = 16384;
 // where a `Bounds` (two vec2) aligns to 8 bytes. These are the offsets that
 // alignment could move, and the stride of the storage array.
 const _: () = {
-    assert!(std::mem::size_of::<BackdropLens>() == 296);
+    assert!(std::mem::size_of::<BackdropLens>() == 328);
     assert!(std::mem::size_of::<BackdropLens>() % 8 == 0);
     assert!(std::mem::offset_of!(BackdropLens, bounds) == 8);
     assert!(std::mem::offset_of!(BackdropLens, content_mask) == 24);
-    assert!(std::mem::offset_of!(BackdropLens, body) == 40);
-    assert!(std::mem::offset_of!(BackdropLens, color) == 96);
-    assert!(std::mem::offset_of!(BackdropLens, light_mix) == 236);
-    assert!(std::mem::offset_of!(BackdropLens, tune_frost_edge) == 292);
+    assert!(std::mem::offset_of!(BackdropLens, body) == 72);
+    assert!(std::mem::offset_of!(BackdropLens, color) == 128);
+    assert!(std::mem::offset_of!(BackdropLens, light_mix) == 268);
+    assert!(std::mem::offset_of!(BackdropLens, tune_frost_edge) == 324);
 };
 
 /// Where one lens's backdrop lies in the target and in the atlas, device
