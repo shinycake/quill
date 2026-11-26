@@ -48,6 +48,20 @@ pub enum LensBend {
         /// The pull at the rim.
         amount: Pixels,
     },
+    /// QUILL (glass tuning): a round bevel `height` deep that shows, at the
+    /// rim, what lies `refract` past the edge, falling off along a quarter
+    /// circle (`refract * (1 - sqrt(t * (2 - t)))`, t = depth / height),
+    /// with the colours split `aberration` apart along the rim. After the
+    /// QuartzCore-style liquid glass demo. Logical pixels; on a body less
+    /// than `height` deep, the bevel and the pull shrink with it.
+    Bevel {
+        /// How far past the rim the edge reaches.
+        refract: Pixels,
+        /// How deep the bevel is.
+        height: Pixels,
+        /// How far red and blue split from green at the rim.
+        aberration: Pixels,
+    },
 }
 
 /// Clear glass shows (and bends) the backdrop; tinted glass is its own colour.
@@ -85,8 +99,11 @@ pub struct LensBorder {
 /// (the source shader's `uFrostEdge`): above 1 the frost thickens towards
 /// the edge, below 1 it clears. `rim_frost` multiplies the frost itself
 /// across the rim band of clear glass (1 = even frost, 0 = a clear rim
-/// that shows the bent backdrop around a frosted middle).
+/// that shows the bent backdrop around a frosted middle). `specular` is
+/// the strength of a thin two-sided highlight along the rim, lit from the
+/// upper left and lower right (0 = none, the default).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 #[allow(missing_docs)]
 pub struct LensTune {
     pub rim: f32,
@@ -100,6 +117,7 @@ pub struct LensTune {
     pub saturation: f32,
     pub frost_edge: f32,
     pub rim_frost: f32,
+    pub specular: f32,
 }
 
 impl Default for LensTune {
@@ -116,6 +134,7 @@ impl Default for LensTune {
             saturation: 1.0,
             frost_edge: 1.0,
             rim_frost: 1.0,
+            specular: 0.0,
         }
     }
 }
@@ -300,6 +319,12 @@ pub struct BackdropLens {
     pub neck_x: f32,
     pub neck_w: f32,
     pub tune_frost_edge: f32,
+    /// QUILL (glass tuning): the bevel bend's depth and colour split,
+    /// logical pixels (`LensBend::Bevel`; its pull is `refract`).
+    pub bevel_height: f32,
+    pub aberration: f32,
+    pub tune_specular: f32,
+    pub pad: f32,
 }
 
 /// Room around a body of `height` for the drop shadow below it and the
@@ -394,6 +419,10 @@ impl BackdropLens {
             neck_x: 0.0,
             neck_w: 0.0,
             tune_frost_edge: style.tune.frost_edge.max(0.0),
+            bevel_height: 0.0,
+            aberration: 0.0,
+            tune_specular: style.tune.specular.max(0.0),
+            pad: 0.0,
         };
         if let Some(droplet) = style.droplet.filter(|d| d.radius.0 > 0.0) {
             lens.drop_x = droplet.offset_x.0;
@@ -443,6 +472,16 @@ impl BackdropLens {
                     LensBend::Radial { amount } => {
                         lens.bend = 1;
                         lens.radial_amount = amount.0;
+                    }
+                    LensBend::Bevel {
+                        refract,
+                        height,
+                        aberration,
+                    } => {
+                        lens.bend = 2;
+                        lens.refract = refract.0.max(0.0);
+                        lens.bevel_height = height.0.max(1.0);
+                        lens.aberration = aberration.0.max(0.0);
                     }
                 }
             }
@@ -700,6 +739,21 @@ impl LensStyle {
     pub fn footprint(&self, body: Bounds<Pixels>) -> Bounds<Pixels> {
         let casts_shadow = self.shadow * self.strength > 0.0;
         let (sides, top, bottom) = lens_pad(body.size.height.0, casts_shadow);
+        // A bevel bend reads the backdrop up to `refract` past the rim (and
+        // the colour split a little further), so the copy must hold it.
+        let reach = match self.material {
+            LensMaterial::Clear {
+                bend:
+                    LensBend::Bevel {
+                        refract,
+                        aberration,
+                        ..
+                    },
+                ..
+            } => (refract.0 + aberration.0).max(0.0).ceil() + 2.0,
+            _ => 0.0,
+        };
+        let (sides, top, bottom) = (sides.max(reach), top.max(reach), bottom.max(reach));
         let glass = self.glass_bounds(body);
         Bounds::from_corners(
             point(glass.left() - px(sides), glass.top() - px(top)),

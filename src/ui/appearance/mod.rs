@@ -157,6 +157,7 @@ impl QuillApp {
         crate::ui::reduce_motion_probe::apply(cx);
         crate::ui::glass::set_choice(
             self.appearance.material,
+            self.appearance.glass_tuning,
             hc || super::chat_theme::high_contrast(),
             cx,
         );

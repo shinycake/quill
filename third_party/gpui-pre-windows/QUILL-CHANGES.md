@@ -635,3 +635,9 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
   read-back and `to_output` are unchanged. `src/directx_atlas.rs`:
   `DirectXAtlas::removals`. Inked labels draw in their own colour here and
   re-rendered backdrops copy the frame like any lens.
+
+Glass tuning (2026-11-26): `src/shaders_lens.hlsl` adds the bevel bend (`bend == 2`: a
+quarter-circle pull that shows what lies past the rim, a seven-tap colour
+split along the rim, the blur thinning at the rim) and the two-sided rim
+specular (`tune_specular`), after a QuartzCore-style liquid glass web demo;
+`BackdropLens` grows to 312 bytes (the size assert follows).

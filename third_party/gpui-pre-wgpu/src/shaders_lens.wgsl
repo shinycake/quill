@@ -73,6 +73,11 @@ struct BackdropLens {
     neck_x: f32,
     neck_w: f32,
     tune_frost_edge: f32,
+    // QUILL (glass tuning).
+    bevel_height: f32,
+    aberration: f32,
+    tune_specular: f32,
+    pad: f32,
 }
 
 // Where one lens's backdrop lies in the frame and in the atlas, device
@@ -271,6 +276,61 @@ fn lens_bent(s: LensShape, slot: LensSlot, atlas_size: vec2<f32>, p: vec2<f32>, 
     return vec3<f32>(r, g, b);
 }
 
+// QUILL (glass tuning): the bevel bend's profile, after the QuartzCore-style
+// liquid glass demo (`glassProfile`): `amount` at the rim, falling off along
+// a quarter circle to 0 at `height` deep.
+fn lens_bevel_profile(depth: f32, height: f32, amount: f32) -> f32 {
+    let t = clamp(depth / max(height, 1e-4), 0.0, 1.0);
+    return amount * (1.0 - sqrt(max(t * (2.0 - t), 0.0)));
+}
+
+// QUILL (glass tuning): the backdrop at `p` with red pushed along `offset`
+// and blue against it, over seven taps so the split fades through the
+// spectrum (the demo's `aberrateBackdrop`).
+fn lens_spectrum(s: LensShape, slot: LensSlot, atlas_size: vec2<f32>, p: vec2<f32>, offset: vec2<f32>, lod: f32) -> vec3<f32> {
+    if (length(offset) * s.unit_dev < 0.05) {
+        return lens_back(s, slot, atlas_size, p, lod);
+    }
+    var acc = vec3<f32>(0.0);
+    for (var i = 0; i < 3; i++) {
+        let w = 1.0 - f32(i) / 3.0;
+        let c = lens_back(s, slot, atlas_size, p + offset * w, lod);
+        acc.r += c.r * w;
+        acc.g += c.g * (1.0 - w);
+    }
+    for (var i = 0; i < 4; i++) {
+        let w = f32(i) / 3.0;
+        let c = lens_back(s, slot, atlas_size, p - offset * w, lod);
+        acc.g += c.g * (1.0 - w);
+        acc.b += c.b * w;
+    }
+    return vec3<f32>(acc.r * 0.5, acc.g / 3.0, acc.b * 0.5);
+}
+
+// QUILL (glass tuning): the demo's key-fill highlight: a line `height` wide
+// just inside the rim on the two sides facing along the light, compressed
+// so it saturates softly. Lengths are units; `fw` is a device pixel.
+fn lens_key_fill(dist: f32, fw: f32, dir: vec2<f32>, height: f32, offset: f32) -> f32 {
+    let spread = 0.18;
+    let amount = 1.4;
+    let d = dist + offset;
+    let inward = -d;
+    if (height <= 0.0 || d >= 0.5 * fw || inward >= height + 0.5 * fw) {
+        return 0.0;
+    }
+    let t = clamp(inward / height, 0.0, 1.0);
+    let falloff = mix(select(0.0, 1.0, t < 1.0), 1.0 - t, 0.75);
+    let inner_edge = clamp((d + height) / fw + 0.5, 0.0, 1.0);
+    let outer_edge = clamp(inward / fw + 0.5, 0.0, 1.0);
+    let mask = falloff * inner_edge * outer_edge;
+    // Lit from the upper left and the lower right.
+    let facing = dot(normalize(vec2<f32>(0.778, 0.629)), dir);
+    let sides = clamp((vec2<f32>(facing, -facing) - vec2<f32>(spread)) / max(1.0 - spread, 1e-6),
+                      vec2<f32>(0.0), vec2<f32>(1.0)) * mask;
+    let soft = sides / max(vec2<f32>(1.0) + amount * (vec2<f32>(1.0) - sides), vec2<f32>(1e-6));
+    return soft.x + soft.y;
+}
+
 fn lens_radial_bend(s: LensShape, lens: BackdropLens, q: vec2<f32>, amount: f32) -> vec2<f32> {
     let d = lens_sdf(s, q);
     let len = max(length(q), 1e-4);
@@ -336,6 +396,29 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
     var glass: vec3<f32>;
     if (!clear) {
         glass = mix(surface.rgb, color.rgb, 1.0 - edge * lens.edge_clear);
+    } else if (lens.bend == 2u) {
+        // QUILL (glass tuning): the bevel bend. The rim shows what lies past
+        // the edge (the sdf's gradient points out), pulled in along a quarter
+        // circle; a body thinner than the bevel takes a shallower one.
+        let unit = max(lens.unit, 1e-3);
+        let full = max(lens.bevel_height / unit, 1e-3);
+        let height = clamp(min(s.half_size.x, s.half_size.y), 1e-3, full);
+        let shrink = height / full;
+        let inward = max(-dist, 0.0);
+        let pull = lens_bevel_profile(inward, height, lens.refract / unit * shrink);
+        let at = local + dir * pull;
+        let split = lens_bevel_profile(inward, height * 0.85, lens.aberration / unit * shrink);
+        // The colours split along the rim's normal turned 15 degrees.
+        let split_dir = vec2<f32>(0.9659 * dir.x - 0.2588 * dir.y, 0.2588 * dir.x + 0.9659 * dir.y);
+        glass = lens_spectrum(s, slot, atlas_size, at, split_dir * split, max(s.blur_shift, 0.0));
+        if (frost_sigma > 0.0) {
+            // A quarter of the blur where the bend shows, all of it deeper in.
+            let rim_t = clamp((dist + pull + height) / height, 0.0, 1.0);
+            let sigma = frost_sigma * mix(1.0, 0.25, rim_t);
+            let frost = lens_frosted(s, slot, atlas_size, at, max(sigma, 0.5));
+            glass = mix(glass, frost, lens.blur_mix);
+        }
+        glass = lens_saturate(glass, lens.tune_saturation);
     } else if (lens.bend == 1u) {
         let amount = lens.radial_amount / max(lens.unit, 1e-3);
         let bend = lens_radial_bend(s, lens, local, amount);
@@ -430,6 +513,15 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
     // Caustic: warm light gathering inside the bottom edge.
     let caustic = lens_step(0.72, 0.98, depth) * down * 0.08 * strength * lens.tune_caustic;
     glass += rim_col * add + vec3<f32>(1.0, 0.92, 0.86) * caustic;
+
+    // QUILL (glass tuning): the rim specular, lifted with the demo's S-curve
+    // so dark glass brightens more than light.
+    if (lens.tune_specular > 0.0) {
+        let hi = lens_key_fill(dist, s.device_px, dir, 2.8 * s.css_px, 0.5 * s.css_px);
+        let curve = vec3<f32>(3.0) - 2.0 * clamp(glass, vec3<f32>(0.0), vec3<f32>(1.0));
+        glass = glass * (vec3<f32>(1.0) + lens.tune_specular * hi * curve)
+            + vec3<f32>(0.18 * lens.tune_specular * hi);
+    }
 
     let border_color = hsla_to_rgba(lens.border_color);
     let border_w = lens.border_width / max(lens.unit, 1e-3);

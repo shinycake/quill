@@ -274,6 +274,11 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
   `src/metal_atlas.rs`: `MetalAtlas::removals`. `build.rs` and
   `vendor/gpui/src/scene.rs`: the new fields and `LensInkInstance` for the
   shader header.
+- Glass tuning (2026-11-26): `src/shaders.metal` adds the bevel bend
+  (`bend == 2`: a quarter-circle pull that shows what lies past the rim,
+  a seven-tap colour split along the rim, the blur thinning at the rim)
+  and the two-sided rim specular (`tune_specular`), after a QuartzCore-style
+  liquid glass web demo. `vendor/gpui/src/scene.rs`: the new fields.
 
 ## GPU time probe for glass budgets
 

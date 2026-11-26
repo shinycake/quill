@@ -1225,6 +1225,11 @@ pub struct BackdropLens {
     pub neck_x: f32,
     pub neck_w: f32,
     pub tune_frost_edge: f32,
+    // QUILL (glass tuning).
+    pub bevel_height: f32,
+    pub aberration: f32,
+    pub tune_specular: f32,
+    pub pad: f32,
 }
 
 /// QUILL (glass stage 5): mirror of gpui-pre's `LensInkInstance`

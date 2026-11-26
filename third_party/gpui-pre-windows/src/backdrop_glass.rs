@@ -46,7 +46,7 @@ const MAX_SIDE_LEVEL_10: u32 = 8192;
 // `BackdropLens` in shaders_lens.hlsl: a structured buffer packs its fields
 // at 4 bytes, as `#[repr(C)]` lays out these all-4-byte fields.
 const _: () = {
-    assert!(std::mem::size_of::<BackdropLens>() == 296);
+    assert!(std::mem::size_of::<BackdropLens>() == 312);
     assert!(std::mem::size_of::<LensSlot>() == 32);
     assert!(std::mem::size_of::<LensDownsampleSlot>() == 32);
 };

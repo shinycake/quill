@@ -49,7 +49,7 @@ const MAX_SIDE: u32 = 16384;
 // where a `Bounds` (two vec2) aligns to 8 bytes. These are the offsets that
 // alignment could move, and the stride of the storage array.
 const _: () = {
-    assert!(std::mem::size_of::<BackdropLens>() == 296);
+    assert!(std::mem::size_of::<BackdropLens>() == 312);
     assert!(std::mem::size_of::<BackdropLens>() % 8 == 0);
     assert!(std::mem::offset_of!(BackdropLens, bounds) == 8);
     assert!(std::mem::offset_of!(BackdropLens, content_mask) == 24);

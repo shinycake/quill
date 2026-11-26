@@ -153,7 +153,7 @@ fn backdrops(role: GlassRole) -> Vec<(&'static str, Rgba, f32, f32)> {
 fn check(theme: &str, colors: &ThemeColor) {
     let mut failures = Vec::new();
     for role in GlassRole::ALL {
-        let style = recipe(role, colors);
+        let style = recipe(role, colors, &GlassTuning::default());
         let labels = labels(role, colors);
         for (name, backdrop, primary_floor, secondary_floor) in backdrops(role) {
             let glass = settled_over(&style, backdrop);
@@ -199,4 +199,49 @@ fn the_contrast_arithmetic_matches_wcag() {
         a: 1.0,
     };
     assert!((contrast(black, white) - 21.0).abs() < 0.01);
+}
+
+/// The dials reach every role: the bend, the frost and the specular move
+/// with them, media glass keeps its frost, and the copied footprint grows
+/// to hold how far past the rim the bevel reads.
+#[test]
+fn the_dials_reach_the_glass_and_its_footprint() {
+    use quill::glass_tuning::{GlassDial, GlassPreset};
+    let colors = ThemeColor::light();
+    let prism = GlassPreset::Prism.tuning();
+    let clear_parts = |style: &LensStyle| match style.material {
+        LensMaterial::Clear { bend, frost, .. } => Some((bend, frost)),
+        LensMaterial::Tinted { .. } => None,
+    };
+    let menu = recipe(GlassRole::Menu, &colors, &prism);
+    let (bend, frost) = clear_parts(&menu).unwrap_or((LensBend::Radial { amount: px(0.0) }, -1.0));
+    assert_eq!(
+        bend,
+        LensBend::Bevel {
+            refract: px(58.0),
+            height: px(42.0),
+            aberration: px(26.0),
+        }
+    );
+    assert!((frost - floor(GlassRole::Menu, false) * 0.44).abs() < 1e-4);
+    assert!((menu.tune.specular - 1.16).abs() < 1e-4);
+
+    let clear = GlassTuning::default().with(GlassDial::Frost, 0.0);
+    let media = recipe(GlassRole::MediaText, &colors, &clear);
+    assert_eq!(
+        clear_parts(&media).map(|(_, frost)| frost),
+        Some(floor(GlassRole::MediaText, false))
+    );
+
+    let body = gpui_kit::Bounds::new(
+        point(px(100.0), px(100.0)),
+        gpui_kit::size(px(200.0), px(300.0)),
+    );
+    let still = GlassTuning::default()
+        .with(GlassDial::Refraction, 0.0)
+        .with(GlassDial::Aberration, 0.0);
+    let near = recipe(GlassRole::Menu, &colors, &still).footprint(body);
+    let far = menu.footprint(body);
+    assert!(far.left() <= body.left() - px(58.0 + 26.0));
+    assert!(far.size.width > near.size.width);
 }

@@ -9,3 +9,4 @@ qll_chatlist_email_address form field label; lng_action_secure_email names a Pas
 qll_money_email_address form field label; lng_action_secure_email names a Passport document kind.
 qll_people_topic_info_status a forum topic's status row; lng_proxy_box_status is the proxy connection status.
 qll_service_web_app a mini app with no title in a service message; lng_status_bot_app is the lowercase bot status line.
+qll_prefs_glass_preset_clear adjective (transparent glass); lng_* has the verb (empty the cache)

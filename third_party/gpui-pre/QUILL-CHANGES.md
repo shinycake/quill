@@ -755,3 +755,10 @@ Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`):
   HLSL): `LensTune::rim_frost` (default 1, no change) thins the frost of
   clear glass across the rim band, carried in the lens's `edge_clear`
   field, which clear glass did not use. The GPU struct is unchanged.
+
+Glass tuning (2026-11-26): `src/scene/backdrop_lens.rs` adds
+`LensBend::Bevel { refract, height, aberration }` and `LensTune::specular`
+(the struct takes serde defaults), their `BackdropLens` fields
+(`bevel_height`, `aberration`, `tune_specular`, a pad to keep the size a
+multiple of 8), and a footprint that reaches as far past the rim as the
+bevel reads.

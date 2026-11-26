@@ -82,7 +82,8 @@ rather than liquid.
   sheen and caustic, with a faint inner shade (0.25) and a 24 px bevel;
   stronger or wider, a tall menu's corners crease along the diagonals and
   light glass turns grey.
-- **As liquid as it goes** (2026-11-25). Idan asked for more liquid and
+- **As liquid as it goes** (2026-11-25; the pulls are now the bevel bend
+  of "Tuning" below). Idan asked for more liquid and
   picked the clearest of three steps: a 2 px blur on slabs and none on
   buttons, an 80 px radial pull that reaches deep into the slab
   (`bend_curve` 4, `bend_depth` 1.7) so what is behind curves like it is
@@ -123,6 +124,54 @@ Transparency never draw glass.
 When glass can't be drawn (a lens inside a paint layer, past the last band,
 or an unreadable frame) the lens draws its fallback quad in the glass
 colour.
+
+## Tuning
+
+On 2026-11-26 Idan shared a QuartzCore-style liquid glass web demo (one
+WebGL2 shader with a panel of variants and sliders) and asked for its
+optics and a panel like it. Its look comes from three things the radial
+pull didn't have, now in the lens shader on all three backends:
+
+- **A round bevel that reaches past the rim** (`LensBend::Bevel`). The
+  edge shows what lies `refract` px outside the glass, and the pull falls
+  off along a quarter circle, `refract * (1 - sqrt(t * (2 - t)))` with
+  `t` the depth over the bevel height. The old radial pull read inward,
+  so the rim magnified the middle instead of gathering the surroundings.
+  The copied footprint grows to hold the reach. A body less deep than the
+  bevel takes a bevel its half height deep and a pull shrunk with it, so
+  one set of dials fits a 36 px button and a menu.
+- **Colour split along the rim**: seven taps over the rim's normal
+  turned 15 degrees, red one way and blue the other, fading through the
+  spectrum, over 0.85 of the bevel.
+- **A two-sided rim specular** (`LensTune::specular`): a 2.8 px line just
+  inside the rim, lit from the upper left and lower right, lifted with
+  the demo's S-curve `c * (1 + k * hi * (3 - 2c))` so dark glass
+  brightens more than light.
+
+The blur also thins to a quarter at the rim, where the bend shows, as in
+the demo. The demo's edge bleed, outer rim pull, ring shadow, squircle
+corners and colour matrices are not ported: the frost tint does the
+colour matrices' work, and the rest is subtle next to the cost of seven
+more taps.
+
+The dials (`quill::glass_tuning`, saved as `glass_tuning` in
+`appearance_prefs.json`) sit under the switch in Settings › Appearance
+while glass shows: Refraction, Bevel height, Chromatic aberration,
+Backdrop blur, Rim specular and Frost (the share of the contrast floor's
+tint, dark glass taking 0.875 of it), with a live preview and three
+presets after the demo's variants: Regular (thicker), Clear (the
+default: 44 px pull, 34 px bevel, 14 px split, 2 px blur, 0.86
+specular, 56% frost) and Prism. Reset goes back to Clear. The demo's Dark
+variant is left out because Quill's tint follows the theme, and its
+Liquid merge and Corner radius sliders shape its floating blobs; Quill's
+shapes come from the layout. A drag redraws every window on each step
+and saves on release.
+
+Every role scales the same dials: menus, panels, media plates and
+buttons take them as set; the chat-list bar takes half the pull and
+split, half the specular, its own thicker frost and at least an 8 px
+blur; media glass keeps its full frost. The contrast test holds for the
+default dials only. A person who turns Frost down chooses fainter labels.
 
 ## Not done, and why
 

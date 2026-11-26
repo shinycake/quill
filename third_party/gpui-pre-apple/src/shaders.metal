@@ -1669,6 +1669,66 @@ float3 lens_bent(LensShape s, LensSlot slot, texture2d<float> atlas,
   return float3(r, g, b);
 }
 
+// QUILL (glass tuning): the bevel bend's profile, after the QuartzCore-style
+// liquid glass demo (`glassProfile`): `amount` at the rim, falling off along
+// a quarter circle to 0 at `height` deep.
+float lens_bevel_profile(float depth, float height, float amount) {
+  float t = clamp(depth / max(height, 1e-4), 0.0, 1.0);
+  return amount * (1.0 - sqrt(max(t * (2.0 - t), 0.0)));
+}
+
+// QUILL (glass tuning): the backdrop at `p` with red pushed along `offset`
+// and blue against it, over seven taps so the split fades through the
+// spectrum (the demo's `aberrateBackdrop`).
+float3 lens_spectrum(LensShape s, LensSlot slot, texture2d<float> atlas,
+                     float2 atlas_size, float2 p, float2 offset, float lod) {
+  if (length(offset) * s.unit_dev < 0.05) {
+    return lens_back(s, slot, atlas, atlas_size, p, lod);
+  }
+  float3 acc = float3(0.0);
+  for (int i = 0; i < 3; i++) {
+    float w = 1.0 - float(i) / 3.0;
+    float3 c = lens_back(s, slot, atlas, atlas_size, p + offset * w, lod);
+    acc.r += c.r * w;
+    acc.g += c.g * (1.0 - w);
+  }
+  for (int i = 0; i < 4; i++) {
+    float w = float(i) / 3.0;
+    float3 c = lens_back(s, slot, atlas, atlas_size, p - offset * w, lod);
+    acc.g += c.g * (1.0 - w);
+    acc.b += c.b * w;
+  }
+  return float3(acc.r * 0.5, acc.g / 3.0, acc.b * 0.5);
+}
+
+// QUILL (glass tuning): the demo's key-fill highlight: a line `height` wide
+// just inside the rim on the two sides facing along the light, compressed
+// so it saturates softly. Lengths are units; `fw` is a device pixel.
+float lens_key_fill(float dist, float fw, float2 dir, float height,
+                    float offset) {
+  float spread = 0.18;
+  float amount = 1.4;
+  float d = dist + offset;
+  float inward = -d;
+  if (height <= 0.0 || d >= 0.5 * fw || inward >= height + 0.5 * fw) {
+    return 0.0;
+  }
+  float t = clamp(inward / height, 0.0, 1.0);
+  float falloff = mix(t < 1.0 ? 1.0 : 0.0, 1.0 - t, 0.75);
+  float inner_edge = clamp((d + height) / fw + 0.5, 0.0, 1.0);
+  float outer_edge = clamp(inward / fw + 0.5, 0.0, 1.0);
+  float mask = falloff * inner_edge * outer_edge;
+  // Lit from the upper left and the lower right.
+  float facing = dot(normalize(float2(0.778, 0.629)), dir);
+  float2 sides = clamp((float2(facing, -facing) - float2(spread)) /
+                           max(1.0 - spread, 1e-6),
+                       0.0, 1.0) *
+                 mask;
+  float2 soft = sides / max(float2(1.0) + amount * (float2(1.0) - sides),
+                            float2(1e-6));
+  return soft.x + soft.y;
+}
+
 float2 lens_radial_bend(LensShape s, BackdropLens lens, float2 q,
                         float amount) {
   float d = lens_sdf(s, q);
@@ -1746,6 +1806,33 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
   float3 glass;
   if (!clear) {
     glass = mix(surface.rgb, color.rgb, 1.0 - edge * lens.edge_clear);
+  } else if (lens.bend == 2) {
+    // QUILL (glass tuning): the bevel bend. The rim shows what lies past
+    // the edge (the sdf's gradient points out), pulled in along a quarter
+    // circle; a body thinner than the bevel takes a shallower one.
+    float unit = max(lens.unit, 1e-3);
+    float full = max(lens.bevel_height / unit, 1e-3);
+    float height = clamp(min(s.half_size.x, s.half_size.y), 1e-3, full);
+    float shrink = height / full;
+    float inward = max(-dist, 0.0);
+    float pull = lens_bevel_profile(inward, height, lens.refract / unit * shrink);
+    float2 at = local + dir * pull;
+    float split = lens_bevel_profile(inward, height * 0.85,
+                                     lens.aberration / unit * shrink);
+    // The colours split along the rim's normal turned 15 degrees.
+    float2 split_dir = float2(0.9659 * dir.x - 0.2588 * dir.y,
+                              0.2588 * dir.x + 0.9659 * dir.y);
+    glass = lens_spectrum(s, slot, atlas, atlas_size, at, split_dir * split,
+                          max(s.blur_shift, 0.0));
+    if (frost_sigma > 0.0) {
+      // A quarter of the blur where the bend shows, all of it deeper in.
+      float rim_t = clamp((dist + pull + height) / height, 0.0, 1.0);
+      float sigma = frost_sigma * mix(1.0, 0.25, rim_t);
+      float3 frost = lens_frosted(s, slot, atlas, atlas_size, at,
+                                  max(sigma, 0.5));
+      glass = mix(glass, frost, lens.blur_mix);
+    }
+    glass = lens_saturate(glass, lens.tune_saturation);
   } else if (lens.bend == 1) {
     float amount = lens.radial_amount / max(lens.unit, 1e-3);
     float2 bend = lens_radial_bend(s, lens, local, amount);
@@ -1862,6 +1949,16 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
   float caustic = lens_step(0.72, 0.98, depth) * down * 0.08 * strength *
                   lens.tune_caustic;
   glass += rim_col * add + float3(1.0, 0.92, 0.86) * caustic;
+
+  // QUILL (glass tuning): the rim specular, lifted with the demo's S-curve
+  // so dark glass brightens more than light.
+  if (lens.tune_specular > 0.0) {
+    float hi = lens_key_fill(dist, s.device_px, dir, 2.8 * s.css_px,
+                             0.5 * s.css_px);
+    float3 curve = float3(3.0) - 2.0 * clamp(glass, float3(0.0), float3(1.0));
+    glass = glass * (float3(1.0) + lens.tune_specular * hi * curve) +
+            float3(0.18 * lens.tune_specular * hi);
+  }
 
   float4 border_color = hsla_to_rgba(lens.border_color);
   float border_w = lens.border_width / max(lens.unit, 1e-3);
