@@ -1,7 +1,7 @@
 //! Floating menus pop in from their corner through a snapshot that lives
 //! only for the run; Classic menus never take one.
 
-use super::{POP_FROM, POP_MS, pop_draw, pop_origin};
+use super::{POP_FROM, POP_MS, pop_draw, pop_origin, shadow_reach};
 use crate::ui::app::QuillApp;
 use crate::ui::appearance::own_appearance_prefs;
 use crate::ui::keybindings::bind_keys;
@@ -16,6 +16,15 @@ use gpui_kit::{
 use quill::ids::ChatId;
 use quill::layout_style::LayoutStyle;
 use std::time::Duration;
+
+#[test]
+fn the_picture_holds_the_whole_menu_shadow() {
+    use crate::ui::chrome::menu_shape::menu_shadow;
+    // Dark: 18 blur, 4 down. Light: 10 blur, centred.
+    assert_eq!(shadow_reach(&menu_shadow(true)), px(58.));
+    assert_eq!(shadow_reach(&menu_shadow(false)), px(30.));
+    assert_eq!(shadow_reach(&[]), px(0.));
+}
 
 #[test]
 fn a_menu_grows_from_the_corner_it_opened_at() {

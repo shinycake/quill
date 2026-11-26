@@ -16,6 +16,7 @@
 use super::menu_shape::menu_entrance;
 use crate::ui::glass;
 use gpui_kit::component::popover_shape::MenuEnter;
+use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::layout_style::Curve;
 use std::time::Duration;
@@ -24,8 +25,26 @@ use std::time::Duration;
 pub(in crate::ui) const POP_MS: u64 = 200;
 /// The scale a menu pops from.
 pub(in crate::ui) const POP_FROM: f32 = 0.8;
-/// Room for the menu's shadow in the picture.
-const SHADOW_MARGIN: f32 = 12.;
+/// How far a shadow reaches past its box: a Gaussian blur is gone by
+/// three times its radius, plus the shadow's offset and spread.
+pub(in crate::ui) fn shadow_reach(shadows: &[BoxShadow]) -> Pixels {
+    shadows
+        .iter()
+        .map(|shadow| {
+            let (x, y) = (shadow.offset.x.abs(), shadow.offset.y.abs());
+            let offset = if x > y { x } else { y };
+            let spread = if shadow.spread_radius > px(0.) {
+                shadow.spread_radius
+            } else {
+                px(0.)
+            };
+            shadow.blur_radius * 3. + offset + spread
+        })
+        .fold(
+            px(0.),
+            |reach, next| if next > reach { next } else { reach },
+        )
+}
 
 /// The corner of `bounds` nearest to `anchor`: the point the menu grows
 /// from. A menu opened at the pointer has its anchor at a corner unless it
@@ -70,7 +89,11 @@ pub(in crate::ui) fn menu_pop(menu: AnyElement, anchor: Point<Pixels>, cx: &App)
         Animation::new(Duration::from_millis(POP_MS)),
         move |t, bounds| pop_draw(t, bounds, anchor),
     )
-    .margin(px(SHADOW_MARGIN))
+    // Room for the menu's whole shadow in the picture: a clipped shadow
+    // would jump when the run ends and the live menu takes over.
+    .margin(shadow_reach(&super::menu_shape::menu_shadow(
+        cx.theme().is_dark(),
+    )))
     .into_any_element()
 }
 
