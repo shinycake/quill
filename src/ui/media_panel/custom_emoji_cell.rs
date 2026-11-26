@@ -593,6 +593,7 @@ impl QuillApp {
         // so it carries the tag itself: the UI driver treats it as part of
         // the chat it opens over (the surface check already allowed that
         // chat; sticker and GIF sends are refused while an agent drives).
+        let metrics = self.chrome_metrics();
         div()
             .id("media-panel")
             .occlude()
@@ -601,12 +602,14 @@ impl QuillApp {
             .h(px(PANEL_HEIGHT))
             .flex()
             .flex_col()
-            .rounded_lg()
+            .map(|this| crate::ui::chrome::dropdown::corners(this, metrics))
             .border_1()
             .glass_or(GlassRole::Panel, cx, |this| {
-                this.border_color(cx.theme().border)
-                    .bg(cx.theme().popover)
-                    .shadow_lg()
+                crate::ui::chrome::dropdown::shadow(
+                    this.border_color(cx.theme().border).bg(cx.theme().popover),
+                    metrics,
+                    cx.theme(),
+                )
             })
             .overflow_hidden()
             .child(header)
