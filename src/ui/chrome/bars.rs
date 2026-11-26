@@ -142,3 +142,17 @@ pub(in crate::ui) fn action_rounding(
 
 /// A radius past any button's half height: the ends are round.
 const PILL: f32 = 9999.;
+
+/// A notice strip inside the composer card ("Messages forwarded to …",
+/// "2 messages selected"): the kit's corners, or Web K's `$border-radius`
+/// (12) in the composer's card, concentric with its rounded ends at the
+/// strip's inset.
+pub(in crate::ui) fn notice_corners<E: Styled>(this: E, metrics: &ChromeMetrics) -> E {
+    match metrics.look {
+        Look::Lines => this.rounded_md(),
+        Look::Cards => this.rounded(px(NOTICE_RADIUS)),
+    }
+}
+
+/// Web K's `$border-radius`.
+const NOTICE_RADIUS: f32 = 12.;
