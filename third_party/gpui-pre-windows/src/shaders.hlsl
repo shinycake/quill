@@ -1445,7 +1445,7 @@ struct PolychromeSprite {
     uint order;
     uint pad;
     AtlasTile tile;
-    uint grayscale;
+    uint flags;
     float opacity;
     Bounds bounds;
     ContentMask content_mask;
@@ -1472,7 +1472,7 @@ PolychromeSpriteFragmentInput polychrome_sprite_vertex(uint vertex_id: SV_Vertex
     PolychromeSpriteFragmentInput output;
     output.position = device_position;
     output.tile_position = tile_position;
-    bool simple = !has_rounded_corners(sprite.corner_radii) && sprite.grayscale == 0u
+    bool simple = !has_rounded_corners(sprite.corner_radii) && sprite.flags == 0u
         && !has_rounded_mask(sprite.content_mask);
     output.sprite_id = sprite_id | (simple ? SIMPLE_PRIMITIVE_FLAG : 0u);
     output.opacity = sprite.opacity;
@@ -1486,12 +1486,12 @@ float4 polychrome_sprite_fragment_impl(PolychromeSpriteFragmentInput input){
     }
 
     PolychromeSprite sprite = poly_sprites[input.sprite_id];
-    // QUILL: the flags (`grayscale`): bit 2, the texture holds premultiplied
-    // colour (a snapshot, `snapshots.rs`); bit 1, draw it in grey.
-    if ((sprite.grayscale & 2u) != 0u && color.a > 0.0) {
+    // QUILL: `flags` (`SpriteFlags`): 2, the texture holds premultiplied
+    // colour (a snapshot, `snapshots.rs`); 1, draw it in grey.
+    if ((sprite.flags & 2u) != 0u && color.a > 0.0) {
         color.rgb /= color.a;
     }
-    if ((sprite.grayscale & 1u) != 0u) {
+    if ((sprite.flags & 1u) != 0u) {
         color.rgb = dot(color.rgb, GRAYSCALE_FACTORS);
     }
     float distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);

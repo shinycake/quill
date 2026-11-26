@@ -149,9 +149,11 @@ it reads may be freed right after.
 ## Drawing
 
 A snapshot quad is a `PolychromeSprite` with the whole texture as its tile.
-The texture holds premultiplied colour, so the sprite's flag word (the
-`grayscale` field, read as flags by the shaders) gains bit 2: divide the
-sample by its alpha, then the pipeline blends as for any sprite. This is one
+The texture holds premultiplied colour, so the sprite carries
+`SpriteFlags::PREMULTIPLIED` in its `flags` field (which replaced the
+`grayscale: PaddedBool32` the shaders already read as a `u32`, and holds
+`SpriteFlags::GRAYSCALE` beside it): divide the sample by its alpha, then
+the pipeline blends as for any sprite. This is one
 branch in an existing pipeline instead of a new one. Sampling is linear, so
 at identity on pixel-aligned bounds the quad draws its content's pixels
 exactly (the Metal test compares them, within 1 of 255).

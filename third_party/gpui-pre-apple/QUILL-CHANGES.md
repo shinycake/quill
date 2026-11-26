@@ -321,3 +321,5 @@ which keeps them until its command buffer completes. Snapshot scenes are
 drawn at the top of `MetalRenderer::draw`, before a frame can be skipped,
 and first in the headless entry points. `src/shaders.metal`: bit 2 of the
 polychrome flags divides the sample by its alpha.
+`vendor/gpui/src/scene.rs` mirrors `SpriteFlags` and the `flags` field for
+the generated shader header.

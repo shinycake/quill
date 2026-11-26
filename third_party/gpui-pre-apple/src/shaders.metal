@@ -800,10 +800,10 @@ vertex PolychromeSpriteFragmentInput polychrome_sprite_vertex(
       to_device_position_impl(clipped.position, viewport_size);
   float2 tile_position =
       to_tile_position(clipped.unit_vertex, sprite.tile, atlas_size);
-  // QUILL: `grayscale` holds flags: 1 grayscale, 2 premultiplied (a
+  // QUILL: `flags` (`SpriteFlags`): 1 grayscale, 2 premultiplied (a
   // snapshot's texture); either takes the full path.
   bool simple = !has_rounded_corners(sprite.corner_radii) &&
-                sprite.grayscale == 0u &&
+                sprite.flags == 0u &&
                 !has_rounded_mask(sprite.content_mask);
   return PolychromeSpriteFragmentInput{
       device_position,
@@ -827,10 +827,10 @@ fragment float4 polychrome_sprite_fragment(
   PolychromeSprite sprite = sprites[input.sprite_id];
   // QUILL: a snapshot's texels are premultiplied; the blend wants them
   // straight.
-  if ((sprite.grayscale & 2u) != 0u && color.a > 0.0) {
+  if ((sprite.flags & 2u) != 0u && color.a > 0.0) {
     color.rgb /= color.a;
   }
-  if ((sprite.grayscale & 1u) != 0u) {
+  if ((sprite.flags & 1u) != 0u) {
     float grayscale = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
     color.r = grayscale;
     color.g = grayscale;

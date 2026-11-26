@@ -45,8 +45,6 @@ pub type DrawOrder = u32;
 /// compiler-inserted padding bytes, which would be undefined behavior to
 /// reinterpret as `&[u8]` when writing instance buffers. Guaranteed to be
 /// `0` or `1` by construction; shaders read it as a `u32`/`uint`.
-/// QUILL: but for [`PaddedBool32::PREMULTIPLIED`], which only a snapshot's
-/// sprite carries.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct PaddedBool32(u32);
@@ -58,11 +56,6 @@ impl From<bool> for PaddedBool32 {
 }
 
 impl PaddedBool32 {
-    /// QUILL: `PolychromeSprite::grayscale` read by the shaders as flags:
-    /// bit 0 grayscale, bit 1 "the texture holds premultiplied colour" (a
-    /// snapshot's, `SnapshotQuad::sprite`).
-    pub(crate) const PREMULTIPLIED: Self = PaddedBool32(2);
-
     /// The wrapped boolean.
     pub fn as_bool(self) -> bool {
         self.0 != 0
@@ -1807,6 +1800,32 @@ impl From<SubpixelSprite> for Primitive {
     }
 }
 
+/// QUILL: how a polychrome sprite's texture is read, as bits of a `u32`
+/// the shaders test (docs/decisions/snapshot-transitions.md).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct SpriteFlags(u32);
+
+impl SpriteFlags {
+    /// Drawn as it is.
+    pub const NONE: Self = Self(0);
+    /// Drawn in grey.
+    pub const GRAYSCALE: Self = Self(1);
+    /// The texture holds premultiplied colour (a snapshot's), which the
+    /// shader divides back before the blend.
+    pub const PREMULTIPLIED: Self = Self(2);
+
+    /// [`Self::GRAYSCALE`] when `grayscale`, else none.
+    pub fn grayscale(grayscale: bool) -> Self {
+        if grayscale { Self::GRAYSCALE } else { Self::NONE }
+    }
+
+    /// Whether every bit of `flags` is set.
+    pub fn contains(self, flags: Self) -> bool {
+        self.0 & flags.0 == flags.0
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 #[expect(missing_docs)]
@@ -1814,7 +1833,8 @@ pub struct PolychromeSprite {
     pub order: DrawOrder,
     pub pad: u32,
     pub tile: AtlasTile,
-    pub grayscale: PaddedBool32,
+    /// QUILL: was `grayscale: PaddedBool32`.
+    pub flags: SpriteFlags,
     pub opacity: f32,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,

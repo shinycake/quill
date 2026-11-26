@@ -805,8 +805,10 @@ every GPUI update:
   `push_into_frame` does what it did. `Primitive::Snapshot`,
   `PrimitiveKind::Snapshot` and `PrimitiveBatch::Snapshots`;
   `Scene::{snapshots, snapshot_scenes, snapshot_releases}`.
-  `PaddedBool32::PREMULTIPLIED`: the polychrome shader's flag word gains bit
-  2, for sampling a texture that holds premultiplied colour.
+  `SpriteFlags` replaces `PolychromeSprite::grayscale` with a `flags`
+  field (`GRAYSCALE` 1, `PREMULTIPLIED` 2, for sampling a texture that
+  holds premultiplied colour); `window.rs` and
+  `randomized_element_tree.rs` follow the rename.
 - `src/scene/snapshot.rs` (new): captures, how they settle at the end of a
   frame (drawn, kept, or pushed back live), and `Scene::region_snapshot`.
 - `src/scene/backdrop_frame.rs`: a lens over a snapshot quad redraws its

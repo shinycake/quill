@@ -24,6 +24,7 @@ use crate::{
     ModifiersChangedEvent, MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent,
     MouseUpEvent, PaintedPath, Path, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
     PlatformInputHandler, PlatformWindow, Point, PolychromeSprite, Priority, PromptButton,
+    SpriteFlags,
     PromptLevel, Quad, Render, RenderGlyphParams, RoundedMask,
     RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge, SMOOTH_SVG_SCALE_FACTOR,
     SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow, SharedString, Size,
@@ -5847,7 +5848,7 @@ impl Window {
             self.next_frame.scene.insert_primitive(PolychromeSprite {
                 order: 0,
                 pad: 0,
-                grayscale: false.into(),
+                flags: SpriteFlags::NONE,
                 bounds,
                 corner_radii: Default::default(),
                 content_mask,
@@ -6055,7 +6056,7 @@ impl Window {
         self.next_frame.scene.insert_primitive(PolychromeSprite {
             order: 0,
             pad: 0,
-            grayscale: grayscale.into(),
+            flags: SpriteFlags::grayscale(grayscale),
             bounds: visible_bounds_snapped,
             content_mask,
             corner_radii,
