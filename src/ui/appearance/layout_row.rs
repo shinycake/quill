@@ -13,11 +13,22 @@ use quill::settings::WallpaperSource;
 /// The two options, in the order they are shown.
 const OPTIONS: [LayoutStyle; 2] = [LayoutStyle::Classic, LayoutStyle::Floating];
 
-/// The preview's size in the picker: two tiles fit the onboarding card.
+/// The preview's size in a tile: Settings' tiles, and the onboarding
+/// card's larger ones, which carry the card.
 const PREVIEW: gpui_kit::Size<Pixels> = gpui_kit::Size {
     width: px(160.),
     height: px(100.),
 };
+pub(in crate::ui) const ONBOARDING_PREVIEW: gpui_kit::Size<Pixels> = gpui_kit::Size {
+    width: px(232.),
+    height: px(145.),
+};
+
+/// Room for two lines of a tile's description.
+const ABOUT_LINES: Pixels = px(32.);
+
+/// A tile's padding around the radio, the preview and the text.
+const TILE_PAD: Pixels = px(10.);
 
 fn option_text(style: LayoutStyle) -> (&'static str, &'static str, &'static ChromeMetrics) {
     match style {
@@ -43,9 +54,14 @@ pub(in crate::ui) fn tile_selector(style: LayoutStyle) -> &'static str {
 }
 
 impl QuillApp {
-    /// The two tiles, each a preview above its name and one line about it,
-    /// as a radio group: Tab reaches it, the arrows move the choice.
-    pub(in crate::ui) fn layout_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The two tiles, each a radio, a `preview`-sized drawing, its name
+    /// and one line about it inside one outlined tile, as a radio group:
+    /// Tab reaches it, the arrows move the choice.
+    pub(in crate::ui) fn layout_picker(
+        &self,
+        preview: gpui_kit::Size<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let chosen = self.layout_choice();
         let theme = cx.theme().clone();
         let radios = OPTIONS.map(|style| {
@@ -58,27 +74,31 @@ impl QuillApp {
             };
             Radio::new(tile_selector(style))
                 .accessibility_label(name)
-                // The radio's content takes its whole width: sized to the
-                // tile, the two sit side by side.
-                .w(PREVIEW.width + px(24.))
+                // The tile: the radio leads inside it, beside the preview.
+                .p(TILE_PAD)
+                .rounded(theme.radius_lg)
+                .border_2()
+                .border_color(ring)
                 .child(
                     div()
                         .debug_selector(move || tile_selector(style).into())
                         .flex()
                         .flex_col()
-                        .gap_1p5()
-                        .w(PREVIEW.width)
+                        .gap_1()
+                        .w(preview.width)
                         .child(
                             div()
-                                .rounded(theme.radius_lg)
+                                .rounded(theme.radius)
                                 .overflow_hidden()
-                                .border_2()
-                                .border_color(ring)
-                                .child(miniature(metrics, PREVIEW, &theme)),
+                                .border_1()
+                                .border_color(theme.border)
+                                .child(miniature(metrics, preview, &theme)),
                         )
-                        .child(div().text_sm().font_medium().child(name))
+                        .child(div().pt_1().text_sm().font_medium().child(name))
                         .child(
                             div()
+                                // Two lines either way, so the tiles match.
+                                .min_h(ABOUT_LINES)
                                 .text_xs()
                                 .text_color(theme.muted_foreground)
                                 .child(about),
@@ -127,25 +147,21 @@ impl QuillApp {
             Some(_) => keys::Q_PREFS_LAYOUT_WALLPAPER_USE_YOURS,
         };
         let muted = cx.theme().muted_foreground;
+        // Settings: the note beside its button. Onboarding: one centred
+        // block under the tiles, the note over the button.
         let hint = div()
             .flex()
             .flex_col()
-            .gap_0p5()
-            .flex_1()
             .min_w_0()
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(tr(keys::Q_PREFS_LAYOUT_WALLPAPER_HINT)),
-            )
+            .text_xs()
+            .text_color(muted)
+            .map(|hint| match onboarding {
+                true => hint.items_center().text_center(),
+                false => hint.flex_1().gap_0p5(),
+            })
+            .child(tr(keys::Q_PREFS_LAYOUT_WALLPAPER_HINT))
             .when(onboarding, |hint| {
-                hint.child(
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(tr(keys::Q_FIRST_RUN_STYLE_WALLPAPER_LATER)),
-                )
+                hint.child(tr(keys::Q_FIRST_RUN_STYLE_WALLPAPER_LATER))
             });
         Some(
             div()
@@ -153,7 +169,10 @@ impl QuillApp {
                 .w_full()
                 .flex()
                 .items_center()
-                .gap_3()
+                .map(|row| match onboarding {
+                    true => row.flex_col().gap_2(),
+                    false => row.gap_3(),
+                })
                 .child(hint)
                 .child(
                     Button::new("layout-wallpaper-use")
@@ -172,7 +191,7 @@ impl QuillApp {
 
     /// The Settings card's Layout row.
     pub(in crate::ui) fn appearance_layout_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let picker = self.layout_picker(cx);
+        let picker = self.layout_picker(PREVIEW, cx);
         let section = div()
             .flex()
             .flex_col()

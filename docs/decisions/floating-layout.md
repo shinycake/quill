@@ -588,3 +588,59 @@ chat window at its default size, which is Floating; under 601 a chat
 window answers Classic from its own width through the same
 `chrome_metrics`, covered by `a_window_of_600_or_under_draws_classic`).
 Windows and Linux GPUs, and the system frame, were not run.
+
+## Appearance review round
+
+The owner's review of the first full build (captures over three
+wallpapers, light and dark) found these, all fixed in Floating only:
+
+- **Title strip.** The strip keeps its height and controls but draws no
+  fill or line; the window's wallpaper runs under it. The history is
+  clipped at the header card's top, so no row shows in the gap above it
+  (Web K stops its bubbles under the topbar). The wallpaper is now one
+  layer at the window root (`QuillApp::window_backdrop_layer`), not a fill
+  on the shell, so the strip and Settings stand on it too.
+- **Glass cards.** Cards take their own recipe, `GlassRole::Card`, instead
+  of the menus' `Panel`: frosted to the edge (no clear rim band), barely
+  bent or lit, a wider blur and the whole frost floor. The slab's rim
+  band, saturated twice, read as a warm glowing frame on a card the
+  window's height; its "studio" rim light drew a bright streak halfway
+  down the list card's right edge; a picture under the header card showed
+  as a muddy block. The Archived chats row is clear on glass, as every
+  chat row is.
+- **Dark popovers.** Menus and kit popovers (the folder dropdown) take a
+  fill lifted above the card's and a light 1 px edge in dark
+  (`menu_shape::dark_surface`, carried by the kit's `PopoverShape::fill`
+  and `edge`), and a darker shadow. The header ⋮ menu opens from the
+  button's right edge, so it stays inside the header card, and its entries
+  carry icons as the row and message menus do.
+- **The drawer.** A scrim (black, 32 % once in) dims the chat behind the
+  held drawer, and the drawer card casts a wider, darker shadow than a
+  card. The chat header's title stays under the drawer, dimmed, as Web K's
+  topbar does under its sliding column: the column is narrower than the
+  chat column plus a drawer at these widths.
+- **Pinned bar.** Its accent stripe starts at the header's inset (the
+  hairline's start), with 4 pt more room above the card's lower corner.
+- **Menu target.** While a context menu is open, its chat row keeps the
+  hover fill and its message a light selection tint (Web K marks both).
+- **Dark cards on a dark wallpaper.** Dark cards draw a 1 px white edge at
+  12 %, so a near-black card holds its shape on a near-black pattern.
+- **Onboarding picker.** Each option is one outlined tile with its radio
+  inside; the two tiles match in height; the onboarding card is wider with
+  larger previews; the wallpaper note is centred over its button. The
+  previews draw a gradient wallpaper (behind the history in Classic,
+  behind everything in Floating) and dark cards keep an edge. The Settings
+  card shares the picker, so its tiles changed too.
+- **Settings.** Settings notes the window's width as the chat columns do,
+  so it follows the layout: in Floating its list and page are cards over
+  the window's wallpaper. The Glass effects description says the Floating
+  cards turn to glass too.
+- **Chat switch.** While the bars float, only the history crosses
+  (`floating_column` draws the stage around it); the header and composer
+  pills stay where they are and show the new chat at once. The old
+  picture still holds the old pills, under the live ones, so where the
+  new header is shorter (no pinned bar) the old bar fades out below it.
+- **Classic glass menu.** The blue blob in a glass message menu over an
+  outgoing bubble and the light seam at its right edge are on main too
+  (same capture on a main build): the menu recipe's rim bends the bubble
+  in. Classic is left as it is.

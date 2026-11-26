@@ -25,7 +25,10 @@ pub(in crate::ui) fn miniature(metrics: &ChromeMetrics, size: Size<Pixels>, them
     let gap = s(metrics.bar_gap.max(8.) * 0.5);
     let radius = super::radius::card_in(metrics, theme) * scale;
     let floating = metrics.placement == Placement::Overlaid;
-    let wallpaper = theme.primary.opacity(0.18);
+    let wallpaper = wallpaper(theme);
+    // Dark cards keep a faint light edge over the wallpaper, as the real
+    // ones do (`frames::surface`).
+    let edge = (floating && theme.is_dark()).then(|| hsla(0., 0., 1., 0.14));
     let card = theme.sidebar;
     let pane = theme.background;
     let bar = theme.background;
@@ -75,6 +78,7 @@ pub(in crate::ui) fn miniature(metrics: &ChromeMetrics, size: Size<Pixels>, them
         .p(s(8.))
         .bg(card)
         .rounded(radius)
+        .when_some(edge, |list, edge| list.border_1().border_color(edge))
         .when(!floating, |list| {
             list.border_r(divider).border_color(border)
         })
@@ -99,7 +103,9 @@ pub(in crate::ui) fn miniature(metrics: &ChromeMetrics, size: Size<Pixels>, them
     };
     let pill = |el: Div| {
         if floating {
-            el.rounded(radius).bg(bar)
+            el.rounded(radius)
+                .bg(bar)
+                .when_some(edge, |el, edge| el.border_1().border_color(edge))
         } else {
             el.bg(bar)
         }
@@ -141,9 +147,20 @@ pub(in crate::ui) fn miniature(metrics: &ChromeMetrics, size: Size<Pixels>, them
         .gap(gutter)
         .p(gutter)
         .bg(match metrics.backdrop {
-            Backdrop::History => pane,
+            Backdrop::History => Background::from(pane),
             Backdrop::Window => wallpaper,
         })
         .child(list)
         .child(chat)
+}
+
+/// The preview's wallpaper: a soft two-colour gradient in the theme's
+/// lightness, so the cards over it read as cards.
+fn wallpaper(theme: &Theme) -> Background {
+    let (from, to) = if theme.is_dark() {
+        (hsla(0.48, 0.38, 0.30, 1.), hsla(0.72, 0.34, 0.32, 1.))
+    } else {
+        (hsla(0.48, 0.45, 0.74, 1.), hsla(0.72, 0.42, 0.80, 1.))
+    };
+    linear_gradient(135., linear_color_stop(from, 0.), linear_color_stop(to, 1.))
 }

@@ -10,16 +10,21 @@ use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 
+/// The style card's width: two tiles of `ONBOARDING_PREVIEW` and their gap.
+const STYLE_CARD_WIDTH: f32 = 580.;
+
 impl QuillApp {
     /// The style card: heading, the picker, where to change it later, and
     /// the button that finishes onboarding.
     pub(super) fn first_run_style(&self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
         super::first_run_ui::card()
+            // Two large tiles side by side: the previews carry the card.
+            .w(px(STYLE_CARD_WIDTH))
             .child(super::first_run_ui::heading(tr(
                 keys::Q_FIRST_RUN_STYLE_TITLE,
             )))
-            .child(self.layout_picker(cx))
+            .child(self.layout_picker(super::appearance::ONBOARDING_PREVIEW, cx))
             .children(self.layout_wallpaper_offer(true, cx))
             .child(
                 div()

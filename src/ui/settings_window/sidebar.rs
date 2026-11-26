@@ -61,8 +61,11 @@ impl QuillApp {
                         let _ = owner.update(cx, |this, cx| this.show_settings_page(page, cx));
                     })
             });
+        let chrome = self.chrome(cx);
+        let fill = self.list_row_fill(cx);
         Sidebar::new("settings-sidebar")
             .collapsible(false)
+            .map(|this| crate::ui::chrome::frames::settings_list(this, &chrome, fill))
             .when(narrow, |this| this.w_full())
             .header(self.settings_sidebar_header(cx))
             .child(SidebarMenu::new().children(items))
