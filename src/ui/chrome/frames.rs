@@ -4,11 +4,9 @@
 //! Every call site passes its element through here, so the two layouts
 //! cannot drift apart at one site.
 //!
-//! Rounded clipping of a card's content waits for the renderer's
-//! `clip_rounded` (plan step 1). Until then a card clips to its rectangle
-//! and the surface inside it rounds its own fill: content that paints to
-//! the card's edge (a hovered row at the bottom corner, a profile cover)
-//! still shows square corners. The seam is [`card_clip`].
+//! A card clips its content to its rounded shape ([`card_clip`],
+//! docs/decisions/rounded-content-masks.md), so a hovered row at the
+//! bottom corner or a profile cover is cut by the card's corners.
 
 use super::radius::card_in;
 use gpui_kit::component::theme::Theme;
@@ -158,9 +156,9 @@ pub(in crate::ui) fn card<E: Styled + FluentBuilder>(
     }
 }
 
-/// The seam for the renderer's rounded clip: today a rectangular clip.
+/// A card's clip: its content is cut by its rounded corners.
 pub(in crate::ui) fn card_clip<E: Styled>(this: E) -> E {
-    this.overflow_hidden()
+    this.overflow_hidden().clip_rounded()
 }
 
 /// A card's shadow over the wallpaper: a soft, close one and a wider,
