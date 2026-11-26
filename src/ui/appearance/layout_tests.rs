@@ -159,3 +159,29 @@ fn floating_without_a_wallpaper_offers_one(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(vcx.debug_bounds("layout-wallpaper-offer").is_none());
 }
+
+/// The battery saver flattens Floating's cards: no shadow while the system
+/// forces power saving, the shadow back once it stops.
+#[gpui_kit::test]
+fn battery_saving_flattens_floating(cx: &mut TestAppContext) {
+    use quill::layout_style::Elevation;
+    quill::power_saving::isolate_for_tests();
+    let _prefs = own_appearance_prefs("quill-layout-battery");
+    let (app, mut vcx) = new_app(cx, 1200.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.set_appearance(cx, |appearance| appearance.layout = LayoutStyle::Floating);
+    });
+    frames(vcx);
+    let roomy = chrome(&app, vcx);
+    assert_eq!(roomy.metrics, &FLOATING);
+    assert!(roomy.elevation != Elevation::Flat, "shadowed at rest");
+
+    quill::battery_saving::set_state(Some(true));
+    let saving = chrome(&app, vcx);
+    assert_eq!(saving.metrics, &FLOATING);
+    assert_eq!(saving.elevation, Elevation::Flat);
+
+    quill::battery_saving::set_state(Some(false));
+    assert_eq!(chrome(&app, vcx), roomy);
+}

@@ -18,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::layout_style::{
     BackdropKind, Chrome, ChromeMetrics, Contrast, FLOATING_FROM, LayoutOverride, LayoutStyle,
-    Power, Readings, contrast_ratio, metrics_for, resolve,
+    Power, Readings, TitleStrip, contrast_ratio, metrics_for, resolve,
 };
 
 /// WCAG 2.1 relative luminance of a colour.
@@ -52,6 +52,11 @@ impl QuillApp {
             f32::from(self.slices.window.width.get()),
             FLOATING_FROM,
         )
+    }
+
+    /// The window's title strip: lined in Classic, bare in Floating.
+    pub(in crate::ui) fn title_strip(&self) -> TitleStrip {
+        self.chrome_metrics().title
     }
 
     /// The window is in the drawer band (Floating, 601 to 925 wide).

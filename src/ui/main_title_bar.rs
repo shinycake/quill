@@ -12,6 +12,7 @@ use gpui_kit::component::{Sizable, Size, StyledExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+use quill::layout_style::TitleStrip;
 
 /// `control` sizes the bar's buttons with the density
 /// (`QuillApp::control_size`); the bar's own height follows it through the
@@ -22,6 +23,7 @@ pub(super) fn main_title_bar(
     search_open: bool,
     update: Option<AnyElement>,
     menu_bar: Option<Entity<AppMenuBar>>,
+    strip: TitleStrip,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let title = "Quill";
@@ -30,6 +32,7 @@ pub(super) fn main_title_bar(
     // zoom, Linux min/max/close, macOS traffic-light inset) in theme tokens.
     // The caption + action buttons ride as its children.
     FrameTitleBar::new()
+        .strip(strip)
         .on_close_window(cx.listener(|this, _, window, cx| {
             this.exit_after_exports(super::export_quit::quit_app, window, cx);
         }))

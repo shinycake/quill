@@ -12,7 +12,7 @@ use super::radius::card_in;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::layout_style::{Chrome, Clip, Edge, Elevation, Placement};
+use quill::layout_style::{Chrome, Clip, Edge, Elevation, Placement, TitleStrip};
 
 /// The chat list column's own frame, inside its slot: Classic's right
 /// border, or a card's rounded fill (none over glass: the slot's card
@@ -194,5 +194,15 @@ pub(in crate::ui) fn peek_surface<E: Styled + FluentBuilder>(
     match chrome.metrics.clip {
         Clip::Square => this.bg(theme.sidebar).shadow_xl(),
         Clip::Rounded => this,
+    }
+}
+
+/// The title strip's lower edge: the frame's line in Classic, none in
+/// Floating, where the cards sit under the strip on the wallpaper. Applied
+/// after the line, so it only ever takes it away; the strip keeps its fill.
+pub(in crate::ui) fn title_strip<E: Styled>(this: E, strip: TitleStrip) -> E {
+    match strip {
+        TitleStrip::Lined => this,
+        TitleStrip::Bare => this.border_b_0(),
     }
 }
