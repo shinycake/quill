@@ -61,7 +61,7 @@ impl ChatListRowStyle {
             rich_preview,
             density,
             rows: metrics.rows,
-            selected: metrics.selected_row,
+            selected: metrics.look.selected_row(),
         }
     }
 

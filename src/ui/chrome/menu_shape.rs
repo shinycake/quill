@@ -14,17 +14,17 @@
 //! the window being drawn writes its metrics here first and its menus read
 //! them: their shape here, their entrance in `menu_pop`.
 
-use gpui_kit::component::popover_shape::{PopoverShape, PopoverShapeHook};
+use gpui_kit::component::popover_shape::{MenuEnter, PopoverShape, PopoverShapeHook};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::*;
-use quill::layout_style::{ChromeMetrics, Clip, MenuEnter};
+use quill::layout_style::Look;
 
 /// Web K's menu corner radius.
 pub(in crate::ui) const MENU_RADIUS: f32 = 16.;
 
-/// The metrics of the window being drawn.
+/// The look of the window being drawn.
 #[derive(Clone, Copy)]
-struct DrawnWindow(&'static ChromeMetrics);
+struct DrawnWindow(Look);
 
 impl Global for DrawnWindow {}
 
@@ -66,7 +66,7 @@ fn dark_surface(cx: &App) -> (Option<Hsla>, Option<Hsla>) {
 /// The shape menus in the window being drawn take: `Some` in Floating.
 pub(in crate::ui) fn menu_shape(cx: &App) -> Option<PopoverShape> {
     let drawn = cx.try_global::<DrawnWindow>()?;
-    if drawn.0.clip != Clip::Rounded {
+    if drawn.0 != Look::Cards {
         return None;
     }
     let (fill, edge) = dark_surface(cx);
@@ -75,28 +75,30 @@ pub(in crate::ui) fn menu_shape(cx: &App) -> Option<PopoverShape> {
         shadow: menu_shadow(edge.is_some()),
         fill,
         edge,
-        pop: drawn.0.motion.menu == MenuEnter::Pop,
+        enter: MenuEnter::Pop,
     })
 }
 
 /// How menus in the window being drawn enter: Classic's when no window
 /// has drawn.
 pub(in crate::ui) fn menu_entrance(cx: &App) -> MenuEnter {
-    cx.try_global::<DrawnWindow>()
-        .map_or(MenuEnter::FadeSlide, |drawn| drawn.0.motion.menu)
+    match cx.try_global::<DrawnWindow>() {
+        Some(DrawnWindow(Look::Cards)) => MenuEnter::Pop,
+        Some(DrawnWindow(Look::Lines)) | None => MenuEnter::FadeSlide,
+    }
 }
 
-/// The window about to draw has these metrics; the kit's popovers ask
+/// The window about to draw has this look; the kit's popovers ask
 /// through the same answer.
-pub(in crate::ui) fn note_drawn_window(metrics: &'static ChromeMetrics, cx: &mut App) {
+pub(in crate::ui) fn note_drawn_window(look: Look, cx: &mut App) {
     if !cx.has_global::<PopoverShapeHook>() {
         cx.set_global(PopoverShapeHook(menu_shape));
     }
     let same = cx
         .try_global::<DrawnWindow>()
-        .is_some_and(|drawn| std::ptr::eq(drawn.0, metrics));
+        .is_some_and(|drawn| drawn.0 == look);
     if !same {
-        cx.set_global(DrawnWindow(metrics));
+        cx.set_global(DrawnWindow(look));
     }
 }
 

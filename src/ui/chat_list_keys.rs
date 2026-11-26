@@ -655,7 +655,7 @@ impl QuillApp {
         E: IntoElement + Styled + StatefulInteractiveElement,
     {
         let highlighted = self.chat_list.keys.list_highlighted(key);
-        let open = open.then(|| self.chrome_metrics().selected_row);
+        let open = open.then(|| self.selected_row());
         row.when(highlighted, |row| row.bg(nav_fill(open, cx.theme())))
             .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(move |this, hovered: &bool, _, _| {

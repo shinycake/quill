@@ -22,24 +22,16 @@ SRC = ROOT / "src"
 
 NAMES = [
     "LayoutStyle",
-    "Placement",
-    "Backdrop",
-    "PanelDock",
+    "Look",
     "SelectedRow",
-    "FolderTabs",
-    "SearchShape",
-    "TitleStrip",
-    "BarReveal",
     "RowScale",
-    "Clip",
     "MenuEnter",
     "PageSwitch",
-    "SlideDraw",
     "Elevation",
     "Edge",
 ]
 USE = re.compile(r"\b(" + "|".join(NAMES) + r")::")
-# `LayoutStyle` names nothing else; the metrics' enum names (`Edge`, `Clip`)
+# `LayoutStyle` names nothing else; the metrics' enum names (`Edge`, `Look`)
 # are common, so they count only in a file that reaches `layout_style`.
 ONLY_CHOICE = re.compile(r"\b(LayoutStyle)::")
 

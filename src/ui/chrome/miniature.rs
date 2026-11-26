@@ -6,7 +6,7 @@
 use gpui_kit::component::theme::Theme;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use quill::layout_style::{Backdrop, ChromeMetrics, Placement, SelectedRow};
+use quill::layout_style::{ChromeMetrics, Look, SelectedRow};
 
 /// The real window the preview stands for, in interface pixels.
 const MODEL_WIDTH: f32 = 1200.;
@@ -24,7 +24,7 @@ pub(in crate::ui) fn miniature(metrics: &ChromeMetrics, size: Size<Pixels>, them
     let gutter = s(metrics.gutter);
     let gap = s(metrics.bar_gap.max(8.) * 0.5);
     let radius = super::radius::card_in(metrics, theme) * scale;
-    let floating = metrics.placement == Placement::Overlaid;
+    let floating = metrics.look == Look::Cards;
     let wallpaper = wallpaper(theme);
     // Dark cards keep a faint light edge over the wallpaper, as the real
     // ones do (`frames::surface`).
@@ -33,15 +33,15 @@ pub(in crate::ui) fn miniature(metrics: &ChromeMetrics, size: Size<Pixels>, them
     let pane = theme.background;
     let bar = theme.background;
     let border = theme.border;
-    let divider = line(metrics.divider);
+    let divider = line(if floating { 0. } else { 1. });
 
     let row = |selected: bool| {
-        let fill = match (selected, metrics.selected_row) {
+        let fill = match (selected, metrics.look.selected_row()) {
             (false, _) => None,
             (true, SelectedRow::Tint) => Some(theme.primary.opacity(0.16)),
             (true, SelectedRow::Solid) => Some(theme.primary),
         };
-        let ink = match (selected, metrics.selected_row) {
+        let ink = match (selected, metrics.look.selected_row()) {
             (true, SelectedRow::Solid) => theme.primary_foreground,
             _ => theme.muted_foreground,
         };
@@ -124,9 +124,9 @@ pub(in crate::ui) fn miniature(metrics: &ChromeMetrics, size: Size<Pixels>, them
         .py(s(12.))
         .child(bubble(false, 260.))
         .child(bubble(true, 200.));
-    let chat_backdrop = match metrics.backdrop {
-        Backdrop::History => Some(wallpaper),
-        Backdrop::Window => None,
+    let chat_backdrop = match metrics.look {
+        Look::Lines => Some(wallpaper),
+        Look::Cards => None,
     };
     let chat = div()
         .flex()
@@ -146,9 +146,9 @@ pub(in crate::ui) fn miniature(metrics: &ChromeMetrics, size: Size<Pixels>, them
         .overflow_hidden()
         .gap(gutter)
         .p(gutter)
-        .bg(match metrics.backdrop {
-            Backdrop::History => Background::from(pane),
-            Backdrop::Window => wallpaper,
+        .bg(match metrics.look {
+            Look::Lines => Background::from(pane),
+            Look::Cards => wallpaper,
         })
         .child(list)
         .child(chat)

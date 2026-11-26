@@ -12,7 +12,7 @@ use gpui_kit::component::{Sizable, Size, StyledExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::layout_style::TitleStrip;
+use quill::layout_style::Look;
 
 /// `control` sizes the bar's buttons with the density
 /// (`QuillApp::control_size`); the bar's own height follows it through the
@@ -23,7 +23,7 @@ pub(super) fn main_title_bar(
     search_open: bool,
     update: Option<AnyElement>,
     menu_bar: Option<Entity<AppMenuBar>>,
-    strip: TitleStrip,
+    strip: Look,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let title = "Quill";

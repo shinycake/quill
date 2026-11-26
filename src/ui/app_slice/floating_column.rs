@@ -64,7 +64,7 @@ impl QuillApp {
         });
         // The rows lie out against the composer's height at once and are
         // drawn where its glide has got to, as Web K moves its bubbles.
-        let ms = metrics.motion.composer_ms;
+        let ms = self.composer_glide_ms();
         let (shift, moving) = slices.follow_composer(ms, cx.background_executor().now());
         if moving {
             self.request_app_tick(60, cx);

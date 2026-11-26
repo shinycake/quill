@@ -22,15 +22,8 @@ pub enum LayoutStyle {
     Floating,
 }
 
-/// `QUILL_DEMO_LAYOUT`, for demos and captures: `classic` or `floating`
-/// wins over the stored choice.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LayoutOverride {
-    Classic,
-    Floating,
-}
-
-impl LayoutOverride {
+impl LayoutStyle {
+    /// `classic` or `floating`, in any case, with spaces around.
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "classic" => Some(Self::Classic),
@@ -39,10 +32,10 @@ impl LayoutOverride {
         }
     }
 
-    /// The override in the environment, read once: it never changes after
-    /// launch.
-    pub fn from_env() -> Option<Self> {
-        static VALUE: std::sync::OnceLock<Option<LayoutOverride>> = std::sync::OnceLock::new();
+    /// `QUILL_DEMO_LAYOUT`, for demos and captures: it wins over the
+    /// stored choice. Read once: it never changes after launch.
+    pub fn demo_override() -> Option<Self> {
+        static VALUE: std::sync::OnceLock<Option<LayoutStyle>> = std::sync::OnceLock::new();
         *VALUE.get_or_init(|| {
             std::env::var("QUILL_DEMO_LAYOUT")
                 .ok()
@@ -50,17 +43,23 @@ impl LayoutOverride {
         })
     }
 
-    pub fn style(self) -> LayoutStyle {
-        match self {
-            Self::Classic => LayoutStyle::Classic,
-            Self::Floating => LayoutStyle::Floating,
-        }
+    /// A stored value that is not a layout loads as Classic, without
+    /// failing the rest of the file it sits in.
+    pub fn deserialize_or_classic<'de, D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(value
+            .as_str()
+            .and_then(Self::parse)
+            .unwrap_or(Self::Classic))
     }
 }
 
 /// The choice in force: the override when one is set, else the stored one.
-pub fn choice(stored: LayoutStyle, overridden: Option<LayoutOverride>) -> LayoutStyle {
-    overridden.map_or(stored, LayoutOverride::style)
+pub fn choice(stored: LayoutStyle, overridden: Option<LayoutStyle>) -> LayoutStyle {
+    overridden.unwrap_or(stored)
 }
 
 /// Web K's `$small-screen`: a window this wide or narrower is one column
@@ -99,14 +98,9 @@ pub enum BackdropKind {
     Plain { card_contrast: f32 },
 }
 
-/// What the window can tell the rules this frame.
+/// What the window can tell the rules this frame, beyond its width.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Readings {
-    /// The window's content width, interface pixels.
-    pub width: f32,
-    /// The narrowest width at which a window shows the Floating layout
-    /// ([`FLOATING_FROM`]).
-    pub floating_from: f32,
     pub contrast: Contrast,
     pub power: Power,
     pub backdrop: BackdropKind,
@@ -126,22 +120,15 @@ pub enum Elevation {
     Shadowed,
 }
 
-/// Where the conversation's header and composer sit.
+/// What a window draws its regions as. Classic's lines: panels divided
+/// by hairlines, the bars stacked over and under the history, which
+/// paints the wallpaper. Floating's cards: rounded cards and pills over
+/// the window's wallpaper, the bars over the history, which scrolls
+/// under them; menus pop and wear Web K's shape; pages cross.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Placement {
-    /// Stacked above and below the history, divided by lines.
-    Stacked,
-    /// Pills over the history, which scrolls under them.
-    Overlaid,
-}
-
-/// Who paints the chat wallpaper.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Backdrop {
-    /// The history, inside its own pane.
-    History,
-    /// The window, behind every card.
-    Window,
+pub enum Look {
+    Lines,
+    Cards,
 }
 
 /// How the open chat's row in the list is drawn.
@@ -151,34 +138,14 @@ pub enum SelectedRow {
     Solid,
 }
 
-/// The folder tabs' indicator.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FolderTabs {
-    Underline,
-    Pill,
-}
-
-/// The search field's shape.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SearchShape {
-    Field,
-    Pill,
-}
-
-/// How side panels sit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PanelDock {
-    /// A column divided by a line.
-    Column,
-    /// A card, docked or over the chat.
-    Card,
-}
-
-/// The title strip's lower edge.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TitleStrip {
-    Lined,
-    Bare,
+impl Look {
+    /// Lines tint the open chat's row; cards fill it with the accent.
+    pub fn selected_row(self) -> SelectedRow {
+        match self {
+            Look::Lines => SelectedRow::Tint,
+            Look::Cards => SelectedRow::Solid,
+        }
+    }
 }
 
 /// Row sizes in Standard density.
@@ -188,13 +155,6 @@ pub enum RowScale {
     Quill,
     /// Web K's (72 rows, 54 avatars).
     WebK,
-}
-
-/// Whether cards and pills clip their content to their corners.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Clip {
-    Square,
-    Rounded,
 }
 
 /// The easing of slides.
@@ -237,146 +197,45 @@ fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, x: f32) -> f32 {
     at(y1, y2, (lo + hi) / 2.)
 }
 
-/// How a bar above the history appears.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BarReveal {
-    /// Opens by height under a rectangular clip.
-    Slide,
-    /// Rises into place and fades in (a pill cannot be clipped open).
-    Rise,
-}
-
-/// How a menu enters.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MenuEnter {
-    /// The kit's fade and slide.
-    FadeSlide,
-    /// Scale from .8 and fade, from its anchor's corner.
-    Pop,
-}
-
-/// How one page gives way to another.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PageSwitch {
-    Cut,
-    Cross,
-}
-
-/// What a sliding card is drawn from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SlideDraw {
-    Live,
-    Snapshot,
-}
-
-/// Timings and shapes of the layout's motion (docs/decisions/floating-layout.md).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Motion {
-    pub curve: Curve,
-    pub panel_in_ms: u16,
-    pub panel_out_ms: u16,
-    pub sidebar_ms: u16,
-    pub bar_reveal: BarReveal,
-    pub menu: MenuEnter,
-    pub chat_switch: PageSwitch,
-    pub folder_page: PageSwitch,
-    /// The composer's height glide; 0 follows the measured height at once.
-    pub composer_ms: u16,
-    pub slides: SlideDraw,
-}
-
-/// The layout's numbers and shapes. Data, like `density::DensityMetrics`.
+/// The layout's look and the numbers that vary with it. Data, like
+/// `density::DensityMetrics`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChromeMetrics {
+    pub look: Look,
     /// Window edge to card, card to conversation column.
     pub gutter: f32,
     /// Between stacked floating bars.
     pub bar_gap: f32,
     /// Card and pill radius, in multiples of the theme radius.
     pub radius: f32,
-    /// Divider between regions.
-    pub divider: f32,
     /// Widest conversation column.
     pub chat_column: Option<f32>,
-    /// Shortest bar pill; 0 is the bar's natural height.
-    pub bar_height: f32,
-    pub placement: Placement,
-    pub backdrop: Backdrop,
-    pub selected_row: SelectedRow,
-    pub folder_tabs: FolderTabs,
-    pub search: SearchShape,
-    pub panels: PanelDock,
-    pub title: TitleStrip,
-    /// Row sizes in Standard density.
-    pub rows: RowScale,
-    pub clip: Clip,
     /// The list is a drawer at this width and under.
     pub drawer_to: Option<f32>,
-    pub motion: Motion,
+    /// Row sizes in Standard density.
+    pub rows: RowScale,
 }
 
 /// Today's layout, value for value.
 pub const CLASSIC: ChromeMetrics = ChromeMetrics {
+    look: Look::Lines,
     gutter: 0.,
     bar_gap: 0.,
     radius: 0.,
-    divider: 1.,
     chat_column: None,
-    bar_height: 0.,
-    placement: Placement::Stacked,
-    backdrop: Backdrop::History,
-    selected_row: SelectedRow::Tint,
-    folder_tabs: FolderTabs::Underline,
-    search: SearchShape::Field,
-    panels: PanelDock::Column,
-    title: TitleStrip::Lined,
-    rows: RowScale::Quill,
-    clip: Clip::Square,
     drawer_to: None,
-    motion: Motion {
-        curve: Curve::OutCubic,
-        panel_in_ms: 200,
-        panel_out_ms: 200,
-        sidebar_ms: 200,
-        bar_reveal: BarReveal::Slide,
-        menu: MenuEnter::FadeSlide,
-        chat_switch: PageSwitch::Cut,
-        folder_page: PageSwitch::Cut,
-        composer_ms: 0,
-        slides: SlideDraw::Live,
-    },
+    rows: RowScale::Quill,
 };
 
 /// Web K's layout in Quill's units.
 pub const FLOATING: ChromeMetrics = ChromeMetrics {
+    look: Look::Cards,
     gutter: 16.,
     bar_gap: 8.,
     radius: 4.,
-    divider: 0.,
     chat_column: Some(696.),
-    bar_height: 48.,
-    placement: Placement::Overlaid,
-    backdrop: Backdrop::Window,
-    selected_row: SelectedRow::Solid,
-    folder_tabs: FolderTabs::Pill,
-    search: SearchShape::Pill,
-    panels: PanelDock::Card,
-    title: TitleStrip::Bare,
-    rows: RowScale::WebK,
-    clip: Clip::Rounded,
     drawer_to: Some(DRAWER_TO),
-    motion: Motion {
-        curve: Curve::Standard,
-        panel_in_ms: 300,
-        panel_out_ms: 250,
-        sidebar_ms: 200,
-        bar_reveal: BarReveal::Rise,
-        menu: MenuEnter::Pop,
-        chat_switch: PageSwitch::Cross,
-        folder_page: PageSwitch::Cross,
-        composer_ms: 250,
-        slides: SlideDraw::Snapshot,
-    },
+    rows: RowScale::WebK,
 };
 
 /// What is drawn: a pure function of the choice and the readings.
@@ -395,35 +254,31 @@ impl Chrome {
     };
 }
 
-/// The chrome for `choice` (after the override) in a window that reads
-/// `readings`. The first matching row wins (docs/decisions/floating-layout.md).
-/// The metrics a window this wide draws: [`resolve`]'s table without
-/// the edge and elevation, for callers that have no theme to read (the
-/// shell's columns).
-pub fn metrics_for(
-    stored: LayoutStyle,
-    overridden: Option<LayoutOverride>,
-    width: f32,
-    floating_from: f32,
-) -> &'static ChromeMetrics {
-    if choice(stored, overridden) == LayoutStyle::Classic || width < floating_from {
-        &CLASSIC
-    } else {
-        &FLOATING
+/// The look a window this wide draws: Floating's cards only from
+/// [`FLOATING_FROM`] up.
+pub fn look_for(stored: LayoutStyle, overridden: Option<LayoutStyle>, width: f32) -> Look {
+    match choice(stored, overridden) {
+        LayoutStyle::Floating if width >= FLOATING_FROM => Look::Cards,
+        LayoutStyle::Classic | LayoutStyle::Floating => Look::Lines,
     }
 }
 
-pub fn resolve(
-    stored: LayoutStyle,
-    overridden: Option<LayoutOverride>,
-    readings: Readings,
-) -> Chrome {
-    if std::ptr::eq(
-        metrics_for(stored, overridden, readings.width, readings.floating_from),
-        &CLASSIC,
-    ) {
+/// The metrics of a look.
+pub fn metrics_of(look: Look) -> &'static ChromeMetrics {
+    match look {
+        Look::Lines => &CLASSIC,
+        Look::Cards => &FLOATING,
+    }
+}
+
+/// The chrome for `look` in a window that reads `readings` (only cards
+/// read them). The first matching row wins
+/// (docs/decisions/floating-layout.md).
+pub fn resolve(look: Look, readings: impl FnOnce() -> Readings) -> Chrome {
+    if look == Look::Lines {
         return Chrome::CLASSIC;
     }
+    let readings = readings();
     let plain_low = matches!(
         readings.backdrop,
         BackdropKind::Plain { card_contrast } if card_contrast < CARD_CONTRAST_FLOOR

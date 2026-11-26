@@ -12,7 +12,7 @@ use super::radius::card_in;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::layout_style::{Chrome, Clip, Edge, Elevation, Placement, TitleStrip};
+use quill::layout_style::{Chrome, Edge, Elevation, Look};
 
 /// The chat list column's own frame, inside its slot: Classic's right
 /// border, or a card's rounded fill (none over glass: the slot's card
@@ -23,12 +23,12 @@ pub(in crate::ui) fn list_frame<E: Styled + FluentBuilder>(
     theme: &Theme,
     glass: Option<&LensStyle>,
 ) -> E {
-    match chrome.metrics.clip {
-        Clip::Square => this
+    match chrome.metrics.look {
+        Look::Lines => this
             .border_r_1()
             .border_color(theme.border)
             .bg(theme.sidebar),
-        Clip::Rounded => surface(this, chrome, theme, glass),
+        Look::Cards => surface(this, chrome, theme, glass),
     }
 }
 
@@ -40,12 +40,12 @@ pub(in crate::ui) fn panel_frame<E: Styled + FluentBuilder>(
     theme: &Theme,
     glass: Option<&LensStyle>,
 ) -> E {
-    match chrome.metrics.clip {
-        Clip::Square => this
+    match chrome.metrics.look {
+        Look::Lines => this
             .border_l_1()
             .border_color(theme.border)
             .bg(theme.sidebar),
-        Clip::Rounded => surface(this, chrome, theme, glass),
+        Look::Cards => surface(this, chrome, theme, glass),
     }
 }
 
@@ -56,9 +56,9 @@ pub(in crate::ui) fn header_frame<E: Styled + FluentBuilder>(
     chrome: &Chrome,
     theme: &Theme,
 ) -> E {
-    match chrome.metrics.placement {
-        Placement::Stacked => this.border_b_1().border_color(theme.border),
-        Placement::Overlaid => this,
+    match chrome.metrics.look {
+        Look::Lines => this.border_b_1().border_color(theme.border),
+        Look::Cards => this,
     }
 }
 
@@ -69,9 +69,9 @@ pub(in crate::ui) fn composer_frame<E: Styled + FluentBuilder>(
     chrome: &Chrome,
     theme: &Theme,
 ) -> E {
-    match chrome.metrics.placement {
-        Placement::Stacked => this.border_t_1().border_color(theme.border),
-        Placement::Overlaid => this,
+    match chrome.metrics.look {
+        Look::Lines => this.border_t_1().border_color(theme.border),
+        Look::Cards => this,
     }
 }
 
@@ -82,21 +82,37 @@ pub(in crate::ui) fn tab_column_frame<E: Styled + FluentBuilder>(
     theme: &Theme,
     glass: Option<&LensStyle>,
 ) -> E {
-    match chrome.metrics.clip {
-        Clip::Square => this
+    match chrome.metrics.look {
+        Look::Lines => this
             .bg(theme.background)
             .border_r_1()
             .border_color(theme.border),
-        Clip::Rounded => card(surface(this, chrome, theme, glass), chrome, theme, glass),
+        Look::Cards => card(surface(this, chrome, theme, glass), chrome, theme, glass),
+    }
+}
+
+/// The column resize handle: Classic's lights its line on hover; between
+/// cards there is no line to light.
+pub(in crate::ui) fn resize_handle<E: InteractiveElement>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+) -> E {
+    match chrome.metrics.look {
+        Look::Lines => {
+            let line = theme.border;
+            this.hover(move |style| style.bg(line))
+        }
+        Look::Cards => this,
     }
 }
 
 /// The settings window: Classic's page fill; in Floating no fill of its
 /// own, so the window's wallpaper shows in the gutter around its two cards.
 pub(in crate::ui) fn settings_frame<E: Styled>(this: E, chrome: &Chrome, theme: &Theme) -> E {
-    match chrome.metrics.clip {
-        Clip::Square => this.bg(theme.background),
-        Clip::Rounded => {
+    match chrome.metrics.look {
+        Look::Lines => this.bg(theme.background),
+        Look::Cards => {
             let gutter = px(chrome.metrics.gutter);
             this.p(gutter).gap(gutter)
         }
@@ -106,9 +122,9 @@ pub(in crate::ui) fn settings_frame<E: Styled>(this: E, chrome: &Chrome, theme: 
 /// The settings list inside its card: no line at its edge, and clear on a
 /// glass card. Classic keeps the kit sidebar as it is.
 pub(in crate::ui) fn settings_list<E: Styled>(this: E, chrome: &Chrome, fill: Hsla) -> E {
-    match chrome.metrics.clip {
-        Clip::Square => this,
-        Clip::Rounded => this.border_r_0().border_l_0().bg(fill),
+    match chrome.metrics.look {
+        Look::Lines => this,
+        Look::Cards => this.border_r_0().border_l_0().bg(fill),
     }
 }
 
@@ -120,9 +136,9 @@ pub(in crate::ui) fn page_card<E: Styled + FluentBuilder>(
     theme: &Theme,
     glass: Option<&LensStyle>,
 ) -> E {
-    match chrome.metrics.clip {
-        Clip::Square => this,
-        Clip::Rounded => card(surface(this, chrome, theme, glass), chrome, theme, glass),
+    match chrome.metrics.look {
+        Look::Lines => this,
+        Look::Cards => card(surface(this, chrome, theme, glass), chrome, theme, glass),
     }
 }
 
@@ -188,9 +204,9 @@ pub(in crate::ui) fn card<E: Styled + FluentBuilder>(
     theme: &Theme,
     glass: Option<&LensStyle>,
 ) -> E {
-    match chrome.metrics.clip {
-        Clip::Square => this,
-        Clip::Rounded => card_clip(match glass {
+    match chrome.metrics.look {
+        Look::Lines => this,
+        Look::Cards => card_clip(match glass {
             Some(lens) => lens_on(this, chrome, theme, lens),
             None => this
                 .rounded(card_in(chrome.metrics, theme))
@@ -237,9 +253,9 @@ pub(in crate::ui) fn peek_surface<E: Styled + ParentElement + FluentBuilder>(
     chrome: &Chrome,
     theme: &Theme,
 ) -> E {
-    match chrome.metrics.clip {
-        Clip::Square => this.bg(theme.sidebar).shadow_xl(),
-        Clip::Rounded => {
+    match chrome.metrics.look {
+        Look::Lines => this.bg(theme.sidebar).shadow_xl(),
+        Look::Cards => {
             let gutter = px(chrome.metrics.gutter);
             this.child(
                 div()
@@ -271,9 +287,9 @@ fn drawer_shadow(theme: &Theme) -> Vec<BoxShadow> {
 /// slide: Floating's (Web K's dimmed chat behind the left column), none in
 /// Classic, whose sheet keeps its own shadow.
 pub(in crate::ui) fn drawer_scrim(chrome: &Chrome, shown: f32) -> Option<Hsla> {
-    match chrome.metrics.clip {
-        Clip::Square => None,
-        Clip::Rounded => Some(black().opacity(DRAWER_SCRIM * shown.clamp(0., 1.))),
+    match chrome.metrics.look {
+        Look::Lines => None,
+        Look::Cards => Some(black().opacity(DRAWER_SCRIM * shown.clamp(0., 1.))),
     }
 }
 
@@ -284,9 +300,9 @@ const DRAWER_SCRIM: f32 = 0.32;
 /// Floating neither, so the window's wallpaper runs under the strip as it
 /// does under the cards. Applied after the frame's own, so it only ever
 /// takes them away.
-pub(in crate::ui) fn title_strip<E: Styled>(this: E, strip: TitleStrip) -> E {
+pub(in crate::ui) fn title_strip<E: Styled>(this: E, strip: Look) -> E {
     match strip {
-        TitleStrip::Lined => this,
-        TitleStrip::Bare => this.border_b_0().bg(transparent_black()),
+        Look::Lines => this,
+        Look::Cards => this.border_b_0().bg(transparent_black()),
     }
 }

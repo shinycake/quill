@@ -15,8 +15,9 @@
 
 use super::menu_shape::menu_entrance;
 use crate::ui::glass;
+use gpui_kit::component::popover_shape::MenuEnter;
 use gpui_kit::*;
-use quill::layout_style::{Curve, MenuEnter};
+use quill::layout_style::Curve;
 use std::time::Duration;
 
 /// Web K's menu transition.

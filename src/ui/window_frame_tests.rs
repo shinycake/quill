@@ -201,23 +201,17 @@ fn traffic_lights_stay_centred_on_a_shorter_bar() {
 fn a_bare_strip_takes_the_line_away_and_a_lined_one_keeps_it(_cx: &mut TestAppContext) {
     use crate::ui::chrome::frames::title_strip;
     use gpui_kit::component::TitleBar;
-    use quill::layout_style::{CLASSIC, FLOATING};
+    use quill::layout_style::Look;
     let bottom = |mut this: gpui_kit::Div| this.style().border_widths.bottom;
     let row = || div().border_b_1();
-    assert_eq!(
-        bottom(title_strip(row(), CLASSIC.title)),
-        Some(px(1.).into())
-    );
-    assert_eq!(
-        bottom(title_strip(row(), FLOATING.title)),
-        Some(px(0.).into())
-    );
-    let mut kit = title_strip(TitleBar::new(), CLASSIC.title);
+    assert_eq!(bottom(title_strip(row(), Look::Lines)), Some(px(1.).into()));
+    assert_eq!(bottom(title_strip(row(), Look::Cards)), Some(px(0.).into()));
+    let mut kit = title_strip(TitleBar::new(), Look::Lines);
     assert_eq!(
         kit.style().border_widths.bottom,
         None,
         "the kit's own line stays"
     );
-    let mut kit = title_strip(TitleBar::new(), FLOATING.title);
+    let mut kit = title_strip(TitleBar::new(), Look::Cards);
     assert_eq!(kit.style().border_widths.bottom, Some(px(0.).into()));
 }

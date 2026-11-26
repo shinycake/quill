@@ -244,7 +244,7 @@ impl Render for ChatWindowView {
             // A submenu opened by key focuses its first row once drawn.
             app.frame.menu.items.apply_pending_focus(window, cx);
             let capture_blocked = app.capture_block_wanted();
-            let strip = (app.title_strip(), app.window_backdrop_layer(cx));
+            let strip = (app.look(), app.window_backdrop_layer(cx));
             (body, app.autoscroll_layer(cx), capture_blocked, strip)
         });
         if capture_blocked != self.capture_blocked
@@ -375,7 +375,7 @@ impl ChatWindowView {
             // screen Space here too, before its deadline passes unseen.
             app.viewer_follow_window_fullscreen(window);
             let body = app.chat_window_body(chat_id, window, cx);
-            let strip = (app.title_strip(), app.window_backdrop_layer(cx));
+            let strip = (app.look(), app.window_backdrop_layer(cx));
             app.set_window_scope(outer);
             (body, strip)
         });

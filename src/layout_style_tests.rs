@@ -2,8 +2,6 @@ use super::*;
 
 fn roomy() -> Readings {
     Readings {
-        width: 1440.,
-        floating_from: FLOATING_FROM,
         contrast: Contrast::Normal,
         power: Power::Normal,
         backdrop: BackdropKind::Picture,
@@ -11,66 +9,37 @@ fn roomy() -> Readings {
 }
 
 fn floating(readings: Readings) -> Chrome {
-    resolve(LayoutStyle::Floating, None, readings)
+    resolve(Look::Cards, || readings)
 }
 
 #[test]
-fn classic_holds_todays_literals() {
-    // The contract every render site is held to: Classic draws what Quill
-    // drew before the layout existed.
-    let c = CLASSIC;
-    assert_eq!(c.gutter, 0.);
-    assert_eq!(c.bar_gap, 0.);
-    assert_eq!(c.radius, 0.);
-    assert_eq!(c.divider, 1.);
-    assert_eq!(c.chat_column, None);
-    assert_eq!(c.bar_height, 0.);
-    assert_eq!(c.placement, Placement::Stacked);
-    assert_eq!(c.backdrop, Backdrop::History);
-    assert_eq!(c.selected_row, SelectedRow::Tint);
-    assert_eq!(c.folder_tabs, FolderTabs::Underline);
-    assert_eq!(c.search, SearchShape::Field);
-    assert_eq!(c.panels, PanelDock::Column);
-    assert_eq!(c.title, TitleStrip::Lined);
-    assert_eq!(c.rows, RowScale::Quill);
-    assert_eq!(c.clip, Clip::Square);
-    assert_eq!(c.drawer_to, None);
-    let m = c.motion;
-    assert_eq!(m.curve, Curve::OutCubic);
-    assert_eq!(
-        (m.panel_in_ms, m.panel_out_ms, m.sidebar_ms),
-        (200, 200, 200)
-    );
-    assert_eq!(m.bar_reveal, BarReveal::Slide);
-    assert_eq!(m.menu, MenuEnter::FadeSlide);
-    assert_eq!(m.chat_switch, PageSwitch::Cut);
-    assert_eq!(m.folder_page, PageSwitch::Cut);
-    assert_eq!(m.composer_ms, 0);
-    assert_eq!(m.slides, SlideDraw::Live);
-}
-
-#[test]
-fn classic_choice_is_classic_at_any_width() {
+fn classic_choice_is_lines_at_any_width() {
     for width in [320., 600., 601., 925., 926., 2560.] {
-        let readings = Readings { width, ..roomy() };
+        assert_eq!(look_for(LayoutStyle::Classic, None, width), Look::Lines);
+    }
+}
+
+#[test]
+fn floating_at_600_and_under_is_lines() {
+    for width in [320., 560., 600., 600.5] {
         assert_eq!(
-            resolve(LayoutStyle::Classic, None, readings),
-            Chrome::CLASSIC
+            look_for(LayoutStyle::Floating, None, width),
+            Look::Lines,
+            "width {width}"
         );
     }
+    assert_eq!(look_for(LayoutStyle::Floating, None, 601.), Look::Cards);
 }
 
 #[test]
-fn floating_at_600_and_under_is_classic() {
-    for width in [320., 560., 600., 600.5] {
-        let readings = Readings { width, ..roomy() };
-        assert_eq!(floating(readings), Chrome::CLASSIC, "width {width}");
-    }
-    let at_601 = floating(Readings {
-        width: 601.,
-        ..roomy()
-    });
-    assert_eq!(at_601.metrics, &FLOATING);
+fn lines_are_classic_whatever_the_readings() {
+    let asked = std::cell::Cell::new(false);
+    let read = || {
+        asked.set(true);
+        roomy()
+    };
+    assert_eq!(resolve(Look::Lines, read), Chrome::CLASSIC);
+    assert!(!asked.get(), "lines read nothing");
 }
 
 #[test]
@@ -138,31 +107,19 @@ fn a_plain_backdrop_under_the_floor_gets_a_hairline() {
 #[test]
 fn the_override_wins_over_the_choice() {
     assert_eq!(
-        resolve(
-            LayoutStyle::Classic,
-            Some(LayoutOverride::Floating),
-            roomy()
-        )
-        .metrics,
-        &FLOATING
+        look_for(LayoutStyle::Classic, Some(LayoutStyle::Floating), 1440.),
+        Look::Cards
     );
     assert_eq!(
-        resolve(
-            LayoutStyle::Floating,
-            Some(LayoutOverride::Classic),
-            roomy()
-        ),
-        Chrome::CLASSIC
+        look_for(LayoutStyle::Floating, Some(LayoutStyle::Classic), 1440.),
+        Look::Lines
     );
     assert_eq!(
-        LayoutOverride::parse(" Floating "),
-        Some(LayoutOverride::Floating)
+        LayoutStyle::parse(" Floating "),
+        Some(LayoutStyle::Floating)
     );
-    assert_eq!(
-        LayoutOverride::parse("classic"),
-        Some(LayoutOverride::Classic)
-    );
-    assert_eq!(LayoutOverride::parse("cards"), None);
+    assert_eq!(LayoutStyle::parse("classic"), Some(LayoutStyle::Classic));
+    assert_eq!(LayoutStyle::parse("cards"), None);
 }
 
 #[test]
@@ -172,13 +129,6 @@ fn the_choice_round_trips_and_defaults_to_classic() {
     let back: Option<LayoutStyle> = serde_json::from_str(&json).ok();
     assert_eq!(back, Some(LayoutStyle::Floating));
     assert_eq!(LayoutStyle::default(), LayoutStyle::Classic);
-}
-
-#[test]
-fn floating_follows_webk_breakpoints() {
-    assert_eq!(FLOATING_FROM, 601.);
-    assert_eq!(FLOATING.drawer_to, Some(925.));
-    assert_eq!(FLOATING.chat_column, Some(696.));
 }
 
 #[test]

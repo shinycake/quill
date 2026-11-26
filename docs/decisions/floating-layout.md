@@ -13,29 +13,35 @@ landed it.
 ## One choice, everything else derived (step 3)
 
 - `AppearancePrefs.layout: LayoutStyle` (`classic` | `floating`) is the
-  only new persisted state. A settings file without the key reads as
-  Classic.
-- `quill::layout_style::resolve(choice, override, readings) -> Chrome`
-  is pure. The first matching row wins:
+  only new persisted state. A settings file without the key, or with a
+  value this build does not know, reads as Classic; the rest of the file
+  still loads.
+- `quill::layout_style::look_for(choice, override, width) -> Look` picks
+  `Lines` (Classic, and Floating at 600 and under) or `Cards`. Then
+  `resolve(look, readings) -> Chrome` is pure, and reads the window's
+  wallpaper, contrast and power only for cards. The first matching row
+  wins:
 
-  | Choice | Reading | Result |
+  | Look | Reading | Result |
   | --- | --- | --- |
-  | Classic | any | `CLASSIC`, no edge, flat |
-  | Floating | width under 601 | the same value as Classic |
-  | Floating | high contrast | `FLOATING`, flat, hairline |
-  | Floating | battery saving forced | `FLOATING`, flat; hairline on a plain backdrop |
-  | Floating | plain backdrop under the contrast floor | `FLOATING`, shadowed, hairline |
-  | Floating | otherwise | `FLOATING`, shadowed, no edge |
+  | Lines | none read | `CLASSIC`, no edge, flat |
+  | Cards | high contrast | `FLOATING`, flat, hairline |
+  | Cards | battery saving forced | `FLOATING`, flat; hairline on a plain backdrop |
+  | Cards | plain backdrop under the contrast floor | `FLOATING`, shadowed, hairline |
+  | Cards | otherwise | `FLOATING`, shadowed, no edge |
 
 - The contrast floor is a WCAG contrast ratio of 1.15 between the card
   fill (`theme.sidebar`) and the plain window background
   (`theme.background`). The plan named a floor without a number; 1.15
   is where a card stops reading as a separate surface in the built-in
   themes without a wallpaper.
-- `ChromeMetrics` is data, two constants. `CLASSIC` holds today's
-  literals, pinned by `classic_holds_todays_literals` and, for the slide
-  timings, by `classic_slides_keep_todays_timing` against
-  `sidebar_reveal::SLIDE_DURATION`.
+- `ChromeMetrics` is data, two constants: the `Look` and the numbers
+  that vary with it (gutter, bar gap, radius, the centred column, the
+  drawer band, row sizes). Everything that only differs between the two
+  looks (lines or cards, where the wallpaper sits, the open row's fill,
+  the search and tab shapes, the title strip, how menus enter, whether
+  pages cross, the composer glide) is a `match` on the look in
+  `ui/chrome/`. The motion owners keep their own timings.
 - Breakpoints, Web K's, in interface pixels: 600 and under is one
   column with Classic's chrome (`ONE_COLUMN_TO`), 601 to 925 shows the
   list as a drawer (`DRAWER_TO`), above 925 the list is docked.

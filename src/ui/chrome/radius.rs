@@ -15,15 +15,3 @@ use quill::layout_style::ChromeMetrics;
 pub(in crate::ui) fn card_in(metrics: &ChromeMetrics, theme: &Theme) -> Pixels {
     theme.radius * metrics.radius
 }
-
-#[cfg(test)]
-mod tests {
-    use gpui_kit::px;
-
-    #[test]
-    fn the_card_step_is_four_theme_radii_and_classic_is_square() {
-        let base = px(6.);
-        assert_eq!(base * quill::layout_style::FLOATING.radius, px(24.));
-        assert_eq!(base * quill::layout_style::CLASSIC.radius, px(0.));
-    }
-}

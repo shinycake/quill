@@ -121,7 +121,7 @@ impl QuillApp {
         let theme = cx.theme();
         let ink = super::chat_row::RowInk::of(
             selected,
-            self.chrome_metrics().selected_row,
+            self.selected_row(),
             transparent_black(),
             theme.muted_foreground,
             theme,

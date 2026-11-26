@@ -10,8 +10,8 @@ use super::super::app::QuillApp;
 use super::super::folder_tabs::{FolderSlotKind, selected_slot};
 use super::super::motion::interface_animations_off;
 use super::super::page_cross::CrossLook;
+use crate::ui::chrome::PageSwitch;
 use gpui_kit::*;
-use quill::layout_style::PageSwitch;
 use std::time::Duration;
 
 /// Web K's slider transition.
@@ -48,7 +48,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.chrome_metrics().motion.folder_page != PageSwitch::Cross {
+        if self.page_switch() != PageSwitch::Cross {
             self.chat_list.folder_slide.cut();
             return rows;
         }

@@ -18,8 +18,8 @@ use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::layout_style::{
-    BackdropKind, Chrome, ChromeMetrics, Contrast, FLOATING_FROM, LayoutOverride, LayoutStyle,
-    Power, Readings, TitleStrip, contrast_ratio, metrics_for, resolve,
+    BackdropKind, Chrome, ChromeMetrics, Contrast, LayoutStyle, Look, Power, Readings,
+    contrast_ratio, look_for, metrics_of, resolve,
 };
 
 /// WCAG 2.1 relative luminance of a colour.
@@ -36,28 +36,60 @@ pub(in crate::ui) fn luminance(color: Hsla) -> f32 {
     0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b)
 }
 
+/// How one page gives way to another.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::ui) enum PageSwitch {
+    Cut,
+    Cross,
+}
+
+/// Web K's composer height glide.
+const COMPOSER_GLIDE_MS: u16 = 250;
+
 impl QuillApp {
     /// The layout in force: the `QUILL_DEMO_LAYOUT` override when set, else
     /// the Appearance choice. The Settings card and the onboarding card
     /// show this one, so a demo run with the override shows it selected.
     pub(in crate::ui) fn layout_choice(&self) -> LayoutStyle {
-        quill::layout_style::choice(self.appearance.layout, LayoutOverride::from_env())
+        quill::layout_style::choice(self.appearance.layout, LayoutStyle::demo_override())
+    }
+
+    /// How one page gives way to the next in this window (a chat switch,
+    /// a folder page): cut in Classic, crossed in Floating.
+    pub(in crate::ui) fn page_switch(&self) -> PageSwitch {
+        match self.look() {
+            Look::Lines => PageSwitch::Cut,
+            Look::Cards => PageSwitch::Cross,
+        }
+    }
+
+    /// How many milliseconds the rows take to follow the composer's new
+    /// height (Web K's W12): 0, at once, in Classic.
+    pub(in crate::ui) fn composer_glide_ms(&self) -> u16 {
+        match self.look() {
+            Look::Lines => 0,
+            Look::Cards => COMPOSER_GLIDE_MS,
+        }
+    }
+
+    /// How the open chat's row is drawn in this window.
+    pub(in crate::ui) fn selected_row(&self) -> quill::layout_style::SelectedRow {
+        self.look().selected_row()
+    }
+
+    /// The look of the window whose state is in place.
+    pub(in crate::ui) fn look(&self) -> Look {
+        look_for(
+            self.appearance.layout,
+            LayoutStyle::demo_override(),
+            f32::from(self.slices.window.width.get()),
+        )
     }
 
     /// The metrics of the window whose state is in place, which need no
     /// theme: the shell's columns read them.
     pub(in crate::ui) fn chrome_metrics(&self) -> &'static ChromeMetrics {
-        metrics_for(
-            self.appearance.layout,
-            LayoutOverride::from_env(),
-            f32::from(self.slices.window.width.get()),
-            FLOATING_FROM,
-        )
-    }
-
-    /// The window's title strip: lined in Classic, bare in Floating.
-    pub(in crate::ui) fn title_strip(&self) -> TitleStrip {
-        self.chrome_metrics().title
+        metrics_of(self.look())
     }
 
     /// The window is in the drawer band (Floating, 601 to 925 wide).
@@ -70,8 +102,8 @@ impl QuillApp {
 
     /// The wallpaper is the window's, under the cards (Floating), not the
     /// history's.
-    pub(in crate::ui) fn window_backdrop(&self, cx: &App) -> bool {
-        self.chrome(cx).metrics.backdrop == quill::layout_style::Backdrop::Window
+    pub(in crate::ui) fn window_backdrop(&self) -> bool {
+        self.look() == Look::Cards
     }
 
     /// The chat header's frame in this window (`frames::header_frame`).
@@ -150,11 +182,9 @@ impl QuillApp {
     /// resolves to glass (the `Card` recipe), else `None`: the opaque
     /// card. Classic has no cards, so never any.
     pub(in crate::ui) fn card_glass(&self, cx: &App) -> Option<LensStyle> {
-        match self.chrome_metrics().clip {
-            quill::layout_style::Clip::Square => None,
-            quill::layout_style::Clip::Rounded => {
-                super::glass::lens(super::glass::GlassRole::Card, cx)
-            }
+        match self.look() {
+            Look::Lines => None,
+            Look::Cards => super::glass::lens(super::glass::GlassRole::Card, cx),
         }
     }
 
@@ -177,7 +207,7 @@ impl QuillApp {
             .menu
             .row()
             .is_some_and(|menu| menu.chat_id == chat);
-        match target && self.chrome_metrics().clip == quill::layout_style::Clip::Rounded {
+        match target && self.look() == Look::Cards {
             true => fill.blend(crate::ui::pressable::hover_fill(cx.theme())),
             false => fill,
         }
@@ -185,13 +215,13 @@ impl QuillApp {
 
     /// The bars sit in a card over the history (Floating's header card).
     pub(in crate::ui) fn bars_in_card(&self) -> bool {
-        self.chrome_metrics().placement == quill::layout_style::Placement::Overlaid
+        self.look() == Look::Cards
     }
 
     /// Menus open over cards (Floating): the header's ⋮ menu opens from
     /// its button's right edge, inside the card, and carries icons.
     pub(in crate::ui) fn menus_in_cards(&self) -> bool {
-        self.chrome_metrics().clip == quill::layout_style::Clip::Rounded
+        self.look() == Look::Cards
     }
 
     /// Whether Floating marks this message: its menu is open.
@@ -200,7 +230,7 @@ impl QuillApp {
         chat: quill::ids::ChatId,
         message: quill::ids::MessageId,
     ) -> bool {
-        self.chrome_metrics().clip == quill::layout_style::Clip::Rounded
+        self.look() == Look::Cards
             && self
                 .message_ui
                 .menu
@@ -210,16 +240,12 @@ impl QuillApp {
 
     /// The header and the bars float over the history in their own slice.
     pub(in crate::ui) fn bars_float(&self) -> bool {
-        self.chrome_metrics().placement == quill::layout_style::Placement::Overlaid
+        self.look() == Look::Cards
     }
 
     /// What the window whose state is in place draws this frame.
     pub(in crate::ui) fn chrome(&self, cx: &App) -> Chrome {
-        resolve(
-            self.appearance.layout,
-            LayoutOverride::from_env(),
-            self.chrome_readings(cx),
-        )
+        resolve(self.look(), || self.chrome_readings(cx))
     }
 
     fn chrome_readings(&self, cx: &App) -> Readings {
@@ -234,8 +260,6 @@ impl QuillApp {
             },
         };
         Readings {
-            width: f32::from(self.slices.window.width.get()),
-            floating_from: FLOATING_FROM,
             contrast: if super::chat_theme::high_contrast() {
                 Contrast::High
             } else {
@@ -261,10 +285,10 @@ impl QuillApp {
     /// changed with it (a resize across 600 px), render the cached slices
     /// again, as their own bounds may not have changed.
     pub(in crate::ui) fn note_window_width(&self, width: Pixels, cx: &mut Context<Self>) {
-        let before = self.chrome(cx);
+        let before = self.look();
         self.slices.window.width.set(width);
-        menu_shape::note_drawn_window(self.chrome_metrics(), cx);
-        if self.chrome(cx) != before {
+        menu_shape::note_drawn_window(self.look(), cx);
+        if self.look() != before {
             self.notify_slices(cx);
         }
     }

@@ -17,7 +17,7 @@ use gpui_kit::component::{ActiveTheme, TITLE_BAR_HEIGHT, TitleBar};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::agent::ui_driver::redact::{WINDOW_CHROME, WINDOW_CHROME_CONTENT};
-use quill::layout_style::TitleStrip;
+use quill::layout_style::Look;
 use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -255,7 +255,7 @@ pub(crate) struct FrameTitleBar {
     /// Overrides [`use_native`] (tests draw both frames on any platform).
     native: Option<bool>,
     /// The window's strip (`ChromeMetrics::title`).
-    strip: TitleStrip,
+    strip: Look,
 }
 
 impl FrameTitleBar {
@@ -266,12 +266,12 @@ impl FrameTitleBar {
             children: SmallVec::new(),
             on_close_window: None,
             native: None,
-            strip: quill::layout_style::CLASSIC.title,
+            strip: quill::layout_style::CLASSIC.look,
         }
     }
 
-    /// The window's title strip, from its chrome (`QuillApp::title_strip`).
-    pub(crate) fn strip(mut self, strip: TitleStrip) -> Self {
+    /// The window's title strip, from its chrome (`QuillApp::look`).
+    pub(crate) fn strip(mut self, strip: Look) -> Self {
         self.strip = strip;
         self
     }

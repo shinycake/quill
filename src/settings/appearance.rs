@@ -229,8 +229,12 @@ pub struct AppearancePrefs {
     #[serde(default)]
     pub density: crate::density::Density,
     /// Appearance → Layout: Classic panels or Floating cards
-    /// (`crate::layout_style`). Classic by default.
-    #[serde(default)]
+    /// (`crate::layout_style`). Classic by default, and Classic for a
+    /// value this build does not know, so the rest of the file still loads.
+    #[serde(
+        default,
+        deserialize_with = "crate::layout_style::LayoutStyle::deserialize_or_classic"
+    )]
     pub layout: crate::layout_style::LayoutStyle,
     /// Appearance → Glass effects: menus, tabs and floating buttons drawn as
     /// glass (`crate::glass`). Solid by default.
@@ -530,6 +534,13 @@ mod tests {
         let old: AppearancePrefs = serde_json::from_str("{}").unwrap();
         assert_eq!(old.density, crate::density::Density::Standard);
         assert_eq!(old.layout, crate::layout_style::LayoutStyle::Classic);
+        // A layout from a newer build keeps the other choices.
+        let newer: Option<AppearancePrefs> =
+            serde_json::from_str(r#"{"layout":"stacked","font_size_px":17}"#).ok();
+        assert_eq!(
+            newer.map(|p| (p.layout, p.font_size_px)),
+            Some((crate::layout_style::LayoutStyle::Classic, 17))
+        );
 
         let prefs = AppearancePrefs {
             theme: ThemeChoice::Dark,

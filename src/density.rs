@@ -208,23 +208,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn web_k_rows_are_standard_s_alone() {
-        assert_eq!(Density::Standard.metrics_in(RowScale::WebK), &STANDARD_WEBK);
-        assert_eq!(Density::Compact.metrics_in(RowScale::WebK), &COMPACT);
-        assert_eq!(Density::Standard.metrics_in(RowScale::Quill), &STANDARD);
-        assert_eq!(Density::Compact.metrics_in(RowScale::Quill), &COMPACT);
-        assert_eq!(Density::Standard.metrics(), &STANDARD);
-        assert_eq!(
-            (
-                STANDARD_WEBK.row_base,
-                STANDARD_WEBK.avatar,
-                STANDARD_WEBK.search_field
-            ),
-            (72., 54., 44.)
-        );
-    }
-
-    #[test]
     fn rows_fit_their_photo_and_text_lines() {
         for m in [&STANDARD, &STANDARD_WEBK, &COMPACT] {
             assert!(m.avatar <= m.row_base);

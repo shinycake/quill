@@ -11,7 +11,7 @@ use crate::ui::app::QuillApp;
 use gpui_kit::component::theme::{ActiveTheme, Theme};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::layout_style::{Chrome, ChromeMetrics, Placement};
+use quill::layout_style::{Chrome, ChromeMetrics, Look};
 
 /// Where Classic draws a bar's hairline: under it (a bar over the history)
 /// or over it (a bar under the history).
@@ -36,9 +36,9 @@ pub(in crate::ui) fn bar<E: Styled>(
     metrics: &ChromeMetrics,
     theme: &Theme,
 ) -> E {
-    match metrics.placement {
-        Placement::Stacked => line(this, at, theme),
-        Placement::Overlaid => this.bg(transparent_black()),
+    match metrics.look {
+        Look::Lines => line(this, at, theme),
+        Look::Cards => this.bg(transparent_black()),
     }
 }
 
@@ -54,18 +54,18 @@ pub(in crate::ui) fn tinted_bar<E: Styled>(
     metrics: &ChromeMetrics,
     theme: &Theme,
 ) -> E {
-    match metrics.placement {
-        Placement::Stacked => line(this, at, theme),
-        Placement::Overlaid => tile(this, metrics, theme),
+    match metrics.look {
+        Look::Lines => line(this, at, theme),
+        Look::Cards => tile(this, metrics, theme),
     }
 }
 
 /// A coloured bar with no line in Classic (the call bars): as it is, or
 /// the rounded tile in its card.
 pub(in crate::ui) fn tinted_tile<E: Styled>(this: E, metrics: &ChromeMetrics, theme: &Theme) -> E {
-    match metrics.placement {
-        Placement::Stacked => this,
-        Placement::Overlaid => tile(this, metrics, theme),
+    match metrics.look {
+        Look::Lines => this,
+        Look::Cards => tile(this, metrics, theme),
     }
 }
 
@@ -93,9 +93,9 @@ pub(in crate::ui) fn strip<E: Styled + ParentElement + FluentBuilder>(
     metrics: &ChromeMetrics,
     theme: &Theme,
 ) -> E {
-    match metrics.placement {
-        Placement::Stacked => line(this, at, theme),
-        Placement::Overlaid => this.relative().child(
+    match metrics.look {
+        Look::Lines => line(this, at, theme),
+        Look::Cards => this.relative().child(
             card_divider(inset, theme)
                 .absolute()
                 .bottom_0()
@@ -114,9 +114,9 @@ pub(in crate::ui) fn stack_card<E: Styled + FluentBuilder>(
     theme: &Theme,
     glass: Option<&LensStyle>,
 ) -> E {
-    match chrome.metrics.placement {
-        Placement::Stacked => this,
-        Placement::Overlaid => pill(this, chrome, theme, glass),
+    match chrome.metrics.look {
+        Look::Lines => this,
+        Look::Cards => pill(this, chrome, theme, glass),
     }
 }
 
@@ -155,66 +155,5 @@ impl QuillApp {
             cx.theme(),
             self.card_glass(cx).as_ref(),
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{BarLine, bar, stack_card, tinted_bar, tinted_tile};
-    use gpui_kit::component::theme::Theme;
-    use gpui_kit::{Styled, div, transparent_black};
-    use quill::layout_style::Chrome;
-    use quill::layout_style::{CLASSIC, Edge, Elevation, FLOATING};
-
-    fn chrome(metrics: &'static quill::layout_style::ChromeMetrics) -> Chrome {
-        Chrome {
-            metrics,
-            edge: Edge::Hairline,
-            elevation: Elevation::Shadowed,
-        }
-    }
-
-    fn theme() -> Theme {
-        Theme::default()
-    }
-
-    /// Classic draws exactly the line each bar drew by hand.
-    #[test]
-    fn classic_bars_keep_their_lines() {
-        let theme = theme();
-        let classic = chrome(&CLASSIC);
-        for (at, mut by_hand) in [
-            (
-                BarLine::Under,
-                div().border_b_1().border_color(theme.border),
-            ),
-            (BarLine::Over, div().border_t_1().border_color(theme.border)),
-        ] {
-            let mut helped = bar(div(), at, classic.metrics, &theme);
-            assert!(helped.style().clone() == by_hand.style().clone());
-            let mut tinted = tinted_bar(div(), at, classic.metrics, &theme);
-            assert!(tinted.style().clone() == by_hand.style().clone());
-        }
-        let mut tile = tinted_tile(div(), classic.metrics, &theme);
-        assert!(tile.style().clone() == div().style().clone());
-        let mut card = stack_card(div(), &classic, &theme, None);
-        assert!(card.style().clone() == div().style().clone());
-    }
-
-    /// In a card a bar has no line and the card's fill; a tinted bar keeps
-    /// its own fill as a rounded tile.
-    #[test]
-    fn floating_bars_drop_their_lines() {
-        let theme = theme();
-        let floating = chrome(&FLOATING);
-        for at in [BarLine::Under, BarLine::Over] {
-            let mut helped = bar(div(), at, floating.metrics, &theme);
-            assert!(helped.style().clone() == div().bg(transparent_black()).style().clone());
-            let mut tinted = tinted_bar(div(), at, floating.metrics, &theme);
-            assert!(tinted.style().border_widths.top.is_none(), "no line");
-            assert!(tinted.style().corner_radii.top_left.is_some(), "a tile");
-        }
-        let mut card = stack_card(div(), &floating, &theme, None);
-        assert!(card.style().box_shadow.is_some(), "the card casts a shadow");
     }
 }

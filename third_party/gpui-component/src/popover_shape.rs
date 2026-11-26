@@ -15,9 +15,17 @@ pub struct PopoverShape {
     pub fill: Option<Hsla>,
     /// A hairline round the edge (`None` draws none).
     pub edge: Option<Hsla>,
-    /// Dropdowns pop in (scale from .8 and fade, through a snapshot) in
-    /// place of the fade and slide.
-    pub pop: bool,
+    /// How a dropdown enters.
+    pub enter: MenuEnter,
+}
+
+/// How a menu enters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuEnter {
+    /// The kit's fade and slide.
+    FadeSlide,
+    /// Scale from .8 and fade, through a snapshot.
+    Pop,
 }
 
 /// The app's answer: `Some` draws that shape, `None` the kit's own.

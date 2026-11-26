@@ -343,7 +343,7 @@ impl QuillApp {
     /// Floating's wallpaper as a layer under the whole window, title strip
     /// included; `None` in Classic, where the history draws its own.
     pub(super) fn window_backdrop_layer(&self, cx: &Context<Self>) -> Option<AnyElement> {
-        self.window_backdrop(cx).then(|| {
+        self.window_backdrop().then(|| {
             self.paint_window_backdrop(div().absolute().top_0().left_0().size_full(), cx)
                 .into_any_element()
         })
@@ -354,7 +354,7 @@ impl QuillApp {
         this: T,
         cx: &Context<Self>,
     ) -> T {
-        if !self.window_backdrop(cx) {
+        if !self.window_backdrop() {
             return this;
         }
         let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);

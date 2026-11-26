@@ -343,7 +343,7 @@ impl Render for QuillApp {
                 // the title row (macOS uses the native menu bar installed by
                 // `setup_app_menus`).
                 cfg!(not(target_os = "macos")).then(|| self.menu_bar.clone()),
-                self.title_strip(),
+                self.look(),
                 cx,
             ))
             .children(self.frozen_banner(cx))

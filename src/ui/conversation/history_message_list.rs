@@ -388,7 +388,7 @@ impl QuillApp {
             .begin_render(surface, target, cx);
         let weak = cx.weak_entity();
         let look = self.chat_look(self.viewed_chat().map(|c| c.0), cx);
-        let window_backdrop = self.window_backdrop(cx);
+        let window_backdrop = self.window_backdrop();
         let palette = self.history_palette(&look, cx);
         self.history.palette.set(palette);
         let date_pill =
