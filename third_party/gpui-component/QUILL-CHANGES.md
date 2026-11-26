@@ -156,6 +156,15 @@ indicator still has to go, in tab widths), for the segmented variant's
 selection pill of a bar built with `TabBar::glass_selection()`. Re-apply
 when re-vendoring.
 
+`src/popover_shape.rs` (new), `src/styled.rs`: the Floating layout
+(`docs/decisions/floating-layout.md`). `PopoverShapeHook` is a global
+holding one function to an optional `PopoverShape` (corner radius and
+shadow); Quill installs it. While it answers `Some`, `popover_style` draws
+that radius and shadow instead of the theme radius and the ring-and-shadow
+edge, and clips the content to its rounded shape (`clip_rounded`); while it
+answers `None`, or with no global, popovers draw exactly as before. Glass
+popovers take the radius and the clip. Re-apply when re-vendoring.
+
 ## Rounded content masks
 
 Changed by the Quill project in 2026

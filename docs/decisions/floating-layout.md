@@ -406,3 +406,54 @@ scrolls), then solid cards on battery.
   fill, but faintly): both are left as they are.
 - Compact mode was not captured (no demo switch for it); the table test
   proves it is unchanged.
+
+## Menus take Web K's shape
+
+Owner note: context menus should have rounded corners like Web K. In
+Floating every menu, dropdown and popover takes `.btn-menu`'s shape from
+tweb (`scss/partials/_button.scss`): a 16px radius
+(`$border-radius-medium`) and a `0 0 10px rgba(0, 0, 0, .15)` shadow, the
+same in night mode, with its rows clipped to the corners
+(`clip_rounded`). Classic menus keep the kit's radius and ring-and-shadow
+edge, byte for byte (Classic captures identical, the chat menu included).
+
+Two surfaces draw menus. Quill's own (`MenuSurface::menu_surface`) and
+the kit's (`popover_style`, used by the popup menu, select, combobox,
+popover, date picker and completion list). The kit gets a hook,
+`PopoverShapeHook` (`third_party/gpui-component/src/popover_shape.rs`,
+recorded in `QUILL-CHANGES.md`), and Quill answers it from
+`chrome::menu_shape`.
+
+Which window's shape: a menu is built while its window draws, and every
+window notes its width before it builds anything
+(`QuillApp::note_window_width`, main and chat windows). That call also
+writes the clip of the window being drawn (`DrawnWindowClip`), and both
+surfaces read it. A chat window under 601 wide draws Classic menus while
+the main window draws Floating ones. Glass menus take the radius and the
+clip; the lens keeps its own rim and shadow.
+
+Not changed yet: the menus still open with the kit's fade and slide; the
+Web K pop (scale .8 to 1) is step 11a.
+
+## Title strip (step 10)
+
+`frames::title_strip` takes the strip's lower line away in Floating and
+leaves Classic's alone. It runs after the line is set: on Quill's own
+frame the kit's `TitleBar` draws its border and then the caller's style,
+and on the system frame the slim row sets `border_b_1` first. The strip
+keeps its opaque fill on every platform, so the caption, the menu bar,
+the update pill and Search stay legible over any wallpaper. The bar
+keeps its height: the cards and the wallpaper do not move.
+
+`FrameTitleBar::strip` takes the window's strip. The main window passes
+`QuillApp::title_strip()`; a chat window reads it while its own state is
+in place (the same update that notes its width), so a narrow chat window
+next to a wide main window keeps its line.
+
+Proof: the light main window differs from the step 9 build only in the
+two device-pixel rows of the line (66 and 67 at 2x) and in the caption
+and Search, which sit half a point lower: centred in the whole strip now
+that no line takes its last point. The chat window capture shows no line. The system frame
+cannot be drawn on macOS (`window_frame::supported`), so
+`window_frame_tests` checks the style both frames end with: Classic keeps
+1px, Floating ends at 0.
