@@ -63,9 +63,12 @@ const DARK_FROST: f32 = 0.875;
 /// rim. Kept narrow, or a tall slab's corners crease along the diagonals.
 const BEVEL: f32 = 24.0;
 /// The bar shows only its lower edge over rows of text right under its
-/// own labels: half the bend, and a thicker frost and blur than the rest,
+/// own labels: a third of the bend, and a thicker frost and blur than the rest,
 /// or the rows ghost through.
-const BAR_BEND: f32 = 0.5;
+const BAR_BEND: f32 = 0.3;
+/// Media plates and buttons sit a few pixels from captions and other
+/// controls: at the full pull their rim shows that text as a ghost.
+const MEDIA_BEND: f32 = 0.3;
 const BAR_MIDDLE_LIGHT: f32 = 0.78;
 const BAR_MIDDLE_DARK: f32 = 0.68;
 const BAR_BLUR: f32 = 8.0;
@@ -168,7 +171,7 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor, tuning: &GlassTuning)
     };
     // A clear dome sized by the button's height, bending the backdrop at
     // its rim (the bevel shrinks to a small button's half height).
-    let dome = |tint: Hsla| LensStyle {
+    let dome = |tint: Hsla, bend: f32| LensStyle {
         unit: 0.0,
         bevel: LENS_DESIGN_HEIGHT * 0.42,
         band: None,
@@ -179,7 +182,7 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor, tuning: &GlassTuning)
         color: opaque(tint),
         surface: opaque(tint),
         material: LensMaterial::Clear {
-            bend: bevel_bend(tuning, 1.0),
+            bend: bevel_bend(tuning, bend),
             frost,
             blur,
             blur_mix: 1.0,
@@ -219,10 +222,10 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor, tuning: &GlassTuning)
         },
         GlassRole::MediaText => LensStyle {
             border: None,
-            ..slab(black(), 0.0, bevel_bend(tuning, 1.0))
+            ..slab(black(), 0.0, bevel_bend(tuning, MEDIA_BEND))
         },
-        GlassRole::Control | GlassRole::Selection => dome(colors.background),
-        GlassRole::MediaIcon => dome(black()),
+        GlassRole::Control | GlassRole::Selection => dome(colors.background, 1.0),
+        GlassRole::MediaIcon => dome(black(), MEDIA_BEND),
     }
 }
 

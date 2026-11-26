@@ -167,10 +167,13 @@ Liquid merge and Corner radius sliders shape its floating blobs; Quill's
 shapes come from the layout. A drag redraws every window on each step
 and saves on release.
 
-Every role scales the same dials: menus, panels, media plates and
-buttons take them as set; the chat-list bar takes half the pull and
-split, half the specular, its own thicker frost and at least an 8 px
-blur; media glass keeps its full frost. The contrast test holds for the
+Every role scales the same dials: menus, panels and buttons take them
+as set; the chat-list bar takes 0.3 of the pull and split, half the
+specular, its own thicker frost and at least an 8 px blur; media plates
+and buttons take 0.3 of the pull and split and keep their full frost.
+The before/after captures showed why: at the full pull, the video
+controls' rim showed the caption 10 px above it as ghost text, and the
+bar's lower edge smeared the first row into itself. The contrast test holds for the
 default dials only. A person who turns Frost down chooses fainter labels.
 
 ## Not done, and why
