@@ -2217,7 +2217,20 @@ impl PlatformWindow for MacWindow {
         let native_view_layout = native_views::plan_layout(&this, scene);
         native_views::update_background(&mut this, scene);
         native_views::scene_drawn(&mut this, scene);
-        this.renderer.draw(scene);
+        // Quill: an Objective-C exception thrown while drawing would unwind
+        // through GPUI's frame and drop the window (docs/decisions/
+        // glass-display-link.md). Caught here, it costs one frame.
+        let renderer = &mut this.renderer;
+        if let Err(exception) =
+            objc2::exception::catch(std::panic::AssertUnwindSafe(|| renderer.draw(scene)))
+        {
+            log::error!("drawing a frame threw {exception:?}");
+        }
+        // Quill: a frame the screen is short of is presented again in the
+        // display link's next update (`MetalRenderer::owes_present`).
+        if this.renderer.owes_present() {
+            self.2.demand.store(true, Ordering::Relaxed);
+        }
         drop(this);
         native_views::apply_layout(&self.0, native_view_layout);
         crate::frame_presented();
@@ -3733,12 +3746,15 @@ fn run_step(
     idle.drew.store(false, Ordering::Relaxed);
     idle.demand.store(false, Ordering::Relaxed);
     let running = idle.running.load(Ordering::Relaxed);
+    // Quill: a frame the screen is short of is presented again.
+    let require_presentation = lock.renderer.owes_present();
 
     if let Some(mut callback) = lock.request_frame_callback.take() {
         drop(lock);
         callback(RequestFrameOptions {
             signal_at,
             signal_source: FrameRequestSource::NativeCallback,
+            require_presentation,
             ..Default::default()
         });
         lock = window_state.lock();

@@ -664,7 +664,8 @@ impl MetalRenderer {
 /// QUILL: whether the layer hands out drawables the lens pass can read.
 /// Readable drawables cost the compositor its direct path, so they are
 /// asked for when glass is drawn and given back after a stretch of frames
-/// without any (or when the window goes idle).
+/// without any. Idling keeps them: an idle window draws nothing, and its
+/// next frame usually has its glass again.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum DrawableReads {
     #[default]
