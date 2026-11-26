@@ -93,6 +93,9 @@ impl QuillApp {
                     self.card_glass(cx).as_ref(),
                 )
             })
+            .when(self.folder_rail_active(), |this| {
+                crate::ui::chrome::frames::joined_to_rail(this, &chrome)
+            })
             .flex()
             .flex_col()
             .gap(px(m.sidebar_gap))

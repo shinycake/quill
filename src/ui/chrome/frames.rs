@@ -49,6 +49,91 @@ pub(in crate::ui) fn panel_frame<E: Styled + FluentBuilder>(
     }
 }
 
+/// The folder rail's frame (the Left folder layout): Classic's fill and
+/// right border; over cards the rail and the chat list are one card, so
+/// the rail takes the card's left corners and its edge on its three outer
+/// sides, and the list's own edge is the line between them
+/// ([`joined_to_rail`]). Over glass the slot's lens is the fill.
+pub(in crate::ui) fn rail_frame<E: Styled + FluentBuilder>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+    glass: Option<&LensStyle>,
+) -> E {
+    match chrome.metrics.look {
+        Look::Lines => this
+            .bg(theme.sidebar)
+            .border_r_1()
+            .border_color(theme.border),
+        Look::Cards => {
+            let this = this.rounded_l(card_in(chrome.metrics, theme));
+            match (glass, card_edge(chrome, theme)) {
+                (Some(_), _) => this,
+                (None, Some(edge)) => this
+                    .bg(theme.sidebar)
+                    .border_l_1()
+                    .border_t_1()
+                    .border_b_1()
+                    .border_color(edge),
+                (None, None) => this.bg(theme.sidebar),
+            }
+        }
+    }
+}
+
+/// The chat list beside the folder rail: over cards its left corners are
+/// square, as the rail holds the card's left end.
+pub(in crate::ui) fn joined_to_rail<E: Styled>(this: E, chrome: &Chrome) -> E {
+    match chrome.metrics.look {
+        Look::Lines => this,
+        Look::Cards => this.rounded_l(px(0.)),
+    }
+}
+
+/// A column beside the chat list (the forum's topics): Classic's lined
+/// column, or a card with the gutter before it, above and below it.
+/// `slot` holds the column and takes its width; `column` is the column.
+pub(in crate::ui) fn side_column<S, E>(
+    slot: S,
+    column: E,
+    chrome: &Chrome,
+    theme: &Theme,
+    glass: Option<&LensStyle>,
+) -> S
+where
+    S: Styled + ParentElement + FluentBuilder,
+    E: Styled + FluentBuilder + IntoElement,
+{
+    match chrome.metrics.look {
+        Look::Lines => slot.child(
+            column
+                .size_full()
+                .border_r_1()
+                .border_color(theme.border)
+                .bg(theme.sidebar),
+        ),
+        Look::Cards => {
+            let gutter = px(chrome.metrics.gutter);
+            slot.pl(gutter).py(gutter).child(card(
+                surface(column.size_full(), chrome, theme, glass),
+                chrome,
+                theme,
+                glass,
+            ))
+        }
+    }
+}
+
+/// The edge a card draws, as [`surface`] does: the hairline, the faint
+/// light edge of a dark card, or none.
+fn card_edge(chrome: &Chrome, theme: &Theme) -> Option<Hsla> {
+    match chrome.edge {
+        Edge::Hairline => Some(theme.border),
+        Edge::None if theme.is_dark() => Some(DARK_CARD_EDGE),
+        Edge::None => None,
+    }
+}
+
 /// The column resize handle: Classic's lights its line on hover; between
 /// cards there is no line to light.
 pub(in crate::ui) fn resize_handle<E: InteractiveElement>(

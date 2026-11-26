@@ -142,23 +142,26 @@ impl QuillApp {
         let count = open
             .and_then(|id| self.session().map(|s| s.ordered_forum_topics(id).len()))
             .unwrap_or(0);
-        div()
+        let chrome = self.chrome();
+        let gutter = chrome.metrics.gutter;
+        let slot = div()
             .id("forum-column")
             .role(gpui_kit::Role::Group)
             .a11y_tag(quill::agent::ui_driver::redact::REGION_FORUM)
             .flex()
-            .flex_col()
             .map(|this| {
                 if pane == ForumPane::Fill {
                     this.flex_1().min_w_0()
                 } else {
-                    this.flex_none().w(px(quill::state::FORUM_COLUMN_WIDTH))
+                    this.flex_none()
+                        .w(px(gutter + quill::state::FORUM_COLUMN_WIDTH))
                 }
             })
-            .h_full()
-            .border_r_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
+            .h_full();
+        let column = div()
+            .flex()
+            .flex_col()
+            .min_w_0()
             .child(
                 div()
                     .flex()
@@ -218,8 +221,15 @@ impl QuillApp {
                     .min_h_0()
                     .overflow_y_scroll()
                     .child(self.forum_topics_pane(open, cx)),
-            )
-            .into_any_element()
+            );
+        crate::ui::chrome::frames::side_column(
+            slot,
+            column,
+            &chrome,
+            cx.theme(),
+            self.card_glass(cx).as_ref(),
+        )
+        .into_any_element()
     }
 
     /// Phase 5.1: select a forum topic (live: `searchChatMessages` with
