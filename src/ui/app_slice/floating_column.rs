@@ -69,9 +69,36 @@ impl QuillApp {
         if moving {
             self.request_app_tick(60, cx);
         }
+        // A chat switch crosses the history alone (`chat_switch`): the
+        // pills drawn after it stay put.
+        let rows = history
+            .absolute()
+            .top(shift - gutter)
+            .bottom(-shift)
+            .left_0()
+            .right_0()
+            .into_any_element();
+        let rows = slices.chat_switch.draw(
+            rows,
+            &super::chat_switch::CHAT_SWITCH,
+            cx.background_executor().now(),
+        );
         column
             .relative()
-            .child(history.absolute().top(shift).left_0().size_full())
+            // Rows end at the header card's top: none show in the gap
+            // between it and the title strip, as in Web K, where the
+            // bubbles scroll under the header and stop there.
+            .child(
+                div()
+                    .absolute()
+                    .top(gutter)
+                    .bottom_0()
+                    .left_0()
+                    .right_0()
+                    .flex()
+                    .overflow_hidden()
+                    .child(rows),
+            )
             .child(
                 lane("conversation-top")
                     .role(gpui_kit::Role::Group)

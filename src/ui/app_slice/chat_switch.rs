@@ -2,6 +2,11 @@
 //! the right and fades in over the old one, which fades out where it was,
 //! 200 ms on the standard curve. Classic cuts, as before.
 //!
+//! While the bars float, only the history crosses: the header and composer
+//! pills stay where they are and show the new chat at once, as Web K's
+//! bubbles slide under a topbar and an input that do not move
+//! (`floating_column`).
+//!
 //! The stage is the window's (`WindowSlices::chat_switch`, a
 //! `page_cross::PageStage`); the slot settles it before it draws.
 
@@ -65,6 +70,10 @@ impl QuillApp {
             self.request_app_tick(60, cx);
         }
         let slot = self.conversation_slot(cx);
+        if self.bars_float() {
+            // The floating column draws the stage around its history.
+            return slot;
+        }
         self.slices.window.chat_switch.draw(slot, &CHAT_SWITCH, now)
     }
 }
