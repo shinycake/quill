@@ -27,12 +27,15 @@ pub(crate) trait MenuSurface: Styled + Sized {
         };
         this.border_1()
             .text_color(theme.popover_foreground)
-            .glass_or(GlassRole::Menu, cx, |this| {
-                let this = this.border_color(theme.border).bg(theme.popover);
-                match shape {
-                    Some(shape) => this.shadow(shape.shadow),
-                    None => this.shadow_lg(),
-                }
+            .glass_or(GlassRole::Menu, cx, |this| match shape {
+                Some(shape) => this
+                    .border_color(shape.edge.unwrap_or(theme.border))
+                    .bg(shape.fill.unwrap_or(theme.popover))
+                    .shadow(shape.shadow),
+                None => this
+                    .border_color(theme.border)
+                    .bg(theme.popover)
+                    .shadow_lg(),
             })
     }
 }

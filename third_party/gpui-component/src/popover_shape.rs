@@ -4,13 +4,17 @@
 //! that shape instead of the theme radius and the ring-and-shadow edge. See
 //! QUILL-CHANGES.md.
 
-use gpui::{App, BoxShadow, Global, Pixels};
+use gpui::{App, BoxShadow, Global, Hsla, Pixels};
 
 /// A popover's corners and shadow, and how a dropdown enters.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopoverShape {
     pub radius: Pixels,
     pub shadow: Vec<BoxShadow>,
+    /// A fill in place of the theme's popover colour (`None` keeps it).
+    pub fill: Option<Hsla>,
+    /// A hairline round the edge (`None` draws none).
+    pub edge: Option<Hsla>,
     /// Dropdowns pop in (scale from .8 and fade, through a snapshot) in
     /// place of the fade and slide.
     pub pop: bool,

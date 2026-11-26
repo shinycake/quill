@@ -5,6 +5,9 @@ use crate::ui::status_note::StatusNote;
 use quill::connect::ConnectSendError;
 use quill::lang::{keys, tr};
 
+/// How strongly Floating marks the message its menu is open on.
+const MENU_TARGET_TINT: f32 = 0.35;
+
 impl QuillApp {
     pub(in crate::ui) fn history_row_seek_bar(
         &self,
@@ -272,6 +275,11 @@ impl QuillApp {
                     )
                     .when(selection_tint > 0., |this| {
                         this.bg(cx.theme().selection.opacity(selection_tint))
+                    })
+                    // Floating: the message its menu is open on stays
+                    // marked, as Web K marks it, so the menu shows whose it is.
+                    .when(self.menu_on_row(row_chat, row_msg), |this| {
+                        this.bg(cx.theme().selection.opacity(MENU_TARGET_TINT))
                     })
                     // M1: failed sends stay visibly marked so the retry
                     // affordance is noticed (`updateMessageSendFailed`).

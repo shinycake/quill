@@ -13,7 +13,7 @@ fn menus_take_web_k_shape_only_while_a_floating_window_draws(cx: &mut TestAppCon
             shape.as_ref().map(|shape| shape.radius),
             Some(px(MENU_RADIUS))
         );
-        assert_eq!(shape.map(|shape| shape.shadow), Some(menu_shadow()));
+        assert_eq!(shape.map(|shape| shape.shadow), Some(menu_shadow(false)));
         note_drawn_window(&CLASSIC, cx);
         assert_eq!(popover_shape(cx), None, "a Classic window draws next");
     });

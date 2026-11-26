@@ -204,11 +204,15 @@ impl<T: Styled + Sized> ThemeStyled for T {
         }
         // No border: the edge is the ring inside `popover_shadow`, which is how
         // shadcn draws it and the only way the shadow can show through it.
-        let shadow = match shape {
-            Some(shape) => shape.shadow,
-            None => popover_shadow(popover_ring(cx), 1.),
+        let (fill, edge, shadow) = match shape {
+            Some(shape) => (shape.fill.unwrap_or(theme.popover), shape.edge, shape.shadow),
+            None => (theme.popover, None, popover_shadow(popover_ring(cx), 1.)),
         };
-        this.bg(theme.popover)
+        let this = match edge {
+            Some(edge) => this.border_1().border_color(edge),
+            None => this,
+        };
+        this.bg(fill)
             .text_color(theme.popover_foreground)
             .shadow(shadow)
     }

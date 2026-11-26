@@ -5,6 +5,7 @@
 
 use super::app::QuillApp;
 use super::navigation::NavigationAction;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::*;
@@ -122,6 +123,11 @@ impl QuillApp {
                 })
             })
             .unwrap_or_default();
+        let floating = self.menus_in_cards();
+        let anchor = match floating {
+            true => Anchor::TopRight,
+            false => Anchor::TopLeft,
+        };
         Button::new("chat-more-menu")
             .icon(gpui_kit::assets::IconName::EllipsisVertical)
             .ghost()
@@ -134,13 +140,21 @@ impl QuillApp {
                     );
                 }
             })
-            .dropdown_menu(move |mut menu, _, _| {
+            // Floating: it opens under the button towards the card's
+            // inside, so it never reaches past the header card's right end,
+            // and its rows carry icons as the other menus' do.
+            .dropdown_menu_with_anchor(anchor, move |mut menu, _, _| {
                 for entry in &entries {
                     let (label, action) =
                         entry_label(*entry, muted, archived, view_toggle, is_secret);
                     let owner = owner.clone();
                     let entry = *entry;
-                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                    let item = PopupMenuItem::new(label);
+                    let item = match floating {
+                        true => item.icon(entry_icon(entry, muted, archived)),
+                        false => item,
+                    };
+                    menu = menu.item(item.on_click(move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| {
                             let Some(chat_id) = chat_id else {
                                 return;
@@ -219,6 +233,37 @@ impl QuillApp {
 
 /// The label of an entry and, when an existing `NavigationAction` handles
 /// it, that action.
+/// Each entry's icon, as the chat row's and the message's menus carry
+/// theirs (Telegram Desktop's top bar menu has one on every row).
+fn entry_icon(entry: HeaderEntry, muted: bool, archived: bool) -> IconName {
+    match entry {
+        HeaderEntry::Mute if muted => IconName::Bell,
+        HeaderEntry::Mute => IconName::BellOff,
+        HeaderEntry::NewTopic => IconName::MessageCirclePlus,
+        HeaderEntry::ViewProfile(_) => IconName::CircleUser,
+        HeaderEntry::ViewAsTopics => IconName::List,
+        HeaderEntry::Boost(_) => IconName::Gem,
+        HeaderEntry::CreatePoll => IconName::ChartBar,
+        HeaderEntry::Wallpaper => IconName::Image,
+        HeaderEntry::ViewDiscussion => IconName::MessagesSquare,
+        HeaderEntry::Export => IconName::Download,
+        HeaderEntry::Translate => IconName::Languages,
+        HeaderEntry::Report => IconName::Flag,
+        HeaderEntry::Archive if archived => IconName::ArchiveRestore,
+        HeaderEntry::Archive => IconName::Archive,
+        HeaderEntry::Folders => IconName::Folder,
+        HeaderEntry::SharedMedia => IconName::Images,
+        HeaderEntry::Statistics => IconName::ChartColumn,
+        HeaderEntry::Monetization => IconName::CircleDollarSign,
+        HeaderEntry::AutoDelete => IconName::Clock,
+        HeaderEntry::ReceivedGifts | HeaderEntry::Gift => IconName::Gift,
+        HeaderEntry::SendMoney => IconName::Coins,
+        HeaderEntry::NewWindow => IconName::ExternalLink,
+        HeaderEntry::AgentAccess => IconName::Bot,
+        HeaderEntry::CloseSecretChat => IconName::Lock,
+    }
+}
+
 fn entry_label(
     entry: HeaderEntry,
     muted: bool,
