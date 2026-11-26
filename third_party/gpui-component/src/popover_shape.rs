@@ -58,3 +58,36 @@ pub fn shadow_reach(shadows: &[BoxShadow]) -> Pixels {
         })
         .fold(Pixels::ZERO, Pixels::max)
 }
+
+/// QUILL (concentric corners): the radius of a rounded shape set `inset`
+/// inside a rounded container of radius `outer`, so the two curves share a
+/// centre. A container too tight to inset from gives square corners.
+pub fn concentric_radius(outer: Pixels, inset: Pixels) -> Pixels {
+    (outer - inset).max(Pixels::ZERO)
+}
+
+/// The corner radius and edge width `popover_style` gives a popover in
+/// `window`. Glass draws its rim inside the lens, so it takes no width.
+pub fn popover_frame(window: &Window, cx: &App) -> (Pixels, Pixels) {
+    let shape = popover_shape(window, cx);
+    let radius = shape
+        .as_ref()
+        .map_or(crate::ActiveTheme::theme(cx).radius, |shape| shape.radius);
+    let glass = crate::popover_glass::popover_glass(
+        crate::popover_glass::PopoverGlassSurface::Popover,
+        cx,
+    )
+    .is_some();
+    let edge = match shape.and_then(|shape| shape.edge) {
+        Some(_) if !glass => gpui::px(1.),
+        _ => Pixels::ZERO,
+    };
+    (radius, edge)
+}
+
+/// The radius of a row (a menu item, a list row) set `padding` inside a
+/// popover in `window`: concentric with the popover's corners.
+pub fn popover_row_radius(padding: Pixels, window: &Window, cx: &App) -> Pixels {
+    let (radius, edge) = popover_frame(window, cx);
+    concentric_radius(radius, padding + edge)
+}

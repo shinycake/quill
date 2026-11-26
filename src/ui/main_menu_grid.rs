@@ -285,6 +285,8 @@ impl QuillApp {
         };
         let ring = focus_ring(theme);
         let over = hover_fill(theme);
+        // Glass effects: the lit tile is a glass highlight, not a grey square.
+        let glass = super::glass::lens(GlassRole::Highlight, cx);
         div()
             .id(("main-menu-tile", entry as usize))
             .relative()
@@ -300,8 +302,14 @@ impl QuillApp {
             .role(gpui_kit::Role::Button)
             .aria_label(label)
             .tab_index(0)
-            .pressable(theme)
-            .when(highlighted, |tile| tile.bg(over).shadow(vec![ring]))
+            .pressable_lit(theme, glass)
+            .when(highlighted, |tile| {
+                match glass {
+                    Some(lens) => tile.backdrop_glass(Some(lens)),
+                    None => tile.bg(over),
+                }
+                .shadow(vec![ring])
+            })
             .child(
                 div()
                     .size(rems(2.5))

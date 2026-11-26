@@ -256,6 +256,15 @@ pub(super) fn surface<E: Styled + FluentBuilder>(
     }
 }
 
+/// How wide a card's edge is drawn (`surface`): a hairline, or none.
+pub(in crate::ui) fn edge_width(chrome: &Chrome, theme: &Theme) -> Pixels {
+    match chrome.edge {
+        Edge::Hairline => px(1.),
+        Edge::None if theme.is_dark() => px(1.),
+        Edge::None => px(0.),
+    }
+}
+
 /// The edge of a dark card over the wallpaper.
 pub(super) const DARK_CARD_EDGE: Hsla = Hsla {
     h: 0.,

@@ -193,3 +193,23 @@ Changed by the Quill project in 2026
 (`docs/decisions/rounded-content-masks.md`): gpui-pre's `ContentMask` gained
 a rounded part, so the masks built here are made with `ContentMask::rect`
 instead of a struct literal. Nothing else changes.
+
+## Concentric highlights and glass highlights
+
+Changed by the Quill project in 2026 (`docs/decisions/concentric-highlights.md`).
+`popover_shape::concentric_radius(outer, inset)` is the radius of a shape
+set `inset` inside a rounded container; `popover_frame` reads the radius and
+edge width `popover_style` gives a popover in a window, and
+`popover_row_radius(padding, ..)` the radius of a row `padding` inside it.
+`PopupMenu` rows (`popup_menu.rs`, padding `MENU_PADDING`) and the rows of
+the select and combobox lists (`searchable_list/item.rs`, padding
+`DROPDOWN_LIST_PADDING`) take it, in place of the theme radius (which left
+the highlight's corners off the popover's own). `PopoverGlassSurface` gained
+`Highlight`: `popover_glass::highlight` lights a row as glass where the app
+answers with a lens, and with the accent fill otherwise; menu items
+(`menu/menu_item.rs`) and select rows use it. `TabBar::glass_selection`
+now also covers the Pill variant, whose selected label keeps the theme's text
+colour over the glass (`Tab::glass_selection`). A Pill tab with a prefix or
+suffix pads its whole content (`tab.rs`, `pill_parts`), so the icon and the
+counter sit inside the capsule with the label instead of on its rounded
+ends. Re-apply when re-vendoring.

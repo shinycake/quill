@@ -14,7 +14,7 @@ use gpui::{
     prelude::FluentBuilder, px, rems,
 };
 use gpui::{
-    ClickEvent, Half, MouseDownEvent, MouseMoveEvent, OwnedMenuItem, Point, Subscription, Task,
+    ClickEvent, MouseDownEvent, MouseMoveEvent, OwnedMenuItem, Point, Subscription, Task,
 };
 use gpui_base::{LayoutDirection, LogicalStyledExt as _, TestSupportExt as _};
 
@@ -1439,10 +1439,11 @@ impl PopupMenu {
 
         let is_submenu = matches!(item, PopupMenuItem::Submenu { .. });
 
-        let (item_height, radius) = match self.size {
-            Size::Small => (rems(1.25), options.radius.half()),
-            _ => (rems(1.625), options.radius),
+        let item_height = match self.size {
+            Size::Small => rems(1.25),
+            _ => rems(1.625),
         };
+        let radius = options.radius;
 
         let this = MenuItemElement::new(ix)
             .relative()
@@ -1661,6 +1662,9 @@ impl Focusable for PopupMenu {
     }
 }
 
+/// Between the menu's edge and its rows.
+const MENU_PADDING: Pixels = px(4.);
+
 #[derive(Clone, Copy)]
 struct RenderOptions {
     has_left_icon: bool,
@@ -1708,7 +1712,9 @@ impl Render for PopupMenu {
         let options = RenderOptions {
             has_left_icon,
             check_side: self.check_side,
-            radius: cx.theme().radius.min(px(8.)),
+            // QUILL (concentric corners): the rows' corners follow the
+            // menu's, inset by its padding (`p_1`) and edge.
+            radius: crate::popover_shape::popover_row_radius(MENU_PADDING, window, cx),
         };
 
         v_flex()
@@ -1731,7 +1737,7 @@ impl Render for PopupMenu {
             .child(
                 v_flex()
                     .id("items")
-                    .p_1()
+                    .p(MENU_PADDING)
                     .gap_y_0p5()
                     .min_w(rems(8.))
                     .when_some(self.min_width, |this, min_width| this.min_w(min_width))

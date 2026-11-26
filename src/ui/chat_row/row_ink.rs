@@ -136,6 +136,25 @@ impl RowInk {
     }
 }
 
+impl RowInk {
+    /// The ink of a row on a glass card, whose open row is a glass
+    /// highlight: Classic's tint colours, but the lens is the open row's
+    /// fill, so the row keeps the list's own (`rest_fill`) and no hover fill
+    /// of its own.
+    pub(in crate::ui) fn on_glass(
+        open: bool,
+        rest_fill: Hsla,
+        muted_fg: Hsla,
+        theme: &ThemeColor,
+    ) -> Self {
+        Self {
+            fill: rest_fill,
+            open_hover: None,
+            ..Self::of(open, SelectedRow::Tint, rest_fill, muted_fg, theme)
+        }
+    }
+}
+
 /// Secondary text on the solid row: the row's text colour, softened.
 const SOLID_SECONDARY_ALPHA: f32 = 0.9;
 

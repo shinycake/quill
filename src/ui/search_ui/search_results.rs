@@ -277,6 +277,7 @@ impl QuillApp {
                         None,
                         &query,
                         photo,
+                        self.list_row_corners(cx),
                         cx,
                         move |this, window, cx| {
                             this.select_search_chat(id, window, cx);
@@ -342,6 +343,7 @@ impl QuillApp {
                         None,
                         &query,
                         photo,
+                        self.list_row_corners(cx),
                         cx,
                         move |this, window, cx| {
                             this.select_search_chat(id, window, cx);
@@ -378,6 +380,7 @@ impl QuillApp {
                         Some(date),
                         &query,
                         photo,
+                        self.list_row_corners(cx),
                         cx,
                         move |this, window, cx| {
                             this.select_search_message(chat_id, message_id, window, cx);

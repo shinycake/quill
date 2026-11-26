@@ -60,6 +60,9 @@ pub enum TabVariant {
     Folder,
 }
 
+/// QUILL: between a pill tab's icon, label and counter.
+const PILL_PART_GAP: Pixels = px(6.);
+
 impl TabVariant {
     fn height(&self, size: Size) -> Pixels {
         match size {
@@ -552,6 +555,9 @@ pub struct Tab {
     /// tab switch. Used to key the selected tab's text color fade so it
     /// restarts in sync with the indicator slide.
     pub(super) indicator_epoch: u64,
+    /// QUILL (glass effects): the bar draws its sliding selection as glass,
+    /// so the selected label keeps the theme's text colour.
+    pub(super) glass_selection: bool,
     /// Whether a [`TabVariant::Folder`] tab draws the divider after it.
     pub(super) separator: bool,
     /// Whether the [`super::TabBar`] reports the pointer over this tab. Kept
@@ -606,6 +612,7 @@ impl Default for Tab {
             indicator_active: false,
             indicator_ready: true,
             indicator_epoch: 0,
+            glass_selection: false,
             separator: false,
             hovered: false,
             prefix: None,
@@ -776,6 +783,10 @@ impl RenderOnce for Tab {
         if self.disabled {
             hover_style = self.variant.disabled(self.selected, cx);
         }
+        // QUILL (glass effects): a glass pill is clear, not the accent fill.
+        if self.glass_selection && self.variant == TabVariant::Pill {
+            selected_style.fg = cx.theme().foreground;
+        }
         let tab_bar_prefix = self.tab_bar_prefix.unwrap_or_default();
         if !tab_bar_prefix {
             // The first tab meets the bar's start edge, so it drops that border.
@@ -805,6 +816,17 @@ impl RenderOnce for Tab {
         let radius = self.variant.radius(self.size, cx);
         let inner_radius = self.variant.inner_radius(self.size, cx);
         let inner_paddings = self.variant.inner_paddings(self.size);
+        // QUILL (Pill with a prefix or suffix): the pill pads its whole
+        // content, so an icon or a counter sits inside the capsule with the
+        // label rather than on its rounded end.
+        let pill_parts = self.variant == TabVariant::Pill
+            && self.icon.is_none()
+            && (self.prefix.is_some() || self.suffix.is_some());
+        let inner_paddings = match pill_parts {
+            true => Edges::default(),
+            false => inner_paddings,
+        };
+        let pill_padding = self.variant.inner_paddings(self.size).left;
         let inner_margins = self.variant.inner_margins(self.size);
         let inner_height = self.variant.inner_height(self.size);
         let height = self.variant.height(self.size);
@@ -978,7 +1000,10 @@ impl RenderOnce for Tab {
                 Some(max_width) => this.flex_nowrap().max_w(max_width),
                 None => this.flex_wrap(),
             })
-            .gap_1()
+            .map(|this| match pill_parts {
+                true => this.gap(PILL_PART_GAP).px(pill_padding),
+                false => this.gap_1(),
+            })
             .items_center()
             .flex_shrink_0()
             .h(height)

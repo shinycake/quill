@@ -139,6 +139,8 @@ default-features = false
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2]
 version = "0.6"
+# Quill: `exception` for `objc2::exception::catch` around a frame's draw.
+features = ["exception"]
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
 version = "0.3.2"

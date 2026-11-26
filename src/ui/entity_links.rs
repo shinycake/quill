@@ -18,6 +18,7 @@ use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_surface::MenuSurface;
+use crate::ui::menu_surface::{RowHighlight as _, menu_row_radius};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -632,11 +633,11 @@ impl QuillApp {
                             .gap_3()
                             .px_3()
                             .py_1p5()
-                            .rounded_md()
+                            .rounded(menu_row_radius(self.look(), cx))
                             .cursor_pointer()
                             .text_sm()
                             .text_color(text_menu())
-                            .hover(|style| style.bg(row_hover))
+                            .hover_highlight(row_hover, cx)
                             .role(gpui_kit::Role::MenuItem)
                             .aria_label(label)
                             .child(Icon::new(gpui_kit::assets::IconName::Copy).size(px(16.)))
@@ -662,11 +663,11 @@ impl QuillApp {
                             .gap_3()
                             .px_3()
                             .py_1p5()
-                            .rounded_md()
+                            .rounded(menu_row_radius(self.look(), cx))
                             .cursor_pointer()
                             .text_sm()
                             .text_color(text_menu())
-                            .hover(|style| style.bg(row_hover))
+                            .hover_highlight(row_hover, cx)
                             .role(gpui_kit::Role::MenuItem)
                             .aria_label(label.clone())
                             .child(label)

@@ -8,6 +8,7 @@ use super::*;
 use crate::ui::context_menu_keys::ContextMenuItems;
 use crate::ui::menu_aim::MenuAimRow as _;
 use crate::ui::menu_states::{ChatMenuState, ChatMenuSubmenu};
+use crate::ui::menu_surface::MenuRowCorners as _;
 use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;
 use quill::chatlist_menu::{ExitEntry, exit_entry, mute_offered};
@@ -47,11 +48,11 @@ pub(super) fn menu_row<I: Into<ElementId>>(
         .gap_3()
         .px_3()
         .py_1p5()
-        .rounded_md()
+        .menu_row_corners(items, cx)
         .cursor_pointer()
         .text_sm()
         .text_color(if danger { danger_bright() } else { text_menu() })
-        .menu_hover(hover, items)
+        .menu_hover(hover, items, cx)
         .menu_key_target(key, items, cx)
         .role(gpui_kit::Role::MenuItem)
         .aria_label(label.clone())

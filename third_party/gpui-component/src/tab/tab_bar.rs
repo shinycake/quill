@@ -112,8 +112,8 @@ impl TabBar {
         self
     }
 
-    /// QUILL (glass effects): let the app draw the segmented selection as
-    /// glass (`popover_glass`), for a tab bar that floats over content.
+    /// QUILL (glass effects): let the app draw the segmented or pill
+    /// selection as glass (`popover_glass`).
     pub fn glass_selection(mut self) -> Self {
         self.glass_selection = true;
         self
@@ -280,14 +280,15 @@ impl TabBar {
         // QUILL (glass effects): the segmented selection can be glass that
         // clears while it slides (`popover_glass`).
         let travel = ((left - to_left).abs() / to_width.max(px(1.))).clamp(0., 1.);
+        // A pill is a lit row's glass (`Highlight`), a segment the
+        // sliding selection.
+        let selection_surface = match variant {
+            TabVariant::Pill => crate::popover_glass::PopoverGlassSurface::Highlight,
+            _ => crate::popover_glass::PopoverGlassSurface::TabSelection { travel },
+        };
         let selection_glass = self
             .glass_selection
-            .then(|| {
-                crate::popover_glass::popover_glass(
-                    crate::popover_glass::PopoverGlassSurface::TabSelection { travel },
-                    cx,
-                )
-            })
+            .then(|| crate::popover_glass::popover_glass(selection_surface, cx))
             .flatten();
         let indicator = div()
             .absolute()
@@ -311,8 +312,11 @@ impl TabBar {
                 TabVariant::Pill => el.flex().items_center().child(
                     div()
                         .size_full()
-                        .bg(cx.theme().tokens.primary)
-                        .rounded(cx.theme().radius_full()),
+                        .rounded(cx.theme().radius_full())
+                        .map(|pill| match selection_glass {
+                            Some(lens) => pill.backdrop_glass(Some(lens)),
+                            None => pill.bg(cx.theme().tokens.primary),
+                        }),
                 ),
                 TabVariant::Underline => el.child(
                     div()
@@ -523,6 +527,16 @@ impl RenderOnce for TabBar {
         reveal.advance(window, cx);
 
         let padding_x = paddings.left;
+        // QUILL (glass effects): whether the sliding selection is glass now.
+        let glass_selection = self.glass_selection
+            && crate::popover_glass::popover_glass(
+                match self.variant {
+                    TabVariant::Pill => crate::popover_glass::PopoverGlassSurface::Highlight,
+                    _ => crate::popover_glass::PopoverGlassSurface::TabSelection { travel: 0. },
+                },
+                cx,
+            )
+            .is_some();
         let indicator = self.render_indicator(&bounds_rc, window, cx);
         let indicator_epoch = indicator.as_ref().map(|(_, epoch)| *epoch).unwrap_or(0);
         let mut indicator_element = indicator.map(|(el, _)| el);
@@ -564,6 +578,7 @@ impl RenderOnce for TabBar {
             tab.indicator_active = has_indicator;
             tab.indicator_ready = indicator_ready;
             tab.indicator_epoch = indicator_epoch;
+            tab.glass_selection = glass_selection;
             tab.hovered = hovered_ix == Some(ix);
             tab.separator = self.variant == TabVariant::Folder
                 && ix + 1 < num_tabs
