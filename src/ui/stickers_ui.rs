@@ -219,6 +219,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let roots = self.media_display_roots();
+        let metrics = self.chrome_metrics();
         let file_id = sticker.file_id;
         let emoji = sticker.emoji.clone();
         let display_id = sticker.display_file_id();
@@ -243,7 +244,7 @@ impl QuillApp {
                 .w(px(72.))
                 .h(px(72.))
                 .aspect_ratio(px(72.) / px(72.))
-                .rounded_md()
+                .map(|this| crate::ui::chrome::dropdown::sticker_tile(this, metrics))
                 .object_fit(ObjectFit::Contain)
                 .with_fallback({
                     let label = label.clone();
@@ -251,7 +252,7 @@ impl QuillApp {
                         div()
                             .w(px(72.))
                             .h(px(72.))
-                            .rounded_md()
+                            .map(|this| crate::ui::chrome::dropdown::sticker_tile(this, metrics))
                             .bg(fill_muted())
                             .flex()
                             .items_center()
@@ -266,7 +267,7 @@ impl QuillApp {
                 .id(SharedString::from(cell_id))
                 .w(px(72.))
                 .h(px(72.))
-                .rounded_md()
+                .map(|this| crate::ui::chrome::dropdown::sticker_tile(this, metrics))
                 .bg(bg_subtle())
                 .border_1()
                 .border_color(text_muted())
@@ -288,7 +289,7 @@ impl QuillApp {
             .relative()
             .w(px(72.))
             .h(px(72.))
-            .rounded_md()
+            .map(|this| crate::ui::chrome::dropdown::sticker_tile(this, metrics))
             .pressable(cx.theme())
             .role(gpui_kit::Role::Button)
             .aria_label(tr_with(

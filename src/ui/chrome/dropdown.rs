@@ -27,3 +27,15 @@ pub(in crate::ui) fn shadow<E: Styled>(this: E, metrics: &ChromeMetrics, theme: 
         Look::Cards => this.shadow(menu_shadow(theme.is_dark())),
     }
 }
+
+/// A sticker's tile (the panel's and the composer's suggestions): the
+/// kit's corners, or Web K's `.super-sticker` (`$border-radius-medium`).
+pub(in crate::ui) fn sticker_tile<E: Styled>(this: E, metrics: &ChromeMetrics) -> E {
+    match metrics.look {
+        Look::Lines => this.rounded_md(),
+        Look::Cards => this.rounded(px(STICKER_TILE_RADIUS)),
+    }
+}
+
+/// Web K's `$border-radius-medium`.
+const STICKER_TILE_RADIUS: f32 = 16.;

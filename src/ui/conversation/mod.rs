@@ -567,3 +567,29 @@ mod open_position_tests;
 #[cfg(feature = "demo-capture")]
 #[path = "thread_root_jump_tests.rs"]
 mod thread_root_jump_tests;
+
+impl QuillApp {
+    /// A note in place of a topic's history: Classic's placeholder, or a
+    /// service bubble over cards (`chrome::history_parts::pane_note`).
+    pub(super) fn pane_note(
+        &self,
+        title: &'static str,
+        body: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let ink = super::chrome::history_parts::MarkInk {
+            bar: super::chat_palette::service_bg(theme.secondary.opacity(0.7)),
+            pill: super::chat_palette::service_bg(theme.secondary),
+            text: theme.secondary_foreground,
+        };
+        let metrics = self.chrome_metrics();
+        super::chrome::history_parts::pane_note(
+            || crate::ui::app::pane_placeholder(title, body, cx).into_any_element(),
+            title.into(),
+            body.into(),
+            &ink,
+            metrics,
+        )
+    }
+}

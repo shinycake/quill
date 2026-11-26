@@ -671,14 +671,11 @@ impl QuillApp {
                 // with the topic column on screen the pane only asks for
                 // a choice.
                 if forum_on_screen {
-                    pane(
-                        pane_placeholder(
-                            tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
-                            tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
-                            cx,
-                        )
-                        .into_any_element(),
-                    )
+                    pane(self.pane_note(
+                        tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
+                        tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
+                        cx,
+                    ))
                 } else {
                     pane(self.forum_topics_pane(open, cx).into_any_element())
                 }
@@ -691,14 +688,11 @@ impl QuillApp {
                 } else if topic_loading {
                     pane(history_skeleton().into_any_element())
                 } else if topic_empty {
-                    pane(
-                        pane_placeholder(
-                            tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC),
-                            tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC_2),
-                            cx,
-                        )
-                        .into_any_element(),
-                    )
+                    pane(self.pane_note(
+                        tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC),
+                        tr(keys::Q_CHAT_NO_MESSAGES_IN_THIS_TOPIC_2),
+                        cx,
+                    ))
                 } else {
                     let (key, rows) =
                         self.topic_rows_input(open, open_topic, topic_history, highlight_id);
