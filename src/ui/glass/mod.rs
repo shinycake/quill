@@ -15,11 +15,14 @@ pub(crate) mod probe;
 pub(crate) mod recipes;
 mod settings_row;
 pub(crate) mod surface;
+pub(crate) mod tuner;
+mod tuner_preview;
 
 use gpui_kit::component::popover_glass::{PopoverGlass, PopoverGlassSurface};
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
 use quill::glass::{GlassLook, GlassOverride, Material, Readings, SolidReason, resolve};
+use quill::glass_tuning::GlassTuning;
 
 pub(crate) use recipes::GlassRole;
 pub(crate) use surface::{GlassFill, GlassSurface, glass_button, media_glass_button};
@@ -28,6 +31,8 @@ pub(crate) use surface::{GlassFill, GlassSurface, glass_button, media_glass_butt
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct GlassState {
     material: Material,
+    /// The dials of Settings › Appearance › Glass effects.
+    tuning: GlassTuning,
     high_contrast_theme: bool,
     system: probe::SystemGlass,
     /// Whether the GPU is a software rasterizer, once a window has said.
@@ -59,9 +64,11 @@ pub(crate) fn look(cx: &App) -> GlassLook {
 
 /// The glass `role` draws now, or `None` under the solid look.
 pub(crate) fn lens(role: GlassRole, cx: &App) -> Option<LensStyle> {
-    look(cx)
+    let state = cx.try_global::<GlassState>()?;
+    state
+        .look
         .is_glass()
-        .then(|| recipes::recipe(role, &cx.theme().colors))
+        .then(|| recipes::recipe(role, &cx.theme().colors, &state.tuning))
 }
 
 /// The kit's popovers and toasts ask through this.
@@ -85,6 +92,7 @@ fn update(cx: &mut App, change: impl FnOnce(&mut GlassState)) {
     let before = cx.try_global::<GlassState>().copied();
     let mut state = before.unwrap_or(GlassState {
         material: Material::Solid,
+        tuning: GlassTuning::default(),
         high_contrast_theme: false,
         system: probe::SystemGlass::default(),
         software_adapter: None,
@@ -98,7 +106,9 @@ fn update(cx: &mut App, change: impl FnOnce(&mut GlassState)) {
     if before == Some(state) {
         return;
     }
-    let redraw = before.is_none_or(|before| before.look != state.look);
+    let redraw = before.is_none_or(|before| {
+        before.look != state.look || (state.look.is_glass() && before.tuning != state.tuning)
+    });
     cx.set_global(state);
     if redraw {
         cx.refresh_windows();
@@ -117,13 +127,25 @@ fn read_software_adapter(cx: &mut App) -> Option<bool> {
     })
 }
 
-/// The Appearance pref and the theme's high contrast
+/// The Appearance prefs and the theme's high contrast
 /// (`QuillApp::apply_appearance`).
-pub(crate) fn set_choice(material: Material, high_contrast_theme: bool, cx: &mut App) {
+pub(crate) fn set_choice(
+    material: Material,
+    tuning: GlassTuning,
+    high_contrast_theme: bool,
+    cx: &mut App,
+) {
     update(cx, |state| {
         state.material = material;
+        state.tuning = tuning;
         state.high_contrast_theme = high_contrast_theme;
     });
+}
+
+/// A tuning dial moved: the windows redraw with it before it is saved
+/// (the slider's release saves it through [`set_choice`]).
+pub(crate) fn set_tuning(tuning: GlassTuning, cx: &mut App) {
+    update(cx, |state| state.tuning = tuning);
 }
 
 /// The probe's answer.

@@ -159,7 +159,7 @@ fn backdrops(role: GlassRole) -> Vec<(&'static str, Rgba, f32, f32)> {
 fn check(theme: &str, colors: &ThemeColor) {
     let mut failures = Vec::new();
     for role in GlassRole::ALL {
-        let style = recipe(role, colors);
+        let style = recipe(role, colors, &GlassTuning::default());
         let labels = labels(role, colors);
         for (name, backdrop, primary_floor, secondary_floor) in backdrops(role) {
             let glass = settled_over(&style, backdrop);
@@ -195,9 +195,58 @@ fn every_recipe_keeps_its_labels_readable_in_dark() {
 #[test]
 fn a_card_keeps_a_quieter_rim_than_a_menu() {
     for colors in [ThemeColor::light(), ThemeColor::dark()] {
-        let card = recipe(GlassRole::Card, &colors);
-        let menu = recipe(GlassRole::Menu, &colors);
+        let card = recipe(GlassRole::Card, &colors, &GlassTuning::default());
+        let menu = recipe(GlassRole::Menu, &colors, &GlassTuning::default());
         assert!(card.tune.rim < menu.tune.rim && card.tune.fresnel < menu.tune.fresnel);
+    }
+}
+
+/// The default dials draw the shipped look; a dial moves every role's
+/// value together, and media glass keeps its frost whatever the dial.
+#[test]
+fn the_dials_scale_the_shipped_look() {
+    use quill::glass_tuning::GlassDial;
+    fn radial(style: &LensStyle) -> Option<f32> {
+        match style.material {
+            LensMaterial::Clear {
+                bend: LensBend::Radial { amount },
+                ..
+            } => Some(f32::from(amount)),
+            _ => None,
+        }
+    }
+    fn frost(style: &LensStyle) -> Option<f32> {
+        match style.material {
+            LensMaterial::Clear { frost, .. } => Some(frost),
+            LensMaterial::Tinted { .. } => None,
+        }
+    }
+    let colors = ThemeColor::light();
+    let shipped = GlassTuning::default();
+    let bent = shipped.with(GlassDial::Bend, 160.0);
+    let clear = shipped.with(GlassDial::Frost, 0.0);
+    assert_eq!(
+        radial(&recipe(GlassRole::Menu, &colors, &shipped)),
+        Some(BEND)
+    );
+    assert_eq!(
+        radial(&recipe(GlassRole::Bar, &colors, &shipped)),
+        Some(BAR_BEND)
+    );
+    assert_eq!(
+        radial(&recipe(GlassRole::Menu, &colors, &bent)),
+        Some(BEND * 2.0)
+    );
+    assert_eq!(
+        radial(&recipe(GlassRole::Card, &colors, &bent)),
+        Some(CARD_BEND * 2.0)
+    );
+    assert_eq!(frost(&recipe(GlassRole::Menu, &colors, &clear)), Some(0.0));
+    for role in [GlassRole::MediaText, GlassRole::MediaIcon] {
+        assert_eq!(
+            frost(&recipe(role, &colors, &clear)),
+            frost(&recipe(role, &colors, &shipped)),
+        );
     }
 }
 
