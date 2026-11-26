@@ -17,6 +17,9 @@ pub struct PopoverShape {
     pub edge: Option<Hsla>,
     /// How a dropdown enters.
     pub enter: MenuEnter,
+    /// The corner radius of a dialog in that window (QUILL: the Floating
+    /// layout's card radius).
+    pub dialog_radius: Pixels,
 }
 
 /// How a menu enters.

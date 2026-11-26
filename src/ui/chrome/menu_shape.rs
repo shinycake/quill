@@ -87,8 +87,19 @@ pub(in crate::ui) fn menu_shape_in(look: Look, cx: &App) -> Option<PopoverShape>
                 fill,
                 edge,
                 enter: MenuEnter::Pop,
+                dialog_radius: dialog_radius(look, cx),
             })
         }
+    }
+}
+
+/// A dialog's corners in a window with this look: the card radius, so a
+/// box over the wallpaper is rounded as the cards around it (Web K's
+/// popups are rounder still, `--popup-border-radius: 2.5rem`).
+fn dialog_radius(look: Look, cx: &App) -> Pixels {
+    match cx.try_global::<Theme>() {
+        Some(theme) => super::radius::card_in(quill::layout_style::metrics_of(look), theme),
+        None => px(MENU_RADIUS),
     }
 }
 
