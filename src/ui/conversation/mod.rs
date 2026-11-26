@@ -536,16 +536,6 @@ pub(super) enum ConversationPart {
     Bottom,
 }
 
-impl ConversationPart {
-    pub(super) fn top(self) -> bool {
-        self == Self::Top
-    }
-
-    pub(super) fn bottom(self) -> bool {
-        self == Self::Bottom
-    }
-}
-
 mod composer_field_view;
 mod conversation_part1;
 mod header_view;

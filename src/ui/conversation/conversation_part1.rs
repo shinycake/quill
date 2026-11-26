@@ -10,30 +10,77 @@ impl QuillApp {
     /// (`ConversationPart::Bottom`) renders as its own cached slice, so
     /// typing and the caret's blink don't rebuild the history
     /// (`app_slice`).
+    ///
+    /// The rows above the history (the calls, the header, the chat's bars)
+    /// and under it (the strips, the composer, its ends) are built once each;
+    /// the frame places them. Stacked, the calls and the strips join the
+    /// history's part and the composer's part holds the rest. Floating, the
+    /// header card takes the rows above (`floating_bars`) and the composer's
+    /// card the rows under.
     pub(in crate::ui) fn conversation(
         &mut self,
         part: ConversationPart,
         forum_on_screen: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Floating: the header and the bars float in their own slice, and
-        // the strips under the history join the composer's.
-        let float = match self.conversation_frame() {
-            ConversationFrame::Floating(_) => true,
-            ConversationFrame::Stacked => false,
-        };
-        if part == ConversationPart::Bars {
-            return self.floating_bars(self.pane_mode(), cx);
-        }
-        if part.top() {
-            crate::ui::frame_clock::trace_slice_render("history");
-            // One instant for the rows work and the dust of this frame, in
-            // panes that build no rows too.
-            self.pin_vanish_now();
-        }
         let mode = self.pane_mode();
-        let history = match mode {
-            _ if !part.top() => Empty.into_any_element(),
+        let frame = self.conversation_frame();
+        match part {
+            ConversationPart::Bars => self.floating_bars(mode, cx),
+            ConversationPart::Top => {
+                crate::ui::frame_clock::trace_slice_render("history");
+                // One instant for the rows work and the dust of this frame,
+                // in panes that build no rows too.
+                self.pin_vanish_now();
+                let history = self.history_pane(mode, forum_on_screen, cx);
+                let dust = self.vanish_overlay(cx);
+                let (calls, strips) = match frame {
+                    ConversationFrame::Stacked => (self.call_rows(cx), self.strip_rows(cx)),
+                    ConversationFrame::Floating(_) => (Vec::new(), Vec::new()),
+                };
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .children(calls)
+                    .child(history)
+                    .children(strips)
+                    // A deleted message's dust drifts over everything.
+                    .children(dust.map(super::anim_layer::occluder))
+                    .into_any_element()
+            }
+            ConversationPart::Bottom => {
+                let rows = self.composer_rows(mode, cx);
+                // Floating: what sits under the history is one card, when
+                // there is something besides the strips.
+                let (strips, card) = match frame {
+                    ConversationFrame::Floating(_) => (self.strip_rows(cx), !rows.is_empty()),
+                    ConversationFrame::Stacked => (Vec::new(), false),
+                };
+                div()
+                    .when(card, |this| self.stack_card(this, cx))
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .children(strips)
+                    .children(rows)
+                    .into_any_element()
+            }
+        }
+    }
+
+    /// The history's part: the list, or the pane in its place.
+    fn history_pane(
+        &mut self,
+        mode: PaneMode,
+        forum_on_screen: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match mode {
             PaneMode::Synthetic => div()
                 .id("conversation-history")
                 .flex()
@@ -50,19 +97,69 @@ impl QuillApp {
                 cx,
             )
             .into_any_element(),
-            PaneMode::Ready => self
-                .session_history(forum_on_screen, !float, cx)
-                .into_any_element(),
-        };
-        let composer = self.composer_available(mode).then_some(true);
-        let composer_note: Option<String> = match mode {
+            PaneMode::Ready => self.session_history(forum_on_screen, cx).into_any_element(),
+        }
+    }
+
+    /// The bars of a call, the player and a capture notice, top to bottom.
+    pub(super) fn call_rows(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        [
+            self.player_bar(cx).map(IntoElement::into_any_element),
+            self.call_bar(cx)
+                .or_else(|| self.group_call_bar(cx))
+                .map(IntoElement::into_any_element),
+            self.capture_notice(cx).map(IntoElement::into_any_element),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    /// The strips between the history and the composer: the bottom tab
+    /// strip and the busy-decline banner.
+    fn strip_rows(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        [
+            self.subsection_tabs_strip(SubsectionTabsMode::Bottom, cx)
+                .map(IntoElement::into_any_element),
+            // Phase C2i: busy-decline banner — the calls that arrived
+            // while another call was active were declined with
+            // `discardCall` (TDLib has no hold/swap API). Dismissible.
+            self.call_busy_banner(cx).map(IntoElement::into_any_element),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    /// The composer, or the note in its place, and the chat's ends under
+    /// it (the channel footer, the bottom action bar), top to bottom.
+    fn composer_rows(&mut self, mode: PaneMode, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let composer = self.composer_available(mode);
+        let mut rows = Vec::new();
+        if composer {
+            rows.push(self.composer_block(mode, cx));
+        }
+        if let Some(note) = self.composer_note(mode, composer) {
+            rows.push(self.composer_note_row(note, cx));
+        }
+        if !self.thread_pending() {
+            rows.extend(self.channel_footer(cx).map(IntoElement::into_any_element));
+            rows.extend(
+                self.bottom_action_bar(cx)
+                    .map(IntoElement::into_any_element),
+            );
+        }
+        rows
+    }
+
+    /// The note shown in the composer's place, if any.
+    fn composer_note(&self, mode: PaneMode, composer: bool) -> Option<String> {
+        match mode {
             PaneMode::Connecting => Some(tr(keys::Q_CHAT_SIGN_IN_TO_SEND_MESSAGES).to_string()),
-            PaneMode::Ready
-                if composer.is_none() && self.session().is_some_and(|s| s.is_frozen()) =>
-            {
+            PaneMode::Ready if !composer && self.session().is_some_and(|s| s.is_frozen()) => {
                 Some(tr(keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND_2).to_string())
             }
-            PaneMode::Ready if composer.is_none() => {
+            PaneMode::Ready if !composer => {
                 let open = self.session().and_then(|s| s.open_chat_id());
                 let in_topic = self
                     .session()
@@ -121,7 +218,28 @@ impl QuillApp {
                 }
             }
             _ => None,
-        };
+        }
+    }
+
+    /// The note in the composer's place as a row.
+    fn composer_note_row(&self, note: String, cx: &mut Context<Self>) -> AnyElement {
+        // A rights restriction is centered like tdesktop's
+        // `TextErrorSendRestriction`; other notes stay left.
+        let centered = self.composer_restriction().is_some();
+        div()
+            .id("composer-note")
+            .px_3()
+            .py(px(self.density().composer_inset_y))
+            .map(|this| self.bar_frame(this, BarLine::Over, cx))
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+            .when(centered, |this| this.text_center())
+            .child(note)
+            .into_any_element()
+    }
+
+    /// The composer with its bars, popups and input row.
+    fn composer_block(&mut self, mode: PaneMode, cx: &mut Context<Self>) -> AnyElement {
         // B4: `chatPermissions.can_send_polls` (schema 1.8.67 line 1070)
         // gates the Poll composer entry; absent permissions = unknown =
         // allowed.
@@ -133,338 +251,261 @@ impl QuillApp {
                     .and_then(|s| s.chats.get(&id.0))
                     .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
             });
-        let top = part.top();
-        let bars = top && !float;
-        let strips = if float { part.bottom() } else { top };
-        let dust = top.then(|| self.vanish_overlay(cx)).flatten();
-        let player_bar = bars.then(|| self.player_bar(cx)).flatten();
-        let call_bar = bars
-            .then(|| self.call_bar(cx).or_else(|| self.group_call_bar(cx)))
-            .flatten();
-        let capture_notice = bars.then(|| self.capture_notice(cx)).flatten();
-        let ends = part.bottom() && !self.thread_pending();
-        // Floating: what sits under the history is one card, when there is
-        // something. Its ends are built here to know; Classic builds them
-        // in place, after the history, as it always did.
-        let early = float && !top && ends;
-        let mut footer = early.then(|| self.channel_footer(cx)).flatten();
-        let mut action_bar = early.then(|| self.bottom_action_bar(cx)).flatten();
-        let card = float
-            && !top
-            && (composer.is_some()
-                || composer_note.is_some()
-                || footer.is_some()
-                || action_bar.is_some());
+        let show_attach = matches!(mode, PaneMode::Ready) && !self.chat_ui.is_editing();
+        // Something to send (text, an attachment, an edit): the
+        // composer shows Send instead of the mic.
+        // A rich draft shown in place of the field sends too.
+        let rich_preview = self.rich_draft_preview(cx);
+        // Picked files wait in the send box, which takes the field
+        // as its caption and everything that hangs off it
+        // (`send_card`): the bar under the box rests.
+        let boxed = self.send_box_shown();
+        let sendable = !show_attach
+            || self.forward_bar_here()
+            || rich_preview.is_some()
+            || (!boxed && !self.composer.read(cx).value().trim().is_empty());
         div()
-            .when(card, |this| self.stack_card(this, cx))
+            .id("composer-file-drop")
             .relative()
+            // The emoji / sticker / GIF popover floats above the
+            // composer, anchored to its left edge.
+            .when_some(self.media_panel_reveal(cx), |this, panel| {
+                // Over the history: animations under it are
+                // drawn by the conversation (`anim_layer`).
+                this.child(
+                    div()
+                        .absolute()
+                        .left(px(8.))
+                        .bottom(relative(1.))
+                        .pb_1()
+                        .child(panel),
+                )
+            })
+            // tdesktop shows the recording video message as a
+            // camera circle over the chat.
+            .when_some(self.round_record_overlay(cx), |this, circle| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom(relative(1.))
+                        .pb(px(24.))
+                        .flex()
+                        .justify_center()
+                        .child(super::anim_layer::occluder(circle)),
+                )
+            })
+            .px_3()
+            .py(px(self.density().composer_inset_y))
+            .map(|this| self.composer_frame(this, cx))
             .flex()
             .flex_col()
-            .when(top, |this| this.flex_1().min_h_0())
-            .min_w_0()
-            .children(player_bar)
-            .children(call_bar)
-            .children(capture_notice)
-            .when(top, |this| this.child(history))
-            .children(
-                strips
-                    .then(|| self.subsection_tabs_strip(SubsectionTabsMode::Bottom, cx))
-                    .flatten(),
+            .gap_2()
+            .when(self.recording_here(), |this| {
+                this.child(self.record_bar(cx))
+            })
+            .when_some(self.chat_ui.forward_result.clone(), |this, result| {
+                this.child(self.forward_success_banner(&result, cx))
+            })
+            .when(
+                self.forward_draft().is_some()
+                    && !self.share.forward.picker_open()
+                    && !self.forward_bar_here()
+                    // Selecting here: the header carries the buttons.
+                    && !self
+                        .session()
+                        .and_then(|s| s.open_chat_id())
+                        .is_some_and(|chat| self.selecting_in(chat)),
+                |this| {
+                    this.when_some(self.forward_draft(), |this, draft| {
+                        this.child(self.forward_selection_banner(&draft, cx))
+                    })
+                },
             )
-            // Phase C2i: busy-decline banner — the calls that arrived
-            // while another call was active were declined with
-            // `discardCall` (TDLib has no hold/swap API). Dismissible.
+            .children(self.forward_bar_slot(cx))
+            // Phase S2: inline-bot warning banner for secret chats.
+            // Gated on the open chat still being one: a pending
+            // alert from a previous chat never renders elsewhere.
+            .when(
+                self.chat_ui.bot_alert.is_pending() && self.open_chat_is_secret(),
+                |this| this.child(self.inline_bot_alert_banner(cx)),
+            )
+            .children(self.composer_edit_bar_slot(cx))
+            .children(self.composer_reply_bar_slot(cx))
+            .when_some(self.suggest_bar_panel(cx), |this, bar| this.child(bar))
+            .when_some(self.reply_quote_panel(cx), |this, panel| this.child(panel))
+            // B1: bot custom keyboard (`replyMarkupShowKeyboard`)
+            // above the composer.
+            .when_some(self.custom_keyboard_panel(cx), |this, panel| {
+                this.child(panel)
+            })
+            // Force-reply keyboard bar (`replyMarkupForceReply`)
+            // above the composer.
+            .when_some(self.force_reply_panel(cx), |this, panel| this.child(panel))
+            // Phase 3.3: `/` command menu above the composer.
             .when_some(
-                strips.then(|| self.call_busy_banner(cx)).flatten(),
-                |this, banner| this.child(banner),
+                (!boxed).then(|| self.mention_menu_dropdown(cx)).flatten(),
+                |this, panel| this.child(panel),
             )
-            .when(composer.is_some() && part.bottom(), |this| {
-                let show_attach = matches!(mode, PaneMode::Ready) && !self.chat_ui.is_editing();
-                // Something to send (text, an attachment, an edit): the
-                // composer shows Send instead of the mic.
-                // A rich draft shown in place of the field sends too.
-                let rich_preview = self.rich_draft_preview(cx);
-                // Picked files wait in the send box, which takes the field
-                // as its caption and everything that hangs off it
-                // (`send_card`): the bar under the box rests.
-                let boxed = self.send_box_shown();
-                let sendable = !show_attach
-                    || self.forward_bar_here()
-                    || rich_preview.is_some()
-                    || (!boxed && !self.composer.read(cx).value().trim().is_empty());
-                this.child(
-                    div()
-                        .id("composer-file-drop")
-                        .relative()
-                        // The emoji / sticker / GIF popover floats above the
-                        // composer, anchored to its left edge.
-                        .when_some(self.media_panel_reveal(cx), |this, panel| {
-                            // Over the history: animations under it are
-                            // drawn by the conversation (`anim_layer`).
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .left(px(8.))
-                                    .bottom(relative(1.))
-                                    .pb_1()
-                                    .child(panel),
-                            )
-                        })
-                        // tdesktop shows the recording video message as a
-                        // camera circle over the chat.
-                        .when_some(self.round_record_overlay(cx), |this, circle| {
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .left_0()
-                                    .right_0()
-                                    .bottom(relative(1.))
-                                    .pb(px(24.))
-                                    .flex()
-                                    .justify_center()
-                                    .child(super::anim_layer::occluder(circle)),
-                            )
-                        })
-                        .px_3()
-                        .py(px(self.density().composer_inset_y))
-                        .map(|this| self.composer_frame(this, cx))
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .when(self.recording_here(), |this| {
-                            this.child(self.record_bar(cx))
-                        })
-                        .when_some(self.chat_ui.forward_result.clone(), |this, result| {
-                            this.child(self.forward_success_banner(&result, cx))
-                        })
-                        .when(
-                            self.forward_draft().is_some()
-                                && !self.share.forward.picker_open()
-                                && !self.forward_bar_here()
-                                // Selecting here: the header carries the buttons.
-                                && !self
-                                    .session()
-                                    .and_then(|s| s.open_chat_id())
-                                    .is_some_and(|chat| self.selecting_in(chat)),
-                            |this| {
-                                this.when_some(self.forward_draft(), |this, draft| {
-                                    this.child(self.forward_selection_banner(&draft, cx))
-                                })
-                            },
-                        )
-                        .children(self.forward_bar_slot(cx))
-                        // Phase S2: inline-bot warning banner for secret chats.
-                        // Gated on the open chat still being one: a pending
-                        // alert from a previous chat never renders elsewhere.
-                        .when(
-                            self.chat_ui.bot_alert.is_pending() && self.open_chat_is_secret(),
-                            |this| this.child(self.inline_bot_alert_banner(cx)),
-                        )
-                        .children(self.composer_edit_bar_slot(cx))
-                        .children(self.composer_reply_bar_slot(cx))
-                        .when_some(self.suggest_bar_panel(cx), |this, bar| this.child(bar))
-                        .when_some(self.reply_quote_panel(cx), |this, panel| this.child(panel))
-                        // B1: bot custom keyboard (`replyMarkupShowKeyboard`)
-                        // above the composer.
-                        .when_some(self.custom_keyboard_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
-                        // Force-reply keyboard bar (`replyMarkupForceReply`)
-                        // above the composer.
-                        .when_some(self.force_reply_panel(cx), |this, panel| this.child(panel))
-                        // Phase 3.3: `/` command menu above the composer.
-                        .when_some(
-                            (!boxed).then(|| self.mention_menu_dropdown(cx)).flatten(),
-                            |this, panel| this.child(panel),
-                        )
-                        .when_some(
-                            (!boxed).then(|| self.suggest_menu_dropdown(cx)).flatten(),
-                            |this, panel| this.child(panel),
-                        )
-                        .when_some(
-                            (!boxed).then(|| self.command_menu_dropdown(cx)).flatten(),
-                            |this, panel| this.child(panel),
-                        )
-                        // Bots slice: `@bot` inline-results dropdown above
-                        // the composer (mutually exclusive with the `/`
-                        // menu — see `sync_command_menu`).
-                        .when_some(
-                            (!boxed).then(|| self.inline_results_dropdown(cx)).flatten(),
-                            |this, panel| this.child(panel),
-                        )
-                        .when_some(
-                            (!boxed).then(|| self.sticker_suggestions_row(cx)).flatten(),
-                            |this, row| this.child(row),
-                        )
-                        .when_some(
-                            (!boxed)
-                                .then(|| self.animated_emoji_suggestion(cx))
-                                .flatten(),
-                            |this, row| this.child(row),
-                        )
-                        // Phase A1: slow-mode countdown. The composer stays
-                        // usable (typing is fine) but sends are blocked
-                        // until the wait expires; the send button shows the
-                        // remaining time (`composer_send_button`) and
-                        // the button asks the frame clock for a frame a second.
-                        // Non-default send options as clearable chips; the
-                        // schedule picker opens above the input.
-                        // Pickers open directly above the input, next to the
-                        // buttons that summon them.
-                        // The share box's schedule step shows inside its dialog.
-                        .when(!boxed && self.chat_ui.schedule_popup_shown(), |this| {
-                            this.child(self.schedule_popup(cx))
-                        })
-                        .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
-                        .when_some(
-                            (!boxed).then(|| self.composer_options_row(cx)).flatten(),
-                            |this, row| this.child(row),
-                        )
-                        // MED4: detected-URL chip (send-time preview
-                        // control) and caption bar (above/below toggle
-                        // while editing a caption, n / max counter).
-                        .when_some(self.preview_chip(cx), |this, chip| this.child(chip))
-                        .when_some(self.edit_replacement_chip(cx), |this, chip| {
-                            this.child(chip)
-                        })
-                        .when_some(self.caption_bar(cx), |this, bar| this.child(bar))
-                        .when_some(
-                            (!boxed).then(|| self.text_limit_bar(cx)).flatten(),
-                            |this, bar| this.child(bar),
-                        )
-                        // kit Phase 5: the composer input row — attach and
-                        // emoji/sticker pickers, the borderless growing
-                        // kit Textarea (auto_grow on the state sizes
-                        // it; no fixed height, no custom focus ring or
-                        // placeholder machinery), the voice/video record
-                        // button, and the round send button.
-                        .child(
-                            div()
-                                .id("composer-input-row")
-                                .relative()
-                                .flex()
-                                .items_end()
-                                .gap(px(self.density().composer_gap))
-                                .when(show_attach, |row| {
-                                    row.when_some(self.bot_menu_button(cx), |row, button| {
-                                        row.child(button)
-                                    })
-                                    .child(
-                                        self.ai_compose_attach_column(
-                                            self.attach_menu_button(polls_allowed, cx)
-                                                .into_any_element(),
-                                            cx,
-                                        ),
-                                    )
-                                    .child(
-                                        Button::new("composer-emoji")
-                                            .icon(IconName::FaceSlightlySmiling)
-                                            .ghost()
-                                            .tooltip(if self.sticker_panel_open() {
-                                                tr(keys::Q_CHAT_CLOSE_STICKERS)
-                                            } else {
-                                                tr(keys::Q_CHAT_STICKERS)
-                                            })
-                                            .accessibility_label(tr(keys::Q_CHAT_STICKERS))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.toggle_media_panel(
-                                                    super::media_panel::PanelTab::Emoji,
-                                                    cx,
-                                                );
-                                            })),
-                                    )
-                                    .when(rich_preview.is_none(), |row| {
-                                        row.child(self.format_menu_button(cx))
-                                    })
-                                })
-                                .when(!show_attach, |row| row.children(self.ai_compose_button(cx)))
-                                .when_some(rich_preview, |row, preview| row.child(preview))
-                                // The field, or its empty seat while the
-                                // send box holds it.
-                                .child(if boxed {
-                                    div().flex_1().min_w_0().into_any_element()
-                                } else {
-                                    self.composer_field(cx).into_any_element()
-                                })
-                                // Scheduled-messages button while the chat has
-                                // any (`updateChatHasScheduledMessages`).
-                                .when_some(self.scheduled_messages_button(cx), |row, button| {
-                                    row.child(button)
-                                })
-                                // Show / hide the bot's reply keyboard, or
-                                // tdesktop's `/` button.
-                                .when_some(self.composer_bot_button(cx), |row, button| {
-                                    row.child(button)
-                                })
-                                .when_some(self.suggest_post_toggle(cx), |row, button| {
-                                    row.child(button)
-                                })
-                                // "Send as" identity of the chat
-                                // (`chat.message_sender_id`).
-                                .when_some(self.send_as_button(cx), |row, button| row.child(button))
-                                // Telegram Desktop's round button: the mic
-                                // while there's nothing to send, Send once
-                                // there is, Save when editing, the slow-mode
-                                // countdown while the chat is rate-limited.
-                                .child(self.composer_send_button(show_attach, sendable, cx))
-                                // Emoji for `:word` or a pointed-at word,
-                                // as wide as the row.
-                                .when_some(
-                                    (!boxed).then(|| self.emoji_bar_overlay(cx)).flatten(),
-                                    |row, bar| row.child(bar),
+            .when_some(
+                (!boxed).then(|| self.suggest_menu_dropdown(cx)).flatten(),
+                |this, panel| this.child(panel),
+            )
+            .when_some(
+                (!boxed).then(|| self.command_menu_dropdown(cx)).flatten(),
+                |this, panel| this.child(panel),
+            )
+            // Bots slice: `@bot` inline-results dropdown above
+            // the composer (mutually exclusive with the `/`
+            // menu — see `sync_command_menu`).
+            .when_some(
+                (!boxed).then(|| self.inline_results_dropdown(cx)).flatten(),
+                |this, panel| this.child(panel),
+            )
+            .when_some(
+                (!boxed).then(|| self.sticker_suggestions_row(cx)).flatten(),
+                |this, row| this.child(row),
+            )
+            .when_some(
+                (!boxed)
+                    .then(|| self.animated_emoji_suggestion(cx))
+                    .flatten(),
+                |this, row| this.child(row),
+            )
+            // Phase A1: slow-mode countdown. The composer stays
+            // usable (typing is fine) but sends are blocked
+            // until the wait expires; the send button shows the
+            // remaining time (`composer_send_button`) and
+            // the button asks the frame clock for a frame a second.
+            // Non-default send options as clearable chips; the
+            // schedule picker opens above the input.
+            // Pickers open directly above the input, next to the
+            // buttons that summon them.
+            // The share box's schedule step shows inside its dialog.
+            .when(!boxed && self.chat_ui.schedule_popup_shown(), |this| {
+                this.child(self.schedule_popup(cx))
+            })
+            .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
+            .when_some(
+                (!boxed).then(|| self.composer_options_row(cx)).flatten(),
+                |this, row| this.child(row),
+            )
+            // MED4: detected-URL chip (send-time preview
+            // control) and caption bar (above/below toggle
+            // while editing a caption, n / max counter).
+            .when_some(self.preview_chip(cx), |this, chip| this.child(chip))
+            .when_some(self.edit_replacement_chip(cx), |this, chip| {
+                this.child(chip)
+            })
+            .when_some(self.caption_bar(cx), |this, bar| this.child(bar))
+            .when_some(
+                (!boxed).then(|| self.text_limit_bar(cx)).flatten(),
+                |this, bar| this.child(bar),
+            )
+            // kit Phase 5: the composer input row — attach and
+            // emoji/sticker pickers, the borderless growing
+            // kit Textarea (auto_grow on the state sizes
+            // it; no fixed height, no custom focus ring or
+            // placeholder machinery), the voice/video record
+            // button, and the round send button.
+            .child(
+                div()
+                    .id("composer-input-row")
+                    .relative()
+                    .flex()
+                    .items_end()
+                    .gap(px(self.density().composer_gap))
+                    .when(show_attach, |row| {
+                        row.when_some(self.bot_menu_button(cx), |row, button| row.child(button))
+                            .child(
+                                self.ai_compose_attach_column(
+                                    self.attach_menu_button(polls_allowed, cx)
+                                        .into_any_element(),
+                                    cx,
                                 ),
-                        )
-                        // M2: rich editor block bar + live block preview
-                        // under the textarea while the editor is open.
-                        .when(self.chat_ui.rich.editor_open(), |this| {
-                            this.child(self.rich_editor_bar(cx))
-                        }),
-                )
+                            )
+                            .child(
+                                Button::new("composer-emoji")
+                                    .icon(IconName::FaceSlightlySmiling)
+                                    .ghost()
+                                    .tooltip(if self.sticker_panel_open() {
+                                        tr(keys::Q_CHAT_CLOSE_STICKERS)
+                                    } else {
+                                        tr(keys::Q_CHAT_STICKERS)
+                                    })
+                                    .accessibility_label(tr(keys::Q_CHAT_STICKERS))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_media_panel(
+                                            super::media_panel::PanelTab::Emoji,
+                                            cx,
+                                        );
+                                    })),
+                            )
+                            .when(rich_preview.is_none(), |row| {
+                                row.child(self.format_menu_button(cx))
+                            })
+                    })
+                    .when(!show_attach, |row| row.children(self.ai_compose_button(cx)))
+                    .when_some(rich_preview, |row, preview| row.child(preview))
+                    // The field, or its empty seat while the
+                    // send box holds it.
+                    .child(if boxed {
+                        div().flex_1().min_w_0().into_any_element()
+                    } else {
+                        self.composer_field(cx).into_any_element()
+                    })
+                    // Scheduled-messages button while the chat has
+                    // any (`updateChatHasScheduledMessages`).
+                    .when_some(self.scheduled_messages_button(cx), |row, button| {
+                        row.child(button)
+                    })
+                    // Show / hide the bot's reply keyboard, or
+                    // tdesktop's `/` button.
+                    .when_some(self.composer_bot_button(cx), |row, button| {
+                        row.child(button)
+                    })
+                    .when_some(self.suggest_post_toggle(cx), |row, button| {
+                        row.child(button)
+                    })
+                    // "Send as" identity of the chat
+                    // (`chat.message_sender_id`).
+                    .when_some(self.send_as_button(cx), |row, button| row.child(button))
+                    // Telegram Desktop's round button: the mic
+                    // while there's nothing to send, Send once
+                    // there is, Save when editing, the slow-mode
+                    // countdown while the chat is rate-limited.
+                    .child(self.composer_send_button(show_attach, sendable, cx))
+                    // Emoji for `:word` or a pointed-at word,
+                    // as wide as the row.
+                    .when_some(
+                        (!boxed).then(|| self.emoji_bar_overlay(cx)).flatten(),
+                        |row, bar| row.child(bar),
+                    ),
+            )
+            // M2: rich editor block bar + live block preview
+            // under the textarea while the editor is open.
+            .when(self.chat_ui.rich.editor_open(), |this| {
+                this.child(self.rich_editor_bar(cx))
             })
-            .when_some(composer_note.filter(|_| part.bottom()), |this, note| {
-                // A rights restriction is centered like tdesktop's
-                // `TextErrorSendRestriction`; other notes stay left.
-                let centered = self.composer_restriction().is_some();
-                this.child(
-                    div()
-                        .id("composer-note")
-                        .px_3()
-                        .py(px(self.density().composer_inset_y))
-                        .map(|this| self.bar_frame(this, BarLine::Over, cx))
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .when(centered, |this| this.text_center())
-                        .child(note),
-                )
-            })
-            .children(if early {
-                footer.take()
-            } else {
-                ends.then(|| self.channel_footer(cx)).flatten()
-            })
-            .children(if early {
-                action_bar.take()
-            } else {
-                ends.then(|| self.bottom_action_bar(cx)).flatten()
-            })
-            // A deleted message's dust drifts over everything.
-            .children(dust.map(super::anim_layer::occluder))
             .into_any_element()
     }
 
     pub(in crate::ui) fn session_history(
         &mut self,
         forum_on_screen: bool,
-        with_bars: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         super::video_player::warm_decoder(cx);
         let tabs_left = self.subsection_tabs_column(cx);
-        let (header, bars) = if with_bars {
-            let (header, bars) = self.history_bars(cx);
-            (Some(header), bars)
-        } else {
-            (None, Vec::new())
+        // Stacked, the header and the bars head the history; floating,
+        // they are the header card's (`floating_bars`).
+        let (header, bars) = match self.conversation_frame() {
+            ConversationFrame::Stacked => {
+                let (header, bars) = self.history_bars(cx);
+                (Some(header), bars)
+            }
+            ConversationFrame::Floating(_) => (None, Vec::new()),
         };
         let body = self.history_body(tabs_left, forum_on_screen, cx);
         div()
@@ -755,10 +796,7 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .children(self.thread_root_bar(cx))
-            .when(self.chat_ui.info_card.thread(), |this| {
-                this.children(self.thread_info_card(cx))
-            })
+            .children(self.thread_bars(cx))
             .child(list)
             .into_any_element()
     }

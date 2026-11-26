@@ -33,16 +33,9 @@ impl QuillApp {
             }
             PaneMode::Synthetic | PaneMode::Connecting => (None, Vec::new()),
         };
-        let calls = [
-            self.player_bar(cx).map(IntoElement::into_any_element),
-            self.call_bar(cx)
-                .or_else(|| self.group_call_bar(cx))
-                .map(IntoElement::into_any_element),
-            self.capture_notice(cx).map(IntoElement::into_any_element),
-        ];
         let rows: Vec<AnyElement> = header
             .into_iter()
-            .chain(calls.into_iter().flatten())
+            .chain(self.call_rows(cx))
             .chain(bars)
             .collect();
         if rows.is_empty() {
@@ -63,6 +56,18 @@ impl QuillApp {
             card = card.child(row);
         }
         card.into_any_element()
+    }
+
+    /// A reply thread's root bar and, when shown, its info card: over the
+    /// thread's list, or in the header card when the bars float.
+    pub(super) fn thread_bars(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let card = self
+            .chat_ui
+            .info_card
+            .thread()
+            .then(|| self.thread_info_card(cx))
+            .flatten();
+        self.thread_root_bar(cx).into_iter().chain(card).collect()
     }
 
     /// The header, and every other bar above the history's body, top to
@@ -117,10 +122,7 @@ impl QuillApp {
         if let (ConversationFrame::Floating(_), true) =
             (self.conversation_frame(), self.thread_shown())
         {
-            bars.extend(self.thread_root_bar(cx));
-            if self.chat_ui.info_card.thread() {
-                bars.extend(self.thread_info_card(cx));
-            }
+            bars.extend(self.thread_bars(cx));
         }
         (header, bars)
     }
