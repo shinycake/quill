@@ -1,7 +1,7 @@
 //! Screenshot demo for snapshot transforms (`snapshot`, the vendored GPUI's
 //! `window/snapshot.rs` and `scene/snapshot.rs`;
-//! docs/decisions/snapshot-transitions.md). Nothing in Quill's product UI
-//! uses them yet.
+//! docs/decisions/snapshot-transitions.md). The Floating layout's menu
+//! pop and page cross draw through them.
 //!
 //! `ready-snapshot` lays out one card, with large and small text, emoji, an
 //! image, a shadow and a rounded clip, drawn live and then through a

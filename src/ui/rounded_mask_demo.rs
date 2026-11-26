@@ -1,7 +1,7 @@
 //! Screenshot demo for rounded content masks (`Styled::clip_rounded`,
 //! `Window::with_rounded_content_mask`, the vendored GPUI's
 //! `scene/rounded_mask.rs`; docs/decisions/rounded-content-masks.md).
-//! Nothing in Quill's product UI uses them yet.
+//! The Floating layout's cards and menus clip to their corners with them.
 //!
 //! `ready-rounded-mask` lays out one card per primitive kind, each with its
 //! content running over the card's corners: a fill, a bordered square, a
