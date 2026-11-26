@@ -697,6 +697,9 @@ struct MonochromeSpriteFragmentInput {
   float4 color [[flat]];
   float4 clip_distance;
   uint sprite_id [[flat]];
+  // QUILL: 1 when the sprite's mask has a rounded shape, so the fragment
+  // reads the instance only then (docs/decisions/rounded-content-masks.md).
+  uint rounded [[flat]];
 };
 
 vertex MonochromeSpriteFragmentInput monochrome_sprite_vertex(
@@ -756,7 +759,8 @@ vertex MonochromeSpriteFragmentInput monochrome_sprite_vertex(
       tile_position,
       color,
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w},
-      sprite_id};
+      sprite_id,
+      has_rounded_mask(sprite.content_mask) ? 1u : 0u};
 }
 
 fragment float4 monochrome_sprite_fragment(
@@ -772,9 +776,11 @@ fragment float4 monochrome_sprite_fragment(
   float4 sample =
       atlas_texture.sample(atlas_texture_sampler, input.tile_position);
   float4 color = input.color;
-  color.a *= sample.a * rounded_mask_coverage(
-                            input.position.xy,
-                            sprites[input.sprite_id].content_mask.rounded);
+  color.a *= sample.a;
+  if (input.rounded != 0u) {
+    color.a *= rounded_mask_coverage(
+        input.position.xy, sprites[input.sprite_id].content_mask.rounded);
+  }
   return color;
 }
 

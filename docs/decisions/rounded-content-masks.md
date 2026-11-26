@@ -104,6 +104,13 @@ quad shader's own distance function, at the fragment's device position (so a
 transformed sprite needs nothing special). A quad with a shape leaves the
 "simple" fast return and the opaque pre-pass.
 
+Glyphs, the bulk of a Classic frame, used to read their instance's mask in
+every fragment to learn it had no shape. The monochrome and subpixel
+sprite vertex shaders now pass a flat `rounded` value (1 when the mask has
+a shape), and the fragment reads the instance only then, on Metal, wgpu
+(storage and WebGL transports alike) and DirectX 11. On DirectX it is an
+`if`, since HLSL evaluates both sides of `?:`.
+
 The native view is the exception: it is an OS view, so the rectangle clips
 it and the rounded part is ignored. Quill hosts no native view inside a card.
 

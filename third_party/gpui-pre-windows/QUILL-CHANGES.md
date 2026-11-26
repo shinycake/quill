@@ -648,6 +648,9 @@ pre-pass; the monochrome and subpixel sprites pass their instance index;
 `src/hdr_surfaces.rs`, `src/yuv_surfaces.rs`: the surface instances carry
 the shape (80 and 112 bytes). `src/backdrop_glass.rs`: the lens size
 assert.
+`src/shaders.hlsl`: the monochrome (and subpixel) sprite vertex passes a
+flat `rounded` flag, and the fragments read the instance's mask only when
+it is set.
 
 ## Snapshots
 

@@ -269,6 +269,9 @@ struct's size and mask offset. `src/yuv_surfaces.rs`: the NV12 surface
 parameters carry the shape (112 bytes). `src/wgpu_renderer.rs`,
 `src/wgpu_renderer/lens.rs`: `ContentMask::rect`, the instance strides and
 the lens layout asserts.
+`src/shaders.wgsl`, `src/shaders_subpixel.wgsl`: the monochrome and
+subpixel sprite vertex shaders pass a flat `rounded` flag, and the
+fragment loads the instance's mask only when it is set.
 
 ## Snapshots
 

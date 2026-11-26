@@ -1384,6 +1384,9 @@ struct MonochromeSpriteFragmentInput {
     nointerpolation float4 color: COLOR;
     float4 clip_distance: SV_ClipDistance;
     nointerpolation uint sprite_id: TEXCOORD0;
+    // QUILL: 1 when the sprite's mask has a rounded shape, so the fragment
+    // reads the instance only then (docs/decisions/rounded-content-masks.md).
+    nointerpolation uint rounded: TEXCOORD1;
 };
 
 StructuredBuffer<MonochromeSprite> mono_sprites: register(t1);
@@ -1404,14 +1407,19 @@ MonochromeSpriteFragmentInput monochrome_sprite_vertex(uint vertex_id: SV_Vertex
     output.color = color;
     output.clip_distance = clip_distance;
     output.sprite_id = sprite_id;
+    output.rounded = has_rounded_mask(sprite.content_mask) ? 1u : 0u;
     return output;
 }
 
 float4 monochrome_sprite_fragment_impl(MonochromeSpriteFragmentInput input){
     float sample = t_sprite.Sample(s_sprite, input.tile_position).r;
     float alpha_corrected = apply_contrast_and_gamma_correction(sample, input.color.rgb, grayscale_enhanced_contrast, gamma_ratios);
-    float mask_coverage = rounded_mask_coverage(
-        input.position.xy, mono_sprites[input.sprite_id].content_mask.rounded);
+    // An `if`, not `?:`, which HLSL evaluates on both sides.
+    float mask_coverage = 1.0;
+    if (input.rounded != 0u) {
+        mask_coverage = rounded_mask_coverage(
+            input.position.xy, mono_sprites[input.sprite_id].content_mask.rounded);
+    }
     return float4(input.color.rgb, input.color.a * alpha_corrected * mask_coverage);
 }
 
@@ -1429,8 +1437,12 @@ SubpixelSpriteFragmentOutput subpixel_sprite_fragment(MonochromeSpriteFragmentIn
     SubpixelSpriteFragmentOutput output;
     // QUILL: scRGB output while an HDR still shows.
     output.foreground = to_output(float4(input.color.rgb, 1.0f));
-    float mask_coverage = rounded_mask_coverage(
-        input.position.xy, mono_sprites[input.sprite_id].content_mask.rounded);
+    // An `if`, not `?:`, which HLSL evaluates on both sides.
+    float mask_coverage = 1.0;
+    if (input.rounded != 0u) {
+        mask_coverage = rounded_mask_coverage(
+            input.position.xy, mono_sprites[input.sprite_id].content_mask.rounded);
+    }
     output.alpha = float4(input.color.a * alpha_corrected * mask_coverage, 1.0f);
     return output;
 }

@@ -296,6 +296,8 @@ and the opaque pre-pass; monochrome sprites pass their instance index and
 surfaces their mask's shape to the fragment; `QUILL-LAYOUT` lines state each
 struct's size and mask offset. `src/metal_renderer.rs`: `ContentMask::rect`
 and a headless pixel test of the coverage.
+`src/shaders.metal`: the monochrome sprite vertex passes a flat `rounded`
+flag, and the fragment reads the instance's mask only when it is set.
 
 ## Drawing a scene into a texture
 
