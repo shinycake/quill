@@ -719,3 +719,37 @@ need `QUILL_ASSUME_ACTIVE=1`; with it the drawer lands without pointer
 moves. `the_drawer_slides_on_the_frame_clock` checks that the drawer
 asks for every frame of its slide on its own and stops asking once it
 lands.
+
+## Floating leftovers (2026-11-26)
+
+A sweep of the Floating surfaces for boxes that still looked like Classic
+(square ends, full-bleed bars) next to Web K's rounded ones. Classic is
+unchanged by each of these: every helper answers Classic's styling for
+`Look::Lines`.
+
+- **Unread divider.** A centred pill in the date chip's family
+  (`chrome::history_parts::unread_mark`), the width of its text, instead
+  of a band across the history. tweb's own `.bubbles-group-unread` is a
+  full-width bar; the pill was chosen so the divider matches the date
+  chips that float above it.
+- **Forum topics column.** A card with the gutter above, below and before
+  it (`frames::side_column`), like the chat list card, instead of a square
+  column the window's height.
+- **Folder rail.** The rail and the chat list are one card
+  (`frames::rail_frame`, `frames::joined_to_rail`): the rail holds the
+  card's left corners, the list's edge is the line between them.
+- **Emoji, sticker and GIF panel.** Web K's emoji dropdown radius
+  (`1.25rem`) and the menus' shadow (`chrome::dropdown`).
+- **Dialogs.** Every kit dialog takes the card radius
+  (`PopoverShape::dialog_radius`, from `menu_shape`), as Web K's popups
+  are rounder than its menus.
+- **Bottom action.** Join Channel, Join Group, Start, Unblock and the
+  Premium button are pills in the composer card
+  (`bars::action_rounding`), as Web K's Join and Unmute fill its pill.
+- **Search fields.** The in-chat search field and Settings' search field
+  are pills, like the chat list's (`list_parts::search_field`).
+
+Left as they are: the square selected-message, search-hit and hover
+highlights (their own round of work), settings group boxes, the forward
+box's search field, the composer's notice strip ("Messages forwarded"),
+inline keyboard buttons and the sponsored card.
