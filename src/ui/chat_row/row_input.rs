@@ -71,4 +71,10 @@ pub(in crate::ui) struct ChatRowInput<'a> {
     /// The fill of a row that is not selected: the list's, or none on a
     /// glass card (`QuillApp::list_row_fill`).
     pub(in crate::ui) rest_fill: Hsla,
+    /// The row's corners (`QuillApp::list_row_corners`).
+    pub(in crate::ui) corners: Pixels,
+    /// The open row's glass on a glass card (`QuillApp::list_row_glass`),
+    /// in place of its fill. The row under the pointer keeps the plain
+    /// hover fill, so the two stay apart.
+    pub(in crate::ui) glass: Option<LensStyle>,
 }

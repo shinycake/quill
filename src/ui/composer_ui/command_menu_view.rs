@@ -1,6 +1,7 @@
 //! The `/` command menu popup above the composer.
 
 use super::*;
+use crate::ui::menu_surface::RowHighlight as _;
 use quill::composer::commands_with_username;
 
 impl QuillApp {
@@ -47,6 +48,9 @@ impl QuillApp {
             .mx_4()
             .mb_2()
             .rounded_md()
+            // Rows run edge to edge: the panel's corners cut the first and
+            // last one, so a lit row follows the panel's curve.
+            .clip_rounded()
             .border_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().sidebar);
@@ -72,12 +76,11 @@ impl QuillApp {
                         .justify_center()
                         .px_3()
                         .py_2()
-                        .rounded_md()
                         .role(gpui_kit::Role::Button)
                         .aria_label(item.description.clone())
                         .cursor_pointer()
                         .pressable(cx.theme())
-                        .when(index == selected, |this| this.bg(cx.theme().selection))
+                        .when(index == selected, |this| this.lit(cx.theme().selection, cx))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, window, cx| {
@@ -146,13 +149,12 @@ impl QuillApp {
                 .gap_2()
                 .px_3()
                 .py_2()
-                .rounded_md()
                 .role(gpui_kit::Role::Button)
                 .aria_label(label)
                 .tab_index(0)
                 .cursor_pointer()
                 .pressable(cx.theme())
-                .when(highlighted, |this| this.bg(cx.theme().selection))
+                .when(highlighted, |this| this.lit(cx.theme().selection, cx))
                 // On press, not click: the press moves focus off the
                 // composer, whose blur closes this menu before a click
                 // could land. Telegram Desktop sends a clicked command.

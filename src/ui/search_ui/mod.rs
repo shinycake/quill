@@ -63,6 +63,7 @@ pub(super) fn search_result_row(
     date: Option<i32>,
     query: &str,
     photo: Option<std::path::PathBuf>,
+    corners: Pixels,
     cx: &mut Context<QuillApp>,
     on_pick: impl Fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>) + 'static,
 ) -> gpui_kit::Stateful<Div> {
@@ -91,7 +92,7 @@ pub(super) fn search_result_row(
         .gap_3()
         .px_2()
         .py_1p5()
-        .rounded_md()
+        .rounded(corners)
         // Same 2 px leading edge as a chat row, so avatars share one spine.
         .border_l_2()
         .border_color(transparent_black())

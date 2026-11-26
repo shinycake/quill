@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ui::menu_aim::MenuAimRow as _;
+use crate::ui::menu_surface::MenuRowCorners as _;
 use crate::ui::status_note::StatusNote;
 use quill::go_to_message::{GoToTarget, MessageListContext, go_to_message_offered, go_to_target};
 use quill::lang::{keys, tr};
@@ -268,11 +269,11 @@ impl QuillApp {
                         .gap_3()
                         .px_3()
                         .py_1p5()
-                        .rounded_md()
+                        .menu_row_corners(&self.frame.menu.items, $cx)
                         .cursor_pointer()
                         .text_sm()
                         .text_color(text_menu())
-                        .menu_hover(row_hover, &self.frame.menu.items)
+                        .menu_hover(row_hover, &self.frame.menu.items, $cx)
                         .menu_key_target(row_key($order), &self.frame.menu.items, $cx)
                         .role(gpui_kit::Role::MenuItem)
                         .aria_label($label)
@@ -297,11 +298,11 @@ impl QuillApp {
                         .gap_3()
                         .px_3()
                         .py_1p5()
-                        .rounded_md()
+                        .menu_row_corners(&self.frame.menu.items, $cx)
                         .cursor_pointer()
                         .text_sm()
                         .text_color(text_menu())
-                        .menu_hover(row_hover, &self.frame.menu.items)
+                        .menu_hover(row_hover, &self.frame.menu.items, $cx)
                         .menu_key_target(row_key($order), &self.frame.menu.items, $cx)
                         .role(gpui_kit::Role::MenuItem)
                         .aria_label($label)

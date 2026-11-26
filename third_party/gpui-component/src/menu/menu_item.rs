@@ -157,16 +157,11 @@ impl RenderOnce for MenuItemElement {
                 // Not `group_hover` on the item's own group: GPUI styles an
                 // element before registering its group, and that fallback keeps
                 // the pointer's item lit after a key moves the highlight away.
+                // QUILL (glass effects): the lit row is glass in a glass menu.
                 this.when(self.lit_by_pointer, |this| {
-                    this.hover(|this| {
-                        this.bg(cx.theme().tokens.accent)
-                            .text_color(cx.theme().accent_foreground)
-                    })
+                    this.hover(|this| crate::popover_glass::highlight(this, cx))
                 })
-                .when(self.selected, |this| {
-                    this.bg(cx.theme().tokens.accent)
-                        .text_color(cx.theme().accent_foreground)
-                })
+                .when(self.selected, |this| crate::popover_glass::highlight(this, cx))
                 .when_some(self.on_click, |this, on_click| {
                     this.on_mouse_down(MouseButton::Left, move |_, _, cx| {
                         cx.stop_propagation();

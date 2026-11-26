@@ -16,6 +16,9 @@ const RING_WIDTH: f32 = 2.;
 /// focuses it.
 pub(super) trait PressableDiv {
     fn pressable(self, theme: &Theme) -> Self;
+    /// [`Self::pressable`] whose hover is `glass` (a glass highlight) when
+    /// given, in place of the hover fill.
+    fn pressable_lit(self, theme: &Theme, glass: Option<LensStyle>) -> Self;
     /// The focus ring alone, for a surface with hover feedback of its own.
     fn focus_ring_visible(self, theme: &Theme) -> Self;
 }
@@ -25,11 +28,18 @@ impl PressableDiv for gpui_kit::Stateful<Div> {
     /// `windowBgRipple`): a light gray over the background in the day
     /// theme and a light lift in the night theme, not an accent tint.
     fn pressable(self, theme: &Theme) -> Self {
+        self.pressable_lit(theme, None)
+    }
+
+    fn pressable_lit(self, theme: &Theme, glass: Option<LensStyle>) -> Self {
         let fg = theme.foreground;
         let over = hover_fill(theme);
-        self.hover(move |s| s.bg(over))
-            .active(move |s| s.bg(fg.opacity(0.11)))
-            .focus_ring_visible(theme)
+        match glass {
+            Some(lens) => self.hover(move |s| s.backdrop_glass(Some(lens))),
+            None => self.hover(move |s| s.bg(over)),
+        }
+        .active(move |s| s.bg(fg.opacity(0.11)))
+        .focus_ring_visible(theme)
     }
 
     fn focus_ring_visible(self, theme: &Theme) -> Self {

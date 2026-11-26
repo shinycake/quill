@@ -11,6 +11,7 @@ use crate::ui::context_menu_keys::{MenuKeyTarget, context_menu_item, row_key, su
 use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_aim::{MenuAimPanel as _, MenuAimRow as _};
 use crate::ui::menu_states::ChatMenuSubmenu;
+use crate::ui::menu_surface::MenuRowCorners as _;
 use crate::ui::menu_surface::{MENU_WIDTH, MenuSurface};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
@@ -191,11 +192,11 @@ impl QuillApp {
                 .gap_3()
                 .px_3()
                 .py_1p5()
-                .rounded_md()
+                .menu_row_corners(items, cx)
                 .cursor_pointer()
                 .text_sm()
                 .text_color(text_menu())
-                .menu_hover(hover, items)
+                .menu_hover(hover, items, cx)
                 .menu_key_target(submenu_key(MUTE_ROW_ORDER, index), items, cx)
                 .role(Role::MenuItem)
                 .aria_label(label.clone())

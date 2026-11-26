@@ -401,7 +401,7 @@ impl QuillApp {
             .px_2()
             .flex()
             .items_center()
-            .rounded_md()
+            .rounded(self.list_row_corners(cx))
             .role(gpui_kit::Role::Button)
             .aria_label(format!("{} · {}", name, status))
             .tab_index(0)

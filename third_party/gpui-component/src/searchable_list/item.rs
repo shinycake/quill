@@ -94,14 +94,20 @@ impl Styled for SearchableListItemElement {
 }
 
 impl RenderOnce for SearchableListItemElement {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         h_flex()
             .id(self.id)
             .relative()
             .gap_x_1()
             .py_1()
             .px_2()
-            .rounded(cx.theme().radius)
+            // QUILL (concentric corners): the row sits in a select's or
+            // combobox's popup, inset by the list's padding.
+            .rounded(crate::popover_shape::popover_row_radius(
+                crate::sizing::DROPDOWN_LIST_PADDING,
+                window,
+                cx,
+            ))
             .text_base()
             .text_color(cx.theme().foreground)
             .items_center()
@@ -111,16 +117,18 @@ impl RenderOnce for SearchableListItemElement {
             .refine_style(&self.style)
             .when(!self.disabled, |this| {
                 this.when(!self.selected, |this| {
-                    this.hover(|this| {
-                        this.bg(cx.theme().accent.opacity(0.7))
-                            .text_color(cx.theme().accent_foreground)
+                    this.hover(|this| match crate::popover_glass::popover_glass(
+                        crate::popover_glass::PopoverGlassSurface::Highlight,
+                        cx,
+                    ) {
+                        Some(_) => crate::popover_glass::highlight(this, cx),
+                        None => this
+                            .bg(cx.theme().accent.opacity(0.7))
+                            .text_color(cx.theme().accent_foreground),
                     })
                 })
             })
-            .when(self.selected, |this| {
-                this.bg(cx.theme().tokens.accent)
-                    .text_color(cx.theme().accent_foreground)
-            })
+            .when(self.selected, |this| crate::popover_glass::highlight(this, cx))
             .when(self.disabled, |this| {
                 this.cursor_not_allowed()
                     .text_color(cx.theme().muted_foreground)
