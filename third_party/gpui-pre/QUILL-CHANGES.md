@@ -814,7 +814,8 @@ every GPUI update:
 - `src/window.rs`, `src/window/snapshot.rs` (new): `Snapshot`,
   `SnapshotState`, `SnapshotDraw`; `Window::{new_snapshot,
   capture_snapshot, paint_snapshot, snapshot_last_frame,
-  snapshots_supported}`; `Window::scenes_drawn` counts full draws.
+  snapshots_supported}`; a snapshot the renderer can't draw turns
+  `SnapshotState::Failed` and paints live; `Window::scenes_drawn` counts full draws.
 - `src/view.rs`: a cached view reuses its paint only when it was painted
   in the previous full draw (always true in Classic, where a re-rendered
   view refreshes its children).
@@ -822,6 +823,10 @@ every GPUI update:
   `src/elements/snapshot_animation.rs` (new): `with_snapshot_animation`.
 - `src/window/snapshot.rs`: `SnapshotSwitch`, the `QUILL_SNAPSHOTS` switch,
   read once.
-- `src/platform.rs`: `PlatformWindow::{snapshots_supported, draw_snapshot,
-  snapshot_losses}`, false and zero by default. `src/platform/test/window.rs`
-  records drawn and released snapshots.
+- `src/platform.rs`: `PlatformWindow::{snapshot_max_side, draw_snapshot,
+  take_snapshot_losses}`, no support and no losses by default.
+  `src/platform/test/window.rs` records drawn and released snapshots, and
+  can fail every draw.
+- `src/scene/snapshot_pool.rs` (new): `SnapshotPool<T>`, the snapshot
+  textures every backend keeps (sizes, spares, limit), and
+  `SnapshotLosses`, what a renderer lost per slot or with its device.

@@ -17,12 +17,10 @@ use std::{
 use super::Window;
 use crate::scene::{CaptureContent, CaptureFate, CaptureTarget, Redraw};
 use crate::{
-    Bounds, DevicePixels, Hsla, Pixels, Point, ScaledPixels, Size, SnapshotQuad, SnapshotScene,
-    SnapshotSlot, point,
+    Bounds, DevicePixels, Hsla, Pixels, Point, ScaledPixels, Size, SnapshotLosses, SnapshotQuad,
+    SnapshotScene, SnapshotSlot, point,
 };
 
-/// The largest side of a snapshot's texture, in texels.
-const MAX_SIDE: i32 = 16384;
 /// What a window's snapshots may hold together, in multiples of the
 /// window's own device pixels.
 const AREA_LIMIT: f64 = 1.25;
@@ -75,6 +73,9 @@ pub enum SnapshotState {
     },
     /// The renderer or the scale factor changed under it: capture again.
     Lost,
+    /// The renderer could not draw it. It is not captured again: its owner
+    /// paints live, and a new snapshot may try again.
+    Failed,
 }
 
 /// A subtree's pixels, held for one transition. Not `Send`. Dropping it
@@ -224,9 +225,9 @@ pub(crate) struct SnapshotTable {
     live: Cell<Vec<Weak<SnapshotHandle>>>,
     /// Slots whose handles dropped since the last frame took them.
     released: Cell<Vec<SnapshotSlot>>,
-    /// The scale factor and the renderer's loss count the live snapshots
-    /// were drawn under, once a frame has set them.
-    drawn_under: Cell<Option<(f32, u64)>>,
+    /// The scale factor the live snapshots were drawn at, once a frame
+    /// has set it.
+    drawn_at: Cell<Option<f32>>,
     /// A test's switch in place of the environment's.
     switch: Cell<Option<SnapshotSwitch>>,
 }
@@ -272,7 +273,7 @@ impl SnapshotTable {
             .filter(|handle| Some(handle.slot) != except)
             .map(|handle| match handle.state.get() {
                 SnapshotState::Ready { size, .. } => texels(size),
-                SnapshotState::Empty | SnapshotState::Lost => 0.0,
+                SnapshotState::Empty | SnapshotState::Lost | SnapshotState::Failed => 0.0,
             })
             .sum()
     }
@@ -284,6 +285,19 @@ impl SnapshotTable {
             if let SnapshotState::Ready { .. } = handle.state.get() {
                 handle.state.set(SnapshotState::Lost);
                 any = true;
+            }
+        }
+        any
+    }
+
+    /// Marks the pictures in `slots`, which the renderer could not draw,
+    /// failed; returns whether one of them was showing.
+    fn fail(&self, slots: &[SnapshotSlot]) -> bool {
+        let mut any = false;
+        for handle in self.live() {
+            if slots.contains(&handle.slot) {
+                any |= matches!(handle.state.get(), SnapshotState::Ready { .. });
+                handle.state.set(SnapshotState::Failed);
             }
         }
         any
@@ -357,7 +371,7 @@ impl Window {
             .switch
             .get()
             .unwrap_or_else(SnapshotSwitch::from_env);
-        switch == SnapshotSwitch::On && self.platform_window.snapshots_supported()
+        switch == SnapshotSwitch::On && self.platform_window.snapshot_max_side().is_some()
     }
 
     /// QUILL: a new, empty snapshot of this window.
@@ -383,7 +397,7 @@ impl Window {
     ) -> R {
         self.invalidator.debug_assert_paint();
         let Some(target) = self.snapshot_target(snapshot, bounds, backing) else {
-            if snapshot.state() != SnapshotState::Empty {
+            if !matches!(snapshot.state(), SnapshotState::Empty | SnapshotState::Failed) {
                 snapshot.0.state.set(SnapshotState::Empty);
                 self.snapshots.release(snapshot.slot());
             }
@@ -405,7 +419,10 @@ impl Window {
         bounds: Bounds<Pixels>,
         backing: Option<Hsla>,
     ) -> Option<CaptureTarget> {
-        if !self.snapshots_supported() || !snapshot.of(&self.snapshots) {
+        if !self.snapshots_supported()
+            || !snapshot.of(&self.snapshots)
+            || snapshot.state() == SnapshotState::Failed
+        {
             return None;
         }
         let scale = self.scale_factor();
@@ -428,10 +445,13 @@ impl Window {
         })
     }
 
-    /// Whether a picture of `size` fits beside what the window's other
-    /// snapshots hold.
+    /// Whether a picture of `size` fits in a texture of the renderer and
+    /// beside what the window's other snapshots hold.
     fn snapshot_fits(&self, size: Size<DevicePixels>, except: Option<SnapshotSlot>) -> bool {
-        let sides = |side: i32| side > 0 && side <= MAX_SIDE;
+        let Some(max_side) = self.platform_window.snapshot_max_side() else {
+            return false;
+        };
+        let sides = |side: i32| u32::try_from(side).is_ok_and(|side| side > 0 && side <= max_side);
         if !sides(size.width.0) || !sides(size.height.0) {
             return false;
         }
@@ -510,13 +530,24 @@ impl Window {
     }
 
     /// QUILL: at the start of a frame, marks every live picture `Lost` when
-    /// the scale factor changed or the renderer lost its textures since
-    /// they were drawn, and draws everything again so that their owners
-    /// capture anew.
+    /// the scale factor changed or the renderer lost every texture since
+    /// they were drawn, so that their owners capture anew, and the pictures
+    /// the renderer could not draw `Failed`, so that their owners paint
+    /// live. Either draws everything again.
     pub(super) fn check_snapshots(&mut self) {
-        let now = (self.scale_factor(), self.platform_window.snapshot_losses());
-        let before = self.snapshots.drawn_under.replace(Some(now));
-        if before.is_some_and(|before| before != now) && self.snapshots.lose_all() {
+        let scale = self.scale_factor();
+        let rescaled = self
+            .snapshots
+            .drawn_at
+            .replace(Some(scale))
+            .is_some_and(|before| before != scale);
+        let changed = match self.platform_window.take_snapshot_losses() {
+            _ if rescaled => self.snapshots.lose_all(),
+            SnapshotLosses::All => self.snapshots.lose_all(),
+            SnapshotLosses::Slots(slots) => self.snapshots.fail(&slots),
+            SnapshotLosses::None => false,
+        };
+        if changed {
             self.refresh();
         }
     }
@@ -554,11 +585,27 @@ impl Window {
         self.snapshots.switch.set(Some(switch));
     }
 
+    /// QUILL: hands the last drawn frame to the platform window, as
+    /// presenting does, so a test window's fake renderer sees its snapshots.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn present_test_frame(&mut self) {
+        self.present();
+    }
+
     /// QUILL: on a test window, the renderer loses every snapshot texture.
     #[cfg(any(test, feature = "test-support"))]
     pub fn simulate_test_snapshot_loss(&mut self) {
         if let Some(window) = self.platform_window.as_test() {
             window.simulate_snapshot_loss();
+        }
+    }
+
+    /// QUILL: on a test window, whether the renderer fails to draw every
+    /// snapshot from now on.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_test_snapshot_draws_fail(&mut self, fail: bool) {
+        if let Some(window) = self.platform_window.as_test() {
+            window.set_snapshot_draws_fail(fail);
         }
     }
 

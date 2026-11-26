@@ -209,5 +209,5 @@ once (sweep bundle B13, N42):
 
 Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md):
 `src/linux/x11/window.rs` and `src/linux/wayland/window.rs` forward
-`snapshots_supported`, `draw_snapshot` and `snapshot_losses` to the wgpu
+`snapshot_max_side`, `draw_snapshot` and `take_snapshot_losses` to the wgpu
 renderer, through `try_borrow` so a busy window reads as no support.

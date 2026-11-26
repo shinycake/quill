@@ -79,9 +79,9 @@ pub(crate) struct DirectXRenderer {
     /// In that case we want to discard the first frame that we draw as we got reset in the middle of a frame
     /// meaning we lost all the allocated gpu textures and scene resources.
     skip_draws: bool,
-    /// QUILL: how many times snapshot textures were lost (a scene not drawn,
-    /// a lost device), for `PlatformWindow::snapshot_losses`.
-    snapshot_losses: u64,
+    /// QUILL: snapshot textures lost with the device, for
+    /// `PlatformWindow::take_snapshot_losses` (the pool keeps the rest).
+    snapshot_losses: gpui::SnapshotLosses,
 }
 
 /// QUILL: what a recording draws into.
@@ -145,7 +145,7 @@ struct DirectXRenderPipelines {
     /// Quill: backdrop glass, built on the first frame with glass.
     lenses: LensState,
     /// QUILL: snapshot textures (`snapshots.rs`), dropped with the device.
-    snapshots: snapshots::SnapshotPool,
+    snapshots: snapshots::Snapshots,
 }
 
 struct DirectXGlobalElements {
@@ -257,7 +257,7 @@ impl DirectXRenderer {
             width: 1,
             height: 1,
             skip_draws: false,
-            snapshot_losses: 0,
+            snapshot_losses: gpui::SnapshotLosses::None,
         })
     }
 
@@ -362,7 +362,7 @@ impl DirectXRenderer {
             self.devices.take();
         }
         // QUILL: the snapshot textures go with the device.
-        self.snapshot_losses = self.snapshot_losses.wrapping_add(1);
+        self.snapshot_losses = gpui::SnapshotLosses::All;
 
         let devices = DirectXRendererDevices::new(directx_devices, disable_direct_composition)
             .context("Recreating DirectX devices")?;
@@ -417,7 +417,7 @@ impl DirectXRenderer {
         background_appearance: WindowBackgroundAppearance,
     ) -> Result<()> {
         // QUILL: the frame's snapshots first; while recovering they can't
-        // be drawn, and count as lost.
+        // be drawn, and every texture counts as lost.
         self.draw_snapshot_scenes(scene);
         if self.skip_draws {
             // skip drawing this frame, we just recovered from a device lost event
@@ -1250,7 +1250,7 @@ impl DirectXRenderPipelines {
             hdr_surfaces,
             yuv_surfaces,
             lenses: LensState::default(),
-            snapshots: snapshots::SnapshotPool::default(),
+            snapshots: snapshots::Snapshots::new(device),
         })
     }
 }

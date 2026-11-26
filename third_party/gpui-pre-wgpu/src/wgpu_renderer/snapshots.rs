@@ -12,53 +12,41 @@
 //! `WgpuResources`, so a device recovery drops it with the device; the
 //! renderer counts that as a loss.
 
-use std::collections::HashMap;
 use std::ops::Range;
 
 use anyhow::Result;
-use gpui::{DevicePixels, Hsla, Scene, Size, SnapshotScene, SnapshotSlot};
+use gpui::{DevicePixels, Hsla, Scene, Size, SnapshotScene};
 
 use super::{DEPTH_FORMAT, DepthTexture, FrameKind, InstanceBinding, WgpuRendererCore};
-
-/// A side no texture exceeds.
-const MAX_SIDE: u32 = 16384;
 
 pub(super) struct SnapshotTexture {
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
 }
 
-/// The snapshot textures of one renderer (one window).
-#[derive(Default)]
-pub(super) struct SnapshotPool {
-    textures: HashMap<SnapshotSlot, SnapshotTexture>,
-    /// Released textures kept for the next capture.
-    spare: Vec<SnapshotTexture>,
+/// The snapshot textures of one renderer (one window), dropped with the
+/// device.
+pub(super) struct Snapshots {
+    pub(super) pool: gpui::SnapshotPool<SnapshotTexture>,
     /// The depth attachment of the last snapshot pass, kept while the next
     /// one is the same size.
     depth: Option<DepthTexture>,
 }
 
-fn rounded(side: i32, limit: u32) -> Option<u32> {
-    let side = u32::try_from(side).ok().filter(|side| *side > 0)?;
-    Some(side.next_multiple_of(256).min(MAX_SIDE).min(limit)).filter(|rounded| *rounded >= side)
-}
-
-impl SnapshotPool {
-    fn release(&mut self, slots: &[SnapshotSlot]) {
-        for slot in slots {
-            if let Some(texture) = self.textures.remove(slot) {
-                self.spare.push(texture);
-            }
-        }
-        if self.textures.is_empty() {
-            self.spare.clear();
-            self.depth = None;
+impl Snapshots {
+    /// No textures yet; none larger than `max_side` (the device's limit).
+    pub(super) fn new(max_side: u32) -> Self {
+        Self {
+            pool: gpui::SnapshotPool::new(max_side),
+            depth: None,
         }
     }
 
-    pub(super) fn bind_group(&self, slot: SnapshotSlot) -> Option<&wgpu::BindGroup> {
-        self.textures.get(&slot).map(|texture| &texture.bind_group)
+    fn release(&mut self, scene: &Scene) {
+        self.pool.release(&scene.snapshot_releases);
+        if self.pool.is_empty() {
+            self.depth = None;
+        }
     }
 }
 
@@ -87,22 +75,31 @@ impl WgpuRendererCore {
 
     /// Releases the textures of dropped snapshots and draws the frame's
     /// snapshot scenes, each on a submission of its own. A scene that can't
-    /// be drawn loses its texture; returns whether any was lost.
+    /// be drawn loses its texture (`SnapshotPool::lose`); returns whether
+    /// any was lost.
     pub(super) fn draw_snapshot_scenes(&mut self, scene: &Scene) -> bool {
-        self.resources.snapshots.release(&scene.snapshot_releases);
+        self.resources.snapshots.release(scene);
         let mut lost = false;
         for snapshot in &scene.snapshot_scenes {
-            if let Err(error) = self.draw_snapshot(snapshot) {
-                log::error!("snapshot not drawn: {error:#}");
-                self.resources.snapshots.textures.remove(&snapshot.slot);
+            if self.try_draw_snapshot(snapshot).is_none() {
                 lost = true;
             }
         }
         lost
     }
 
+    /// Draws one snapshot scene and submits it; a failure loses its texture.
+    pub(super) fn try_draw_snapshot(&mut self, snapshot: &SnapshotScene) -> Option<wgpu::SubmissionIndex> {
+        self.draw_snapshot(snapshot)
+            .inspect_err(|error| {
+                log::error!("snapshot not drawn: {error:#}");
+                self.resources.snapshots.pool.lose(snapshot.slot);
+            })
+            .ok()
+    }
+
     /// Draws one snapshot scene into its texture and submits it.
-    pub(super) fn draw_snapshot(&mut self, snapshot: &SnapshotScene) -> Result<wgpu::SubmissionIndex> {
+    fn draw_snapshot(&mut self, snapshot: &SnapshotScene) -> Result<wgpu::SubmissionIndex> {
         anyhow::ensure!(self.snapshots_supported(), "no snapshots on this path");
         let texture = self.snapshot_target(snapshot.slot, snapshot.size)?;
         let size = Size {
@@ -120,33 +117,16 @@ impl WgpuRendererCore {
         )
     }
 
-    /// The texture `slot` draws into: its own when it is large enough, else
-    /// a spare that is, else a new one.
-    fn snapshot_target(&mut self, slot: SnapshotSlot, texels: Size<DevicePixels>) -> Result<wgpu::Texture> {
-        let limit = self.max_texture_size;
-        let (Some(width), Some(height)) = (rounded(texels.width.0, limit), rounded(texels.height.0, limit)) else {
-            anyhow::bail!("a snapshot of {texels:?} texels");
-        };
-        let fits = |held: &SnapshotTexture| held.texture.width() == width && held.texture.height() == height;
-        let pool = &mut self.resources.snapshots;
-        if let Some(held) = pool.textures.get(&slot).filter(|held| fits(held)) {
-            return Ok(held.texture.clone());
-        }
-        if let Some(old) = pool.textures.remove(&slot) {
-            pool.spare.push(old);
-        }
-        let spare = pool
-            .spare
-            .iter()
-            .position(fits)
-            .map(|index| pool.spare.swap_remove(index));
-        let held = match spare {
-            Some(held) => held,
-            None => self.new_snapshot_texture(width, height),
-        };
-        let texture = held.texture.clone();
-        self.resources.snapshots.textures.insert(slot, held);
-        Ok(texture)
+    /// The texture `slot` draws into, from the pool.
+    fn snapshot_target(&mut self, slot: gpui::SnapshotSlot, texels: Size<DevicePixels>) -> Result<wgpu::Texture> {
+        // The pool is set aside while a new texture is built from `self`.
+        let mut snapshots = std::mem::replace(&mut self.resources.snapshots, Snapshots::new(0));
+        let target = snapshots
+            .pool
+            .target(slot, texels, |_| true, |width, height| Ok(self.new_snapshot_texture(width, height)))
+            .map(|held| held.texture.clone());
+        self.resources.snapshots = snapshots;
+        target
     }
 
     fn new_snapshot_texture(&self, width: u32, height: u32) -> SnapshotTexture {
@@ -219,7 +199,7 @@ impl WgpuRendererCore {
         pass.set_pipeline(&resources.pipelines.poly_sprites);
         pass.set_bind_group(1, &sprites.bind_group, &[]);
         for (index, quad) in quads.zip(batch) {
-            let Some(bind_group) = resources.snapshots.bind_group(quad.slot) else {
+            let Some(bind_group) = resources.snapshots.pool.get(quad.slot).map(|held| &held.bind_group) else {
                 continue;
             };
             let Ok(index) = u32::try_from(index) else {

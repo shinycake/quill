@@ -5,63 +5,53 @@
 //! snapshot textures (`Scene::snapshot_scenes`) and the textures whose
 //! handles dropped (`Scene::snapshot_releases`). Each live slot owns one
 //! `Texture2D` in the SDR swap chain's format with a render-target and a
-//! shader-resource view, sides rounded up to 256; a released texture is
-//! kept for the next capture while another snapshot lives. Each scene is
+//! shader-resource view, kept in gpui's `SnapshotPool` with the other
+//! backends' rules (sizes, spares, losses). Each scene is
 //! drawn by the frame's own recording (`DirectXRenderer::record`) with the
 //! texture bound as the target, its own viewport and SDR output; the next
 //! frame's `pre_draw` binds the frame's target, viewport and globals again.
 //! The pool lives in `DirectXRenderPipelines`, so a lost device drops it.
 
-use std::collections::HashMap;
 use std::ops::Range;
 
 use anyhow::{Context, Result};
-use gpui::{Hsla, Scene, SnapshotScene, SnapshotSlot};
+use gpui::{Hsla, Scene, SnapshotLosses, SnapshotScene};
 use windows::Win32::Graphics::{Direct3D11::*, Dxgi::Common::*};
 
 use super::{DirectXRenderer, DrawTarget, FrameKind, RENDER_TARGET_FORMAT};
 
-/// A side no texture exceeds (D3D11's limit).
-const MAX_SIDE: u32 = 16384;
-
 struct SnapshotTexture {
-    width: u32,
-    height: u32,
     target: Option<ID3D11RenderTargetView>,
     view: [Option<ID3D11ShaderResourceView>; 1],
 }
 
-/// The snapshot textures of one renderer (one window).
-#[derive(Default)]
-pub(super) struct SnapshotPool {
-    textures: HashMap<SnapshotSlot, SnapshotTexture>,
-    /// Released textures kept for the next capture.
-    spare: Vec<SnapshotTexture>,
+/// The snapshot textures of one renderer (one window), dropped with the
+/// device.
+pub(super) struct Snapshots {
+    pool: gpui::SnapshotPool<SnapshotTexture>,
     /// The depth view of the last snapshot pass and its size, kept while
     /// the next one is the same size.
     depth: Option<(u32, u32, Option<ID3D11DepthStencilView>)>,
 }
 
-fn rounded(side: i32) -> Option<u32> {
-    let side = u32::try_from(side).ok().filter(|side| *side > 0)?;
-    Some(side.next_multiple_of(256).min(MAX_SIDE)).filter(|rounded| *rounded >= side)
-}
-
-impl SnapshotPool {
-    fn release(&mut self, slots: &[SnapshotSlot]) {
-        for slot in slots {
-            if let Some(texture) = self.textures.remove(slot) {
-                self.spare.push(texture);
-            }
+impl Snapshots {
+    /// No textures yet; none larger than the device takes.
+    pub(super) fn new(device: &ID3D11Device) -> Self {
+        Self {
+            pool: gpui::SnapshotPool::new(super::backdrop_glass::max_atlas_side(device)),
+            depth: None,
         }
-        if self.textures.is_empty() {
-            self.spare.clear();
+    }
+
+    fn release(&mut self, scene: &Scene) {
+        self.pool.release(&scene.snapshot_releases);
+        if self.pool.is_empty() {
             self.depth = None;
         }
     }
 
-    pub(super) fn view(&self, slot: SnapshotSlot) -> Option<&[Option<ID3D11ShaderResourceView>; 1]> {
-        self.textures.get(&slot).map(|texture| &texture.view)
+    fn view(&self, slot: gpui::SnapshotSlot) -> Option<&[Option<ID3D11ShaderResourceView>; 1]> {
+        self.pool.get(slot).map(|texture| &texture.view)
     }
 }
 
@@ -104,8 +94,6 @@ fn new_texture(device: &ID3D11Device, width: u32, height: u32) -> Result<Snapsho
         device.CreateShaderResourceView(&texture, None, Some(&mut view))?;
     }
     Ok(SnapshotTexture {
-        width,
-        height,
         target,
         view: [view],
     })
@@ -138,47 +126,57 @@ fn new_depth(device: &ID3D11Device, width: u32, height: u32) -> Result<Option<ID
 }
 
 impl DirectXRenderer {
-    /// Whether this renderer can draw snapshots: while it has a device.
-    pub(crate) fn snapshots_supported(&self) -> bool {
-        self.devices.is_some()
+    /// The largest side of a snapshot texture, `None` without a device.
+    pub(crate) fn snapshot_max_side(&self) -> Option<u32> {
+        self.devices
+            .is_some()
+            .then(|| self.pipelines.snapshots.pool.max_side())
     }
 
-    /// How many times this renderer lost snapshot textures.
-    pub(crate) fn snapshot_losses(&self) -> u64 {
-        self.snapshot_losses
+    /// What this renderer lost since the last call.
+    pub(crate) fn take_snapshot_losses(&mut self) -> SnapshotLosses {
+        let mut losses = std::mem::take(&mut self.snapshot_losses);
+        losses.merge(self.pipelines.snapshots.pool.take_losses());
+        losses
     }
 
     /// Draws one snapshot scene now, outside a frame
     /// (`Window::snapshot_last_frame`). Direct3D keeps the atlas textures it
     /// reads alive until the GPU is done with them.
     pub(crate) fn draw_snapshot(&mut self, snapshot: &SnapshotScene) -> bool {
+        self.try_draw_snapshot(snapshot)
+    }
+
+    /// Releases the textures of dropped snapshots and draws the frame's
+    /// snapshot scenes. While a lost device is being replaced none can be
+    /// drawn, and every texture counts as lost.
+    pub(super) fn draw_snapshot_scenes(&mut self, scene: &Scene) {
+        self.pipelines.snapshots.release(scene);
+        if self.skip_draws {
+            if !scene.snapshot_scenes.is_empty() {
+                self.snapshot_losses = SnapshotLosses::All;
+            }
+            return;
+        }
+        for snapshot in &scene.snapshot_scenes {
+            self.try_draw_snapshot(snapshot);
+        }
+    }
+
+    /// Draws one snapshot scene; a failure loses its texture.
+    fn try_draw_snapshot(&mut self, snapshot: &SnapshotScene) -> bool {
         match self.draw_snapshot_scene(snapshot) {
             Ok(()) => true,
             Err(error) => {
                 log::error!("snapshot not drawn: {error:#}");
-                self.pipelines.snapshots.textures.remove(&snapshot.slot);
-                self.snapshot_losses = self.snapshot_losses.wrapping_add(1);
+                self.pipelines.snapshots.pool.lose(snapshot.slot);
                 false
             }
         }
     }
 
-    /// Releases the textures of dropped snapshots and draws the frame's
-    /// snapshot scenes. A scene that can't be drawn loses its texture and
-    /// counts as a loss.
-    pub(super) fn draw_snapshot_scenes(&mut self, scene: &Scene) {
-        self.pipelines.snapshots.release(&scene.snapshot_releases);
-        for snapshot in &scene.snapshot_scenes {
-            if let Err(error) = self.draw_snapshot_scene(snapshot) {
-                log::error!("snapshot not drawn: {error:#}");
-                self.pipelines.snapshots.textures.remove(&snapshot.slot);
-                self.snapshot_losses = self.snapshot_losses.wrapping_add(1);
-            }
-        }
-    }
-
     /// Draws one snapshot scene into its texture.
-    pub(super) fn draw_snapshot_scene(&mut self, snapshot: &SnapshotScene) -> Result<()> {
+    fn draw_snapshot_scene(&mut self, snapshot: &SnapshotScene) -> Result<()> {
         // A recovery in progress leaves the atlas without its textures.
         anyhow::ensure!(!self.skip_draws, "recovering from a lost device");
         let device = self
@@ -187,31 +185,25 @@ impl DirectXRenderer {
             .context("devices missing")?
             .device
             .clone();
-        let (Some(width), Some(height)) = (rounded(snapshot.size.width.0), rounded(snapshot.size.height.0)) else {
-            anyhow::bail!("a snapshot of {:?} texels", snapshot.size);
-        };
-        let pool = &mut self.pipelines.snapshots;
-        let fits = |texture: &SnapshotTexture| texture.width == width && texture.height == height;
-        if !pool.textures.get(&snapshot.slot).is_some_and(fits) {
-            if let Some(old) = pool.textures.remove(&snapshot.slot) {
-                pool.spare.push(old);
-            }
-            let texture = match pool.spare.iter().position(fits) {
-                Some(index) => pool.spare.swap_remove(index),
-                None => new_texture(&device, width, height)?,
-            };
-            pool.textures.insert(snapshot.slot, texture);
-        }
-        if !pool.depth.as_ref().is_some_and(|(w, h, _)| *w == width && *h == height) {
-            pool.depth = Some((width, height, new_depth(&device, width, height)?));
+        let snapshots = &mut self.pipelines.snapshots;
+        let target = snapshots
+            .pool
+            .target(snapshot.slot, snapshot.size, |_| true, |width, height| {
+                new_texture(&device, width, height)
+            })?
+            .target
+            .clone()
+            .context("snapshot texture missing")?;
+        let (width, height) = snapshots
+            .pool
+            .size_of(snapshot.slot)
+            .context("snapshot texture missing")?;
+        if !snapshots.depth.as_ref().is_some_and(|(w, h, _)| *w == width && *h == height) {
+            snapshots.depth = Some((width, height, new_depth(&device, width, height)?));
         }
         let target = DrawTarget {
-            target: pool
-                .textures
-                .get(&snapshot.slot)
-                .and_then(|texture| texture.target.clone())
-                .context("snapshot texture missing")?,
-            depth: pool.depth.as_ref().and_then(|(_, _, depth)| depth.clone()),
+            target,
+            depth: snapshots.depth.as_ref().and_then(|(_, _, depth)| depth.clone()),
             viewport: D3D11_VIEWPORT {
                 TopLeftX: 0.0,
                 TopLeftY: 0.0,

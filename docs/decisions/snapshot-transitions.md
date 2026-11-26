@@ -12,9 +12,13 @@ again on every frame. It is a general renderer feature; the Floating layout
 - `Snapshot` (`window/snapshot.rs`) is a handle to one texture, `Rc` and not
   `Send`, made by `Window::new_snapshot`. Dropping the last handle frees the
   texture at the next frame.
-- `SnapshotState` is `Empty`, `Ready { size, scale }` or `Lost`. A scale
-  factor change and a lost GPU device turn every `Ready` snapshot of the
-  window into `Lost`; the next capture makes it `Ready` again.
+- `SnapshotState` is `Empty`, `Ready { size, scale }`, `Lost` or
+  `Failed`. A scale factor change and a lost GPU device turn every `Ready`
+  snapshot of the window into `Lost`; the next capture makes it `Ready`
+  again. A snapshot the renderer could not draw (an allocation that
+  failed, say) turns `Failed`, alone: it is never captured again, so its
+  owner paints live instead of retrying every frame, and the next
+  transition's new snapshot tries afresh.
 - `SnapshotDraw` is how a snapshot is drawn: a uniform scale about an
   origin, a translation and an opacity. It is not a general transform. A
   rotation or a skew would need a quad with four free corners and a
@@ -114,10 +118,27 @@ otherwise replay a range whose captures were settled two frames ago. In
 Classic a re-rendered view refreshes all its children, so the condition
 always holds there.
 
+## Losses
+
+The renderer reports what it lost through
+`PlatformWindow::take_snapshot_losses`, which the window takes at the start
+of each frame: `SnapshotLosses::Slots` for snapshots that could not be
+drawn, `All` when the device went (or was replaced, or a frame skipped
+while recovering held snapshot scenes). A window that can't reach its
+renderer at that moment (a busy `RefCell` on X11, Wayland and Windows)
+gets `None`, and the renderer keeps the record for the next frame, so a
+busy borrow never reads as a loss or hides one.
+
 ## Limits
 
-Each live snapshot owns one texture in the drawable's format, sides rounded
-up to 256 as the lens canvases are, at most 16384 a side. The window refuses
+Each backend keeps its textures in gpui's `SnapshotPool<T>`
+(`scene/snapshot_pool.rs`): one texture per live slot, sides rounded up
+to 256 as the lens canvases are, at most the backend's limit
+(`PlatformWindow::snapshot_max_side`: 16384 on Metal, the device's
+`max_texture_dimension_2d` on wgpu, 16384 at D3D feature level 11 and 8192
+at 10), spares kept while another snapshot lives, and the losses above.
+The window's own check (`snapshot_fits`) asks the same limit, so a capture
+the backend would refuse is never started. The window refuses
 a capture that would take its snapshots past 1.25 times its own device pixel
 area (counted in exact texels, so the rounded textures can exceed it a
 little). `snapshot_last_frame` tries the window's scale, then half of it,
@@ -152,9 +173,9 @@ pipelines are built for the target's format, so the textures use it.
 Snapshot scenes are drawn before the surface texture is acquired, so a
 frame that is not presented still fills them. The path without storage
 buffers (`shaders_webgl.wgsl`) reports no support. Recovery drops the pool
-with the device; `snapshot_losses` counts a lost device at once and its
-recovery once more, so what was captured in between is lost too. The
-X11 and Wayland windows forward the three methods through `try_borrow`.
+with the device and reports `All`, so what was captured meanwhile is
+captured again on the new one. The X11 and Wayland windows forward the
+three methods through `try_borrow`.
 DirectX 11 (`gpui-pre-windows/src/snapshots.rs`) gives each live slot a
 `Texture2D` in the SDR swap chain's format with a render-target and a
 shader-resource view, and draws each snapshot scene with the frame's own
@@ -164,8 +185,8 @@ atlas image, and an HDR frame converts it as it does any sprite). The next
 frame's `pre_draw` binds the frame's target, viewport and globals again,
 so nothing has to be restored. The snapshot sprites follow the scene's own
 in the polychrome buffer, as the lens fallbacks follow the quads. A lost
-device drops the pool with the pipelines and counts a loss; frames drawn
-while recovering (`skip_draws`) count their snapshot scenes as lost.
+device drops the pool with the pipelines and reports `All`, as do frames
+drawn while recovering (`skip_draws`) that hold snapshot scenes.
 Direct3D keeps a resource alive until the GPU is done with it, so
 `draw_snapshot` does not wait.
 
@@ -175,7 +196,8 @@ Direct3D keeps a resource alive until the GPU is done with it, so
 (gpui-pre's own lib tests don't build in this checkout): live painting
 without support, a capture drawn once and then kept, the draw's scale,
 move and fade, a lens left in the frame, release at the next frame, loss on
-a scale change or a device loss, the area limit, and a last-frame snapshot.
+a scale change or a device loss, a snapshot the renderer can't draw failing
+once and painting live, the area limit, and a last-frame snapshot.
 The switch, and `with_snapshot_animation` ending, going away mid-run and
 ending at once without support, are tested there too on the test clock.
 `gpui-pre-apple`'s `a_snapshot_at_identity_draws_the_pixels_of_its_content`

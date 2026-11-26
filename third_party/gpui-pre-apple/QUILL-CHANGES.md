@@ -309,7 +309,8 @@ in output).
 ## Snapshots
 
 Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
-`src/metal_renderer/snapshots.rs` (new): a texture per live snapshot, drawn
+`src/metal_renderer/snapshots.rs` (new): a texture per live snapshot (gpui's
+`SnapshotPool`), drawn
 from `Scene::snapshot_scenes` ahead of the frame and freed with
 `Scene::snapshot_releases`; snapshot quads draw through the polychrome
 pipeline with the snapshot's texture bound. `src/metal_renderer.rs`: the

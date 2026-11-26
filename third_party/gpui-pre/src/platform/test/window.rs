@@ -81,12 +81,41 @@ pub struct TestWindow(pub(crate) Rc<Mutex<TestWindowState>>);
 /// every owner's fallback unless they turn it on.
 #[derive(Default)]
 struct TestSnapshots {
-    supported: bool,
-    losses: u64,
+    renderer: TestSnapshotRenderer,
+    losses: crate::SnapshotLosses,
     /// Every snapshot drawn, by a frame or at once, in order.
     drawn: Vec<SnapshotSlot>,
     /// Every texture a frame released, in order.
     released: Vec<SnapshotSlot>,
+}
+
+/// What the fake snapshot renderer does.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum TestSnapshotRenderer {
+    /// No snapshots.
+    #[default]
+    Unsupported,
+    /// Every snapshot is drawn.
+    Draws,
+    /// Every snapshot fails to draw.
+    Fails,
+}
+
+impl TestSnapshots {
+    /// Draws `slot`, or records its loss.
+    fn draw(&mut self, slot: SnapshotSlot) -> bool {
+        match self.renderer {
+            TestSnapshotRenderer::Draws => {
+                self.drawn.push(slot);
+                true
+            }
+            TestSnapshotRenderer::Fails => {
+                self.losses.add_slot(slot);
+                false
+            }
+            TestSnapshotRenderer::Unsupported => false,
+        }
+    }
 }
 
 // Test windows are not backed by a real platform window, so there is no raw
@@ -304,12 +333,26 @@ impl TestWindow {
 
     /// QUILL: whether the window reports snapshot support.
     pub fn set_snapshots_supported(&self, supported: bool) {
-        self.0.lock().snapshots.supported = supported;
+        self.0.lock().snapshots.renderer = if supported {
+            TestSnapshotRenderer::Draws
+        } else {
+            TestSnapshotRenderer::Unsupported
+        };
+    }
+
+    /// QUILL: whether every snapshot fails to draw from now on (support
+    /// stays on).
+    pub fn set_snapshot_draws_fail(&self, fail: bool) {
+        self.0.lock().snapshots.renderer = if fail {
+            TestSnapshotRenderer::Fails
+        } else {
+            TestSnapshotRenderer::Draws
+        };
     }
 
     /// QUILL: the renderer loses every snapshot texture, as a device loss does.
     pub fn simulate_snapshot_loss(&self) {
-        self.0.lock().snapshots.losses += 1;
+        self.0.lock().snapshots.losses = crate::SnapshotLosses::All;
     }
 
     /// QUILL: the snapshots drawn so far, in order.
@@ -725,28 +768,26 @@ impl PlatformWindow for TestWindow {
         self.0.lock().appearance_change_callback = Some(callback);
     }
 
-    fn snapshots_supported(&self) -> bool {
-        self.0.lock().snapshots.supported
+    fn snapshot_max_side(&self) -> Option<u32> {
+        (self.0.lock().snapshots.renderer != TestSnapshotRenderer::Unsupported)
+            .then_some(crate::SNAPSHOT_MAX_SIDE)
     }
 
     fn draw_snapshot(&self, snapshot: &crate::SnapshotScene) -> bool {
-        let mut state = self.0.lock();
-        if state.snapshots.supported {
-            state.snapshots.drawn.push(snapshot.slot);
-        }
-        state.snapshots.supported
+        self.0.lock().snapshots.draw(snapshot.slot)
     }
 
-    fn snapshot_losses(&self) -> u64 {
-        self.0.lock().snapshots.losses
+    fn take_snapshot_losses(&self) -> crate::SnapshotLosses {
+        std::mem::take(&mut self.0.lock().snapshots.losses)
     }
 
     fn draw(&self, scene: &Scene) {
         let scale_factor = self.scale_factor();
         let mut state = self.0.lock();
         // QUILL: the fake snapshot renderer keeps what each frame draws.
-        let drawn = scene.snapshot_scenes.iter().map(|snapshot| snapshot.slot);
-        state.snapshots.drawn.extend(drawn);
+        for snapshot in &scene.snapshot_scenes {
+            state.snapshots.draw(snapshot.slot);
+        }
         state.snapshots.released.extend(scene.snapshot_releases.iter().copied());
         state.frame_callback_pending = true;
         state.frame_scheduled = true;

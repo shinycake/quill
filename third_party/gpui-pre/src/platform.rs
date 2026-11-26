@@ -1457,20 +1457,22 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn on_appearance_changed(&self, callback: Box<dyn FnMut()>);
     fn on_button_layout_changed(&self, _callback: Box<dyn FnMut()>) {}
     fn draw(&self, scene: &Scene);
-    /// QUILL: whether the renderer draws snapshots
+    /// QUILL: the largest side, in texels, of a snapshot the renderer
+    /// draws; `None` where it draws no snapshots
     /// (docs/decisions/snapshot-transitions.md).
-    fn snapshots_supported(&self) -> bool {
-        false
+    fn snapshot_max_side(&self) -> Option<u32> {
+        None
     }
     /// QUILL: draws one snapshot's scene into its texture now, outside a
     /// frame, and says whether it did.
     fn draw_snapshot(&self, _snapshot: &crate::SnapshotScene) -> bool {
         false
     }
-    /// QUILL: how many times the renderer lost its snapshot textures (the
-    /// device went away, a texture could not be drawn).
-    fn snapshot_losses(&self) -> u64 {
-        0
+    /// QUILL: what the renderer lost since the last call: snapshots it
+    /// could not draw, or every texture with the device. A renderer that
+    /// can't answer now keeps them for the next call.
+    fn take_snapshot_losses(&self) -> crate::SnapshotLosses {
+        crate::SnapshotLosses::None
     }
     fn schedule_frame(&self) {}
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas>;

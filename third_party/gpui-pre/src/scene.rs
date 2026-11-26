@@ -21,12 +21,14 @@ mod backdrop_lens;
 mod backdrop_sharp;
 mod rounded_mask;
 mod snapshot;
+mod snapshot_pool;
 pub use backdrop_frame::*;
 pub(crate) use backdrop_frame::{UnderItem, primitives_under_ranked};
 pub use backdrop_lens::*;
 pub use backdrop_sharp::SharpBackdrop;
 pub use rounded_mask::{MaskUnit, Nesting, RoundedMask};
 pub use snapshot::{SnapshotQuad, SnapshotScene, SnapshotSlot};
+pub use snapshot_pool::{SNAPSHOT_MAX_SIDE, SnapshotLosses, SnapshotPool};
 pub(crate) use snapshot::{Capture, CaptureContent, CaptureFate, CaptureTarget, Redraw};
 pub(crate) use backdrop_sharp::{GlyphKey, GlyphSource, SlotSpace};
 

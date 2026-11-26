@@ -198,6 +198,11 @@ impl Harness {
         })
     }
 
+    /// Hands the last frame to the (fake) renderer, as presenting does.
+    fn present(&mut self) {
+        self.vcx.update(|window, _| window.present_test_frame());
+    }
+
     fn state(&mut self) -> Option<SnapshotState> {
         self.card.read_with(&self.vcx, |card, _| {
             card.snapshot.as_ref().map(Snapshot::state)
@@ -375,6 +380,29 @@ fn a_scale_factor_change_or_a_lost_device_loses_the_picture(cx: &mut TestAppCont
         .update(|window, _| window.simulate_test_snapshot_loss());
     h.frame(|_, _| {});
     assert_eq!(h.state(), Some(SnapshotState::Lost));
+}
+
+#[gpui_kit::test]
+fn a_snapshot_the_renderer_cannot_draw_fails_once_and_paints_live(cx: &mut TestAppContext) {
+    let mut h = open(cx, true, 100.0);
+    h.vcx
+        .update(|window, _| window.set_test_snapshot_draws_fail(true));
+    // Captured, but the renderer could not draw it.
+    assert_eq!(h.frame(|_, _| {}).captures, 1);
+    h.present();
+    // The next frame learns it: the child paints live, nothing is captured.
+    let drawn = h.replay_frame();
+    assert_eq!((drawn.child_quads, drawn.captures), (1, 0));
+    assert_eq!(h.state(), Some(SnapshotState::Failed));
+    // And it stays so: no capture is tried again, frame after frame.
+    for _ in 0..3 {
+        h.present();
+        let drawn = h.frame(|_, _| {});
+        assert_eq!((drawn.child_quads, drawn.captures), (1, 0));
+    }
+    assert_eq!(h.state(), Some(SnapshotState::Failed));
+    let (drawn, _) = h.vcx.update(|window, _| window.test_snapshot_history());
+    assert!(drawn.is_empty());
 }
 
 #[gpui_kit::test]
