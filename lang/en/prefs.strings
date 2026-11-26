@@ -327,6 +327,8 @@
 "qll_prefs_glass_button_refraction" = "Button refraction";
 "qll_prefs_glass_button_magnify" = "Button magnify";
 "qll_prefs_glass_color_split" = "Color split";
+"qll_prefs_glass_sample_in" = "See everyone at 6. Bring snacks!";
+"qll_prefs_glass_sample_out" = "Perfect, packing the crampons just in case.";
 "qll_prefs_composer" = "Composer";
 "qll_prefs_confirm_before_calling" = "Confirm before calling";
 "qll_prefs_confirm_new_passcode" = "Confirm new passcode";

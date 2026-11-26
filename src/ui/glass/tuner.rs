@@ -148,7 +148,7 @@ impl QuillApp {
             .on_click(cx.listener(|this, _, _, cx| {
                 this.set_appearance(cx, |a| a.glass_tuning = GlassTuning::default());
             }));
-        let preview = super::tuner_preview::preview(cx);
+        let preview = self.glass_tuner_preview(cx);
         let theme = cx.theme();
         let rows = sliders.dials.iter().map(|(dial, slider)| {
             let name = tr(dial_name(*dial));
