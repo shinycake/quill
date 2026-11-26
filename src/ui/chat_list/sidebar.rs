@@ -23,7 +23,7 @@ impl QuillApp {
         show_code: bool,
         show_password: bool,
         show_qr: bool,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mode = self.pane_mode();
@@ -121,7 +121,7 @@ impl QuillApp {
         &mut self,
         mut list: Stateful<Div>,
         focus_visible: bool,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         if self.chat_list.tab == SidebarTab::Contacts {
@@ -173,7 +173,7 @@ impl QuillApp {
         &mut self,
         mut list: Stateful<Div>,
         focus_visible: bool,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let folder = self.chat_list.view.folder();
@@ -359,6 +359,7 @@ impl QuillApp {
         self.chat_list.items = items;
         self.chat_list.folder_tags = folder_tags;
         let rows = self.chat_list_rows(sizes, focus_visible, window, cx);
+        let rows = self.folder_slide_rows(rows, window, cx);
         match self.chat_list_bar_glass(cx) {
             Some(lens) => self.float_chat_list_header(list, rows, lens, cx),
             None => list.child(rows),

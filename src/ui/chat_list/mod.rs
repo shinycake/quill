@@ -823,6 +823,7 @@ impl QuillApp {
 mod drop_on_row;
 mod drop_on_row_tests;
 mod drop_topic;
+mod folder_slide;
 mod forward_drop_tests;
 mod media_drag_tests;
 mod pin_drag_tests;

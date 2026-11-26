@@ -460,6 +460,53 @@ Deviations:
 - No backing colour in the capture: the message menu's strip and panel
   have a gap between them that a backing would fill.
 
+## Chat switch and folder pages (steps 11b, 11c)
+
+Both are one page giving way to the next, so they share one stage,
+`page_cross::PageStage<K>`: an enum (`Idle`, `Crossing`) that owns its two
+pictures, the page it drew last and where. The stage sits where the page
+draws and starts a crossing when the page it is about to draw is not the
+one it drew last (the plan's render-time variant: the many places that
+open a chat or a folder stay as they are). The old page is the last
+frame's pixels (`snapshot_last_frame`), the new one is drawn live through
+a snapshot the stage owns, so a page that is still loading is captured
+again as it changes. Pointer input to the region waits for the run (an
+occluding layer while `Crossing`). Exits: the run settles; another page
+replaces the run and its pictures; no page (a chat closed); Interface
+animations off (never entered); the layout or the width band leaves
+Floating (`cut`). Where the window has no snapshots
+(`QUILL_SNAPSHOTS=off`, an old GPU) the new page fades in and the old one
+is not drawn. Both sides read `motion::elapsed_since`, so
+`QUILL_MOTION_HOLD_MS` holds a capture mid-run.
+
+The chat switch (`app_slice::chat_switch`, W11) is the main window's
+conversation slot, keyed by the open chat: the new chat arrives 200 px
+from the right and fades in over 200 ms on the standard curve.
+
+The folder pages (`chat_list::folder_slide`, W7) are the chat rows keyed by
+the folder tab: the old page leaves and the new one arrives a page's width
+to either side by tab order (Web K's slider: no fade), 200 ms, clipped to
+the rows inside the list card.
+
+Deviations:
+
+- The old chat fades out where it is instead of leaving 200 px to the
+  left: its picture holds the window's wallpaper behind the chat, and
+  moving it showed a seam against the live wallpaper. The new chat still
+  travels 200 px.
+- The old chat's picture is taken at half scale. Two pane-sized pictures
+  pass the window's snapshot budget (1.25 windows); past it the new
+  chat's capture is refused and it painted in place. The old one only
+  fades, so half scale does not show.
+- Every chat switch runs forward. The plan's backward run belongs to the
+  header's back action, which in the wide layout does not open another
+  chat.
+- Chat windows hold one chat each and never cross.
+- A pane with glass in it cannot be taken from the last frame; then only
+  the new chat moves in.
+- Empty folder pages (the empty state, the loading skeleton) are drawn
+  outside the stage and appear at once.
+
 ## Title strip (step 10)
 
 `frames::title_strip` takes the strip's lower line away in Floating and

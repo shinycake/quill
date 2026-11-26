@@ -413,6 +413,8 @@ pub(crate) struct ChatListUi {
     /// The glass header's height at its last paint: the rows' top padding
     /// while it floats over them (`chat_list/header_glass.rs`).
     pub(super) header_inset: super::chat_list::HeaderInset,
+    /// Floating's folder pages sliding (`chat_list/folder_slide.rs`).
+    pub(super) folder_slide: super::page_cross::PageStage<super::folder_tabs::FolderSlotKind>,
 }
 
 /// Which list the sidebar shows (the tab strip under its header).
@@ -448,6 +450,7 @@ impl ChatListUi {
             keys: Default::default(),
             keep_top: None,
             header_inset: Default::default(),
+            folder_slide: Default::default(),
         }
     }
 }
