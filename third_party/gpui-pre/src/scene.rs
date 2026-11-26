@@ -1039,6 +1039,18 @@ impl Primitive {
     /// QUILL: clears the rounded shape of the primitive's mask when the
     /// primitive (clipped to the mask's rectangle) reaches none of its corners.
     fn cull_rounded_mask(&mut self, clipped_bounds: &Bounds<ScaledPixels>) {
+        if self.content_mask().rounded.is_none() {
+            return;
+        }
+        // A shadow's blur reaches 3 radii past its bounds, as the shader
+        // draws it (and `Scene::region_snapshot` reads it).
+        let area = match self {
+            Primitive::Shadow(shadow) => shadow
+                .bounds
+                .dilate(ScaledPixels(shadow.blur_radius.0 * 3.0))
+                .intersect(&shadow.content_mask.bounds),
+            _ => *clipped_bounds,
+        };
         let mask = match self {
             Primitive::Shadow(shadow) => &mut shadow.content_mask,
             Primitive::Quad(quad) => &mut quad.content_mask,
@@ -1052,9 +1064,7 @@ impl Primitive {
             Primitive::Lens(lens) => &mut lens.content_mask,
             Primitive::Snapshot(quad) => &mut quad.content_mask,
         };
-        if !mask.rounded.is_none() {
-            *mask = mask.culled_for(clipped_bounds);
-        }
+        *mask = mask.culled_for(&area);
     }
 
     pub fn content_mask(&self) -> &ContentMask<ScaledPixels> {

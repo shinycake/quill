@@ -91,7 +91,10 @@ transformed sprite) clipped to the mask's rectangle are tested against the
 shape's corner squares. If they touch none, the primitive is stored with no
 shape: the output is identical, it takes the old shader path, and an opaque
 quad keeps the opaque pre-pass. The test is four rectangle overlaps for a
-primitive painted under a rounded mask and none under a plain one.
+primitive painted under a rounded mask and none under a plain one. A
+shadow is tested with its bounds grown by three blur radii, how far the
+shader draws its blur, so a blurred edge that reaches a corner keeps the
+shape.
 
 ## Shaders
 
