@@ -1464,9 +1464,8 @@ impl LineLayout {
 
                 match tab_width {
                     Some(tab_width) => {
-                        let tab_cell = ContentMask {
-                            bounds: Bounds::new(origin, size(*tab_width, line_height)),
-                        };
+                        let tab_cell =
+                            ContentMask::rect(Bounds::new(origin, size(*tab_width, line_height)));
                         window.with_content_mask(Some(tab_cell), |window| {
                             _ = indicators.tab.paint(
                                 origin,

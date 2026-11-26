@@ -17,7 +17,7 @@ use std::num::NonZeroU64;
 use std::ops::Range;
 
 use bytemuck::{Pod, Zeroable};
-use gpui::{Bounds, PaintSurface, ScaledPixels, SurfaceFormat, SurfaceFrame};
+use gpui::{Bounds, Corners, PaintSurface, ScaledPixels, SurfaceFormat, SurfaceFrame};
 
 /// Surfaces drawn in one renderer frame at most: the uniform buffer holds
 /// this many draws' parameters.
@@ -35,11 +35,15 @@ pub(crate) struct SurfaceParams {
     content_mask: [f32; 4],
     /// `YuvColor::rgb_rows`: R, G and B as `dot(row, (y, cb, cr, 1))`.
     rows: [[f32; 4]; 3],
+    /// QUILL: the rounded part of the content mask and its radii
+    /// (docs/decisions/rounded-content-masks.md).
+    mask_rounded: [f32; 4],
+    mask_radii: [f32; 4],
 }
 
 pub(crate) const SURFACE_PARAMS_SIZE: u64 = std::mem::size_of::<SurfaceParams>() as u64;
 
-const _: () = assert!(SURFACE_PARAMS_SIZE == 80);
+const _: () = assert!(SURFACE_PARAMS_SIZE == 112);
 
 fn pod_bounds(bounds: Bounds<ScaledPixels>) -> [f32; 4] {
     [
@@ -47,6 +51,15 @@ fn pod_bounds(bounds: Bounds<ScaledPixels>) -> [f32; 4] {
         bounds.origin.y.0,
         bounds.size.width.0,
         bounds.size.height.0,
+    ]
+}
+
+fn pod_corners(radii: Corners<ScaledPixels>) -> [f32; 4] {
+    [
+        radii.top_left.0,
+        radii.top_right.0,
+        radii.bottom_right.0,
+        radii.bottom_left.0,
     ]
 }
 
@@ -139,6 +152,8 @@ impl YuvSurfaces {
                 bounds: pod_bounds(surface.bounds),
                 content_mask: pod_bounds(surface.content_mask.bounds),
                 rows: frame.yuv().rgb_rows(),
+                mask_rounded: pod_bounds(surface.content_mask.rounded.bounds),
+                mask_radii: pod_corners(surface.content_mask.rounded.radii),
             }));
             self.draws.push(Some((slot, offset as u32)));
             frame.mark_drawn();
@@ -420,7 +435,7 @@ mod tests {
             scene.insert_primitive(PaintSurface {
                 order: 0,
                 bounds,
-                content_mask: ContentMask { bounds },
+                content_mask: ContentMask::rect(bounds),
                 frame: frame.clone(),
             });
         }

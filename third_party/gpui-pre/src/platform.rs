@@ -1457,6 +1457,21 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn on_appearance_changed(&self, callback: Box<dyn FnMut()>);
     fn on_button_layout_changed(&self, _callback: Box<dyn FnMut()>) {}
     fn draw(&self, scene: &Scene);
+    /// QUILL: whether the renderer draws snapshots
+    /// (docs/decisions/snapshot-transitions.md).
+    fn snapshots_supported(&self) -> bool {
+        false
+    }
+    /// QUILL: draws one snapshot's scene into its texture now, outside a
+    /// frame, and says whether it did.
+    fn draw_snapshot(&self, _snapshot: &crate::SnapshotScene) -> bool {
+        false
+    }
+    /// QUILL: how many times the renderer lost its snapshot textures (the
+    /// device went away, a texture could not be drawn).
+    fn snapshot_losses(&self) -> u64 {
+        0
+    }
     fn schedule_frame(&self) {}
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas>;
     fn is_subpixel_rendering_supported(&self) -> bool;

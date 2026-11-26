@@ -2,7 +2,8 @@
 // `SurfaceFrame` (RGBA16F and NV12, `YuvColor`) and the non-Apple `PaintSurface::frame`;
 // primitives a window's paint filter refuses never enter the scene; a replayed
 // range enters the bounds tree once; backdrop glass (`BackdropLens`, banded
-// orders; stage 5: frame plans, label inks, re-rendered backdrops).
+// orders; stage 5: frame plans, label inks, re-rendered backdrops); snapshot
+// transforms (`SnapshotQuad`, captures diverted by paint operation).
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
@@ -18,10 +19,15 @@ use crate::{
 mod backdrop_frame;
 mod backdrop_lens;
 mod backdrop_sharp;
+mod rounded_mask;
+mod snapshot;
 pub use backdrop_frame::*;
 pub(crate) use backdrop_frame::{UnderItem, primitives_under_ranked};
 pub use backdrop_lens::*;
 pub use backdrop_sharp::SharpBackdrop;
+pub use rounded_mask::{MaskUnit, Nesting, RoundedMask};
+pub use snapshot::{SnapshotQuad, SnapshotScene, SnapshotSlot};
+pub(crate) use snapshot::{Capture, CaptureContent, CaptureFate, CaptureTarget, Redraw};
 pub(crate) use backdrop_sharp::{GlyphKey, GlyphSource, SlotSpace};
 
 use smallvec::SmallVec;
@@ -37,6 +43,8 @@ pub type DrawOrder = u32;
 /// compiler-inserted padding bytes, which would be undefined behavior to
 /// reinterpret as `&[u8]` when writing instance buffers. Guaranteed to be
 /// `0` or `1` by construction; shaders read it as a `u32`/`uint`.
+/// QUILL: but for [`PaddedBool32::PREMULTIPLIED`], which only a snapshot's
+/// sprite carries.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct PaddedBool32(u32);
@@ -48,6 +56,11 @@ impl From<bool> for PaddedBool32 {
 }
 
 impl PaddedBool32 {
+    /// QUILL: `PolychromeSprite::grayscale` read by the shaders as flags:
+    /// bit 0 grayscale, bit 1 "the texture holds premultiplied colour" (a
+    /// snapshot's, `SnapshotQuad::sprite`).
+    pub(crate) const PREMULTIPLIED: Self = PaddedBool32(2);
+
     /// The wrapped boolean.
     pub fn as_bool(self) -> bool {
         self.0 != 0
@@ -92,6 +105,18 @@ pub struct Scene {
     /// QUILL (glass stage 5): what lies under each `LensDetail::Rendered` lens,
     /// drawn again finer (`Window` builds them as the frame ends).
     pub sharp_backdrops: Vec<SharpBackdrop>,
+    /// QUILL: snapshot textures drawn in the frame.
+    pub snapshots: Vec<SnapshotQuad>,
+    /// QUILL: what to draw into snapshot textures before the frame.
+    pub snapshot_scenes: Vec<SnapshotScene>,
+    /// QUILL: snapshots whose handles dropped: their textures go back to the
+    /// renderer's pool.
+    pub snapshot_releases: Vec<SnapshotSlot>,
+    /// QUILL: the frame's captures, by the paint operations they span; kept
+    /// with the rendered frame so that a replay of their range captures again.
+    pub(crate) captures: Vec<Capture>,
+    /// QUILL: the captures being painted, innermost last.
+    capture_stack: Vec<usize>,
     /// QUILL (glass stage 5): how to rasterize sprites again, recorded while a
     /// window has re-rendered backdrops.
     pub(crate) glyph_sources: collections::FxHashMap<GlyphKey, GlyphSource>,
@@ -105,6 +130,9 @@ pub struct Scene {
     /// Quill: this scene is drawn under a paint filter, so cached
     /// primitives are not replayed (they were never filtered).
     pub(crate) filtered: bool,
+    /// QUILL: how many masks were nested this frame with a loss of the outer
+    /// mask's rounding (rule 5 of docs/decisions/rounded-content-masks.md).
+    pub inexact_rounded_masks: u32,
 }
 
 #[expect(missing_docs)]
@@ -128,10 +156,31 @@ impl Scene {
         self.inks.clear();
         self.ink_requests.clear();
         self.sharp_backdrops.clear();
+        self.snapshots.clear();
+        self.snapshot_scenes.clear();
+        self.snapshot_releases.clear();
+        self.captures.clear();
+        self.capture_stack.clear();
         self.glyph_sources.clear();
         self.sort_keys.clear();
         self.suppressed = false;
         self.filtered = false;
+        self.inexact_rounded_masks = 0;
+    }
+
+    /// QUILL: records a mask nested with the loss of the outer mask's
+    /// rounding (rule 5), and says so once in a debug build.
+    pub(crate) fn note_inexact_rounded_mask(&mut self) {
+        self.inexact_rounded_masks = self.inexact_rounded_masks.saturating_add(1);
+        #[cfg(debug_assertions)]
+        {
+            static LOGGED: std::sync::Once = std::sync::Once::new();
+            LOGGED.call_once(|| {
+                log::warn!(
+                    "a rounded content mask crossed another one's corner; the outer rounding is lost there (docs/decisions/rounded-content-masks.md, rule 5)"
+                );
+            });
+        }
     }
 
     /// Inserts a sprite that [`Self::advance_animations`] keeps moving. The
@@ -219,7 +268,7 @@ impl Scene {
             {
                 primitive.set_order(order);
                 let primitive = primitive.clone();
-                self.push_primitive(primitive, order);
+                self.push_primitive(primitive, order, index);
             }
         }
     }
@@ -270,7 +319,7 @@ impl Scene {
             {
                 recorded.set_order(order);
             }
-            self.push_primitive(primitive, order);
+            self.push_primitive(primitive, order, index);
         }
     }
 
@@ -288,6 +337,14 @@ impl Scene {
         if clipped_bounds.is_empty() {
             return false;
         }
+        // QUILL: a capture painted afresh draws its texture again.
+        if !self.capture_stack.is_empty() {
+            self.note_painted();
+        }
+        // QUILL: a primitive nowhere near a rounded mask's corner keeps the
+        // fast path (docs/decisions/rounded-content-masks.md, corner culling).
+        let mut primitive = primitive;
+        primitive.cull_rounded_mask(&clipped_bounds);
 
         if let Primitive::Lens(lens) = primitive {
             return self.insert_lens(lens, clipped_bounds);
@@ -324,7 +381,8 @@ impl Scene {
         if let Primitive::Lens(lens) = &mut primitive {
             lens.id = u32::try_from(self.lenses.len()).unwrap_or(u32::MAX);
         }
-        self.push_primitive(primitive.clone(), order);
+        let op = self.paint_operations.len();
+        self.push_primitive(primitive.clone(), order, op);
         self.paint_operations
             .push(PaintOperation::Primitive(primitive));
     }
@@ -350,7 +408,15 @@ impl Scene {
         }
     }
 
-    fn push_primitive(&mut self, primitive: Primitive, order: DrawOrder) {
+    /// QUILL: `op` is the primitive's paint operation; a capture that spans
+    /// it takes the primitive instead of the frame.
+    fn push_primitive(&mut self, primitive: Primitive, order: DrawOrder, op: usize) {
+        if let Some(primitive) = self.divert(op, primitive) {
+            self.push_into_frame(primitive, order);
+        }
+    }
+
+    fn push_into_frame(&mut self, primitive: Primitive, order: DrawOrder) {
         match primitive {
             Primitive::Shadow(shadow) => self.shadows.push(Shadow { order, ..shadow }),
             Primitive::Quad(quad) => self.quads.push(Quad { order, ..quad }),
@@ -382,6 +448,7 @@ impl Scene {
                 let id = u32::try_from(self.lenses.len()).unwrap_or(u32::MAX);
                 self.lenses.push(BackdropLens { order, id, ..*lens });
             }
+            Primitive::Snapshot(quad) => self.snapshots.push(SnapshotQuad { order, ..quad }),
         }
     }
 
@@ -389,7 +456,7 @@ impl Scene {
         if self.filtered {
             return;
         }
-        let Some(operations) = prev_scene.paint_operations.get(range) else {
+        let Some(operations) = prev_scene.paint_operations.get(range.clone()) else {
             return;
         };
         // QUILL: a lens is banded against what is under it now, so a range
@@ -440,6 +507,9 @@ impl Scene {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
                 PaintOperation::StartLayer => self.push_layer(),
                 PaintOperation::EndLayer => self.pop_layer(),
+                // QUILL: a capture painted in the range captures again.
+                PaintOperation::StartCapture(target) => self.begin_capture(target.replayed()),
+                PaintOperation::EndCapture => self.end_capture(),
             }
         }
     }
@@ -528,18 +598,23 @@ impl Scene {
                 }
                 PaintOperation::StartLayer => self.paint_operations.push(PaintOperation::StartLayer),
                 PaintOperation::EndLayer => self.paint_operations.push(PaintOperation::EndLayer),
+                PaintOperation::StartCapture(target) => self
+                    .paint_operations
+                    .push(PaintOperation::StartCapture(target.replayed())),
+                PaintOperation::EndCapture => self.paint_operations.push(PaintOperation::EndCapture),
             }
         }
+        // QUILL: a capture painted in the range captures the copies again.
+        self.add_replayed_captures(first_operation);
         // Primitives that share an order and a kind draw in the order they
         // reached the scene, which for a layer is when the outermost layer
         // around it ended: so push them as painting did.
         for index in deferred_layer_sequence(operations) {
-            if let Some(PaintOperation::Primitive(primitive)) =
-                self.paint_operations.get(first_operation + index)
-            {
+            let op = first_operation + index;
+            if let Some(PaintOperation::Primitive(primitive)) = self.paint_operations.get(op) {
                 let primitive = primitive.clone();
                 let order = primitive.order();
-                self.push_primitive(primitive, order);
+                self.push_primitive(primitive, order, op);
             }
         }
     }
@@ -571,6 +646,7 @@ impl Scene {
         self.native_views
             .sort_by_key(|native_view| native_view.order);
         sort_in_place(&mut self.lenses, keys, |lens| (lens.order, 0));
+        self.snapshots.sort_by_key(|quad| quad.order);
         self.keep_first_painted_native_views();
 
         // Sorting moved the sprites, so animations learn where theirs ended up.
@@ -752,6 +828,8 @@ impl Scene {
             native_views_iter: self.native_views.iter().peekable(),
             lenses_start: 0,
             lenses_iter: self.lenses.iter().peekable(),
+            snapshots_start: 0,
+            snapshots_iter: self.snapshots.iter().peekable(),
         }
     }
 }
@@ -828,6 +906,8 @@ pub(crate) enum PrimitiveKind {
     NativeView,
     /// QUILL: backdrop glass, which takes a band of its own (never shared).
     Lens,
+    /// QUILL: a snapshot's texture.
+    Snapshot,
 }
 
 impl PrimitiveKind {
@@ -867,6 +947,7 @@ fn deferred_layer_sequence(operations: &[PaintOperation]) -> Vec<usize> {
                     sequence.extend(layers.drain(..).flatten());
                 }
             }
+            PaintOperation::StartCapture(_) | PaintOperation::EndCapture => {}
             PaintOperation::Primitive(_) => match open.last().and_then(|&l| layers.get_mut(l)) {
                 Some(layer) => layer.push(index),
                 None => sequence.push(index),
@@ -882,6 +963,10 @@ pub(crate) enum PaintOperation {
     Primitive(Primitive),
     StartLayer,
     EndLayer,
+    /// QUILL: what is painted until the matching `EndCapture` goes into a
+    /// snapshot's texture (`scene/snapshot.rs`).
+    StartCapture(CaptureTarget),
+    EndCapture,
 }
 
 #[derive(Clone)]
@@ -899,6 +984,8 @@ pub enum Primitive {
     /// QUILL: backdrop glass, boxed so the rare lens does not grow every
     /// primitive the frame records.
     Lens(Box<BackdropLens>),
+    /// QUILL: a snapshot's texture.
+    Snapshot(SnapshotQuad),
 }
 
 #[expect(missing_docs)]
@@ -915,6 +1002,7 @@ impl Primitive {
             Primitive::Surface(_) => PrimitiveKind::Surface,
             Primitive::NativeView(_) => PrimitiveKind::NativeView,
             Primitive::Lens(_) => PrimitiveKind::Lens,
+            Primitive::Snapshot(_) => PrimitiveKind::Snapshot,
         }
     }
 
@@ -930,6 +1018,7 @@ impl Primitive {
             Primitive::Surface(surface) => &surface.bounds,
             Primitive::NativeView(native_view) => &native_view.bounds,
             Primitive::Lens(lens) => &lens.bounds,
+            Primitive::Snapshot(quad) => &quad.bounds,
         }
     }
 
@@ -947,6 +1036,27 @@ impl Primitive {
             .intersect(&self.content_mask().bounds)
     }
 
+    /// QUILL: clears the rounded shape of the primitive's mask when the
+    /// primitive (clipped to the mask's rectangle) reaches none of its corners.
+    fn cull_rounded_mask(&mut self, clipped_bounds: &Bounds<ScaledPixels>) {
+        let mask = match self {
+            Primitive::Shadow(shadow) => &mut shadow.content_mask,
+            Primitive::Quad(quad) => &mut quad.content_mask,
+            Primitive::Path(path) => &mut path.paint.content_mask,
+            Primitive::Underline(underline) => &mut underline.content_mask,
+            Primitive::MonochromeSprite(sprite) => &mut sprite.content_mask,
+            Primitive::SubpixelSprite(sprite) => &mut sprite.content_mask,
+            Primitive::PolychromeSprite(sprite) => &mut sprite.content_mask,
+            Primitive::Surface(surface) => &mut surface.content_mask,
+            Primitive::NativeView(native_view) => &mut native_view.content_mask,
+            Primitive::Lens(lens) => &mut lens.content_mask,
+            Primitive::Snapshot(quad) => &mut quad.content_mask,
+        };
+        if !mask.rounded.is_none() {
+            *mask = mask.culled_for(clipped_bounds);
+        }
+    }
+
     pub fn content_mask(&self) -> &ContentMask<ScaledPixels> {
         match self {
             Primitive::Shadow(shadow) => &shadow.content_mask,
@@ -959,6 +1069,7 @@ impl Primitive {
             Primitive::Surface(surface) => &surface.content_mask,
             Primitive::NativeView(native_view) => &native_view.content_mask,
             Primitive::Lens(lens) => &lens.content_mask,
+            Primitive::Snapshot(quad) => &quad.content_mask,
         }
     }
 
@@ -976,6 +1087,7 @@ impl Primitive {
             Primitive::Surface(surface) => surface.order,
             Primitive::NativeView(native_view) => native_view.order,
             Primitive::Lens(lens) => lens.order,
+            Primitive::Snapshot(quad) => quad.order,
         }
     }
 
@@ -991,6 +1103,7 @@ impl Primitive {
             Primitive::Surface(surface) => surface.order = order,
             Primitive::NativeView(native_view) => native_view.order = order,
             Primitive::Lens(lens) => lens.order = order,
+            Primitive::Snapshot(quad) => quad.order = order,
         }
     }
 }
@@ -1023,6 +1136,8 @@ struct BatchIterator<'a> {
     native_views_iter: Peekable<slice::Iter<'a, PaintNativeView>>,
     lenses_start: usize,
     lenses_iter: Peekable<slice::Iter<'a, BackdropLens>>,
+    snapshots_start: usize,
+    snapshots_iter: Peekable<slice::Iter<'a, SnapshotQuad>>,
 }
 
 impl<'a> Iterator for BatchIterator<'a> {
@@ -1068,6 +1183,10 @@ impl<'a> Iterator for BatchIterator<'a> {
             (
                 self.lenses_iter.peek().map(|lens| lens.order),
                 PrimitiveKind::Lens,
+            ),
+            (
+                self.snapshots_iter.peek().map(|quad| quad.order),
+                PrimitiveKind::Snapshot,
             ),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
@@ -1248,6 +1367,20 @@ impl<'a> Iterator for BatchIterator<'a> {
                 self.lenses_start = lenses_end;
                 Some(PrimitiveBatch::Lenses(lenses_start..lenses_end))
             }
+            PrimitiveKind::Snapshot => {
+                let snapshots_start = self.snapshots_start;
+                let mut snapshots_end = snapshots_start + 1;
+                self.snapshots_iter.next();
+                while self
+                    .snapshots_iter
+                    .next_if(|quad| (quad.order, batch_kind) < max_order_and_kind)
+                    .is_some()
+                {
+                    snapshots_end += 1;
+                }
+                self.snapshots_start = snapshots_end;
+                Some(PrimitiveBatch::Snapshots(snapshots_start..snapshots_end))
+            }
         }
     }
 }
@@ -1284,6 +1417,9 @@ pub enum PrimitiveBatch {
     /// QUILL: backdrop glass. Lenses of one batch share an order, so none
     /// covers another.
     Lenses(Range<usize>),
+    /// QUILL: snapshot textures, each drawn with its own texture as a
+    /// polychrome sprite (`SnapshotQuad::sprite`).
+    Snapshots(Range<usize>),
 }
 
 impl PrimitiveBatch {
@@ -1318,6 +1454,7 @@ impl PrimitiveBatch {
             Self::Surfaces(range) => format!("surfaces ({})", range.len()),
             Self::NativeViews(range) => format!("native views ({})", range.len()),
             Self::Lenses(range) => format!("lenses ({})", range.len()),
+            Self::Snapshots(range) => format!("snapshots ({})", range.len()),
         }
     }
 }
@@ -2156,7 +2293,7 @@ mod tests {
     fn quad(x: f32) -> Quad {
         Quad {
             bounds: square(x),
-            content_mask: ContentMask { bounds: square(x) },
+            content_mask: ContentMask::rect(square(x)),
             ..Default::default()
         }
     }
@@ -2166,7 +2303,7 @@ mod tests {
             order: 0,
             pad: 0,
             bounds: square(x),
-            content_mask: ContentMask { bounds: square(x) },
+            content_mask: ContentMask::rect(square(x)),
             color: Hsla::default(),
             thickness: ScaledPixels(1.),
             wavy: false.into(),
@@ -2188,7 +2325,7 @@ mod tests {
             id: NativeViewId::for_test(1),
             hitbox_id: HitboxId::placeholder(),
             bounds: square(0.),
-            content_mask: ContentMask { bounds: square(0.) },
+            content_mask: ContentMask::rect(square(0.)),
             background: Hsla::default(),
         });
         scene.insert_primitive(quad(0.));
@@ -2208,7 +2345,7 @@ mod tests {
             id: NativeViewId::for_test(1),
             hitbox_id,
             bounds: square(x),
-            content_mask: ContentMask { bounds: square(x) },
+            content_mask: ContentMask::rect(square(x)),
             background: Hsla::default(),
         };
         let first_hitbox = HitboxId::placeholder();

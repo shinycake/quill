@@ -543,6 +543,7 @@ mod restricted_exceptions;
 mod rich_draft;
 mod round_record;
 mod round_seek;
+mod rounded_mask_demo;
 mod saved_sublists;
 mod schedule_repeat;
 mod scheduled;
@@ -598,6 +599,7 @@ mod sidebar_hide_tests;
 mod sidebar_reveal;
 mod signin_ui;
 mod similar_strip;
+mod snapshot_demo;
 mod spell_dictionaries;
 #[cfg(target_os = "macos")]
 mod spellcheck_mac;

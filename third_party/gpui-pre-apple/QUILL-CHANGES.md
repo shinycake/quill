@@ -282,3 +282,38 @@ Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`).
 once), each frame's completion handler prints the command buffer's GPU time
 and the frame's lens count to stderr as `GLASSGPU main <ms> <lenses>`.
 Without it nothing is read or printed.
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`). `vendor/gpui/src/window.rs`:
+`ContentMask` gains `rounded: RoundedMask` and `build.rs` exports
+`RoundedMask` to the shader header, so every instance grows by 32 bytes.
+`src/shaders.metal`: `rounded_mask_coverage` and `has_rounded_mask`; every
+fragment function multiplies its coverage by the mask's; a quad, underline,
+polychrome sprite or path tile with a rounded mask leaves its fast return
+and the opaque pre-pass; monochrome sprites pass their instance index and
+surfaces their mask's shape to the fragment; `QUILL-LAYOUT` lines state each
+struct's size and mask offset. `src/metal_renderer.rs`: `ContentMask::rect`
+and a headless pixel test of the coverage.
+
+## Drawing a scene into a texture
+
+Changed by the Quill project in 2026. `src/metal_renderer/scene_target.rs`
+(new): `new_scene_target` allocates a texture a scene can be drawn into and
+sampled from, and `MetalRenderer::draw_scene_into` encodes a whole scene
+into it on a command buffer of its own. `src/metal_renderer/lens.rs`: the
+sharp magnifier's canvases are allocated and drawn through them (no change
+in output).
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
+`src/metal_renderer/snapshots.rs` (new): a texture per live snapshot, drawn
+from `Scene::snapshot_scenes` ahead of the frame and freed with
+`Scene::snapshot_releases`; snapshot quads draw through the polychrome
+pipeline with the snapshot's texture bound. `src/metal_renderer.rs`: the
+pool, the batch arm, and `draw_primitives_to_texture` takes its clear
+colour. `src/metal_renderer/scene_target.rs`: `draw_scene_into` takes a
+clear colour. `src/shaders.metal`: bit 2 of the polychrome flags divides
+the sample by its alpha.

@@ -204,3 +204,10 @@ once (sweep bundle B13, N42):
 - `src/linux/wayland/clipboard.rs`: `send_bytes` logs a source the event
   loop refuses instead of unwrapping. The refused source closes the pipe, so
   the app reading the paste gets an empty one (sweep X14).
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md):
+`src/linux/x11/window.rs` and `src/linux/wayland/window.rs` forward
+`snapshots_supported`, `draw_snapshot` and `snapshot_losses` to the wgpu
+renderer, through `try_borrow` so a busy window reads as no support.

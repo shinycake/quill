@@ -1210,6 +1210,29 @@ impl PlatformWindow for WindowsWindow {
         self.state.renderer.borrow().gpu_specs().log_err()
     }
 
+    // QUILL: snapshots (docs/decisions/snapshot-transitions.md). A busy
+    // renderer reads as no support, nothing drawn and no new loss.
+    fn snapshots_supported(&self) -> bool {
+        self.state
+            .renderer
+            .try_borrow()
+            .is_ok_and(|renderer| renderer.snapshots_supported())
+    }
+
+    fn draw_snapshot(&self, snapshot: &gpui::SnapshotScene) -> bool {
+        self.state
+            .renderer
+            .try_borrow_mut()
+            .is_ok_and(|mut renderer| renderer.draw_snapshot(snapshot))
+    }
+
+    fn snapshot_losses(&self) -> u64 {
+        self.state
+            .renderer
+            .try_borrow()
+            .map_or(0, |renderer| renderer.snapshot_losses())
+    }
+
     fn update_ime_position(&self, bounds: Bounds<Pixels>) {
         let scale_factor = self.state.scale_factor.get();
         let caret_position = POINT {

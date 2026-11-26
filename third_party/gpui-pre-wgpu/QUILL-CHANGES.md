@@ -255,3 +255,34 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
   `src/wgpu_atlas.rs`: `WgpuAtlas::removals`. Inked labels draw in their
   own colour here (the sprite shader ignores the ink) and re-rendered
   backdrops copy the frame like any lens.
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`). `src/shaders.wgsl`,
+`shaders_webgl.wgsl` (its texture decoder reads the wider instances),
+`shaders_subpixel.wgsl`, `shaders_lens.wgsl`: `ContentMask` holds a
+`RoundedMask`; the fragment stages multiply their coverage by it, and a
+quad, underline, polychrome sprite or path tile with a rounded mask leaves
+its fast return and the opaque pre-pass; `QUILL-LAYOUT` lines state each
+struct's size and mask offset. `src/yuv_surfaces.rs`: the NV12 surface
+parameters carry the shape (112 bytes). `src/wgpu_renderer.rs`,
+`src/wgpu_renderer/lens.rs`: `ContentMask::rect`, the instance strides and
+the lens layout asserts.
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
+`src/wgpu_renderer/snapshots.rs` (new): a texture per live snapshot in the
+target's format with a bind group that samples it, drawn from
+`Scene::snapshot_scenes` on submissions ahead of the frame's and freed with
+`Scene::snapshot_releases`; snapshot quads draw through the polychrome
+pipeline with the snapshot's texture bound. Not on the path without storage
+buffers. `src/wgpu_renderer.rs`: `record_frame` takes a `FrameKind` (a
+snapshot draws no glass, uses its own depth texture and leaves the video
+surfaces' frame alone), the snapshot sprites are written with the
+instances, the gamma write is a function of its own, and
+`WgpuRenderer::{snapshots_supported, draw_snapshot, snapshot_losses}`
+(a lost device counts at once and its recovery again). The pool lives in
+`WgpuResources`, so recovery drops it. `src/shaders.wgsl`: bit 2 of the
+polychrome flags divides the sample by its alpha.

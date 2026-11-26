@@ -635,3 +635,33 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
   read-back and `to_output` are unchanged. `src/directx_atlas.rs`:
   `DirectXAtlas::removals`. Inked labels draw in their own colour here and
   re-rendered backdrops copy the frame like any lens.
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`). `src/shaders.hlsl`,
+`shaders_lens.hlsl`: `ContentMask` holds a `RoundedMask`; the pixel shaders
+multiply their coverage by it, and a quad, underline, polychrome sprite or
+path tile with a rounded mask leaves its fast return and the opaque
+pre-pass; the monochrome and subpixel sprites pass their instance index;
+`QUILL-LAYOUT` lines state each struct's size and mask offset.
+`src/hdr_surfaces.rs`, `src/yuv_surfaces.rs`: the surface instances carry
+the shape (80 and 112 bytes). `src/backdrop_glass.rs`: the lens size
+assert.
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
+`src/snapshots.rs` (new): a `Texture2D` per live snapshot in the SDR swap
+chain's format with a render-target and a shader-resource view, drawn from
+`Scene::snapshot_scenes` ahead of the frame and freed with
+`Scene::snapshot_releases`; snapshot quads draw through the polychrome
+pipeline, their sprites after the scene's own in its buffer.
+`src/directx_renderer.rs`: `render` builds the frame's `DrawTarget` and
+`record` draws a scene into any target (`FrameKind::Snapshot` plans no
+glass, writes SDR output and leaves the surfaces' frame alone);
+`pre_draw`, `set_viewport_depth_range` and `discard_depth_buffer` take the
+target; a lost device drops the pool with the pipelines and counts a loss.
+`src/window.rs` forwards `snapshots_supported`, `draw_snapshot` and
+`snapshot_losses` through `try_borrow`. `src/shaders.hlsl`: bit 2 of the
+polychrome flags divides the sample by its alpha.

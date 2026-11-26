@@ -4688,8 +4688,11 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             prepaint.ghost_lines_height,
             editor_paddings,
         );
-        let text_mask = (prepaint.last_layout.line_number_width > px(0.)).then(|| ContentMask {
-            bounds: editor_text_bounds(window.content_mask().bounds, gutter_bounds),
+        let text_mask = (prepaint.last_layout.line_number_width > px(0.)).then(|| {
+            ContentMask::rect(editor_text_bounds(
+                window.content_mask().bounds,
+                gutter_bounds,
+            ))
         });
 
         let cursor_row_y = window.with_content_mask(text_mask, |window| {

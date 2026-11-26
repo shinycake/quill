@@ -755,3 +755,73 @@ Changed by the Quill project in 2026 (`docs/decisions/glass-effects.md`):
   HLSL): `LensTune::rim_frost` (default 1, no change) thins the frost of
   clear glass across the rim band, carried in the lens's `edge_clear`
   field, which clear glass did not use. The GPU struct is unchanged.
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`). A content mask is a rectangle,
+clipped exactly in the vertex stage as before, and at most one rounded
+rectangle, cut per fragment. Upstream files touched, to patch again on every
+GPUI update:
+
+- `src/window.rs`: `ContentMask` gains `rounded: RoundedMask` (32 bytes, so
+  every primitive instance grows by 32 bytes); its `scale` and `intersect`
+  moved to `src/scene/rounded_mask.rs`. `with_content_mask` nests by the
+  rules there and counts the one inexact case on the scene;
+  `with_rounded_content_mask` pushes a rounded mask; `snapped_content_mask`
+  snaps the rounded shape's bounds like a quad's (radii are not snapped);
+  the quad and underline splitters keep the shape. Every
+  `ContentMask { bounds }` became `ContentMask::rect(bounds)`.
+- `src/scene/rounded_mask.rs` (new): `RoundedMask`, `MaskUnit`, `Nesting`,
+  `ContentMask::{rect, rounded, contains, nest_in, culled_for}`.
+- `src/scene.rs`: `Scene::try_insert_primitive` clears the shape of a
+  primitive that reaches none of its corner squares (corner culling), so
+  it keeps today's shader path; `Scene::inexact_rounded_masks`.
+- `src/scene/backdrop_sharp.rs`: `SlotSpace::mask` maps the rounded shape
+  too. The reuse hash of `backdrop_frame.rs` hashes whole instances, so it
+  covers the shape; `hash_path` hashes it explicitly.
+- `src/style.rs`: `ContentClip` and `Style::content_clip`; with
+  `ContentClip::Rounded`, `Style::overflow_mask` returns the element's
+  rounded shape inside a visible border. `src/styled.rs`:
+  `Styled::clip_rounded`. `src/window.rs`: the hit test asks the hitbox's
+  mask whether its rounded shape holds the point; `rendered_scene` is also
+  built with `test-support`.
+- `src/elements/list.rs`, `uniform_list.rs`, `style.rs`, `path_winding.rs`,
+  `debug_overlay.rs`: `ContentMask::rect`.
+
+The vendored gpui-base and gpui-component, and Quill's own code, build their
+rectangular masks with `ContentMask::rect` too.
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
+An element can paint into a texture of its own and draw that texture as one
+quad, scaled, moved and faded. Upstream files touched, to patch again on
+every GPUI update:
+
+- `src/scene.rs`: `PaintOperation::{StartCapture, EndCapture}` mark what a
+  capture holds, and replays copy them. `Scene::push_primitive` takes the
+  operation's index and diverts a captured primitive, then
+  `push_into_frame` does what it did. `Primitive::Snapshot`,
+  `PrimitiveKind::Snapshot` and `PrimitiveBatch::Snapshots`;
+  `Scene::{snapshots, snapshot_scenes, snapshot_releases}`.
+  `PaddedBool32::PREMULTIPLIED`: the polychrome shader's flag word gains bit
+  2, for sampling a texture that holds premultiplied colour.
+- `src/scene/snapshot.rs` (new): captures, how they settle at the end of a
+  frame (drawn, kept, or pushed back live), and `Scene::region_snapshot`.
+- `src/scene/backdrop_frame.rs`: a lens over a snapshot quad redraws its
+  backdrop.
+- `src/window.rs`, `src/window/snapshot.rs` (new): `Snapshot`,
+  `SnapshotState`, `SnapshotDraw`; `Window::{new_snapshot,
+  capture_snapshot, paint_snapshot, snapshot_last_frame,
+  snapshots_supported}`; `Window::scenes_drawn` counts full draws.
+- `src/view.rs`: a cached view reuses its paint only when it was painted
+  in the previous full draw (always true in Classic, where a re-rendered
+  view refreshes its children).
+- `src/elements/snapshot.rs` (new): the `snapshot` element.
+  `src/elements/snapshot_animation.rs` (new): `with_snapshot_animation`.
+- `src/window/snapshot.rs`: `SnapshotSwitch`, the `QUILL_SNAPSHOTS` switch,
+  read once.
+- `src/platform.rs`: `PlatformWindow::{snapshots_supported, draw_snapshot,
+  snapshot_losses}`, false and zero by default. `src/platform/test/window.rs`
+  records drawn and released snapshots.

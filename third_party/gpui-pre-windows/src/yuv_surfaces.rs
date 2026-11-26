@@ -22,7 +22,7 @@ use std::slice;
 use std::time::Instant;
 
 use anyhow::Result;
-use gpui::{Bounds, PaintSurface, ScaledPixels, SurfaceFormat, SurfaceFrame};
+use gpui::{Bounds, PaintSurface, RoundedMask, ScaledPixels, SurfaceFormat, SurfaceFrame};
 use windows::Win32::Graphics::{Direct3D11::*, Dxgi::Common::*};
 
 use super::shader_resources::ShaderModule;
@@ -51,9 +51,12 @@ pub(super) struct YuvSurfaceInstance {
     content_mask: Bounds<ScaledPixels>,
     /// `YuvColor::rgb_rows`: R, G and B as `dot(row, (y, cb, cr, 1))`.
     rows: [[f32; 4]; 3],
+    /// QUILL: the rounded part of the content mask
+    /// (docs/decisions/rounded-content-masks.md).
+    rounded_mask: RoundedMask<ScaledPixels>,
 }
 
-const _: () = assert!(std::mem::size_of::<YuvSurfaceInstance>() == 80);
+const _: () = assert!(std::mem::size_of::<YuvSurfaceInstance>() == 112);
 
 /// The two textures of one clip's picture.
 struct Slot {
@@ -152,6 +155,7 @@ impl YuvSurfaces {
                 bounds: surface.bounds,
                 content_mask: surface.content_mask.bounds,
                 rows: surface.frame.yuv().rgb_rows(),
+                rounded_mask: surface.content_mask.rounded,
             }],
         )?;
         // t0 is the luma (bound by `draw_with_texture`), t1 the instance

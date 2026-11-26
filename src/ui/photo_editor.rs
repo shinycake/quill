@@ -574,7 +574,7 @@ impl QuillApp {
                 let side = fit_size.width.min(fit_size.height) / px(1.);
                 // Items and strokes may reach past the picture; they are
                 // cut at its edge, as the render cuts them.
-                window.with_content_mask(Some(ContentMask { bounds: fit }), |window| {
+                window.with_content_mask(Some(ContentMask::rect(fit)), |window| {
                     // Set mode: the picked image is the ground the drawing and
                     // the other items go on.
                     if base_item && let Some(((left, top, w, h), picture)) = items.first() {

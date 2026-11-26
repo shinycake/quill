@@ -155,3 +155,10 @@ before. `src/tab/tab_bar.rs` asks it too, with
 indicator still has to go, in tab widths), for the segmented variant's
 selection pill of a bar built with `TabBar::glass_selection()`. Re-apply
 when re-vendoring.
+
+## Rounded content masks
+
+Changed by the Quill project in 2026
+(`docs/decisions/rounded-content-masks.md`): gpui-pre's `ContentMask` gained
+a rounded part, so the masks built here are made with `ContentMask::rect`
+instead of a struct literal. Nothing else changes.

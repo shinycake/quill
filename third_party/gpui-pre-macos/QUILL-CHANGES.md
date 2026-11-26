@@ -248,3 +248,9 @@ Changed by the Quill project in 2026: `Cargo.toml` asks `objc2-user-notification
 for `UNNotificationAttachment`, which `src/system_notifications.rs` uses. It
 compiled before only because Quill's own manifest turned that feature on, so the
 crate could not be built or tested on its own.
+
+## Snapshots
+
+Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md):
+`src/window.rs` supports snapshots and forwards `draw_snapshot` and
+`snapshot_losses` to the Metal renderer.

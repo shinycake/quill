@@ -2286,6 +2286,36 @@ impl PlatformWindow for X11Window {
         self.0.state.borrow().renderer.as_ref()?.gpu_specs()
     }
 
+    // QUILL: snapshots (docs/decisions/snapshot-transitions.md). A busy
+    // state reads as no support, nothing drawn and no new loss.
+    fn snapshots_supported(&self) -> bool {
+        self.0.state.try_borrow().is_ok_and(|state| {
+            state
+                .renderer
+                .as_ref()
+                .is_some_and(|renderer| renderer.snapshots_supported())
+        })
+    }
+
+    fn draw_snapshot(&self, snapshot: &gpui::SnapshotScene) -> bool {
+        let Ok(mut state) = self.0.state.try_borrow_mut() else {
+            return false;
+        };
+        state
+            .renderer
+            .as_mut()
+            .is_some_and(|renderer| renderer.draw_snapshot(snapshot))
+    }
+
+    fn snapshot_losses(&self) -> u64 {
+        self.0.state.try_borrow().map_or(0, |state| {
+            state
+                .renderer
+                .as_ref()
+                .map_or(0, |renderer| renderer.snapshot_losses())
+        })
+    }
+
     fn play_system_bell(&self) {
         // Volume 0% means don't increase or decrease from system volume
         let _ = self.0.xcb.bell(0);

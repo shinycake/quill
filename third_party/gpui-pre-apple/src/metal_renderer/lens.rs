@@ -316,18 +316,8 @@ impl LensState {
         if let Some(canvas) = self.canvases.get(index).filter(|c| fits(c)) {
             return Ok(canvas.texture.clone());
         }
-        let descriptor = MTLTextureDescriptor::new();
-        // SAFETY: positive sizes within the device limit (the plan keeps
-        // every slot inside MAX_SIDE).
-        unsafe {
-            descriptor.setWidth(width.max(1) as usize);
-            descriptor.setHeight(height.max(1) as usize);
-        }
-        descriptor.setPixelFormat(format);
-        descriptor.setStorageMode(MTLStorageMode::Private);
-        descriptor.setUsage(MTLTextureUsage::RenderTarget | MTLTextureUsage::ShaderRead);
-        let texture = device
-            .newTextureWithDescriptor(&descriptor)
+        // The plan keeps every slot inside MAX_SIDE.
+        let texture = super::scene_target::new_scene_target(device, format, width, height)
             .context("allocating a sharp backdrop canvas")?;
         let canvas = SharpCanvas {
             texture: texture.clone(),
@@ -425,17 +415,8 @@ impl MetalRenderer {
             let canvas = self
                 .lens
                 .canvas(&self.device, canvases.len(), format, width, height)?;
-            let bindings = super::write_instances(&sharp.scene, writer, None)?;
-            let mut surfaces = Vec::new();
-            let command_buffer = self.draw_primitives_to_texture(
-                &sharp.scene,
-                &bindings,
-                writer,
-                &canvas,
-                size(DevicePixels(width as i32), DevicePixels(height as i32)),
-                &mut surfaces,
-                None,
-            )?;
+            let clear = self.frame_clear();
+            let command_buffer = self.draw_scene_into(&sharp.scene, writer, &canvas, clear)?;
             renders.push(command_buffer);
             canvases.push((index, canvas));
         }

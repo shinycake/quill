@@ -670,7 +670,7 @@ fn paint_highlights(
             }
         }
     }
-    window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
+    window.with_content_mask(Some(ContentMask::rect(clip)), |window| {
         for quad in quads {
             window.paint_quad(quad);
         }
