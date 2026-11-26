@@ -98,15 +98,36 @@ fn chat_list_style_preview_lines_clamp_on_load() {
 #[test]
 fn row_style_clamps_preview_lines() {
     assert_eq!(
-        ChatListRowStyle::new(0, true, true, Density::Standard).preview_lines,
+        ChatListRowStyle::new(
+            0,
+            true,
+            true,
+            Density::Standard,
+            &quill::layout_style::CLASSIC
+        )
+        .preview_lines,
         2
     );
     assert_eq!(
-        ChatListRowStyle::new(3, false, false, Density::Standard).preview_lines,
+        ChatListRowStyle::new(
+            3,
+            false,
+            false,
+            Density::Standard,
+            &quill::layout_style::CLASSIC
+        )
+        .preview_lines,
         3
     );
     assert_eq!(
-        ChatListRowStyle::new(9, true, true, Density::Standard).preview_lines,
+        ChatListRowStyle::new(
+            9,
+            true,
+            true,
+            Density::Standard,
+            &quill::layout_style::CLASSIC
+        )
+        .preview_lines,
         3
     );
     assert_eq!(clamp_preview_lines(0), 2);

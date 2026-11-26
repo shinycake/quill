@@ -651,7 +651,7 @@ impl QuillApp {
                     let height = chat_row_height(
                         chat_row_has_tags(chat, &names, tags, viewing),
                         session.chat_row_lines(chat.id, setting),
-                        self.density(),
+                        self.row_density(),
                     );
                     Some((*id, f32::from(height)))
                 })

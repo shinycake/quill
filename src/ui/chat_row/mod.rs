@@ -311,11 +311,6 @@ pub(super) fn row_text_lines(m: &quill::density::DensityMetrics) -> Div {
         .flex_1()
 }
 
-/// The open chat's row under the pointer (or the keyboard selection).
-pub(super) fn open_row_hover_fill(theme: &Theme) -> Hsla {
-    theme.primary.opacity(0.3)
-}
-
 pub(super) fn session_chat_row(
     chat: &ChatSummary,
     selected: bool,
@@ -380,13 +375,15 @@ pub(super) fn session_chat_row(
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement + Styled + StatefulInteractiveElement + use<> {
     let id = chat.id;
-    // The selected row sits on a tinted fill; its secondary text uses a
-    // foreground tuned for AA contrast there (the grey muted token is 3.2:1).
-    let muted_fg = if selected {
-        selected_secondary_fg(cx.theme().foreground)
-    } else {
-        muted_fg
-    };
+    // The open row's colours: Classic's tint, or the solid accent row.
+    let ink = RowInk::of(
+        selected,
+        row_style.selected,
+        rest_fill,
+        muted_fg,
+        cx.theme(),
+    );
+    let muted_fg = ink.secondary;
     let stamp = match promotion.as_ref() {
         Some(badge) => Some((RowStatusIcon::None, badge.label.clone())),
         None => row_stamp(chat),
@@ -474,6 +471,7 @@ pub(super) fn session_chat_row(
     let badges = row_badges::row_badges(
         ("unread-pill", id.0 as u64).into(),
         pinned_here(chat, archived),
+        ink.badges,
         muted_fg,
         badge_muted,
         unread_indicator,
@@ -503,7 +501,7 @@ pub(super) fn session_chat_row(
     // kit Phase 3: tag chips via the shared helper — the row height
     // (declared to the `VirtualList`) is derived from the same list.
     let tags = chat_row_tags(chat, folders, show_tags, viewing_folder);
-    let m = row_style.density.metrics();
+    let m = row_style.metrics();
     let avatar_size = m.avatar;
     div()
         .id(("chat-row", id.0 as u64))
@@ -528,15 +526,12 @@ pub(super) fn session_chat_row(
         // UI tests find the row by its id (inert outside test support).
         .test_support()
         .aria_selected(selected)
-        .when(selected, |this| {
-            this.hover(|s| s.bg(open_row_hover_fill(cx.theme())))
-                .active(|s| s.bg(cx.theme().primary.opacity(0.4)))
+        .when_some(ink.open_hover, |this, (hover, pressed)| {
+            this.hover(move |s| s.bg(hover))
+                .active(move |s| s.bg(pressed))
         })
-        .bg(if selected {
-            cx.theme().primary.opacity(0.25)
-        } else {
-            rest_fill
-        })
+        .bg(ink.fill)
+        .when_some(ink.title, |this, title| this.text_color(title))
         .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
             // Slice CL3: in multi-select mode a row click toggles the
             // check instead of opening the chat.
@@ -639,6 +634,7 @@ pub(super) fn session_chat_row(
                     ),
                     fx.online,
                     13.,
+                    ink.ring,
                     cx,
                 ))
                 .child(
@@ -773,11 +769,7 @@ pub(super) fn session_chat_row(
                                                     div()
                                                         .flex_none()
                                                         .text_xs()
-                                                        .text_color(if selected {
-                                                            muted_fg
-                                                        } else {
-                                                            accent().into()
-                                                        })
+                                                        .text_color(ink.sender)
                                                         // Drawn on its own, so a Hebrew name keeps its colon
                                                         // on the reading side (isolated, as tdesktop's WrapRtl).
                                                         .child(format!("{}: ", quill::text::isolate(&sender))),
@@ -815,11 +807,11 @@ pub(super) fn session_chat_row(
                                                 .flex()
                                                 .items_center()
                                                 .text_xs()
-                                                .text_color(cx.theme().primary)
+                                                .text_color(ink.activity)
                                                 .child(
                                                     super::activity_indicator::activity_indicator(
                                                         line.indicator,
-                                                        cx.theme().primary,
+                                                        ink.activity,
                                                         format!("row-activity-{}", id.0).into(),
                                                     ),
                                                 )
@@ -932,7 +924,13 @@ pub(super) fn with_presence_dot(
     dot: f32,
     cx: &App,
 ) -> impl IntoElement {
-    with_presence_dot_scaled(avatar, if online { 1. } else { 0. }, dot, cx)
+    with_presence_dot_scaled(
+        avatar,
+        if online { 1. } else { 0. },
+        dot,
+        cx.theme().sidebar,
+        cx,
+    )
 }
 
 /// [`with_presence_dot`] with the dot at `scale` (0 hidden, 1 full): the
@@ -943,6 +941,8 @@ pub(super) fn with_presence_dot_scaled(
     avatar: impl IntoElement,
     scale: f32,
     dot: f32,
+    // The ring between dot and photo: the row's fill.
+    ring: Hsla,
     cx: &App,
 ) -> impl IntoElement {
     const RING: f32 = 2.;
@@ -967,7 +967,7 @@ pub(super) fn with_presence_dot_scaled(
                             .items_center()
                             .justify_center()
                             .rounded_full()
-                            .bg(cx.theme().sidebar)
+                            .bg(ring)
                             .child(
                                 div()
                                     .size(px((dot - 2. * RING) * scale))
@@ -987,6 +987,10 @@ mod folder_tag_context;
 mod pin_lift;
 pub(in crate::ui) use folder_tag_context::FolderTagContext;
 mod promoted_demo;
+mod row_ink;
+pub(in crate::ui) use row_ink::{
+    BadgeInk, RowInk, open_row_hover_fill, tinted_open_row_hover_fill,
+};
 mod selected_fg;
 pub(crate) use selected_fg::selected_secondary_fg;
 mod with_call_badge;

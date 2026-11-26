@@ -418,10 +418,10 @@ impl QuillApp {
             .map(|slot| folder_tab(slot, show_icon, show_text, premium, &weak, cx))
             .collect();
         let kinds: Vec<FolderSlotKind> = slots.iter().map(|s| s.kind).collect();
-        TabBar::new("folder-tabs")
+        let bar = TabBar::new("folder-tabs")
             .children(tabs)
-            .selected_index(selected)
-            .underline()
+            .selected_index(selected);
+        super::chrome::list_parts::folder_tabs(bar, self.chrome_metrics())
             .with_size(self.control_size())
             .max_width(px(140.))
             .track_scroll(scroll)

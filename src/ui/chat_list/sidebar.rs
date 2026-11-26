@@ -183,7 +183,7 @@ impl QuillApp {
         let mut chats: Vec<&ChatSummary> = self.listed_main_chats();
         // Slice CL2: the Archived category shows only the archive section.
         let show_main_list = filter != ChatListFilter::Archived;
-        let m = self.density();
+        let m = self.row_density();
         // Slice CL3: multi-select mode — rows toggle the check instead of
         // opening the chat. Defined once here so the select bar, the main
         // loop, and the archive loop all see it.

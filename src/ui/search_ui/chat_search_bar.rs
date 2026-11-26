@@ -531,11 +531,12 @@ impl QuillApp {
                             this.open_search_ui(window, cx);
                         }
                     }))
-                    .child(
+                    .child(crate::ui::chrome::list_parts::search_field(
                         Textarea::new(&self.search_ui.input)
                             .aria_label(tr(keys::Q_CHAT_SEARCH))
-                            .h(px(self.density().search_field)),
-                    ),
+                            .h(px(self.row_density().search_field)),
+                        self.chrome_metrics(),
+                    )),
             )
             .children(story_stack)
             .when(self.search_is_open(), |this| {

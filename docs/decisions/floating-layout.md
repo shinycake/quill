@@ -375,3 +375,34 @@ does not change. This is open for the owner; the remedies, in order, are
 a renderer that reuses a lens's blur while its backdrop region is
 unchanged, then fewer lenses (the list card solid while the history
 scrolls), then solid cards on battery.
+
+## List details and row sizes (step 9)
+
+- **Row sizes.** `quill::density::STANDARD_WEBK` is Standard with Web K's
+  72 px rows, 54 px photos and 44 px search field;
+  `Density::metrics_in(rows)` picks it for `RowScale::WebK` and keeps
+  Compact as it is. `QuillApp::row_density()` reads the window's row scale
+  (`chrome_metrics().rows`), and only the chat list's rows, photos and
+  search field use it; `density()` stays app-wide (the title bar, the
+  sidebar insets), which keeps it out of per-window state
+  (`check-window-scope.py`). The list's items are built on every render,
+  so a window that crosses 600 px gets the other heights on its next
+  frame; its scroll offset stays in pixels.
+- **The open row** (`chat_row/row_ink.rs`). `RowInk::of(open,
+  SelectedRow, ..)` holds every colour a row draws: fill, the open row's
+  hover and pressed fills, title, secondary text, the sender's name, the
+  typing line, the online dot's ring and the counters' ink. `Tint`
+  returns the expressions the row used before (a test compares them).
+  `Solid` fills the row with the accent and draws on it in the accent's
+  text colour; the counters invert (`BadgeInk::OnFill`). Some accents are
+  too light for white text (Quill Light's #2f81f7 is 3.7:1), so the solid
+  fill moves in lightness, hue kept, until its text keeps 5.4:1 and the
+  softened secondary text 4.5:1; a test holds that for every built-in
+  theme and accent.
+- **Search field and folder tabs** (`chrome/list_parts.rs`): the field is
+  a pill and the folder tabs take the kit's Pill variant in Floating.
+- Topic rows inside a forum keep the tint, and the select-mode check
+  circle on the open row keeps its accent ring (it shows on the solid
+  fill, but faintly): both are left as they are.
+- Compact mode was not captured (no demo switch for it); the table test
+  proves it is unchanged.

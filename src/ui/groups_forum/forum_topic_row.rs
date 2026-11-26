@@ -9,8 +9,8 @@
 use super::*;
 use crate::ui::chat_row::row_badges::row_badges;
 use crate::ui::chat_row::{
-    chat_row_height, draft_prefix, open_row_hover_fill, row_glyph, row_text_lines,
-    selected_secondary_fg,
+    chat_row_height, draft_prefix, row_glyph, row_text_lines, selected_secondary_fg,
+    tinted_open_row_hover_fill,
 };
 use crate::ui::chatlist_style::chat_list_preview_line_layered;
 use crate::ui::pressable::PressableDiv;
@@ -64,6 +64,7 @@ impl QuillApp {
         let badges = row_badges(
             ("forum-topic-unread", topic_id as u64).into(),
             topic.is_pinned,
+            crate::ui::chat_row::BadgeInk::Own,
             muted_fg,
             muted,
             unread_indicator(badge, has_mentions),
@@ -100,7 +101,7 @@ impl QuillApp {
             .when(!selected, |this| this.pressable(cx.theme()))
             .test_support()
             .when(selected, |this| {
-                this.hover(|s| s.bg(open_row_hover_fill(cx.theme())))
+                this.hover(|s| s.bg(tinted_open_row_hover_fill(cx.theme())))
                     .active(|s| s.bg(cx.theme().primary.opacity(0.4)))
             })
             .bg(if selected {

@@ -90,6 +90,13 @@ fn a_window_of_600_or_under_draws_classic_with_floating_chosen(cx: &mut TestAppC
     assert_eq!(chrome(&app, vcx).metrics, &FLOATING);
     app.update(vcx, |app, _| app.slices.window.width.set(px(600.)));
     assert_eq!(chrome(&app, vcx), Chrome::CLASSIC);
+    // Rows follow the window too: Quill's at 600, Web K's from 601.
+    let rows = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, _| app.row_density().row_base)
+    };
+    assert_eq!(rows(&app, vcx), quill::density::STANDARD.row_base);
+    app.update(vcx, |app, _| app.slices.window.width.set(px(601.)));
+    assert_eq!(rows(&app, vcx), quill::density::STANDARD_WEBK.row_base);
 }
 
 /// A layout change goes through the step that lays the open lists out

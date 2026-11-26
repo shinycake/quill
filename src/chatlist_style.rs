@@ -41,6 +41,10 @@ pub struct ChatListRowStyle {
     pub media_icons: bool,
     pub rich_preview: bool,
     pub density: crate::density::Density,
+    /// The layout's row sizes (Web K's in Floating).
+    pub rows: crate::layout_style::RowScale,
+    /// How the open chat's row is drawn.
+    pub selected: crate::layout_style::SelectedRow,
 }
 
 impl ChatListRowStyle {
@@ -49,13 +53,21 @@ impl ChatListRowStyle {
         media_icons: bool,
         rich_preview: bool,
         density: crate::density::Density,
+        metrics: &crate::layout_style::ChromeMetrics,
     ) -> Self {
         Self {
             preview_lines: clamp_preview_lines(preview_lines),
             media_icons,
             rich_preview,
             density,
+            rows: metrics.rows,
+            selected: metrics.selected_row,
         }
+    }
+
+    /// The sizes the row draws with.
+    pub fn metrics(&self) -> &'static crate::density::DensityMetrics {
+        self.density.metrics_in(self.rows)
     }
 }
 

@@ -153,7 +153,7 @@ impl QuillApp {
                     &chat.kind,
                     selected,
                     saved,
-                    self.density().avatar,
+                    self.row_density().avatar,
                     cx,
                 );
                 // Swipe action for this row (none while selecting).
@@ -189,6 +189,7 @@ impl QuillApp {
                         self.appearance.chat_list_media_icons,
                         self.appearance.chat_list_rich_preview,
                         self.appearance.density,
+                        self.chrome_metrics(),
                     ),
                     height,
                     saved,
