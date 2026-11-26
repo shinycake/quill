@@ -3,7 +3,9 @@
 // (`metal_renderer/lens.rs`); snapshot textures (`metal_renderer/snapshots.rs`).
 // See third_party/gpui-pre-apple/QUILL-CHANGES.md.
 use crate::metal_atlas::MetalAtlas;
+use drawables::{DrawableSource, Swap};
 
+mod drawables;
 mod lens;
 mod scene_target;
 mod snapshots;
@@ -204,6 +206,9 @@ pub struct MetalRenderer {
     drawable_reads: lens::DrawableReads,
     /// QUILL: snapshot textures (`snapshots.rs`).
     snapshots: snapshots::SnapshotPool,
+    /// QUILL: whether the last frame reached the screen as drawn
+    /// (`drawables.rs`).
+    presented: drawables::Presented,
 }
 
 impl MetalRenderer {
@@ -515,6 +520,7 @@ impl MetalRenderer {
             lens: lens::LensState::default(),
             drawable_reads: lens::DrawableReads::default(),
             snapshots: snapshots::SnapshotPool::default(),
+            presented: drawables::Presented::AsDrawn,
         })
     }
 
@@ -612,14 +618,14 @@ impl MetalRenderer {
     /// allocates a fresh drawable.
     pub fn release_idle_drawables(&mut self) {
         self.drawables_handed_out.clear();
-        // QUILL: the glass atlas goes too, and the drawables the pool
-        // allocates next are framebuffer-only again until glass is drawn.
+        // QUILL: the glass atlas goes too. Readable drawables stay readable
+        // (`lens::DrawableReads` counts frames, not time): the first frame
+        // after idling usually has its glass again, and a display link's
+        // drawable can't be swapped for a readable one (`drawables.rs`).
         self.lens.release();
-        self.drawable_reads = lens::DrawableReads::FramebufferOnly;
         let Some(layer) = &self.layer else {
             return;
         };
-        Self::follow_drawable_reads(layer, self.drawable_reads);
         let size = layer.drawableSize();
         if size.width <= 1.0 || size.height <= 1.0 {
             return;
@@ -722,27 +728,33 @@ impl MetalRenderer {
         // the layer for readable drawables (`lens::DrawableReads`).
         self.drawable_reads = self.drawable_reads.after_frame(scene.lenses.len());
         Self::follow_drawable_reads(&layer, self.drawable_reads);
-        let drawable = match &mut self.display_link_mode {
+        // QUILL: a frame drawn outside its link's update, or skipped below
+        // in one, is presented again in the next update.
+        self.presented = drawables::Presented::AsDrawn;
+        let (drawable, source) = match &mut self.display_link_mode {
             DisplayLinkMode::Attached { drawable } => {
                 let Some(drawable) = drawable.take() else {
                     log::error!("skipped a frame drawn outside its display link's update");
+                    self.presented = drawables::Presented::Owed;
                     return;
                 };
-                Some(drawable)
+                (Some(drawable), DrawableSource::Link)
             }
             DisplayLinkMode::Detached => {
                 crate::display_link::invalidate_retired();
-                layer.nextDrawable()
+                (layer.nextDrawable(), DrawableSource::Layer)
             }
         };
         let Some(drawable) = drawable
-            .and_then(|drawable| self.usable_drawable(&layer, drawable))
-            .map(|drawable| self.readable_drawable(&layer, drawable, !scene.lenses.is_empty()))
+            .and_then(|drawable| self.usable_drawable(&layer, drawable, source))
+            .map(|drawable| self.readable_drawable(&layer, drawable, source, !scene.lenses.is_empty()))
         else {
-            log::error!(
-                "failed to retrieve next drawable, drawable size: {:?}",
-                layer.drawableSize()
-            );
+            if self.presented == drawables::Presented::AsDrawn {
+                log::error!(
+                    "failed to retrieve next drawable, drawable size: {:?}",
+                    layer.drawableSize()
+                );
+            }
             return;
         };
         // A display link's drawable was sized when the link handed it out,
@@ -776,17 +788,27 @@ impl MetalRenderer {
     /// set can't be built, the layer leaves extended range for the 8-bit set,
     /// which the frame in hand and every later one draws with, display link
     /// or not. The HDR picture comes out clamped to standard range.
+    ///
+    /// A display link's drawable can't be swapped (`drawables.rs`): the
+    /// frame is skipped and presented again in the link's next update,
+    /// which hands out a drawable in the new format.
     fn usable_drawable(
         &mut self,
         layer: &CAMetalLayer,
         drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
+        source: DrawableSource,
     ) -> Option<Retained<ProtocolObject<dyn CAMetalDrawable>>> {
         let Err(error) = self.match_drawable_format(drawable.texture().pixelFormat()) else {
             return Some(drawable);
         };
         log::error!("leaving extended range: {error:#}");
         leave_extended_range(layer);
-        layer.nextDrawable()
+        let swap = source.wrong_format();
+        self.presented = swap.into();
+        match swap {
+            Swap::AskLayer => layer.nextDrawable(),
+            Swap::Keep | Swap::DrawAgainNext => None,
+        }
     }
 
     /// QUILL: the layer's drawables are readable while glass is drawn.
@@ -800,19 +822,31 @@ impl MetalRenderer {
         }
     }
 
-    /// QUILL: a frame with glass needs a drawable it can read. One handed
-    /// out before the layer turned readable (a display link's) is swapped
-    /// for the layer's next; when none comes, the glass draws flat.
+    /// QUILL: a frame with glass needs a drawable it can read. One the
+    /// layer handed out before it turned readable is swapped for the
+    /// layer's next; when none comes, the glass draws flat. A display
+    /// link's can't be swapped (`drawables.rs`): its glass draws flat, and
+    /// the link's next update presents the scene again into a drawable
+    /// made since the layer turned readable.
     fn readable_drawable(
-        &self,
+        &mut self,
         layer: &CAMetalLayer,
         drawable: Retained<ProtocolObject<dyn CAMetalDrawable>>,
+        source: DrawableSource,
         has_glass: bool,
     ) -> Retained<ProtocolObject<dyn CAMetalDrawable>> {
-        if !has_glass || !drawable.texture().isFramebufferOnly() {
-            return drawable;
+        let swap = source.for_glass(has_glass, drawable.texture().isFramebufferOnly());
+        self.presented = swap.into();
+        match swap {
+            Swap::AskLayer => layer.nextDrawable().unwrap_or(drawable),
+            Swap::Keep | Swap::DrawAgainNext => drawable,
         }
-        layer.nextDrawable().unwrap_or(drawable)
+    }
+
+    /// QUILL: whether the screen is short of the last scene GPUI drew: the
+    /// window asks the display link's next update to present it again.
+    pub fn owes_present(&self) -> bool {
+        self.presented == drawables::Presented::Owed
     }
 
     fn render_frame(

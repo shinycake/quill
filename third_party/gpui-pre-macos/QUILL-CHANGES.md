@@ -254,3 +254,11 @@ crate could not be built or tested on its own.
 Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md):
 `src/window.rs` forwards `snapshot_max_side`, `draw_snapshot` and
 `take_snapshot_losses` to the Metal renderer.
+
+## Glass under a display link
+
+Changed by the Quill project in 2026 (docs/decisions/glass-display-link.md):
+`src/window.rs` draws a frame inside `objc2::exception::catch`, so an
+Objective-C exception costs the frame instead of unwinding through GPUI and
+dropping the window, and asks for a presentation in the next step while the
+renderer `owes_present`. `Cargo.toml` turns on `objc2`'s `exception` feature.
