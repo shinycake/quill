@@ -276,7 +276,7 @@ pub(super) fn paint_wallpaper<T: Styled + ParentElement>(
     dimming: u8,
     slot: Slot,
 ) -> T {
-    let history = matches!(slot, Slot::History(_));
+    let history = matches!(slot, Slot::History(_) | Slot::Window(_));
     // The history reports its area every frame: gradient bubbles take
     // their colors from where they sit in it.
     let area_probe = || {
@@ -337,9 +337,6 @@ pub(super) fn history_backdrop<T: Styled + ParentElement>(
 }
 
 impl QuillApp {
-    /// The window's backdrop under the shell's cards: the viewed chat's
-    /// wallpaper across the window when the layout puts it there, else
-    /// `this` unchanged (the history paints its own).
     /// Floating's wallpaper as a layer under the whole window, title strip
     /// included; `None` in Classic, where the history draws its own.
     pub(super) fn window_backdrop_layer(&self, cx: &Context<Self>) -> Option<AnyElement> {
@@ -362,7 +359,7 @@ impl QuillApp {
             this,
             look.wallpaper.as_ref(),
             look.dimming,
-            Slot::History(cx.entity_id()),
+            Slot::Window(cx.entity_id()),
         )
     }
 
