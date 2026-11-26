@@ -190,8 +190,10 @@ mod tests {
     use super::Omarchy;
     use gpui_kit::Task;
 
-    fn found() -> Omarchy {
-        let root = quill::scratch::process_dir("quill-omarchy-stage");
+    /// A stage with a theme in a folder of the test's own: tests run in
+    /// parallel, and a shared folder let one see another's files.
+    fn found(test: &str) -> Omarchy {
+        let root = quill::scratch::process_dir(&format!("quill-omarchy-{test}"));
         let theme = root.join("theme");
         let _ = std::fs::create_dir_all(&theme);
         let _ = std::fs::write(
@@ -203,7 +205,7 @@ mod tests {
 
     #[test]
     fn the_watcher_runs_only_between_watch_and_unwatch() {
-        let mut omarchy = found();
+        let mut omarchy = found("watcher");
         assert!(matches!(omarchy, Omarchy::Found(_)));
         omarchy.watch(Task::ready(()));
         assert!(matches!(omarchy, Omarchy::Watching { .. }));
@@ -223,7 +225,7 @@ mod tests {
 
     #[test]
     fn a_failed_read_keeps_the_generation_it_looked_at() {
-        let mut omarchy = found();
+        let mut omarchy = found("failed-read");
         omarchy.watch(Task::ready(()));
         omarchy.note_stamp(Some("gone".into()));
         assert_eq!(
