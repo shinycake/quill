@@ -52,17 +52,6 @@ pub(crate) enum Peek {
     Held,
 }
 
-/// The chat list as a drawer over the chat (Floating, 601 to 925 px wide):
-/// held open or not. It holds no task. What closes it: a chat opened, a
-/// click on the chat beside it, Escape, the button again, the window
-/// leaving the band, the window closing (it is dropped with its owner).
-/// The user's hidden-sidebar preference is never written by it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Drawer {
-    Closed,
-    Held,
-}
-
 /// [`Peek`] with the redraw task of the leave grace inside `Leaving`, so
 /// the task is dropped with the stage.
 #[derive(Debug)]
@@ -85,15 +74,40 @@ impl Pointer {
 /// The column's preference. The pointer only peeks at a hidden column, so
 /// the peek lives in the hidden variant: showing the column ends it.
 #[derive(Debug)]
-enum Mode {
+enum Column {
     Docked,
     Hidden(Pointer),
 }
 
+impl Column {
+    fn of(hidden: bool) -> Self {
+        if hidden {
+            Column::Hidden(Pointer::Off)
+        } else {
+            Column::Docked
+        }
+    }
+
+    fn hovering(&self) -> bool {
+        matches!(self, Column::Hidden(Pointer::Hovering))
+    }
+}
+
+/// Where the column is. `Drawer`: the chat list held open as a drawer over
+/// the chat (Floating, 601 to 925 px wide), over the column it keeps. It
+/// holds no task. What closes it: a chat opened, a click on the chat
+/// beside it, Escape, the button again, the window leaving the band, the
+/// window closing (it is dropped with its owner). The user's hidden-sidebar
+/// preference is never written by it.
+#[derive(Debug)]
+enum Stage {
+    Column(Column),
+    Drawer(Column),
+}
+
 #[derive(Debug)]
 pub(crate) struct SidebarReveal {
-    mode: Mode,
-    drawer: Drawer,
+    stage: Stage,
     docked: Glide,
     peek: Glide,
     /// A test holds the clock still and moves it by hand, so a slow
@@ -105,12 +119,7 @@ pub(crate) struct SidebarReveal {
 impl SidebarReveal {
     pub(crate) fn new(hidden: bool, now: Instant) -> Self {
         Self {
-            mode: if hidden {
-                Mode::Hidden(Pointer::Off)
-            } else {
-                Mode::Docked
-            },
-            drawer: Drawer::Closed,
+            stage: Stage::Column(Column::of(hidden)),
             docked: Glide::settled(if hidden { 0. } else { 1. }, now, ease_out_cubic),
             peek: Glide::settled(0., now, ease_out_cubic),
             #[cfg(test)]
@@ -139,9 +148,30 @@ impl SidebarReveal {
         self.pinned = self.pinned.map(|at| at + by);
     }
 
+    fn column(&self) -> &Column {
+        match &self.stage {
+            Stage::Column(column) | Stage::Drawer(column) => column,
+        }
+    }
+
+    fn column_mut(&mut self) -> &mut Column {
+        match &mut self.stage {
+            Stage::Column(column) | Stage::Drawer(column) => column,
+        }
+    }
+
+    fn drawer_held(&self) -> bool {
+        matches!(self.stage, Stage::Drawer(_))
+    }
+
+    /// Take the stage out to move its column into another one.
+    fn take_stage(&mut self) -> Stage {
+        std::mem::replace(&mut self.stage, Stage::Column(Column::Docked))
+    }
+
     /// The stored preference: the user hid the column.
     pub(crate) fn hidden(&self) -> bool {
-        matches!(self.mode, Mode::Hidden(_))
+        matches!(self.column(), Column::Hidden(_))
     }
 
     /// Hide or show the column. Showing it while it peeks keeps it where it
@@ -150,11 +180,7 @@ impl SidebarReveal {
         if self.hidden() == hidden {
             return;
         }
-        self.mode = if hidden {
-            Mode::Hidden(Pointer::Off)
-        } else {
-            Mode::Docked
-        };
+        *self.column_mut() = Column::of(hidden);
         if !hidden {
             let peeked = self.peek.value(now);
             if peeked > self.docked.value(now) {
@@ -169,16 +195,17 @@ impl SidebarReveal {
     /// The pointer reached the reveal edge or moved over the peeking
     /// column. Returns whether anything changed.
     pub(crate) fn pointer_entered(&mut self, animate: bool, now: Instant) -> bool {
-        let Mode::Hidden(pointer) = &self.mode else {
+        let sliding_out = self.docked.value(now) > 0.;
+        let Column::Hidden(pointer) = self.column_mut() else {
             return false;
         };
         match pointer {
             Pointer::Hovering => return false,
             // Still sliding out after Hide: no peek on top of it.
-            Pointer::Off if self.docked.value(now) > 0. => return false,
+            Pointer::Off if sliding_out => return false,
             Pointer::Off | Pointer::Leaving { .. } => {}
         }
-        self.mode = Mode::Hidden(Pointer::Hovering);
+        *pointer = Pointer::Hovering;
         self.peek.go(1., SLIDE_DURATION, animate, now);
         true
     }
@@ -188,34 +215,54 @@ impl SidebarReveal {
     /// and the stage holds it (a pointer back, Escape or the grace over
     /// drops it).
     pub(crate) fn pointer_left(&mut self, now: Instant, wake: impl FnOnce() -> Task<()>) -> bool {
-        if !matches!(self.mode, Mode::Hidden(Pointer::Hovering)) {
+        let Column::Hidden(pointer) = self.column_mut() else {
+            return false;
+        };
+        if !matches!(pointer, Pointer::Hovering) {
             return false;
         }
-        self.mode = Mode::Hidden(Pointer::Leaving {
+        *pointer = Pointer::Leaving {
             since: now,
             _wake: wake(),
-        });
+        };
         true
     }
 
     /// Open the drawer and hold it open. Returns whether it was closed.
     pub(crate) fn hold_drawer(&mut self, animate: bool, now: Instant) -> bool {
-        if self.drawer == Drawer::Held {
+        if self.drawer_held() {
             return false;
         }
-        self.drawer = Drawer::Held;
+        self.stage = match self.take_stage() {
+            Stage::Column(column) | Stage::Drawer(column) => Stage::Drawer(column),
+        };
         self.peek.go(1., SLIDE_DURATION, animate, now);
         true
+    }
+
+    /// Close a held drawer and keep the column under it. Returns the
+    /// column's pointer still hovering, or `None` when nothing was held.
+    fn release_drawer(&mut self) -> Option<bool> {
+        match self.take_stage() {
+            Stage::Drawer(column) => {
+                let hovering = column.hovering();
+                self.stage = Stage::Column(column);
+                Some(hovering)
+            }
+            column @ Stage::Column(_) => {
+                self.stage = column;
+                None
+            }
+        }
     }
 
     /// Close a held drawer (a chat opened, a click beside it, the button
     /// again). Returns whether it was held.
     pub(crate) fn close_drawer(&mut self, animate: bool, now: Instant) -> bool {
-        if self.drawer == Drawer::Closed {
+        let Some(hovering) = self.release_drawer() else {
             return false;
-        }
-        self.drawer = Drawer::Closed;
-        if !matches!(self.mode, Mode::Hidden(Pointer::Hovering)) {
+        };
+        if !hovering {
             self.peek.go(0., SLIDE_DURATION, animate, now);
         }
         true
@@ -231,29 +278,22 @@ impl SidebarReveal {
     /// The window left the drawer band: a held drawer is gone at once, as
     /// the docked (or hidden) list takes over by the user's preference.
     pub(crate) fn leave_drawer_band(&mut self, now: Instant) {
-        if self.drawer == Drawer::Held {
-            self.drawer = Drawer::Closed;
-            if !matches!(self.mode, Mode::Hidden(Pointer::Hovering)) {
-                self.peek = Glide::settled(0., now, ease_out_cubic);
-            }
+        if self.release_drawer() == Some(false) {
+            self.peek = Glide::settled(0., now, ease_out_cubic);
         }
     }
 
     /// Escape: slide the peeking column out now. Returns whether it peeked.
     pub(crate) fn dismiss(&mut self, animate: bool, now: Instant) -> bool {
-        if self.drawer == Drawer::Held {
-            self.drawer = Drawer::Closed;
-            if let Mode::Hidden(pointer) = &mut self.mode {
-                *pointer = Pointer::Off;
-            }
-            self.peek.go(0., SLIDE_DURATION, animate, now);
-            return true;
+        let peeked = self.drawer_held()
+            || matches!(
+                self.column(),
+                Column::Hidden(Pointer::Hovering | Pointer::Leaving { .. })
+            );
+        if !peeked {
+            return false;
         }
-        match self.mode {
-            Mode::Hidden(Pointer::Hovering | Pointer::Leaving { .. }) => {}
-            Mode::Hidden(Pointer::Off) | Mode::Docked => return false,
-        }
-        self.mode = Mode::Hidden(Pointer::Off);
+        self.stage = Stage::Column(Column::of(self.hidden()));
         self.peek.go(0., SLIDE_DURATION, animate, now);
         true
     }
@@ -262,24 +302,25 @@ impl SidebarReveal {
     /// out, unless something opened from it still needs it (`held`: its
     /// context menu, or its search field has the keyboard).
     pub(crate) fn settle(&mut self, held: bool, animate: bool, now: Instant) {
-        if let Mode::Hidden(Pointer::Leaving { since, .. }) = &self.mode
-            && !held
-            && now.saturating_duration_since(*since) >= LEAVE_GRACE
-        {
-            self.mode = Mode::Hidden(Pointer::Off);
-            if self.drawer == Drawer::Closed {
-                self.peek.go(0., SLIDE_DURATION, animate, now);
-            }
+        let over = matches!(
+            self.column(),
+            Column::Hidden(Pointer::Leaving { since, .. })
+                if now.saturating_duration_since(*since) >= LEAVE_GRACE
+        );
+        if !over || held {
+            return;
+        }
+        *self.column_mut() = Column::Hidden(Pointer::Off);
+        if !self.drawer_held() {
+            self.peek.go(0., SLIDE_DURATION, animate, now);
         }
     }
 
     pub(crate) fn pointer(&self) -> Peek {
-        if self.drawer == Drawer::Held {
-            return Peek::Held;
-        }
-        match &self.mode {
-            Mode::Hidden(pointer) => pointer.view(),
-            Mode::Docked => Peek::Off,
+        match &self.stage {
+            Stage::Drawer(_) => Peek::Held,
+            Stage::Column(Column::Hidden(pointer)) => pointer.view(),
+            Stage::Column(Column::Docked) => Peek::Off,
         }
     }
 
