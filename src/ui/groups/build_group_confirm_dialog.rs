@@ -379,6 +379,9 @@ impl QuillApp {
                     Button::new("channel-join")
                         .label(tr(keys::PROFILE_JOIN_CHANNEL))
                         .primary()
+                        .rounded(crate::ui::chrome::bars::action_rounding(
+                            self.chrome_metrics(),
+                        ))
                         .w_full()
                         .max_w(px(360.))
                         .on_click(cx.listener(move |this, _, _, cx| {

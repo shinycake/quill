@@ -126,3 +126,19 @@ impl QuillApp {
         }
     }
 }
+
+/// The corners of the one wide button that takes the composer's place
+/// (Join Channel, Start, Unblock): the kit's, or a pill in the composer's
+/// card, as Web K's Join and Unmute fill its pill-shaped input.
+pub(in crate::ui) fn action_rounding(
+    metrics: &ChromeMetrics,
+) -> gpui_kit::component::button::ButtonRounded {
+    use gpui_kit::component::button::ButtonRounded;
+    match metrics.look {
+        Look::Lines => ButtonRounded::Medium,
+        Look::Cards => ButtonRounded::Size(px(PILL)),
+    }
+}
+
+/// A radius past any button's half height: the ends are round.
+const PILL: f32 = 9999.;
