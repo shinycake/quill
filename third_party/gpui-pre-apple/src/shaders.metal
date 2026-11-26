@@ -697,6 +697,9 @@ struct MonochromeSpriteFragmentInput {
   float4 color [[flat]];
   float4 clip_distance;
   uint sprite_id [[flat]];
+  // QUILL: 1 when the sprite's mask has a rounded shape, so the fragment
+  // reads the instance only then (docs/decisions/rounded-content-masks.md).
+  uint rounded [[flat]];
 };
 
 vertex MonochromeSpriteFragmentInput monochrome_sprite_vertex(
@@ -756,7 +759,8 @@ vertex MonochromeSpriteFragmentInput monochrome_sprite_vertex(
       tile_position,
       color,
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w},
-      sprite_id};
+      sprite_id,
+      has_rounded_mask(sprite.content_mask) ? 1u : 0u};
 }
 
 fragment float4 monochrome_sprite_fragment(
@@ -772,9 +776,11 @@ fragment float4 monochrome_sprite_fragment(
   float4 sample =
       atlas_texture.sample(atlas_texture_sampler, input.tile_position);
   float4 color = input.color;
-  color.a *= sample.a * rounded_mask_coverage(
-                            input.position.xy,
-                            sprites[input.sprite_id].content_mask.rounded);
+  color.a *= sample.a;
+  if (input.rounded != 0u) {
+    color.a *= rounded_mask_coverage(
+        input.position.xy, sprites[input.sprite_id].content_mask.rounded);
+  }
   return color;
 }
 
@@ -800,10 +806,10 @@ vertex PolychromeSpriteFragmentInput polychrome_sprite_vertex(
       to_device_position_impl(clipped.position, viewport_size);
   float2 tile_position =
       to_tile_position(clipped.unit_vertex, sprite.tile, atlas_size);
-  // QUILL: `grayscale` holds flags: 1 grayscale, 2 premultiplied (a
+  // QUILL: `flags` (`SpriteFlags`): 1 grayscale, 2 premultiplied (a
   // snapshot's texture); either takes the full path.
   bool simple = !has_rounded_corners(sprite.corner_radii) &&
-                sprite.grayscale == 0u &&
+                sprite.flags == 0u &&
                 !has_rounded_mask(sprite.content_mask);
   return PolychromeSpriteFragmentInput{
       device_position,
@@ -827,10 +833,10 @@ fragment float4 polychrome_sprite_fragment(
   PolychromeSprite sprite = sprites[input.sprite_id];
   // QUILL: a snapshot's texels are premultiplied; the blend wants them
   // straight.
-  if ((sprite.grayscale & 2u) != 0u && color.a > 0.0) {
+  if ((sprite.flags & 2u) != 0u && color.a > 0.0) {
     color.rgb /= color.a;
   }
-  if ((sprite.grayscale & 1u) != 0u) {
+  if ((sprite.flags & 1u) != 0u) {
     float grayscale = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
     color.r = grayscale;
     color.g = grayscale;

@@ -145,7 +145,7 @@ fn primitive(kind: Kind, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             order: 0,
             pad: tag,
             tile: tile(tag),
-            grayscale: false.into(),
+            flags: gpui_kit::SpriteFlags::NONE,
             opacity: 1.,
             bounds,
             content_mask,

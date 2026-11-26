@@ -648,11 +648,15 @@ pre-pass; the monochrome and subpixel sprites pass their instance index;
 `src/hdr_surfaces.rs`, `src/yuv_surfaces.rs`: the surface instances carry
 the shape (80 and 112 bytes). `src/backdrop_glass.rs`: the lens size
 assert.
+`src/shaders.hlsl`: the monochrome (and subpixel) sprite vertex passes a
+flat `rounded` flag, and the fragments read the instance's mask only when
+it is set.
 
 ## Snapshots
 
 Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
-`src/snapshots.rs` (new): a `Texture2D` per live snapshot in the SDR swap
+`src/snapshots.rs` (new): a `Texture2D` per live snapshot (gpui's
+`SnapshotPool`) in the SDR swap
 chain's format with a render-target and a shader-resource view, drawn from
 `Scene::snapshot_scenes` ahead of the frame and freed with
 `Scene::snapshot_releases`; snapshot quads draw through the polychrome
@@ -661,7 +665,8 @@ pipeline, their sprites after the scene's own in its buffer.
 `record` draws a scene into any target (`FrameKind::Snapshot` plans no
 glass, writes SDR output and leaves the surfaces' frame alone);
 `pre_draw`, `set_viewport_depth_range` and `discard_depth_buffer` take the
-target; a lost device drops the pool with the pipelines and counts a loss.
-`src/window.rs` forwards `snapshots_supported`, `draw_snapshot` and
-`snapshot_losses` through `try_borrow`. `src/shaders.hlsl`: bit 2 of the
+target; a lost device drops the pool with the pipelines and reports every
+snapshot lost. `src/window.rs` forwards `snapshot_max_side`,
+`draw_snapshot` and `take_snapshot_losses` through `try_borrow`.
+`src/backdrop_glass.rs`: `max_atlas_side` is shared with the snapshot pool. `src/shaders.hlsl`: bit 2 of the
 polychrome flags divides the sample by its alpha.

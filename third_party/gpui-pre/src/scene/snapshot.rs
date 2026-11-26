@@ -17,7 +17,7 @@
 
 use std::ops::Range;
 
-use super::{DrawOrder, PaddedBool32, PaintOperation, PaintSurface, Primitive, Scene, SlotSpace};
+use super::{DrawOrder, PaintOperation, SpriteFlags, PaintSurface, Primitive, Scene, SlotSpace};
 use crate::{
     AtlasTextureId, AtlasTextureKind, AtlasTile, Bounds, ContentMask, Corners, DevicePixels,
     Hsla, Point, PolychromeSprite, ScaledPixels, Size, TileId,
@@ -66,7 +66,7 @@ impl SnapshotQuad {
                     size: self.size,
                 },
             },
-            grayscale: PaddedBool32::PREMULTIPLIED,
+            flags: SpriteFlags::PREMULTIPLIED,
             opacity: self.opacity,
             bounds: self.bounds,
             content_mask: self.content_mask,

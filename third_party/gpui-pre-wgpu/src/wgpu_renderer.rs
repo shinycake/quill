@@ -13,7 +13,7 @@ use bytemuck::{Pod, Zeroable};
 use collections::FxHashMap;
 use gpui::{
     AtlasTextureId, BackdropLens, DevicePixels, GpuSpecs, PaintedPath, PrimitiveBatch, Scene,
-    Size, SnapshotQuad, get_gamma_correction_ratios, quad_depth, quad_depth_scale,
+    Size, SnapshotLosses, SnapshotQuad, get_gamma_correction_ratios, quad_depth, quad_depth_scale,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -233,7 +233,7 @@ struct WgpuResources {
     /// QUILL: backdrop glass's pipelines, atlas and frame copy (`lens.rs`).
     lens: lens::LensState,
     /// QUILL: snapshot textures (`snapshots.rs`), dropped with the device.
-    snapshots: snapshots::SnapshotPool,
+    snapshots: snapshots::Snapshots,
 }
 
 struct CachedTextureBindGroup {
@@ -298,9 +298,10 @@ pub struct WgpuRenderer {
     needs_redraw: bool,
     // Quill: from the first `recover` after a device loss until it succeeds.
     recovering: Recovering,
-    /// QUILL: how many times snapshot textures were lost (a scene not drawn,
-    /// a device recovery), for `PlatformWindow::snapshot_losses`.
-    snapshot_losses: u64,
+    /// QUILL: snapshot textures lost where no pool was there to keep the
+    /// record (no device, a device recovery), for
+    /// `PlatformWindow::take_snapshot_losses`.
+    snapshot_losses: SnapshotLosses,
 }
 
 impl WgpuRenderer {
@@ -560,7 +561,7 @@ impl WgpuRenderer {
             last_surface_error: None,
             needs_redraw: false,
             recovering: Recovering::default(),
-            snapshot_losses: 0,
+            snapshot_losses: SnapshotLosses::None,
         })
     }
 }
@@ -1229,19 +1230,23 @@ impl WgpuRenderer {
         if scene.snapshot_scenes.is_empty() && scene.snapshot_releases.is_empty() {
             return;
         }
-        let lost = match self.core_mut() {
-            Some(core) => core.draw_snapshot_scenes(scene),
-            None => !scene.snapshot_scenes.is_empty(),
-        };
-        if lost {
-            self.snapshot_losses = self.snapshot_losses.wrapping_add(1);
+        match self.core_mut() {
+            Some(core) => {
+                core.draw_snapshot_scenes(scene);
+            }
+            // No device: every texture is gone with it.
+            None if !scene.snapshot_scenes.is_empty() => self.snapshot_losses = SnapshotLosses::All,
+            None => {}
         }
     }
 
-    /// QUILL: whether this window can draw snapshots (not on the path
-    /// without storage buffers).
-    pub fn snapshots_supported(&self) -> bool {
-        self.core().is_some_and(WgpuRendererCore::snapshots_supported)
+    /// QUILL: the largest side of a snapshot texture, `None` where this
+    /// window draws no snapshots (no device, or the path without storage
+    /// buffers).
+    pub fn snapshot_max_side(&self) -> Option<u32> {
+        self.core()
+            .filter(|core| core.snapshots_supported())
+            .map(|core| core.resources.snapshots.pool.max_side())
     }
 
     /// QUILL: draws one snapshot scene now, outside a frame
@@ -1250,7 +1255,9 @@ impl WgpuRenderer {
     #[cfg(not(target_family = "wasm"))]
     pub fn draw_snapshot(&mut self, snapshot: &gpui::SnapshotScene) -> bool {
         let drawn = self.core_mut().map(|core| {
-            let submission = core.draw_snapshot(snapshot)?;
+            let submission = core
+                .try_draw_snapshot(snapshot)
+                .ok_or_else(|| anyhow::anyhow!("the snapshot was not drawn"))?;
             core.resources
                 .device
                 .poll(wgpu::PollType::Wait {
@@ -1264,18 +1271,19 @@ impl WgpuRenderer {
             Some(Ok(())) => true,
             Some(Err(error)) => {
                 log::error!("snapshot not drawn: {error:#}");
-                self.snapshot_losses = self.snapshot_losses.wrapping_add(1);
                 false
             }
             None => false,
         }
     }
 
-    /// QUILL: how many times this renderer lost snapshot textures. A lost
-    /// device counts at once, and its recovery once more.
-    pub fn snapshot_losses(&self) -> u64 {
-        self.snapshot_losses
-            .wrapping_add(u64::from(self.device_lost()))
+    /// QUILL: what this renderer lost since the last call.
+    pub fn take_snapshot_losses(&mut self) -> SnapshotLosses {
+        let mut losses = std::mem::take(&mut self.snapshot_losses);
+        if let Some(core) = self.core_mut() {
+            losses.merge(core.resources.snapshots.pool.take_losses());
+        }
+        losses
     }
 
     /// Quill: `scene` rendered offscreen at the surface's size with this
@@ -1520,7 +1528,7 @@ impl WgpuRendererCore {
                 instance_data,
                 yuv_surfaces,
                 lens: lens::LensState::default(),
-                snapshots: snapshots::SnapshotPool::default(),
+                snapshots: snapshots::Snapshots::new(max_texture_size),
             },
             atlas,
             gamma_offset,
@@ -2792,9 +2800,8 @@ impl WgpuRenderer {
         self.state = RendererState::Released;
         self.atlas.handle_device_lost(context);
         let is_bgr = self.is_bgr;
-        // QUILL: the pool went with the old device; past the count a lost
-        // device showed, so the window loses what it captured meanwhile.
-        let snapshot_losses = self.snapshot_losses.wrapping_add(2);
+        // QUILL: the snapshot textures went with the old device.
+        let snapshot_losses = SnapshotLosses::All;
         *self = Self::new_internal(
             Some(Rc::clone(gpu_context)),
             context,

@@ -442,7 +442,7 @@ pub(super) enum GlassDrawn {
 }
 
 /// The largest atlas side the device takes, a whole number of steps.
-fn max_atlas_side(device: &ID3D11Device) -> u32 {
+pub(super) fn max_atlas_side(device: &ID3D11Device) -> u32 {
     // SAFETY: a plain query of a live device.
     let level = unsafe { device.GetFeatureLevel() };
     if level.0 >= D3D_FEATURE_LEVEL_11_0.0 {

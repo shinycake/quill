@@ -3,8 +3,8 @@
 //! culling, the point test, and the instance layouts the shaders mirror.
 
 use gpui_kit::{
-    Bounds, ContentMask, Corners, Nesting, Pixels, Quad, RoundedMask, ScaledPixels, Scene, point,
-    px, size,
+    Bounds, ContentMask, Corners, Nesting, Pixels, Quad, RoundedMask, ScaledPixels, Scene, Shadow,
+    point, px, size,
 };
 
 fn rect(x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {
@@ -154,6 +154,35 @@ fn inserting_a_primitive_culls_its_mask() {
     assert_eq!(masks.len(), 2);
     assert!(masks.first().is_some_and(RoundedMask::is_none));
     assert_eq!(masks.get(1), Some(&mask.rounded));
+}
+
+#[test]
+fn a_shadow_keeps_its_mask_where_its_blur_reaches_a_corner() {
+    let mask = card().scale(2.0);
+    let mut scene = Scene::default();
+    // 40 px clear of the bottom corners; a 20 px blur reaches 60 past them.
+    for blur in [20.0, 0.0] {
+        let bounds = scaled(100.0, 1000.0, 600.0, 120.0);
+        scene.insert_primitive(Shadow {
+            order: 0,
+            blur_radius: ScaledPixels(blur),
+            bounds,
+            corner_radii: Corners::default(),
+            content_mask: mask,
+            color: gpui_kit::Hsla::default(),
+            shape_bounds: bounds,
+            shape_corner_radii: Corners::default(),
+            inset: false.into(),
+            pad: 0,
+        });
+    }
+    let masks: Vec<RoundedMask<ScaledPixels>> = scene
+        .shadows
+        .iter()
+        .map(|shadow| shadow.content_mask.rounded)
+        .collect();
+    assert_eq!(masks.first(), Some(&mask.rounded));
+    assert!(masks.get(1).is_some_and(RoundedMask::is_none));
 }
 
 #[test]

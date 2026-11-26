@@ -198,6 +198,11 @@ impl Harness {
         })
     }
 
+    /// Hands the last frame to the (fake) renderer, as presenting does.
+    fn present(&mut self) {
+        self.vcx.update(|window, _| window.present_test_frame());
+    }
+
     fn state(&mut self) -> Option<SnapshotState> {
         self.card.read_with(&self.vcx, |card, _| {
             card.snapshot.as_ref().map(Snapshot::state)
@@ -378,6 +383,29 @@ fn a_scale_factor_change_or_a_lost_device_loses_the_picture(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
+fn a_snapshot_the_renderer_cannot_draw_fails_once_and_paints_live(cx: &mut TestAppContext) {
+    let mut h = open(cx, true, 100.0);
+    h.vcx
+        .update(|window, _| window.set_test_snapshot_draws_fail(true));
+    // Captured, but the renderer could not draw it.
+    assert_eq!(h.frame(|_, _| {}).captures, 1);
+    h.present();
+    // The next frame learns it: the child paints live, nothing is captured.
+    let drawn = h.replay_frame();
+    assert_eq!((drawn.child_quads, drawn.captures), (1, 0));
+    assert_eq!(h.state(), Some(SnapshotState::Failed));
+    // And it stays so: no capture is tried again, frame after frame.
+    for _ in 0..3 {
+        h.present();
+        let drawn = h.frame(|_, _| {});
+        assert_eq!((drawn.child_quads, drawn.captures), (1, 0));
+    }
+    assert_eq!(h.state(), Some(SnapshotState::Failed));
+    let (drawn, _) = h.vcx.update(|window, _| window.test_snapshot_history());
+    assert!(drawn.is_empty());
+}
+
+#[gpui_kit::test]
 fn a_capture_beyond_the_windows_limit_is_refused_and_paints_live(cx: &mut TestAppContext) {
     // 400 x 300 at 2x is 480,000 device pixels; the limit is 1.25 times that.
     let mut h = open(cx, true, 400.0);
@@ -427,6 +455,18 @@ fn the_switch_reads_off_and_on() {
     assert_eq!(SnapshotSwitch::parse("ON"), Some(SnapshotSwitch::On));
     assert_eq!(SnapshotSwitch::parse("1"), Some(SnapshotSwitch::On));
     assert_eq!(SnapshotSwitch::parse("maybe"), None);
+}
+
+#[gpui_kit::test]
+fn the_apps_switch_reaches_its_windows_at_the_next_frame(cx: &mut TestAppContext) {
+    let mut h = open(cx, true, 100.0);
+    h.vcx
+        .update(|_, cx| cx.set_snapshot_switch(SnapshotSwitch::Off));
+    let drawn = h.frame(|_, _| {});
+    assert_eq!((drawn.child_quads, drawn.captures), (1, 0));
+    h.vcx
+        .update(|_, cx| cx.set_snapshot_switch(SnapshotSwitch::On));
+    assert_eq!(h.frame(|_, _| {}).captures, 1);
 }
 
 #[gpui_kit::test]

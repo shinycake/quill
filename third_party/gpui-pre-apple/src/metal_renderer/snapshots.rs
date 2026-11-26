@@ -4,103 +4,50 @@
 //! The window hands the renderer, with each frame, the scenes to draw into
 //! snapshot textures (`Scene::snapshot_scenes`) and the textures whose
 //! handles dropped (`Scene::snapshot_releases`). Each live slot owns one
-//! texture in the drawable's format, sides rounded up to 256 as the lens
-//! canvases are; a released texture is kept for the next capture while
-//! another snapshot lives, and freed with the last one. The frame draws a
+//! texture in the drawable's format, kept in gpui's `SnapshotPool` with the
+//! other backends' rules (sizes, spares, losses). The frame draws a
 //! `SnapshotQuad` through the polychrome sprite pipeline, the snapshot's
 //! texture bound in place of an atlas.
 
-use std::collections::HashMap;
 use std::ops::Range;
 
 use anyhow::Result;
-use gpui::{DevicePixels, Hsla, Scene, SnapshotScene, SnapshotSlot, size};
+use gpui::{DevicePixels, Hsla, Scene, SnapshotLosses, SnapshotScene, size};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{
-    MTLClearColor, MTLCommandBuffer, MTLDevice, MTLPixelFormat, MTLPrimitiveType,
-    MTLRenderCommandEncoder, MTLTexture,
+    MTLClearColor, MTLCommandBuffer, MTLPrimitiveType, MTLRenderCommandEncoder, MTLTexture,
 };
 use std::{mem, ptr};
 
-use super::{InstanceBindings, InstanceBufferWriter, MetalRenderer, SpriteInputIndex};
+use super::{
+    InstanceBindings, InstanceBuffer, InstanceBufferPool, InstanceBufferWriter, MetalRenderer,
+    SpriteInputIndex,
+};
+use block2::RcBlock;
+use objc2_core_foundation::CFRetained;
+use objc2_core_video::CVMetalTexture;
+use parking_lot::Mutex;
+use std::{cell::Cell, sync::Arc};
 
 type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
 
-/// A side no texture exceeds.
-const MAX_SIDE: u32 = 16384;
-
 /// The snapshot textures of one renderer (one window).
-#[derive(Default)]
-pub(super) struct SnapshotPool {
-    textures: HashMap<SnapshotSlot, Texture>,
-    /// Released textures kept for the next capture.
-    spare: Vec<Texture>,
-    /// How many times textures were lost (`PlatformWindow::snapshot_losses`).
-    losses: u64,
+pub(super) type SnapshotPool = gpui::SnapshotPool<Texture>;
+
+/// What the snapshot command buffers of one frame read, kept until the
+/// last of them completes: the instance buffer goes back to its pool then.
+struct HeldUntilDrawn {
+    pool: Arc<Mutex<InstanceBufferPool>>,
+    buffer: Option<InstanceBuffer>,
+    _surfaces: Vec<CFRetained<CVMetalTexture>>,
 }
 
-fn rounded(side: i32) -> Option<u32> {
-    let side = u32::try_from(side).ok().filter(|side| *side > 0)?;
-    Some(side.next_multiple_of(256).min(MAX_SIDE)).filter(|rounded| *rounded >= side)
-}
-
-impl SnapshotPool {
-    pub(super) fn texture(&self, slot: SnapshotSlot) -> Option<&Texture> {
-        self.textures.get(&slot)
-    }
-
-    pub(super) fn losses(&self) -> u64 {
-        self.losses
-    }
-
-    fn release(&mut self, slots: &[SnapshotSlot]) {
-        for slot in slots {
-            if let Some(texture) = self.textures.remove(slot) {
-                self.spare.push(texture);
-            }
+impl Drop for HeldUntilDrawn {
+    fn drop(&mut self) {
+        if let Some(buffer) = self.buffer.take() {
+            self.pool.lock().release(buffer);
         }
-        if self.textures.is_empty() {
-            self.spare.clear();
-        }
-    }
-
-    /// The texture `slot` draws into: its own when it is large enough and in
-    /// `format`, else a spare that is, else a new one.
-    fn target(
-        &mut self,
-        device: &ProtocolObject<dyn MTLDevice>,
-        format: MTLPixelFormat,
-        slot: SnapshotSlot,
-        texels: gpui::Size<DevicePixels>,
-    ) -> Result<Texture> {
-        let (Some(width), Some(height)) = (rounded(texels.width.0), rounded(texels.height.0)) else {
-            anyhow::bail!("a snapshot of {texels:?} texels");
-        };
-        let fits = |texture: &Texture| {
-            texture.width() == width as usize
-                && texture.height() == height as usize
-                && texture.pixelFormat() == format
-        };
-        if let Some(texture) = self.textures.get(&slot).filter(|texture| fits(texture)) {
-            return Ok(texture.clone());
-        }
-        if let Some(old) = self.textures.remove(&slot) {
-            self.spare.push(old);
-        }
-        let texture = match self.spare.iter().position(fits) {
-            Some(index) => self.spare.swap_remove(index),
-            None => super::scene_target::new_scene_target(device, format, width, height)?,
-        };
-        self.textures.insert(slot, texture.clone());
-        Ok(texture)
-    }
-
-    /// A texture could not be drawn: it is dropped, and the window learns
-    /// its snapshots are lost.
-    fn lose(&mut self, slot: SnapshotSlot) {
-        self.textures.remove(&slot);
-        self.losses = self.losses.wrapping_add(1);
     }
 }
 
@@ -126,19 +73,34 @@ fn clear_color(backing: Option<Hsla>) -> MTLClearColor {
 }
 
 impl MetalRenderer {
-    /// Releases the textures of dropped snapshots and encodes the frame's
+    /// Releases the textures of dropped snapshots and draws the frame's
     /// snapshot scenes, each into its texture on a command buffer of its
-    /// own, to be committed ahead of the frame's. A scene that can't be
-    /// drawn loses its texture.
-    pub(super) fn draw_snapshot_scenes(
-        &mut self,
-        scene: &Scene,
-        writer: &mut InstanceBufferWriter,
-    ) -> Vec<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
+    /// own, committed now, ahead of the frame's. Their instance buffer and
+    /// the video textures they read are kept until the last of them
+    /// completes. A scene that can't be drawn loses its texture.
+    pub(super) fn draw_snapshot_scenes(&mut self, scene: &Scene) {
         self.snapshots.release(&scene.snapshot_releases);
+        if scene.snapshot_scenes.is_empty() {
+            return;
+        }
+        let mut writer = match InstanceBufferWriter::new(
+            &self.device,
+            &self.instance_buffer_pool,
+            self.is_unified_memory,
+        ) {
+            Ok(writer) => writer,
+            Err(error) => {
+                log::error!("snapshots not drawn: {error:#}");
+                for snapshot in &scene.snapshot_scenes {
+                    self.snapshots.lose(snapshot.slot);
+                }
+                return;
+            }
+        };
+        let mut surfaces = Vec::new();
         let mut renders = Vec::new();
         for snapshot in &scene.snapshot_scenes {
-            match self.encode_snapshot(snapshot, writer) {
+            match self.encode_snapshot(snapshot, &mut writer, &mut surfaces) {
                 Ok(command_buffer) => renders.push(command_buffer),
                 Err(error) => {
                     log::error!("snapshot not drawn: {error:#}");
@@ -146,23 +108,46 @@ impl MetalRenderer {
                 }
             }
         }
-        renders
+        let held = Arc::new(HeldUntilDrawn {
+            pool: self.instance_buffer_pool.clone(),
+            buffer: Some(writer.finish()),
+            _surfaces: surfaces,
+        });
+        for command_buffer in &renders {
+            let held = Cell::new(Some(held.clone()));
+            let block = RcBlock::new(
+                move |_: ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| drop(held.take()),
+            );
+            // SAFETY: Metal copies the live block and calls it once, after
+            // this command buffer completes; it only drops its share.
+            unsafe { command_buffer.addCompletedHandler(RcBlock::as_ptr(&block)) };
+            command_buffer.commit();
+        }
     }
 
     fn encode_snapshot(
         &mut self,
         snapshot: &SnapshotScene,
         writer: &mut InstanceBufferWriter,
+        surfaces: &mut Vec<CFRetained<CVMetalTexture>>,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let format = self.drawable_format;
+        let device = self.device.clone();
         let texture = self
             .snapshots
-            .target(&self.device, format, snapshot.slot, snapshot.size)?;
+            .target(
+                snapshot.slot,
+                snapshot.size,
+                |texture| texture.pixelFormat() == format,
+                |width, height| super::scene_target::new_scene_target(&device, format, width, height),
+            )?
+            .clone();
         self.draw_scene_into(
             &snapshot.scene,
             writer,
             &texture,
             clear_color(snapshot.backing),
+            surfaces,
         )
     }
 
@@ -176,11 +161,13 @@ impl MetalRenderer {
                 &self.instance_buffer_pool,
                 self.is_unified_memory,
             )?;
-            let command_buffer = self.encode_snapshot(snapshot, &mut writer)?;
+            let mut surfaces = Vec::new();
+            let command_buffer = self.encode_snapshot(snapshot, &mut writer, &mut surfaces)?;
             let buffer = writer.finish();
             command_buffer.commit();
             command_buffer.waitUntilCompleted();
             self.instance_buffer_pool.lock().release(buffer);
+            drop(surfaces);
             Ok(())
         });
         match drawn {
@@ -193,9 +180,14 @@ impl MetalRenderer {
         }
     }
 
-    /// QUILL: how many times this renderer lost snapshot textures.
-    pub fn snapshot_losses(&self) -> u64 {
-        self.snapshots.losses()
+    /// QUILL: the largest side of a snapshot texture.
+    pub fn snapshot_max_side(&self) -> u32 {
+        self.snapshots.max_side()
+    }
+
+    /// QUILL: what this renderer lost since the last call.
+    pub fn take_snapshot_losses(&mut self) -> SnapshotLosses {
+        self.snapshots.take_losses()
     }
 
     /// Draws a batch of snapshot quads, each with its own texture. A quad
@@ -212,7 +204,7 @@ impl MetalRenderer {
         };
         command_encoder.setRenderPipelineState(&self.polychrome_sprites_pipeline_state);
         for (index, quad) in quads.zip(batch) {
-            let Some(texture) = self.snapshots.texture(quad.slot) else {
+            let Some(texture) = self.snapshots.get(quad.slot) else {
                 continue;
             };
             let texture_size = size(

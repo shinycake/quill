@@ -1211,12 +1211,10 @@ impl PlatformWindow for WindowsWindow {
     }
 
     // QUILL: snapshots (docs/decisions/snapshot-transitions.md). A busy
-    // renderer reads as no support, nothing drawn and no new loss.
-    fn snapshots_supported(&self) -> bool {
-        self.state
-            .renderer
-            .try_borrow()
-            .is_ok_and(|renderer| renderer.snapshots_supported())
+    // renderer reads as no support and nothing drawn; its losses wait in
+    // it for the next frame.
+    fn snapshot_max_side(&self) -> Option<u32> {
+        self.state.renderer.try_borrow().ok()?.snapshot_max_side()
     }
 
     fn draw_snapshot(&self, snapshot: &gpui::SnapshotScene) -> bool {
@@ -1226,11 +1224,13 @@ impl PlatformWindow for WindowsWindow {
             .is_ok_and(|mut renderer| renderer.draw_snapshot(snapshot))
     }
 
-    fn snapshot_losses(&self) -> u64 {
+    fn take_snapshot_losses(&self) -> gpui::SnapshotLosses {
         self.state
             .renderer
-            .try_borrow()
-            .map_or(0, |renderer| renderer.snapshot_losses())
+            .try_borrow_mut()
+            .map_or(gpui::SnapshotLosses::None, |mut renderer| {
+                renderer.take_snapshot_losses()
+            })
     }
 
     fn update_ime_position(&self, bounds: Bounds<Pixels>) {

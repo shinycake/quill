@@ -2364,14 +2364,11 @@ impl PlatformWindow for WaylandWindow {
     }
 
     // QUILL: snapshots (docs/decisions/snapshot-transitions.md). A busy
-    // state reads as no support, nothing drawn and no new loss.
-    fn snapshots_supported(&self) -> bool {
-        self.0.state.try_borrow().is_ok_and(|state| {
-            state
-                .renderer
-                .as_ref()
-                .is_some_and(|renderer| renderer.snapshots_supported())
-        })
+    // state reads as no support and nothing drawn; its losses wait in the
+    // renderer for the next frame.
+    fn snapshot_max_side(&self) -> Option<u32> {
+        let state = self.0.state.try_borrow().ok()?;
+        state.renderer.as_ref()?.snapshot_max_side()
     }
 
     fn draw_snapshot(&self, snapshot: &gpui::SnapshotScene) -> bool {
@@ -2384,13 +2381,16 @@ impl PlatformWindow for WaylandWindow {
             .is_some_and(|renderer| renderer.draw_snapshot(snapshot))
     }
 
-    fn snapshot_losses(&self) -> u64 {
-        self.0.state.try_borrow().map_or(0, |state| {
-            state
-                .renderer
-                .as_ref()
-                .map_or(0, |renderer| renderer.snapshot_losses())
-        })
+    fn take_snapshot_losses(&self) -> gpui::SnapshotLosses {
+        let Ok(mut state) = self.0.state.try_borrow_mut() else {
+            return gpui::SnapshotLosses::None;
+        };
+        state
+            .renderer
+            .as_mut()
+            .map_or(gpui::SnapshotLosses::None, |renderer| {
+                renderer.take_snapshot_losses()
+            })
     }
 
     fn play_system_bell(&self) {

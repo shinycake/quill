@@ -166,7 +166,8 @@ answers `None`, or with no global, popovers draw exactly as before. Glass
 popovers take the radius and the clip. With `enter: MenuEnter::Pop`, `dropdown_popup`
 (`src/popover.rs`) enters with Web K's pop, a scale from .8 and a fade over
 200ms on `cubic-bezier(.4, 0, .2, 1)`, drawn through a snapshot
-(`with_snapshot_animation`); with `QUILL_SNAPSHOTS=off` or a glass popover
+(`with_snapshot_animation`); with the app's snapshot switch off
+(`App::snapshot_switch`) or a glass popover
 it keeps the fade and slide. Re-apply when re-vendoring.
 The shape may also carry a `fill` (in place of the theme's popover colour)
 and an `edge` (a 1px border colour); the app sets both for dark menus,

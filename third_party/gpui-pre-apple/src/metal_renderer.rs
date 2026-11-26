@@ -711,6 +711,11 @@ impl MetalRenderer {
             self.shows_native_views = shows_native_views;
             layer.setOpaque(self.opaque && !shows_native_views);
         }
+        // QUILL: the frame's snapshots are drawn first, on command buffers
+        // of their own, so a frame skipped below (no drawable, a drawable
+        // outside the display link's update, a failed frame) still fills
+        // and releases them.
+        self.draw_snapshot_scenes(scene);
         // QUILL: free spares a burst left before taking the next drawable.
         self.trim_spare_drawables();
         // QUILL: glass reads the drawable back, so a frame with lenses asks
@@ -822,14 +827,12 @@ impl MetalRenderer {
             &self.instance_buffer_pool,
             self.is_unified_memory,
         )?;
-        // QUILL: snapshot textures are drawn first, on command buffers
-        // committed ahead of the frame's.
-        let snapshot_renders = self.draw_snapshot_scenes(scene, &mut writer);
         // QUILL: the frame's glass is planned first: which lens backdrops
         // are copied, kept from last frame or drawn again sharper, and
         // where inked labels read them.
+        let mut surface_textures = Vec::new();
         let glass = self
-            .plan_glass(scene, texture, &mut writer)
+            .plan_glass(scene, texture, &mut writer, &mut surface_textures)
             .inspect_err(|error| log::error!("glass draws flat: {error:#}"))
             .ok()
             .flatten();
@@ -845,7 +848,6 @@ impl MetalRenderer {
                 scene.surfaces.len(),
             )
         })?;
-        let mut surface_textures = Vec::new();
         // QUILL: what this frame copies is kept for the next one first; a
         // batch that fails to fill its slots, or a frame that fails, forgets
         // it again.
@@ -868,9 +870,6 @@ impl MetalRenderer {
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
         let frame_resources = Cell::new(Some((writer.finish(), surface_textures)));
-        for command_buffer in &snapshot_renders {
-            command_buffer.commit();
-        }
         if let Some(glass) = &glass {
             glass.commit_renders();
         }
@@ -955,7 +954,11 @@ impl MetalRenderer {
 
         // Headless callers do not have a Cocoa event-loop pool to release
         // autoreleased command buffers and render-pass descriptors.
-        objc2::rc::autoreleasepool(|_| self.render_offscreen(scene, size))
+        objc2::rc::autoreleasepool(|_| {
+            // QUILL: the scene's snapshots first, as a window frame does.
+            self.draw_snapshot_scenes(scene);
+            self.render_offscreen(scene, size)
+        })
     }
 
     /// Renders a scene into a new offscreen texture of `size` and reads it
@@ -1019,6 +1022,8 @@ impl MetalRenderer {
         }
 
         objc2::rc::autoreleasepool(|_| {
+            // QUILL: the scene's snapshots first, as a window frame does.
+            self.draw_snapshot_scenes(scene);
             let needs_new_target = self.headless_render_target.as_ref().is_none_or(|texture| {
                 texture.width() != size.width.0 as usize
                     || texture.height() != size.height.0 as usize

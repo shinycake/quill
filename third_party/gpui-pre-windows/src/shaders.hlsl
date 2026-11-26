@@ -1384,6 +1384,9 @@ struct MonochromeSpriteFragmentInput {
     nointerpolation float4 color: COLOR;
     float4 clip_distance: SV_ClipDistance;
     nointerpolation uint sprite_id: TEXCOORD0;
+    // QUILL: 1 when the sprite's mask has a rounded shape, so the fragment
+    // reads the instance only then (docs/decisions/rounded-content-masks.md).
+    nointerpolation uint rounded: TEXCOORD1;
 };
 
 StructuredBuffer<MonochromeSprite> mono_sprites: register(t1);
@@ -1404,14 +1407,19 @@ MonochromeSpriteFragmentInput monochrome_sprite_vertex(uint vertex_id: SV_Vertex
     output.color = color;
     output.clip_distance = clip_distance;
     output.sprite_id = sprite_id;
+    output.rounded = has_rounded_mask(sprite.content_mask) ? 1u : 0u;
     return output;
 }
 
 float4 monochrome_sprite_fragment_impl(MonochromeSpriteFragmentInput input){
     float sample = t_sprite.Sample(s_sprite, input.tile_position).r;
     float alpha_corrected = apply_contrast_and_gamma_correction(sample, input.color.rgb, grayscale_enhanced_contrast, gamma_ratios);
-    float mask_coverage = rounded_mask_coverage(
-        input.position.xy, mono_sprites[input.sprite_id].content_mask.rounded);
+    // An `if`, not `?:`, which HLSL evaluates on both sides.
+    float mask_coverage = 1.0;
+    if (input.rounded != 0u) {
+        mask_coverage = rounded_mask_coverage(
+            input.position.xy, mono_sprites[input.sprite_id].content_mask.rounded);
+    }
     return float4(input.color.rgb, input.color.a * alpha_corrected * mask_coverage);
 }
 
@@ -1429,8 +1437,12 @@ SubpixelSpriteFragmentOutput subpixel_sprite_fragment(MonochromeSpriteFragmentIn
     SubpixelSpriteFragmentOutput output;
     // QUILL: scRGB output while an HDR still shows.
     output.foreground = to_output(float4(input.color.rgb, 1.0f));
-    float mask_coverage = rounded_mask_coverage(
-        input.position.xy, mono_sprites[input.sprite_id].content_mask.rounded);
+    // An `if`, not `?:`, which HLSL evaluates on both sides.
+    float mask_coverage = 1.0;
+    if (input.rounded != 0u) {
+        mask_coverage = rounded_mask_coverage(
+            input.position.xy, mono_sprites[input.sprite_id].content_mask.rounded);
+    }
     output.alpha = float4(input.color.a * alpha_corrected * mask_coverage, 1.0f);
     return output;
 }
@@ -1445,7 +1457,7 @@ struct PolychromeSprite {
     uint order;
     uint pad;
     AtlasTile tile;
-    uint grayscale;
+    uint flags;
     float opacity;
     Bounds bounds;
     ContentMask content_mask;
@@ -1472,7 +1484,7 @@ PolychromeSpriteFragmentInput polychrome_sprite_vertex(uint vertex_id: SV_Vertex
     PolychromeSpriteFragmentInput output;
     output.position = device_position;
     output.tile_position = tile_position;
-    bool simple = !has_rounded_corners(sprite.corner_radii) && sprite.grayscale == 0u
+    bool simple = !has_rounded_corners(sprite.corner_radii) && sprite.flags == 0u
         && !has_rounded_mask(sprite.content_mask);
     output.sprite_id = sprite_id | (simple ? SIMPLE_PRIMITIVE_FLAG : 0u);
     output.opacity = sprite.opacity;
@@ -1486,12 +1498,12 @@ float4 polychrome_sprite_fragment_impl(PolychromeSpriteFragmentInput input){
     }
 
     PolychromeSprite sprite = poly_sprites[input.sprite_id];
-    // QUILL: the flags (`grayscale`): bit 2, the texture holds premultiplied
-    // colour (a snapshot, `snapshots.rs`); bit 1, draw it in grey.
-    if ((sprite.grayscale & 2u) != 0u && color.a > 0.0) {
+    // QUILL: `flags` (`SpriteFlags`): 2, the texture holds premultiplied
+    // colour (a snapshot, `snapshots.rs`); 1, draw it in grey.
+    if ((sprite.flags & 2u) != 0u && color.a > 0.0) {
         color.rgb /= color.a;
     }
-    if ((sprite.grayscale & 1u) != 0u) {
+    if ((sprite.flags & 1u) != 0u) {
         color.rgb = dot(color.rgb, GRAYSCALE_FACTORS);
     }
     float distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);

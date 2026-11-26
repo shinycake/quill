@@ -118,12 +118,13 @@ pub(crate) fn dropdown_popup(
 
     // QUILL (Floating layout): the app's shape may ask for Web K's pop, a
     // scale from .8 and a fade from the top corner, drawn through a
-    // snapshot. Without snapshots (`QUILL_SNAPSHOTS=off`) and for glass
+    // snapshot. Without snapshots (`App::snapshot_switch`, which Quill sets
+    // from `QUILL_SNAPSHOTS`) and for glass
     // popovers, whose lens would not scale, the fade and slide stay.
     let pop = crate::popover_shape::popover_shape(window, cx)
         .filter(|shape| shape.enter == crate::popover_shape::MenuEnter::Pop)
         .filter(|_| {
-            gpui::SnapshotSwitch::from_env() == gpui::SnapshotSwitch::On
+            cx.snapshot_switch() == gpui::SnapshotSwitch::On
                 && crate::popover_glass::popover_glass(
                     crate::popover_glass::PopoverGlassSurface::Popover,
                     cx,

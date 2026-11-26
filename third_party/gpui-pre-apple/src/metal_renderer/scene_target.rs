@@ -5,6 +5,8 @@
 
 use anyhow::{Context as _, Result};
 use gpui::{DevicePixels, Scene, size};
+use objc2_core_foundation::CFRetained;
+use objc2_core_video::CVMetalTexture;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{
@@ -39,16 +41,17 @@ pub(super) fn new_scene_target(
 impl MetalRenderer {
     /// Encodes `scene` into the whole of `texture`, cleared to `clear`, on a
     /// command buffer of its own that the caller commits ahead of the frame
-    /// that reads it.
+    /// that reads it. The video textures it reads join `surfaces`, which
+    /// the caller keeps until that command buffer completes.
     pub(super) fn draw_scene_into(
         &mut self,
         scene: &Scene,
         writer: &mut InstanceBufferWriter,
         texture: &ProtocolObject<dyn MTLTexture>,
         clear: MTLClearColor,
+        surfaces: &mut Vec<CFRetained<CVMetalTexture>>,
     ) -> Result<Retained<ProtocolObject<dyn MTLCommandBuffer>>> {
         let bindings = super::write_instances(scene, writer, None)?;
-        let mut surfaces = Vec::new();
         let viewport = size(
             DevicePixels(i32::try_from(texture.width()).unwrap_or(i32::MAX)),
             DevicePixels(i32::try_from(texture.height()).unwrap_or(i32::MAX)),
@@ -59,7 +62,7 @@ impl MetalRenderer {
             writer,
             texture,
             viewport,
-            &mut surfaces,
+            surfaces,
             None,
             clear,
         )

@@ -1434,6 +1434,9 @@ struct MonoSpriteVarying {
     @location(1) @interpolate(flat) color: vec4<f32>,
     @location(2) @interpolate(flat) sprite_id: u32,
     @location(3) clip_distances: vec4<f32>,
+    // QUILL: 1 when the sprite's mask has a rounded shape, so the fragment
+    // loads the instance only then (docs/decisions/rounded-content-masks.md).
+    @location(4) @interpolate(flat) rounded: u32,
 }
 
 @vertex
@@ -1448,6 +1451,7 @@ fn vs_mono_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     out.color = hsla_to_rgba(sprite.color);
     out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask.bounds, sprite.transformation);
     out.sprite_id = instance_id;
+    out.rounded = select(0u, 1u, has_rounded_mask(sprite.content_mask));
     return out;
 }
 
@@ -1461,9 +1465,12 @@ fn fs_mono_sprite(input: MonoSpriteVarying) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
 
-    let rounded = load_mono_sprite(input.sprite_id).content_mask.rounded;
-    return blend_color(input.color,
-        alpha_corrected * rounded_mask_coverage(input.position.xy, rounded));
+    var coverage = alpha_corrected;
+    if (input.rounded != 0u) {
+        let rounded = load_mono_sprite(input.sprite_id).content_mask.rounded;
+        coverage *= rounded_mask_coverage(input.position.xy, rounded);
+    }
+    return blend_color(input.color, coverage);
 }
 
 // --- polychrome sprites --- //
@@ -1472,7 +1479,7 @@ struct PolychromeSprite {
     order: u32,
     pad: u32,
     tile: AtlasTile,
-    grayscale: u32,
+    flags: u32,
     opacity: f32,
     bounds: Bounds,
     content_mask: ContentMask,
@@ -1496,7 +1503,7 @@ fn vs_poly_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     let clipped = clip_to_mask(unit_vertex, sprite.bounds, sprite.content_mask.bounds);
     out.position = to_device_position_impl(clipped.position);
     out.tile_position = to_tile_position(clipped.unit_vertex, sprite.tile);
-    let simple = !has_rounded_corners(sprite.corner_radii) && sprite.grayscale == 0u
+    let simple = !has_rounded_corners(sprite.corner_radii) && sprite.flags == 0u
         && !has_rounded_mask(sprite.content_mask);
     out.sprite_id = instance_id | select(0u, SIMPLE_PRIMITIVE_FLAG, simple);
     out.opacity = sprite.opacity;
@@ -1511,12 +1518,12 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
     }
 
     let sprite = load_poly_sprite(input.sprite_id);
-    // QUILL: the flags (`grayscale`): bit 2, the texture holds premultiplied
-    // colour (a snapshot, `snapshots.rs`); bit 1, draw it in grey.
-    if ((sprite.grayscale & 2u) != 0u && color.a > 0.0) {
+    // QUILL: `flags` (`SpriteFlags`): 2, the texture holds premultiplied
+    // colour (a snapshot, `snapshots.rs`); 1, draw it in grey.
+    if ((sprite.flags & 2u) != 0u && color.a > 0.0) {
         color = vec4<f32>(color.rgb / color.a, color.a);
     }
-    if ((sprite.grayscale & 1u) != 0u) {
+    if ((sprite.flags & 1u) != 0u) {
         color = vec4<f32>(vec3<f32>(dot(color.rgb, GRAYSCALE_FACTORS)), color.a);
     }
     let distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);

@@ -19,6 +19,8 @@ use gpui::{
     LensWork, Scene, Size, size,
 };
 use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_core_foundation::CFRetained;
+use objc2_core_video::CVMetalTexture;
 use objc2_foundation::{NSRange, NSString};
 use objc2_metal::{
     MTLBlitCommandEncoder, MTLCommandBuffer, MTLCommandEncoder, MTLDevice, MTLLibrary,
@@ -375,6 +377,7 @@ impl MetalRenderer {
         scene: &Scene,
         texture: &ProtocolObject<dyn MTLTexture>,
         writer: &mut InstanceBufferWriter,
+        surfaces: &mut Vec<CFRetained<CVMetalTexture>>,
     ) -> Result<Option<GlassFrame>> {
         if scene.lenses.is_empty() || texture.isFramebufferOnly() {
             return Ok(None);
@@ -416,7 +419,8 @@ impl MetalRenderer {
                 .lens
                 .canvas(&self.device, canvases.len(), format, width, height)?;
             let clear = self.frame_clear();
-            let command_buffer = self.draw_scene_into(&sharp.scene, writer, &canvas, clear)?;
+            let command_buffer =
+                self.draw_scene_into(&sharp.scene, writer, &canvas, clear, surfaces)?;
             renders.push(command_buffer);
             canvases.push((index, canvas));
         }

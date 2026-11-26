@@ -805,8 +805,10 @@ every GPUI update:
   `push_into_frame` does what it did. `Primitive::Snapshot`,
   `PrimitiveKind::Snapshot` and `PrimitiveBatch::Snapshots`;
   `Scene::{snapshots, snapshot_scenes, snapshot_releases}`.
-  `PaddedBool32::PREMULTIPLIED`: the polychrome shader's flag word gains bit
-  2, for sampling a texture that holds premultiplied colour.
+  `SpriteFlags` replaces `PolychromeSprite::grayscale` with a `flags`
+  field (`GRAYSCALE` 1, `PREMULTIPLIED` 2, for sampling a texture that
+  holds premultiplied colour); `window.rs` and
+  `randomized_element_tree.rs` follow the rename.
 - `src/scene/snapshot.rs` (new): captures, how they settle at the end of a
   frame (drawn, kept, or pushed back live), and `Scene::region_snapshot`.
 - `src/scene/backdrop_frame.rs`: a lens over a snapshot quad redraws its
@@ -814,14 +816,22 @@ every GPUI update:
 - `src/window.rs`, `src/window/snapshot.rs` (new): `Snapshot`,
   `SnapshotState`, `SnapshotDraw`; `Window::{new_snapshot,
   capture_snapshot, paint_snapshot, snapshot_last_frame,
-  snapshots_supported}`; `Window::scenes_drawn` counts full draws.
+  snapshots_supported}`; a snapshot the renderer can't draw turns
+  `SnapshotState::Failed` and paints live; `Window::scenes_drawn` counts full draws.
 - `src/view.rs`: a cached view reuses its paint only when it was painted
   in the previous full draw (always true in Classic, where a re-rendered
   view refreshes its children).
 - `src/elements/snapshot.rs` (new): the `snapshot` element.
   `src/elements/snapshot_animation.rs` (new): `with_snapshot_animation`.
-- `src/window/snapshot.rs`: `SnapshotSwitch`, the `QUILL_SNAPSHOTS` switch,
-  read once.
-- `src/platform.rs`: `PlatformWindow::{snapshots_supported, draw_snapshot,
-  snapshot_losses}`, false and zero by default. `src/platform/test/window.rs`
-  records drawn and released snapshots.
+- `src/window/snapshot.rs`: `SnapshotSwitch`, an app global the app sets
+  with `App::set_snapshot_switch` (Quill from `QUILL_SNAPSHOTS`) and reads
+  with `App::snapshot_switch`; each window reads it at the start of its
+  frames (`Window::check_snapshots` now takes the `App`). gpui-pre reads no
+  environment for it.
+- `src/platform.rs`: `PlatformWindow::{snapshot_max_side, draw_snapshot,
+  take_snapshot_losses}`, no support and no losses by default.
+  `src/platform/test/window.rs` records drawn and released snapshots, and
+  can fail every draw.
+- `src/scene/snapshot_pool.rs` (new): `SnapshotPool<T>`, the snapshot
+  textures every backend keeps (sizes, spares, limit), and
+  `SnapshotLosses`, what a renderer lost per slot or with its device.

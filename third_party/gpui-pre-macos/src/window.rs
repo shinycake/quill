@@ -2225,16 +2225,16 @@ impl PlatformWindow for MacWindow {
     }
 
     // QUILL: snapshot textures (docs/decisions/snapshot-transitions.md).
-    fn snapshots_supported(&self) -> bool {
-        true
+    fn snapshot_max_side(&self) -> Option<u32> {
+        Some(self.0.lock().renderer.snapshot_max_side())
     }
 
     fn draw_snapshot(&self, snapshot: &gpui::SnapshotScene) -> bool {
         self.0.lock().renderer.draw_snapshot(snapshot)
     }
 
-    fn snapshot_losses(&self) -> u64 {
-        self.0.lock().renderer.snapshot_losses()
+    fn take_snapshot_losses(&self) -> gpui::SnapshotLosses {
+        self.0.lock().renderer.take_snapshot_losses()
     }
 
     unsafe fn attach_native_view(

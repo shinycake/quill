@@ -252,5 +252,5 @@ crate could not be built or tested on its own.
 ## Snapshots
 
 Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md):
-`src/window.rs` supports snapshots and forwards `draw_snapshot` and
-`snapshot_losses` to the Metal renderer.
+`src/window.rs` forwards `snapshot_max_side`, `draw_snapshot` and
+`take_snapshot_losses` to the Metal renderer.

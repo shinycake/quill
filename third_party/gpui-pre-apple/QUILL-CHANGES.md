@@ -296,6 +296,8 @@ and the opaque pre-pass; monochrome sprites pass their instance index and
 surfaces their mask's shape to the fragment; `QUILL-LAYOUT` lines state each
 struct's size and mask offset. `src/metal_renderer.rs`: `ContentMask::rect`
 and a headless pixel test of the coverage.
+`src/shaders.metal`: the monochrome sprite vertex passes a flat `rounded`
+flag, and the fragment reads the instance's mask only when it is set.
 
 ## Drawing a scene into a texture
 
@@ -309,11 +311,17 @@ in output).
 ## Snapshots
 
 Changed by the Quill project in 2026 (docs/decisions/snapshot-transitions.md).
-`src/metal_renderer/snapshots.rs` (new): a texture per live snapshot, drawn
+`src/metal_renderer/snapshots.rs` (new): a texture per live snapshot (gpui's
+`SnapshotPool`), drawn
 from `Scene::snapshot_scenes` ahead of the frame and freed with
 `Scene::snapshot_releases`; snapshot quads draw through the polychrome
 pipeline with the snapshot's texture bound. `src/metal_renderer.rs`: the
 pool, the batch arm, and `draw_primitives_to_texture` takes its clear
 colour. `src/metal_renderer/scene_target.rs`: `draw_scene_into` takes a
-clear colour. `src/shaders.metal`: bit 2 of the polychrome flags divides
-the sample by its alpha.
+clear colour and adds the video textures it reads to the caller's list,
+which keeps them until its command buffer completes. Snapshot scenes are
+drawn at the top of `MetalRenderer::draw`, before a frame can be skipped,
+and first in the headless entry points. `src/shaders.metal`: bit 2 of the
+polychrome flags divides the sample by its alpha.
+`vendor/gpui/src/scene.rs` mirrors `SpriteFlags` and the `flags` field for
+the generated shader header.
