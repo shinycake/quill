@@ -137,13 +137,20 @@ impl RowInk {
 }
 
 impl RowInk {
-    /// The ink over a glass highlight: the lens is the row's fill, so the
-    /// row keeps the list's own (`rest_fill`) and no hover fill of its own.
-    pub(in crate::ui) fn on_glass(self, rest_fill: Hsla) -> Self {
+    /// The ink of a row on a glass card, whose open row is a glass
+    /// highlight: Classic's tint colours, but the lens is the open row's
+    /// fill, so the row keeps the list's own (`rest_fill`) and no hover fill
+    /// of its own.
+    pub(in crate::ui) fn on_glass(
+        open: bool,
+        rest_fill: Hsla,
+        muted_fg: Hsla,
+        theme: &ThemeColor,
+    ) -> Self {
         Self {
             fill: rest_fill,
             open_hover: None,
-            ..self
+            ..Self::of(open, SelectedRow::Tint, rest_fill, muted_fg, theme)
         }
     }
 }

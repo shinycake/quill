@@ -180,10 +180,9 @@ impl ContextMenuItems {
         self.look.set(Some(look));
     }
 
-    /// The look of the window drawing the menu (Classic's until a frame
-    /// noted it).
-    pub(super) fn look(&self) -> Look {
-        self.look.get().unwrap_or(Look::Lines)
+    /// The look of the window drawing the menu, once a frame noted it.
+    pub(super) fn look(&self) -> Option<Look> {
+        self.look.get()
     }
 
     /// The row at `row_key(order)` drawn this frame opens `submenu`.

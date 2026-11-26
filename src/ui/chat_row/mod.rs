@@ -16,7 +16,6 @@ use quill::chatlist_style::ChatListRowStyle;
 use quill::folder_limits::FolderTag;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::layout_style::SelectedRow;
 use quill::local_path::sandboxed_display_path;
 use quill::peer_badge::TitleBadge;
 use quill::state::{ChatSummary, RowStatusIcon, Session, SidebarLine};
@@ -348,8 +347,7 @@ pub(super) fn session_chat_row(
     // The open row's colours: Classic's tint, the solid accent row, or on
     // glass the theme's text over a glass highlight.
     let ink = match glass {
-        Some(_) => RowInk::of(selected, SelectedRow::Tint, rest_fill, muted_fg, cx.theme())
-            .on_glass(rest_fill),
+        Some(_) => RowInk::on_glass(selected, rest_fill, muted_fg, cx.theme()),
         None => RowInk::of(
             selected,
             row_style.selected,

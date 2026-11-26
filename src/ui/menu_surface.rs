@@ -57,13 +57,17 @@ pub(crate) fn menu_row_radius(look: Look, cx: &App) -> Pixels {
 }
 
 pub(super) trait MenuRowCorners: Styled + Sized {
-    /// A menu row's corners, concentric with the menu drawing it.
+    /// A menu row's corners, concentric with the menu drawing it (the
+    /// window notes its look before any row draws).
     fn menu_row_corners(
         self,
         items: &crate::ui::context_menu_keys::ContextMenuItems,
         cx: &App,
     ) -> Self {
-        self.rounded(menu_row_radius(items.look(), cx))
+        match items.look() {
+            Some(look) => self.rounded(menu_row_radius(look, cx)),
+            None => self,
+        }
     }
 }
 
