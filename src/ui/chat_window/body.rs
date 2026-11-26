@@ -145,7 +145,7 @@ impl QuillApp {
                             this.close_media_panel(cx);
                         }),
                     )
-                    .anchored(target.position, panel)
+                    .anchored(target.position, panel, cx)
                     .decorations(self.panel_painter()),
                 )
             })

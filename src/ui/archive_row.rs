@@ -340,6 +340,7 @@ impl QuillApp {
                 .role(gpui_kit::Role::Group)
                 .a11y_tag(quill::agent::ui_driver::redact::REGION_MENU)
                 .child(panel),
+            cx,
         )
         .focus_trap("archive-menu-focus", &self.frame.menu.focus)
     }

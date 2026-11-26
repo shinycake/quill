@@ -259,7 +259,7 @@ impl QuillApp {
                 }),
             )
         })
-        .anchored(menu.position, panel)
+        .anchored(menu.position, panel, cx)
         .focus_trap("folder-tab-menu-focus", &self.frame.menu.focus)
     }
 

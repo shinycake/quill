@@ -185,6 +185,7 @@ impl QuillApp {
                 .role(gpui_kit::Role::Group)
                 .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id))
                 .child(panel),
+            cx,
         )
         .focus_trap("story-menu-focus", &self.frame.menu.focus)
     }

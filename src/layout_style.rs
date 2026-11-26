@@ -206,6 +206,37 @@ pub enum Curve {
     Standard,
 }
 
+impl Curve {
+    /// The eased progress at `t` (0 to 1, clamped).
+    pub fn ease(self, t: f32) -> f32 {
+        let t = t.clamp(0., 1.);
+        match self {
+            Curve::OutCubic => 1. - (1. - t).powi(3),
+            Curve::Standard => cubic_bezier(0.4, 0.0, 0.2, 1.0, t),
+        }
+    }
+}
+
+/// CSS `cubic-bezier(x1, y1, x2, y2)` at `x`: the curve's `y` where its `x`
+/// is `x`, found by bisection on the curve parameter (x is monotonic for
+/// control points inside 0 to 1).
+fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, x: f32) -> f32 {
+    let at = |a: f32, b: f32, s: f32| {
+        let r = 1. - s;
+        3. * r * r * s * a + 3. * r * s * s * b + s * s * s
+    };
+    let (mut lo, mut hi) = (0f32, 1f32);
+    for _ in 0..32 {
+        let mid = (lo + hi) / 2.;
+        if at(x1, x2, mid) < x {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    at(y1, y2, (lo + hi) / 2.)
+}
+
 /// How a bar above the history appears.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarReveal {

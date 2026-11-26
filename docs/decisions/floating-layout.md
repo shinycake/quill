@@ -427,13 +427,38 @@ recorded in `QUILL-CHANGES.md`), and Quill answers it from
 Which window's shape: a menu is built while its window draws, and every
 window notes its width before it builds anything
 (`QuillApp::note_window_width`, main and chat windows). That call also
-writes the clip of the window being drawn (`DrawnWindowClip`), and both
-surfaces read it. A chat window under 601 wide draws Classic menus while
-the main window draws Floating ones. Glass menus take the radius and the
-clip; the lens keeps its own rim and shadow.
+writes the metrics of the window being drawn
+(`DrawnWindow(&'static ChromeMetrics)`), and both surfaces read it. A
+chat window under 601 wide draws Classic menus while the main window
+draws Floating ones. Glass menus take the radius and the clip; the lens
+keeps its own rim and shadow.
 
-Not changed yet: the menus still open with the kit's fade and slide; the
-Web K pop (scale .8 to 1) is step 11a.
+## Menus pop (step 11a)
+
+Floating menus open as `.btn-menu` does: from 0.8 scale and clear to the
+menu itself over 200 ms on `cubic-bezier(.4, 0, .2, 1)`
+(`--btn-menu-transition`), drawn through a snapshot
+(`with_snapshot_animation`) that lives only for the run. Quill's menus
+(`chrome::menu_pop`, wrapped by `DismissLayer::anchored`) grow from the
+corner nearest where they opened, as tweb's `positionMenu` picks its
+`top-left`/`bottom-right` class: a menu pushed left by the window's edge
+grows from its right side. The kit's dropdown (`dropdown_popup`) pops
+from its top left. The capture keeps 12px around the menu for the
+shadow. Classic menus never take a snapshot and open as before (the kit's
+fade and slide, Quill's at once).
+
+Deviations:
+
+- Glass menus don't pop: a lens inside a capture stays live and is not
+  moved, so the glass would stand still while its rows scaled. They open
+  as before.
+- No fallback motion where the window has no snapshots
+  (`QUILL_SNAPSHOTS=off`, an old GPU): Quill's menus appear at once, the
+  kit's dropdown keeps its fade and slide.
+- The kit's dropdown always grows from its top left; it does not know
+  which way it was flipped.
+- No backing colour in the capture: the message menu's strip and panel
+  have a gap between them that a backing would fill.
 
 ## Title strip (step 10)
 

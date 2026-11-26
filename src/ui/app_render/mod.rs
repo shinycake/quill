@@ -574,7 +574,7 @@ impl Render for QuillApp {
                                 this.close_media_panel(cx);
                             }),
                         )
-                        .anchored(position, panel)
+                        .anchored(position, panel, cx)
                         .decorations(self.panel_painter()),
                     )
                 },

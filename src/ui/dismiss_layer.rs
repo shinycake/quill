@@ -82,12 +82,20 @@ impl DismissLayer {
 
     /// Content at `position` in the window, kept 8 px inside its edges
     /// (menus and popups). Wrapped in an occluding box of its own size.
-    pub(super) fn anchored(mut self, position: Point<Pixels>, content: impl IntoElement) -> Self {
+    /// In Floating it pops in from the corner at `position`
+    /// (`chrome::menu_pop`).
+    pub(super) fn anchored(
+        mut self,
+        position: Point<Pixels>,
+        content: impl IntoElement,
+        cx: &App,
+    ) -> Self {
+        let content = div().occlude().child(content).into_any_element();
         self.children.push(
             anchored()
                 .position(position)
                 .snap_to_window_with_margin(px(8.))
-                .child(div().occlude().child(content))
+                .child(super::chrome::menu_pop::menu_pop(content, position, cx))
                 .into_any_element(),
         );
         self
@@ -189,7 +197,7 @@ mod tests {
                         }),
                     );
                     let layer = if anchored {
-                        layer.anchored(point(px(100.), px(100.)), panel)
+                        layer.anchored(point(px(100.), px(100.)), panel, cx)
                     } else {
                         layer
                             .layer(|layer| layer.flex().items_center().justify_center())

@@ -1,8 +1,8 @@
 use gpui::{
     Anchor, Animation, AnimationExt as _, AnyElement, App, Bounds, Context, Div, ElementId,
     FocusHandle, InteractiveElement as _, IntoElement, MouseButton, ParentElement, PathBuilder,
-    Pixels, Point, RenderOnce, Stateful, StyleRefinement, Styled, Window, canvas, point,
-    prelude::FluentBuilder as _, px,
+    Pixels, Point, RenderOnce, SnapshotAnimationExt as _, Stateful, StyleRefinement, Styled,
+    Window, canvas, point, prelude::FluentBuilder as _, px,
 };
 use std::{cell::Cell, rc::Rc, time::Duration};
 
@@ -31,6 +31,30 @@ const DROPDOWN_ENTER_DURATION: Duration = Duration::from_millis(150);
 /// what shadcn/ui expresses as `data-[side=bottom]:slide-in-from-top-2`. Its
 /// `2` is `0.5rem`, which is 8px at the default root size.
 const DROPDOWN_ENTER_OFFSET: Pixels = px(-8.);
+
+/// QUILL (Floating layout): Web K's menu entrance, `.btn-menu-transition`
+/// (tweb `scss/partials/_button.scss`): a scale from .8 and a fade over
+/// 200ms on its standard curve.
+const DROPDOWN_POP_DURATION: Duration = Duration::from_millis(200);
+const DROPDOWN_POP_FROM: f32 = 0.8;
+
+/// `cubic-bezier(.4, 0, .2, 1)` at `x`, by bisection on the curve parameter.
+fn standard_curve(x: f32) -> f32 {
+    let at = |a: f32, b: f32, s: f32| {
+        let r = 1. - s;
+        3. * r * r * s * a + 3. * r * s * s * b + s * s * s
+    };
+    let (mut lo, mut hi) = (0f32, 1f32);
+    for _ in 0..32 {
+        let mid = (lo + hi) / 2.;
+        if at(0.4, 0.2, mid) < x.clamp(0., 1.) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    at(0.0, 1.0, (lo + hi) / 2.)
+}
 
 fn dropdown_positioner(bounds: Bounds<Pixels>) -> gpui_base::Positioner {
     gpui_base::Positioner::side(bounds)
@@ -90,6 +114,35 @@ pub(crate) fn dropdown_popup(
     let travel: f32 = DROPDOWN_ENTER_OFFSET.into();
     // Read out here: the animation runs long after `cx` is gone.
     let ring = popover_ring(cx);
+
+    // QUILL (Floating layout): the app's shape may ask for Web K's pop, a
+    // scale from .8 and a fade from the top corner, drawn through a
+    // snapshot. Without snapshots (`QUILL_SNAPSHOTS=off`) and for glass
+    // popovers, whose lens would not scale, the fade and slide stay.
+    let pop = crate::popover_shape::popover_shape(cx).is_some_and(|shape| shape.pop)
+        && gpui::SnapshotSwitch::from_env() == gpui::SnapshotSwitch::On
+        && crate::popover_glass::popover_glass(
+            crate::popover_glass::PopoverGlassSurface::Popover,
+            cx,
+        )
+        .is_none();
+    if pop {
+        return dropdown_positioner(bounds).child(
+            surface
+                .with_snapshot_animation(
+                    id,
+                    Animation::new(DROPDOWN_POP_DURATION).with_easing(standard_curve),
+                    |t, bounds| {
+                        gpui::SnapshotDraw::scaled_about(
+                            bounds.origin,
+                            DROPDOWN_POP_FROM + (1. - DROPDOWN_POP_FROM) * t,
+                        )
+                        .faded(t)
+                    },
+                )
+                .margin(px(12.)),
+        );
+    }
 
     dropdown_positioner(bounds).child(surface.with_animation(
         id,

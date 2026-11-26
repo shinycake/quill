@@ -940,6 +940,7 @@ impl QuillApp {
                     )
                 })
                 .child(panel),
+            cx,
         )
         .focus_trap("message-menu-focus", &self.frame.menu.focus)
     }

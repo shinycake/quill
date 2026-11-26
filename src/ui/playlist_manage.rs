@@ -537,7 +537,7 @@ impl QuillApp {
             }),
         )
         .layer(|layer| layer.track_focus(&self.frame.menu.focus))
-        .anchored(position, panel)
+        .anchored(position, panel, cx)
         .focus_trap("playlist-menu-focus", &self.frame.menu.focus)
     }
 

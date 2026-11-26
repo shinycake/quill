@@ -6,11 +6,14 @@
 
 use gpui::{App, BoxShadow, Global, Pixels};
 
-/// A popover's corners and shadow.
+/// A popover's corners and shadow, and how a dropdown enters.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopoverShape {
     pub radius: Pixels,
     pub shadow: Vec<BoxShadow>,
+    /// Dropdowns pop in (scale from .8 and fade, through a snapshot) in
+    /// place of the fade and slide.
+    pub pop: bool,
 }
 
 /// The app's answer: `Some` draws that shape, `None` the kit's own.

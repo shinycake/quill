@@ -163,7 +163,11 @@ shadow); Quill installs it. While it answers `Some`, `popover_style` draws
 that radius and shadow instead of the theme radius and the ring-and-shadow
 edge, and clips the content to its rounded shape (`clip_rounded`); while it
 answers `None`, or with no global, popovers draw exactly as before. Glass
-popovers take the radius and the clip. Re-apply when re-vendoring.
+popovers take the radius and the clip. With `pop` set, `dropdown_popup`
+(`src/popover.rs`) enters with Web K's pop, a scale from .8 and a fade over
+200ms on `cubic-bezier(.4, 0, .2, 1)`, drawn through a snapshot
+(`with_snapshot_animation`); with `QUILL_SNAPSHOTS=off` or a glass popover
+it keeps the fade and slide. Re-apply when re-vendoring.
 
 ## Rounded content masks
 

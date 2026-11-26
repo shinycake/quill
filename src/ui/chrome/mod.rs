@@ -8,6 +8,7 @@ pub(in crate::ui) mod bars;
 pub(in crate::ui) mod frame;
 pub(in crate::ui) mod frames;
 pub(in crate::ui) mod list_parts;
+pub(in crate::ui) mod menu_pop;
 pub(in crate::ui) mod menu_shape;
 pub(in crate::ui) mod miniature;
 pub(in crate::ui) mod radius;
@@ -221,7 +222,7 @@ impl QuillApp {
     pub(in crate::ui) fn note_window_width(&self, width: Pixels, cx: &mut Context<Self>) {
         let before = self.chrome(cx);
         self.slices.window.width.set(width);
-        menu_shape::note_drawn_window(self.chrome_metrics().clip, cx);
+        menu_shape::note_drawn_window(self.chrome_metrics(), cx);
         if self.chrome(cx) != before {
             self.notify_slices(cx);
         }

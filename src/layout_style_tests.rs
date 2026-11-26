@@ -187,3 +187,21 @@ fn contrast_ratio_is_wcags() {
     assert!((contrast_ratio(0.5, 0.5) - 1.).abs() < 1e-6);
     assert_eq!(contrast_ratio(0.2, 0.8), contrast_ratio(0.8, 0.2));
 }
+
+#[test]
+fn curves_run_from_rest_to_rest() {
+    for curve in [Curve::OutCubic, Curve::Standard] {
+        assert!(curve.ease(0.).abs() < 1e-4);
+        assert!((curve.ease(1.) - 1.).abs() < 1e-4);
+        let mut last = 0.;
+        for step in 1..=20 {
+            let eased = curve.ease(step as f32 / 20.);
+            assert!(eased >= last, "{curve:?} never goes back");
+            last = eased;
+        }
+    }
+    // Web K's standard curve: about 0.78 of the way at half time
+    // (cubic-bezier(.4, 0, .2, 1) as browsers compute it).
+    assert!((Curve::Standard.ease(0.5) - 0.7756).abs() < 0.005);
+    assert!((Curve::OutCubic.ease(0.5) - 0.875).abs() < 1e-4);
+}

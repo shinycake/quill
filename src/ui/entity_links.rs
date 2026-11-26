@@ -675,6 +675,7 @@ impl QuillApp {
                                 this.open_link(&url, cx);
                             }))
                     })),
+                cx,
             )
             .into_any_element(),
         )
