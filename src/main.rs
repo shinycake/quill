@@ -75,6 +75,19 @@ fn refuse_test_build() {
     }
 }
 
+/// `QUILL_SNAPSHOTS=off` paints every snapshot element live, in every
+/// window (docs/decisions/snapshot-transitions.md); unset or unknown leaves
+/// snapshots on.
+#[cfg(feature = "ui")]
+fn apply_snapshot_switch(cx: &mut gpui_kit::App) {
+    if let Some(switch) = std::env::var("QUILL_SNAPSHOTS")
+        .ok()
+        .and_then(|value| gpui_kit::SnapshotSwitch::parse(&value))
+    {
+        cx.set_snapshot_switch(switch);
+    }
+}
+
 fn main() {
     quill::startup_trace::mark("main");
     quill::crash_log::install_panic_hook();
@@ -255,6 +268,7 @@ fn ui_main(args: &[String]) {
         // take its own direction (docs/decisions/rtl-sweep.md).
         gpui_kit::base::LayoutDirection::Ltr.set_global(cx);
         gpui_kit::init(cx);
+        apply_snapshot_switch(cx);
         // kit Phase 8: the kit defaults to its light theme on init;
         // Quill boots dark (kit dialogs match the app from here on).
         ui::set_theme_mode(ui::startup_theme_mode(), None, cx);
@@ -650,6 +664,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             // One left-to-right layout whatever the system language, as above.
             gpui_kit::base::LayoutDirection::Ltr.set_global(cx);
             gpui_kit::init(cx);
+            apply_snapshot_switch(cx);
             // kit Phase 8: the kit defaults to its light theme on init;
             // Quill boots dark (kit dialogs match the app from here on).
             ui::set_theme_mode(ui::startup_theme_mode(), None, cx);
