@@ -376,6 +376,65 @@ a renderer that reuses a lens's blur while its backdrop region is
 unchanged, then fewer lenses (the list card solid while the history
 scrolls), then solid cards on battery.
 
+## Glass cost (2026-11-26)
+
+Where the Floating glass time goes, measured with the method above
+(`ready-unread-landing` scrolled under the cards, photo wallpaper, ABBA,
+release build on Idan's M-series Mac). Each experiment was an env switch
+in a scratch build, alternated with the plain build; none is in the code.
+Relative numbers for this decision only:
+
+| Variant | GPU p50 | GPU p99 |
+| --- | --- | --- |
+| glass off | 1.0 to 1.4 ms | 5.4 to 6.8 ms |
+| glass on, 6 lenses (Panel or Card recipe) | 2.9 to 3.8 ms | 9.5 to 11.9 ms |
+| list card not drawn at all | 2.05 to 2.80 ms | 9.0 to 10.4 ms |
+| every lens of zero area (copies and pass breaks only) | 1.18 to 1.72 ms | 8.6 to 8.7 ms |
+| no backdrop copies, blurs or pass breaks after frame 30 | 2.55 to 3.02 ms | |
+| no frost taps on any lens | 3.03 to 3.38 ms | |
+| the list card a flat tint, no texture taps | 3.04 to 3.13 ms | |
+
+- The time is raster and blending over the lenses' area, and the list
+  card is about 70% of it. The blur taps are about 0.2 ms, so a blur at
+  half or quarter resolution does not help.
+- Caching the list card's output while the wallpaper under it stays the
+  same can do no better than not drawing the card: still +1.0 to 1.5 ms
+  and p99 over 8.3 ms. That remedy cannot reach #1497's budget.
+- The p99 comes from the glass frame itself (backdrop copies, pass
+  breaks, frames with lenses skip the opaque depth pre-pass): with no
+  lens fragments at all it is 8.6 ms.
+- The Card recipe costs the same as the Panel recipe within noise (its
+  change is to the look).
+- A short path for a lens's deep interior (no shadow, normal or bend, one
+  tap; the same pixels) measured no faster and was not kept.
+
+The owner kept the glass cards as they are (2026-11-26); the Glass
+effects description in Settings says the cards take more graphics work
+while scrolling.
+
+## Slides from snapshots (step 11e): not built
+
+The plan drew a sliding list card or panel from a snapshot instead of
+live. Measured 2026-11-26 with the method above, but with glass off and
+`QUILL_ASSUME_ACTIVE=1`: `ready-showcase` at 1200 by 800, the list hidden
+and shown 20 times. The live slide was ABBA'd against a scratch switch
+that drew nothing for the sliding list. A snapshot quad cannot do
+better than that:
+
+| Slide | CPU draw p50 | CPU draw p99 | GPU p50 |
+| --- | --- | --- | --- |
+| live | 3.58 to 3.90 ms | 4.75 to 6.86 ms | 1.03 to 1.16 ms |
+| nothing drawn for the list | 2.21 to 2.31 ms | 5.66 to 7.05 ms | 0.51 to 0.60 ms |
+
+A snapshot could save up to about 1.4 ms of CPU and 0.5 ms of GPU on
+each frame of a 200 ms slide. The live slide already fits the frame
+(draw p99 under 7 ms), and the snapshot would add a capture pass at the
+start and a recapture whenever the list changes mid-slide. Glass cards
+cannot be captured at all. So the live slide stays. The step's `SlideDraw`
+switch was removed with the unread motion fields. The drawer run at
+800 wide did not toggle from the keyboard in the demo, so only the
+docked slide was measured.
+
 ## List details and row sizes (step 9)
 
 - **Row sizes.** `quill::density::STANDARD_WEBK` is Standard with Web K's
@@ -644,3 +703,13 @@ wallpapers, light and dark) found these, all fixed in Floating only:
   outgoing bubble and the light seam at its right edge are on main too
   (same capture on a main build): the menu recipe's rim bends the bubble
   in. Classic is left as it is.
+
+The drawer looked stuck partway in the review captures unless the
+pointer moved. The slide was fine: a demo window launched from a
+terminal is never the active window, and the frame clock skips
+animation frames for an inactive window (as tdesktop pauses its
+animations when the window is not active). Captures that hold a slide
+need `QUILL_ASSUME_ACTIVE=1`; with it the drawer lands without pointer
+moves. `the_drawer_slides_on_the_frame_clock` checks that the drawer
+asks for every frame of its slide on its own and stops asking once it
+lands.

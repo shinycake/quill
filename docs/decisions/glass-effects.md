@@ -59,7 +59,7 @@ budget.
 | MediaText | the media viewer's docked bar, captions, the video controller |
 | Selection | the Chats/Contacts/Calls selection, which slides as clearer glass |
 | Bar | the chat list's header, folder tabs and search field, floating over the rows (Classic only: in Floating the list card is the glass) |
-| Panel (Floating) | the Floating layout's cards: the chat list card, the header-and-bars card, the composer card, the side-panel card and the left tab column (docs/decisions/floating-layout.md, "Glass on the cards") |
+| Card | the Floating layout's cards: the chat list card, the header-and-bars card, the composer card, the side-panel card and the left tab column. Frosted to the edge, barely bent or lit, a wider blur (docs/decisions/floating-layout.md, "Glass on the cards" and "Appearance review round") |
 
 Message bubbles, chat rows, wallpapers, service messages and bot buttons
 never get glass (Apple's rule: glass is for controls above content).
@@ -144,6 +144,7 @@ not public claims.
 | Power during a 60 s scripted scroll | within 2% or inside run-to-run noise | system load (SMC `AccumulatedSystemLoad`, on AC power) averaged 29.0 W off and 32.2 W on, with runs of the same setting ranging 18 to 39 W: inside noise, and too noisy to resolve 2% |
 | Memory | at most +16 MB with glass on screen, back after | footprint 89 MB off, 89 to 90 MB on with a menu open, unchanged after it closed |
 | Floating cards, scrolling a chat under them (2026-11-25) | as the scroll row | median 0.98 to 1.00 ms off, 3.26 to 3.38 ms on (+2.3 ms), p99 9.0 to 9.9 ms on: over budget, open for the owner (floating-layout.md) |
+| Floating cards with the Card recipe (2026-11-26) | as the scroll row | median 1.29 to 1.37 ms off, 2.89 to 3.39 ms on, p99 10.7 to 11.9 ms on: the same cost as the Panel recipe within noise. Still over budget, with the owner (floating-layout.md, "Glass cost") |
 | Amount of glass | at most 8 lenses in 2 bands; always-visible glass under 15% of the window | scene test: a steady main window stays within 8 lenses and 2 bands; the header bar is about 6% of a 1200 by 800 window |
 
 The power row is the weakest. The Mac was on AC power with other work

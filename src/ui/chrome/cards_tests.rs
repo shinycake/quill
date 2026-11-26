@@ -148,3 +148,41 @@ fn leaving_the_band_drops_the_drawer(cx: &mut TestAppContext) {
     assert!(!held(&app, vcx));
     assert!(app.read_with(vcx, |app, _| !app.shell_layout().drawer()));
 }
+
+/// Whether one render of the (active) window asks the frame clock to
+/// redraw the whole app, which is how the shell's slides tick (a slice's
+/// own animations ask for their slice only).
+fn asks_app_frames(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.update(vcx, |app, cx| {
+        app.frame.animation_targets.take();
+        cx.notify();
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    app.read_with(vcx, |app, _| {
+        app.frame.animation_targets.take().contains(&None)
+    })
+}
+
+/// The drawer asks the frame clock for every frame of its slide on its
+/// own, with no pointer moving, and lets it go once it lands. (A demo
+/// window launched from a terminal is never active, so the clock gate
+/// holds its slide still: captures need `QUILL_ASSUME_ACTIVE=1`.)
+#[gpui_kit::test]
+fn the_drawer_slides_on_the_frame_clock(cx: &mut TestAppContext) {
+    let _prefs = own_appearance_prefs("quill-cards-drawer-clock");
+    let (app, mut vcx) = open(cx, 800., LayoutStyle::Floating);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    frames(vcx);
+    assert!(!asks_app_frames(&app, vcx), "idle: no app frames");
+    app.update_in(vcx, |app, window, cx| app.toggle_sidebar(window, cx));
+    for _ in 0..4 {
+        app.update(vcx, |app, _| {
+            app.frame.sidebar.advance(SLIDE_DURATION / 5);
+        });
+        assert!(asks_app_frames(&app, vcx), "mid-slide frames");
+    }
+    slide(&app, vcx);
+    assert!(held(&app, vcx));
+    assert!(!asks_app_frames(&app, vcx), "landed: no app frames");
+}
