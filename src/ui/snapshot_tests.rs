@@ -458,6 +458,18 @@ fn the_switch_reads_off_and_on() {
 }
 
 #[gpui_kit::test]
+fn the_apps_switch_reaches_its_windows_at_the_next_frame(cx: &mut TestAppContext) {
+    let mut h = open(cx, true, 100.0);
+    h.vcx
+        .update(|_, cx| cx.set_snapshot_switch(SnapshotSwitch::Off));
+    let drawn = h.frame(|_, _| {});
+    assert_eq!((drawn.child_quads, drawn.captures), (1, 0));
+    h.vcx
+        .update(|_, cx| cx.set_snapshot_switch(SnapshotSwitch::On));
+    assert_eq!(h.frame(|_, _| {}).captures, 1);
+}
+
+#[gpui_kit::test]
 fn with_the_switch_off_every_snapshot_paints_live(cx: &mut TestAppContext) {
     let mut h = open(cx, true, 100.0);
     let supported = h.vcx.update(|window, _| {

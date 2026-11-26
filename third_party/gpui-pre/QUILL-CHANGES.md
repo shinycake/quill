@@ -823,8 +823,11 @@ every GPUI update:
   view refreshes its children).
 - `src/elements/snapshot.rs` (new): the `snapshot` element.
   `src/elements/snapshot_animation.rs` (new): `with_snapshot_animation`.
-- `src/window/snapshot.rs`: `SnapshotSwitch`, the `QUILL_SNAPSHOTS` switch,
-  read once.
+- `src/window/snapshot.rs`: `SnapshotSwitch`, an app global the app sets
+  with `App::set_snapshot_switch` (Quill from `QUILL_SNAPSHOTS`) and reads
+  with `App::snapshot_switch`; each window reads it at the start of its
+  frames (`Window::check_snapshots` now takes the `App`). gpui-pre reads no
+  environment for it.
 - `src/platform.rs`: `PlatformWindow::{snapshot_max_side, draw_snapshot,
   take_snapshot_losses}`, no support and no losses by default.
   `src/platform/test/window.rs` records drawn and released snapshots, and

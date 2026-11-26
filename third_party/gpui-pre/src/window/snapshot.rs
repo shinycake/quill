@@ -11,10 +11,10 @@
 use std::{
     cell::Cell,
     rc::{Rc, Weak},
-    sync::OnceLock,
 };
 
 use super::Window;
+use crate::{App, Global};
 use crate::scene::{CaptureContent, CaptureFate, CaptureTarget, Redraw};
 use crate::{
     Bounds, DevicePixels, Hsla, Pixels, Point, ScaledPixels, Size, SnapshotLosses, SnapshotQuad,
@@ -25,20 +25,23 @@ use crate::{
 /// window's own device pixels.
 const AREA_LIMIT: f64 = 1.25;
 
-/// `QUILL_SNAPSHOTS`, for demos and tests: `off` (or `0`) makes every
-/// window paint its snapshot elements live, the fallback every owner has,
-/// so it can be seen and tested where snapshots work; `on` (or `1`), or no
-/// value, leaves it to the platform. Read once.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Whether the app's windows draw snapshots, which the app sets with
+/// [`App::set_snapshot_switch`] (Quill reads it from `QUILL_SNAPSHOTS`):
+/// `Off` makes every window paint its snapshot elements live, the fallback
+/// every owner has, so it can be seen and tested where snapshots work; `On`,
+/// the default, leaves it to the platform.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SnapshotSwitch {
     /// Snapshots where the platform draws them.
+    #[default]
     On,
     /// No snapshots anywhere.
     Off,
 }
 
 impl SnapshotSwitch {
-    /// The switch a value of `QUILL_SNAPSHOTS` sets, if it is one.
+    /// The switch a value such as `QUILL_SNAPSHOTS`'s names: `off` or `0`,
+    /// `on` or `1`.
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "off" | "0" => Some(Self::Off),
@@ -46,16 +49,21 @@ impl SnapshotSwitch {
             _ => None,
         }
     }
+}
 
-    /// The switch in the environment, `On` when unset or unknown.
-    pub fn from_env() -> Self {
-        static SWITCH: OnceLock<SnapshotSwitch> = OnceLock::new();
-        *SWITCH.get_or_init(|| {
-            std::env::var("QUILL_SNAPSHOTS")
-                .ok()
-                .and_then(|value| Self::parse(&value))
-                .unwrap_or(Self::On)
-        })
+impl Global for SnapshotSwitch {}
+
+impl App {
+    /// QUILL: turns snapshots on or off in every window of the app, from
+    /// each window's next frame (docs/decisions/snapshot-transitions.md).
+    pub fn set_snapshot_switch(&mut self, switch: SnapshotSwitch) {
+        self.set_global(switch);
+    }
+
+    /// QUILL: the switch [`Self::set_snapshot_switch`] set, `On` unless
+    /// the app turned snapshots off.
+    pub fn snapshot_switch(&self) -> SnapshotSwitch {
+        self.try_global::<SnapshotSwitch>().copied().unwrap_or_default()
     }
 }
 
@@ -228,7 +236,9 @@ pub(crate) struct SnapshotTable {
     /// The scale factor the live snapshots were drawn at, once a frame
     /// has set it.
     drawn_at: Cell<Option<f32>>,
-    /// A test's switch in place of the environment's.
+    /// The app's switch, as the last frame read it.
+    app_switch: Cell<SnapshotSwitch>,
+    /// A test's switch in place of the app's.
     switch: Cell<Option<SnapshotSwitch>>,
 }
 
@@ -370,7 +380,7 @@ impl Window {
             .snapshots
             .switch
             .get()
-            .unwrap_or_else(SnapshotSwitch::from_env);
+            .unwrap_or_else(|| self.snapshots.app_switch.get());
         switch == SnapshotSwitch::On && self.platform_window.snapshot_max_side().is_some()
     }
 
@@ -534,7 +544,8 @@ impl Window {
     /// they were drawn, so that their owners capture anew, and the pictures
     /// the renderer could not draw `Failed`, so that their owners paint
     /// live. Either draws everything again.
-    pub(super) fn check_snapshots(&mut self) {
+    pub(super) fn check_snapshots(&mut self, cx: &App) {
+        self.snapshots.app_switch.set(cx.snapshot_switch());
         let scale = self.scale_factor();
         let rescaled = self
             .snapshots
@@ -578,8 +589,8 @@ impl Window {
         }
     }
 
-    /// QUILL: sets the `QUILL_SNAPSHOTS` switch for this window, in place
-    /// of the environment's.
+    /// QUILL: sets the snapshot switch for this window, in place of the
+    /// app's.
     #[cfg(any(test, feature = "test-support"))]
     pub fn set_test_snapshot_switch(&mut self, switch: SnapshotSwitch) {
         self.snapshots.switch.set(Some(switch));

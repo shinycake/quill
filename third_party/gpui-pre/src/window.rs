@@ -4076,7 +4076,7 @@ impl Window {
         if self.platform_window.prepare_frame() {
             self.refresh();
         }
-        self.check_snapshots();
+        self.check_snapshots(cx);
         let after_patch = mem::take(&mut self.scene_patched);
         if after_patch {
             self.next_frame.scene.clear();

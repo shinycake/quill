@@ -64,13 +64,16 @@ known once the element is laid out.
 
 ## The switch
 
-`QUILL_SNAPSHOTS=off` (or `0`) makes `Window::snapshots_supported` false in
-every window, so every snapshot element paints live and every owner takes
-its fallback, on a machine where snapshots work. `on`, `1` or no value
-leaves it to the platform. It is read once (`SnapshotSwitch::from_env`) in
-gpui-pre, where the windows ask for it, rather than beside `QUILL_GLASS` in
-`src/glass.rs`; a test sets a window's switch with
-`set_test_snapshot_switch`.
+`SnapshotSwitch::Off` makes `Window::snapshots_supported` false in every
+window, so every snapshot element paints live and every owner takes its
+fallback, on a machine where snapshots work. gpui-pre reads no
+environment: the app sets the switch with `App::set_snapshot_switch` (an
+app global; each window reads it at the start of its next frame) and
+reads it back with `App::snapshot_switch`. Quill sets it from
+`QUILL_SNAPSHOTS` (`off` or `0`, `on` or `1`, parsed by
+`SnapshotSwitch::parse`); until it does, snapshots stay on. A test sets
+one window's switch with `set_test_snapshot_switch`, which wins over the
+app's.
 
 ## The demo
 
