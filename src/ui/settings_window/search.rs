@@ -238,17 +238,20 @@ impl QuillApp {
     pub(super) fn settings_search_field(&self, cx: &App) -> Option<AnyElement> {
         let input = self.settings.search.input.as_ref()?;
         Some(
-            Input::new(input)
-                .id("settings-search")
-                .small()
-                .cleanable(true)
-                .aria_label(tr(keys::Q_SETTINGS_SEARCH))
-                .prefix(
-                    Icon::new(IconName::Search)
-                        .size_4()
-                        .text_color(cx.theme().muted_foreground),
-                )
-                .into_any_element(),
+            crate::ui::chrome::list_parts::search_field(
+                Input::new(input)
+                    .id("settings-search")
+                    .small()
+                    .cleanable(true)
+                    .aria_label(tr(keys::Q_SETTINGS_SEARCH))
+                    .prefix(
+                        Icon::new(IconName::Search)
+                            .size_4()
+                            .text_color(cx.theme().muted_foreground),
+                    ),
+                self.chrome_metrics(),
+            )
+            .into_any_element(),
         )
     }
 

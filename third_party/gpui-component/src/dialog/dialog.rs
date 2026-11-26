@@ -737,6 +737,9 @@ impl RenderOnce for Dialog {
             .iter()
             .rposition(|dialog| !dialog.closing);
         let is_topmost = !closing && topmost == Some(layer_ix);
+        // QUILL: the app's popover shape may give dialogs another radius.
+        let dialog_radius = crate::popover_shape::popover_shape(window, cx)
+            .map_or(cx.theme().radius_lg, |shape| shape.dialog_radius);
         let surface_wrap = self.surface_wrap.take();
         let wrap_surface = move |surface: AnyElement| match surface_wrap {
             Some(wrap) => wrap(surface),
@@ -816,7 +819,7 @@ impl RenderOnce for Dialog {
                                         .bg(cx.theme().tokens.background)
                                         .border_1()
                                         .border_color(cx.theme().border)
-                                        .rounded(cx.theme().radius_lg)
+                                        .rounded(dialog_radius)
                                         .min_h_24()
                                         .pt(paddings.top)
                                         .pb(paddings.bottom)

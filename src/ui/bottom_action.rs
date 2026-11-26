@@ -128,6 +128,9 @@ impl QuillApp {
                     Button::new("bottom-action")
                         .label(bar.label())
                         .primary()
+                        .rounded(crate::ui::chrome::bars::action_rounding(
+                            self.chrome_metrics(),
+                        ))
                         .disabled(matches!(bar, BottomBar::Starting { .. }))
                         .w_full()
                         .max_w(px(360.))

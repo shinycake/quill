@@ -571,9 +571,14 @@ impl QuillApp {
             .w(px(width))
             .h_full()
             .min_h_0()
-            .bg(cx.theme().sidebar)
-            .border_r_1()
-            .border_color(cx.theme().border)
+            .map(|this| {
+                crate::ui::chrome::frames::rail_frame(
+                    this,
+                    &self.chrome(),
+                    cx.theme(),
+                    self.card_glass(cx).as_ref(),
+                )
+            })
             .role(Role::TabList)
             .aria_label(tr(keys::SETTINGS_SECTION_FILTERS))
             .child(list)

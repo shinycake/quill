@@ -266,7 +266,7 @@ impl QuillApp {
             .gap_2()
             .px_3()
             .py_2()
-            .rounded_md()
+            .map(|this| crate::ui::chrome::bars::notice_corners(this, self.chrome_metrics()))
             .border_1()
             .border_color(success())
             .bg(success_bg_subtle())
@@ -282,6 +282,9 @@ impl QuillApp {
             )
             .child(
                 Button::new("dismiss-forward-success")
+                    .rounded(crate::ui::chrome::bars::action_rounding(
+                        self.chrome_metrics(),
+                    ))
                     .label(tr(keys::Q_MISC_DISMISS))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.chat_ui.forward_result = None;
@@ -309,7 +312,7 @@ impl QuillApp {
             .gap_2()
             .px_3()
             .py_2()
-            .rounded_md()
+            .map(|this| crate::ui::chrome::bars::notice_corners(this, self.chrome_metrics()))
             .border_1()
             .border_color(accent())
             .bg(bg_subtle())
@@ -320,6 +323,9 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("clear-forward-selection")
+                            .rounded(crate::ui::chrome::bars::action_rounding(
+                                self.chrome_metrics(),
+                            ))
                             .label(tr(keys::Q_MISC_CLEAR))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.clear_forward(window, cx);
@@ -327,6 +333,9 @@ impl QuillApp {
                     )
                     .child(
                         Button::new("delete-selection")
+                            .rounded(crate::ui::chrome::bars::action_rounding(
+                                self.chrome_metrics(),
+                            ))
                             .label(tr(keys::BOX_DELETE))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.confirm_delete_selection(window, cx);
@@ -335,6 +344,9 @@ impl QuillApp {
                     .when(self.selection_forwardable(draft.from_chat_id), |this| {
                         this.child(
                             Button::new("open-forward-picker")
+                                .rounded(crate::ui::chrome::bars::action_rounding(
+                                    self.chrome_metrics(),
+                                ))
                                 .label(tr(keys::CONTEXT_FORWARD_MSG))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.open_forward_picker(window, cx);

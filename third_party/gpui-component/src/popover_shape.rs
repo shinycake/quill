@@ -17,6 +17,12 @@ pub struct PopoverShape {
     pub edge: Option<Hsla>,
     /// How a dropdown enters.
     pub enter: MenuEnter,
+    /// The corner radius of a dialog in that window (QUILL: the Floating
+    /// layout's card radius).
+    pub dialog_radius: Pixels,
+    /// The corner radius of an outlined or filled `GroupBox` surface in
+    /// that window (QUILL: Web K's rounded settings sections).
+    pub section_radius: Pixels,
 }
 
 /// How a menu enters.

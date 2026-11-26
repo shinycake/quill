@@ -28,6 +28,8 @@ impl QuillApp {
             .selection
             .try_borrow()
             .map_or(0, |fx| fx.last_count);
+        // Web K's selection plate buttons are pills (`.chat-input-plate-button`).
+        let rounded = super::chrome::bars::action_rounding(self.chrome_metrics());
         div()
             .id("selection-bar")
             .absolute()
@@ -44,34 +46,39 @@ impl QuillApp {
             .border_b_1()
             .border_color(cx.theme().border)
             .when(self.selection_forwardable(chat_id), |bar| {
-                bar.child(selection_forward_button(count, cx))
+                bar.child(selection_forward_button(count, rounded, cx))
             })
-            .child(selection_delete_button(count, cx))
-            .child(selection_copy_button(cx))
+            .child(selection_delete_button(count, rounded, cx))
+            .child(selection_copy_button(rounded, cx))
             .when(!self.selection_missing_files(chat_id).is_empty(), |bar| {
-                bar.child(selection_download_button(cx))
+                bar.child(selection_download_button(rounded, cx))
             })
             .when(self.selection_has_media(chat_id), |bar| {
-                bar.child(selection_save_button(cx))
+                bar.child(selection_save_button(rounded, cx))
             })
             .when(self.selection_html_target(chat_id).is_some(), |bar| {
-                bar.child(self.selection_html_button(cx))
+                bar.child(self.selection_html_button(cx).rounded(rounded))
             })
             .when(self.selection_unpinnable(chat_id), |bar| {
-                bar.child(selection_unpin_button(cx))
+                bar.child(selection_unpin_button(rounded, cx))
             })
             .when(self.selection_reportable(chat_id), |bar| {
-                bar.child(selection_report_button(count, cx))
+                bar.child(selection_report_button(count, rounded, cx))
             })
             .child(div().flex_1())
-            .child(selection_cancel_button(cx))
+            .child(selection_cancel_button(rounded, cx))
             .into_any_element()
     }
 }
 
 #[inline(never)]
-fn selection_forward_button(count: usize, cx: &mut Context<QuillApp>) -> AnyElement {
+fn selection_forward_button(
+    count: usize,
+    rounded: ButtonRounded,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
     Button::new("selection-forward")
+        .rounded(rounded)
         .label(tr_with(
             keys::Q_CHAT_FORWARD_2,
             &[("count", &count.to_string())],
@@ -84,8 +91,13 @@ fn selection_forward_button(count: usize, cx: &mut Context<QuillApp>) -> AnyElem
 }
 
 #[inline(never)]
-fn selection_delete_button(count: usize, cx: &mut Context<QuillApp>) -> AnyElement {
+fn selection_delete_button(
+    count: usize,
+    rounded: ButtonRounded,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
     Button::new("selection-delete")
+        .rounded(rounded)
         .label(tr_with(
             keys::Q_CHAT_DELETE,
             &[("count", &count.to_string())],
@@ -98,8 +110,9 @@ fn selection_delete_button(count: usize, cx: &mut Context<QuillApp>) -> AnyEleme
 }
 
 #[inline(never)]
-fn selection_copy_button(cx: &mut Context<QuillApp>) -> AnyElement {
+fn selection_copy_button(rounded: ButtonRounded, cx: &mut Context<QuillApp>) -> AnyElement {
     Button::new("selection-copy")
+        .rounded(rounded)
         .label(tr(keys::Q_CHAT_COPY_AS_TEXT))
         .ghost()
         .tooltip(tr(keys::CONTEXT_COPY_SELECTED_ITEMS))
@@ -110,8 +123,9 @@ fn selection_copy_button(cx: &mut Context<QuillApp>) -> AnyElement {
 }
 
 #[inline(never)]
-fn selection_download_button(cx: &mut Context<QuillApp>) -> AnyElement {
+fn selection_download_button(rounded: ButtonRounded, cx: &mut Context<QuillApp>) -> AnyElement {
     Button::new("selection-download")
+        .rounded(rounded)
         .label(tr(keys::Q_CHAT_DOWNLOAD))
         .ghost()
         .tooltip(tr(keys::Q_CHAT_DOWNLOAD_SELECTED))
@@ -122,8 +136,9 @@ fn selection_download_button(cx: &mut Context<QuillApp>) -> AnyElement {
 }
 
 #[inline(never)]
-fn selection_save_button(cx: &mut Context<QuillApp>) -> AnyElement {
+fn selection_save_button(rounded: ButtonRounded, cx: &mut Context<QuillApp>) -> AnyElement {
     Button::new("selection-save")
+        .rounded(rounded)
         .label(tr(keys::SETTINGS_SAVE))
         .ghost()
         .tooltip(tr(keys::Q_CHAT_SAVE_SELECTED))
@@ -134,8 +149,9 @@ fn selection_save_button(cx: &mut Context<QuillApp>) -> AnyElement {
 }
 
 #[inline(never)]
-fn selection_unpin_button(cx: &mut Context<QuillApp>) -> AnyElement {
+fn selection_unpin_button(rounded: ButtonRounded, cx: &mut Context<QuillApp>) -> AnyElement {
     Button::new("selection-unpin")
+        .rounded(rounded)
         .label(tr(keys::CONTEXT_UNPIN_FROM_TOP))
         .ghost()
         .tooltip(tr(keys::Q_CHAT_UNPIN_SELECTED))
@@ -154,8 +170,13 @@ fn selection_unpin_button(cx: &mut Context<QuillApp>) -> AnyElement {
 }
 
 #[inline(never)]
-fn selection_report_button(count: usize, cx: &mut Context<QuillApp>) -> AnyElement {
+fn selection_report_button(
+    count: usize,
+    rounded: ButtonRounded,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
     Button::new("selection-report")
+        .rounded(rounded)
         .label(tr_with(
             keys::Q_CHAT_REPORT_2,
             &[("count", &count.to_string())],
@@ -168,8 +189,9 @@ fn selection_report_button(count: usize, cx: &mut Context<QuillApp>) -> AnyEleme
 }
 
 #[inline(never)]
-fn selection_cancel_button(cx: &mut Context<QuillApp>) -> AnyElement {
+fn selection_cancel_button(rounded: ButtonRounded, cx: &mut Context<QuillApp>) -> AnyElement {
     Button::new("selection-cancel")
+        .rounded(rounded)
         .label(tr(keys::CANCEL))
         .ghost()
         .on_click(cx.listener(|this, _, window, cx| {

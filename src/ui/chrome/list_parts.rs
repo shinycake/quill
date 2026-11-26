@@ -1,4 +1,5 @@
-//! The chat list's own parts in each layout: the search field's shape and
+//! Parts of the chat list in each layout: the search field's shape (the
+//! chat list's, the in-chat search's and Settings') and
 //! the folder tabs' indicator (docs/decisions/floating-layout.md).
 
 use gpui_kit::Styled;

@@ -36,7 +36,14 @@ pub(super) fn main_title_bar(
         .on_close_window(cx.listener(|this, _, window, cx| {
             this.exit_after_exports(super::export_quit::quit_app, window, cx);
         }))
-        .caption(div().font_semibold().text_sm().child(title))
+        .caption(super::chrome::frames::app_caption(
+            div()
+                .font_semibold()
+                .text_sm()
+                .child(title)
+                .into_any_element(),
+            strip,
+        ))
         .when_some(menu_bar, |bar, menu| bar.menu(menu))
         .child(
             div()

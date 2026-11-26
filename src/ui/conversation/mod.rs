@@ -376,19 +376,27 @@ impl QuillApp {
     }
 }
 
-/// Full-width "Unread messages" bar above the first unread message
-/// (tdesktop `lng_unread_bar_some`, which shows no count). In the wide
-/// layout the label is centred in the wide column while the bar stays full
-/// width (tdesktop `UnreadBar::paint`). `probe` takes the bar's painted
+/// "Unread messages" above the first unread message (tdesktop
+/// `lng_unread_bar_some`, which shows no count): Classic's full-width bar,
+/// its label centred in the wide column in the wide layout (tdesktop
+/// `UnreadBar::paint`), or a service pill over cards
+/// (`chrome::history_parts::unread_mark`). `probe` takes the mark's painted
 /// bounds, so the opened history can put it at the top of the view.
 fn unread_divider(
     wide: bool,
     a11y_focused: bool,
     probe: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    metrics: &quill::layout_style::ChromeMetrics,
     cx: &App,
 ) -> impl IntoElement {
     let text = tr(keys::UNREAD_BAR_SOME);
-    div()
+    let theme = cx.theme();
+    let ink = super::chrome::history_parts::MarkInk {
+        bar: super::chat_palette::service_bg(theme.secondary.opacity(0.7)),
+        pill: super::chat_palette::service_bg(theme.secondary),
+        text: theme.secondary_foreground,
+    };
+    let row = div()
         .relative()
         .child(
             canvas(|_, _, _| {}, move |bounds, _, _, _| probe.set(Some(bounds)))
@@ -400,21 +408,15 @@ fn unread_divider(
         .debug_selector(|| "unread-bar".to_string())
         // Screen-reader focus on the bar (`history_a11y`).
         .when(a11y_focused, |this| this.aria_active_descendant())
-        .w_full()
-        .my_2()
-        .py_1()
-        .bg(super::chat_palette::service_bg(
-            cx.theme().secondary.opacity(0.7),
-        ))
-        .text_xs()
-        .font_medium()
-        .text_color(cx.theme().secondary_foreground)
         .role(Role::Heading)
-        .aria_label(text)
-        .child(super::chat_wide_ui::wide_column(
-            wide,
-            div().w_full().flex().justify_center().child(text),
-        ))
+        .aria_label(text);
+    super::chrome::history_parts::unread_mark(
+        row,
+        text.into(),
+        |label| super::chat_wide_ui::wide_column(wide, label),
+        ink,
+        metrics,
+    )
 }
 
 /// Centered local-day pill between history rows ("Today", "12 March").
@@ -565,3 +567,29 @@ mod open_position_tests;
 #[cfg(feature = "demo-capture")]
 #[path = "thread_root_jump_tests.rs"]
 mod thread_root_jump_tests;
+
+impl QuillApp {
+    /// A note in place of a topic's history: Classic's placeholder, or a
+    /// service bubble over cards (`chrome::history_parts::pane_note`).
+    pub(super) fn pane_note(
+        &self,
+        title: &'static str,
+        body: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme();
+        let ink = super::chrome::history_parts::MarkInk {
+            bar: super::chat_palette::service_bg(theme.secondary.opacity(0.7)),
+            pill: super::chat_palette::service_bg(theme.secondary),
+            text: theme.secondary_foreground,
+        };
+        let metrics = self.chrome_metrics();
+        super::chrome::history_parts::pane_note(
+            || crate::ui::app::pane_placeholder(title, body, cx).into_any_element(),
+            title.into(),
+            body.into(),
+            &ink,
+            metrics,
+        )
+    }
+}

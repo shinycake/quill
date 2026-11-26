@@ -214,13 +214,14 @@ impl QuillApp {
             .relative()
             .flex()
             .items_center()
-            .child(
+            .child(crate::ui::chrome::list_parts::search_field(
                 Textarea::new(&self.share.search_input)
                     .aria_label(label)
                     .w_full()
                     .pl(px(30.))
                     .h(px(36.)),
-            )
+                self.chrome_metrics(),
+            ))
             .child(
                 div()
                     .absolute()

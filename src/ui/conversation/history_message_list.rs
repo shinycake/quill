@@ -765,6 +765,7 @@ impl QuillApp {
         let covered = self.history.scroll_date.covered_row() == Some(ix);
         // The wide layout centres dates and the unread label in its column.
         let wide = self.chat_wide();
+        let metrics = self.chrome_metrics();
         let bar_probe = self.history.bar_probe.clone();
         let probe = self.history.scroll_probe.clone();
         let painted_ids = self.history.painted_ids.clone();
@@ -827,7 +828,7 @@ impl QuillApp {
             })
             .when(row.unread_divider(), |this| {
                 this.child(super::chat_palette::with_palette(palette, false, || {
-                    unread_divider(wide, bar_focused, bar_probe.clone(), cx)
+                    unread_divider(wide, bar_focused, bar_probe.clone(), metrics, cx)
                 }))
             })
             .child(element);

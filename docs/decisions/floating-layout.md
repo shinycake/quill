@@ -719,3 +719,64 @@ need `QUILL_ASSUME_ACTIVE=1`; with it the drawer lands without pointer
 moves. `the_drawer_slides_on_the_frame_clock` checks that the drawer
 asks for every frame of its slide on its own and stops asking once it
 lands.
+
+## Floating leftovers (2026-11-26)
+
+A sweep of the Floating surfaces for boxes that still looked like Classic
+(square ends, full-bleed bars) next to Web K's rounded ones. Classic is
+unchanged by each of these: every helper answers Classic's styling for
+`Look::Lines`.
+
+- **Unread divider.** A centred pill in the date chip's family
+  (`chrome::history_parts::unread_mark`), the width of its text, instead
+  of a band across the history. tweb's own `.bubbles-group-unread` is a
+  full-width bar; the pill was chosen so the divider matches the date
+  chips that float above it.
+- **Forum topics column.** A card with the gutter above, below and before
+  it (`frames::side_column`), like the chat list card, instead of a square
+  column the window's height.
+- **Folder rail.** The rail and the chat list are one card
+  (`frames::rail_frame`, `frames::joined_to_rail`): the rail holds the
+  card's left corners, the list's edge is the line between them.
+- **Emoji, sticker and GIF panel.** Web K's emoji dropdown radius
+  (`1.25rem`) and the menus' shadow (`chrome::dropdown`).
+- **Dialogs.** Every kit dialog takes the card radius
+  (`PopoverShape::dialog_radius`, from `menu_shape`), as Web K's popups
+  are rounder than its menus.
+- **Bottom action.** Join Channel, Join Group, Start, Unblock and the
+  Premium button are pills in the composer card
+  (`bars::action_rounding`), as Web K's Join and Unmute fill its pill.
+- **Search fields.** The in-chat search field and Settings' search field
+  are pills, like the chat list's (`list_parts::search_field`).
+
+A second pass took the rest (values read from tweb's SCSS):
+
+- **Settings groups.** Every kit `GroupBox` takes `PopoverShape::section_radius`,
+  16 in Floating. Web K's sections are 24 (`$section-rounded-border-radius`)
+  but run edge to edge; Quill's group holds rows inset by 4 pt with their
+  own small hover radius, and 16 keeps the two concentric.
+- **Chooser search field.** The forward and "reply in another chat" boxes'
+  search field is a pill (Web K's `.input-search`, radius half its height).
+- **Composer notices.** "Messages forwarded to …" and "N messages
+  selected" take Web K's `$border-radius` (12, `bars::notice_corners`),
+  and their buttons are pills.
+- **Selection bar.** Its buttons are pills, as Web K's selection plate
+  buttons (`.chat-input-plate-button`, radius half the height).
+- **Side panel headers.** The line under the info and shared-media panel
+  headers is an inset hairline (`frames::panel_header_rule`), as in the
+  header card, and the shared-media tab strip sits in from the card's
+  edge (`frames::panel_strip`).
+- **Topic placeholders.** "Choose a topic" and "No messages in this topic
+  yet" sit on a centred service bubble (`history_parts::pane_note`, Web K's
+  `.empty-bubble-placeholder`: 24 corners), not bare on the wallpaper.
+- **Sticker tiles.** 16 corners (Web K's `.super-sticker`,
+  `$border-radius-medium`), in the panel and the composer's suggestions.
+- **Sponsored card.** A bubble's corners, 15 (`$bubble-border-radius-big`).
+- **No "Quill" caption.** The main window's title strip drops its bold
+  "Quill" label in Floating on every platform (`frames::app_caption`); an
+  empty element keeps its place, so the drag area and the buttons stay
+  where they were. Classic keeps the label.
+
+Inline keyboard buttons already match Web K's `.reply-markup-button`
+(`.375rem`, the kit's 6), so they are unchanged. The selected-message,
+search-hit and hover highlights are their own round of work.

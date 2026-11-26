@@ -87,8 +87,26 @@ pub(in crate::ui) fn menu_shape_in(look: Look, cx: &App) -> Option<PopoverShape>
                 fill,
                 edge,
                 enter: MenuEnter::Pop,
+                dialog_radius: dialog_radius(look, cx),
+                section_radius: px(SECTION_RADIUS),
             })
         }
+    }
+}
+
+/// A settings group's corners: Web K's `$border-radius-medium` (16).
+/// Its sections are rounder (`$section-rounded-border-radius`, 24) but
+/// run edge to edge; Quill's group holds rows inset by 4 pt whose hover
+/// fill has its own small radius, and 16 keeps the two concentric.
+const SECTION_RADIUS: f32 = 16.;
+
+/// A dialog's corners in a window with this look: the card radius, so a
+/// box over the wallpaper is rounded as the cards around it (Web K's
+/// popups are rounder still, `--popup-border-radius: 2.5rem`).
+fn dialog_radius(look: Look, cx: &App) -> Pixels {
+    match cx.try_global::<Theme>() {
+        Some(theme) => super::radius::card_in(quill::layout_style::metrics_of(look), theme),
+        None => px(MENU_RADIUS),
     }
 }
 

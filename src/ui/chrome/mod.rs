@@ -5,8 +5,10 @@
 #![deny(clippy::indexing_slicing)]
 
 pub(in crate::ui) mod bars;
+pub(in crate::ui) mod dropdown;
 pub(in crate::ui) mod frame;
 pub(in crate::ui) mod frames;
+pub(in crate::ui) mod history_parts;
 pub(in crate::ui) mod list_parts;
 pub(in crate::ui) mod menu_pop;
 pub(in crate::ui) mod menu_shape;

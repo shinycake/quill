@@ -147,17 +147,20 @@ impl QuillApp {
                     .gap_1()
                     .child(
                         div().id("chat-search-field").flex_1().child(
-                            Textarea::new(if picker_open {
-                                &self.search_ui.member_input
-                            } else {
-                                &self.search_ui.chat_input
-                            })
-                            .aria_label(if picker_open {
-                                tr(keys::Q_CHAT_SEARCH_MEMBERS)
-                            } else {
-                                tr(keys::Q_CHAT_SEARCH_THIS_CONVERSATION)
-                            })
-                            .h(px(36.)),
+                            crate::ui::chrome::list_parts::search_field(
+                                Textarea::new(if picker_open {
+                                    &self.search_ui.member_input
+                                } else {
+                                    &self.search_ui.chat_input
+                                })
+                                .aria_label(if picker_open {
+                                    tr(keys::Q_CHAT_SEARCH_MEMBERS)
+                                } else {
+                                    tr(keys::Q_CHAT_SEARCH_THIS_CONVERSATION)
+                                })
+                                .h(px(36.)),
+                                self.chrome_metrics(),
+                            ),
                         ),
                     )
                     .when(!position.is_empty() && !picker_open, |this| {

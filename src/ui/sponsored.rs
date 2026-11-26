@@ -13,6 +13,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
@@ -79,6 +80,7 @@ pub(super) fn sponsored_message_row(
     revealed: &crate::ui::message_text::revealed::Revealed,
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
+    metrics: &quill::layout_style::ChromeMetrics,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = message.message_id as u64;
@@ -255,7 +257,7 @@ pub(super) fn sponsored_message_row(
         .gap_1()
         .px_3()
         .py_2()
-        .rounded_lg()
+        .map(|this| crate::ui::chrome::history_parts::sponsored_corners(this, metrics))
         .border_1()
         .border_color(cx.theme().border)
         .bg(cx.theme().sidebar)
@@ -427,6 +429,7 @@ impl QuillApp {
                 &media_roots,
                 &self.message_ui.revealed,
                 look,
+                self.chrome_metrics(),
                 cx,
             );
             list = list.child(div().relative().child(card).child(seen_probe));
