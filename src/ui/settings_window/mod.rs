@@ -237,7 +237,7 @@ impl QuillApp {
         let narrow = f32::from(window.viewport_size().width) < NARROW;
         // The layout follows the window's width here too (the chat columns
         // note it otherwise), so Floating's cards frame Settings.
-        self.note_window_width(window.viewport_size().width, cx);
+        self.note_window_width(window, cx);
         self.settle_arrival(window, cx);
         self.settings_search_input(window, cx);
         if !window.has_active_dialog(cx) && window.focused(cx).is_none() {
@@ -261,9 +261,7 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .map(|this| {
-                crate::ui::chrome::frames::settings_frame(this, &self.chrome(cx), cx.theme())
-            })
+            .map(|this| crate::ui::chrome::frames::settings_frame(this, &self.chrome(), cx.theme()))
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.settings_search_key(event, window, cx) {
                     cx.stop_propagation();
@@ -296,7 +294,7 @@ impl QuillApp {
                         .map(|this| {
                             crate::ui::chrome::frames::card(
                                 this,
-                                &self.chrome(cx),
+                                &self.chrome(),
                                 cx.theme(),
                                 self.card_glass(cx).as_ref(),
                             )
@@ -338,7 +336,7 @@ impl QuillApp {
             Some(sub) => self.settings_sub_body(sub, cx),
             None => self.settings_page_body(page, cx),
         };
-        let chrome = self.chrome(cx);
+        let chrome = self.chrome();
         let glass = self.card_glass(cx);
         let frame = div().flex_1().min_w_0().h_full();
         crate::ui::chrome::frames::page_card(frame, &chrome, cx.theme(), glass.as_ref()).child(

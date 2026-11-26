@@ -109,6 +109,7 @@ pub(crate) fn dropdown_popup(
     id: impl Into<ElementId>,
     bounds: Bounds<Pixels>,
     surface: impl IntoElement + Styled + 'static,
+    window: &Window,
     cx: &App,
 ) -> gpui_base::Positioner {
     let travel: f32 = DROPDOWN_ENTER_OFFSET.into();
@@ -119,15 +120,17 @@ pub(crate) fn dropdown_popup(
     // scale from .8 and a fade from the top corner, drawn through a
     // snapshot. Without snapshots (`QUILL_SNAPSHOTS=off`) and for glass
     // popovers, whose lens would not scale, the fade and slide stay.
-    let pop = crate::popover_shape::popover_shape(cx)
-        .is_some_and(|shape| shape.enter == crate::popover_shape::MenuEnter::Pop)
-        && gpui::SnapshotSwitch::from_env() == gpui::SnapshotSwitch::On
-        && crate::popover_glass::popover_glass(
-            crate::popover_glass::PopoverGlassSurface::Popover,
-            cx,
-        )
-        .is_none();
-    if pop {
+    let pop = crate::popover_shape::popover_shape(window, cx)
+        .filter(|shape| shape.enter == crate::popover_shape::MenuEnter::Pop)
+        .filter(|_| {
+            gpui::SnapshotSwitch::from_env() == gpui::SnapshotSwitch::On
+                && crate::popover_glass::popover_glass(
+                    crate::popover_glass::PopoverGlassSurface::Popover,
+                    cx,
+                )
+                .is_none()
+        });
+    if let Some(shape) = pop {
         return dropdown_positioner(bounds).child(
             surface
                 .with_snapshot_animation(
@@ -141,7 +144,9 @@ pub(crate) fn dropdown_popup(
                         .faded(t)
                     },
                 )
-                .margin(px(12.)),
+                // Room for the whole shadow: a clipped one would jump when
+                // the run ends and the live surface takes over.
+                .margin(crate::popover_shape::shadow_reach(&shape.shadow)),
         );
     }
 
@@ -352,14 +357,14 @@ impl Popover {
     pub(crate) fn render_popover_content(
         anchor: Anchor,
         appearance: bool,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) -> Stateful<Div> {
         v_flex()
             .id("content")
             .occlude()
             .tab_group()
-            .when(appearance, |this| this.popover_style(cx).p_3())
+            .when(appearance, |this| this.popover_style(window, cx).p_3())
             .map(|this| match anchor {
                 Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => this.top_1(),
                 Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => this.bottom_1(),
@@ -407,7 +412,7 @@ impl RenderOnce for Popover {
                     .id("content")
                     .occlude()
                     .tab_group()
-                    .when(appearance, |this| this.popover_style(cx).p_3())
+                    .when(appearance, |this| this.popover_style(window, cx).p_3())
                     .when_some(content, |this, content| {
                         this.child((content)(state, window, cx))
                     })
@@ -1003,12 +1008,13 @@ mod tests {
     }
 
     impl Render for Harness {
-        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             div().size_full().when(self.open, |this| {
                 this.child(dropdown_popup(
                     "dropdown",
                     Bounds::new(point(px(0.), px(100.)), size(px(120.), px(30.))),
                     div().debug_selector(|| "surface".into()).size(px(50.)),
+                    window,
                     cx,
                 ))
             })

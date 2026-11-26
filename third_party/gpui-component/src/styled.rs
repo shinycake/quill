@@ -152,7 +152,15 @@ pub trait ThemeStyled: Styled + Sized {
     /// This is the one surface every popup shares — Popover, PopupMenu, Select,
     /// Combobox, DatePicker and the editor's hover popovers — so they cannot
     /// drift apart. See [`popover_shadow`] for what the shadow is modelled on.
-    fn popover_style(self, cx: &App) -> Self;
+    fn popover_style(self, window: &Window, cx: &App) -> Self;
+
+    /// [`Self::popover_style`] with the app's shape given (`None`: the
+    /// kit's own), for a caller that knows its window's look.
+    fn popover_style_shaped(
+        self,
+        shape: Option<crate::popover_shape::PopoverShape>,
+        cx: &App,
+    ) -> Self;
 
     /// Round this element as far as its size allows — a circle if it is square,
     /// a pill if it is not — unless the theme squares its corners.
@@ -183,11 +191,18 @@ impl<T: Styled + Sized> ThemeStyled for T {
         focus_style(self, FocusLine::Edge, window, cx)
     }
 
-    fn popover_style(self, cx: &App) -> Self {
+    fn popover_style(self, window: &Window, cx: &App) -> Self {
+        self.popover_style_shaped(crate::popover_shape::popover_shape(window, cx), cx)
+    }
+
+    fn popover_style_shaped(
+        self,
+        shape: Option<crate::popover_shape::PopoverShape>,
+        cx: &App,
+    ) -> Self {
         let theme = cx.theme();
         // QUILL (Floating layout): the app's shape replaces the radius and
         // the edge, and the content is clipped to the corners.
-        let shape = crate::popover_shape::popover_shape(cx);
         let radius = shape.as_ref().map_or(theme.radius, |shape| shape.radius);
         let this = match shape.is_some() {
             true => self.rounded(radius).clip_rounded(),

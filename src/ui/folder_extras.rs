@@ -240,7 +240,7 @@ impl QuillApp {
             .min_w(px(200.))
             .px_1()
             .py_1()
-            .menu_surface(cx)
+            .menu_surface(self.look(), cx)
             .children(rows);
         DismissLayer::new(
             "folder-tab-menu-overlay",
@@ -259,7 +259,7 @@ impl QuillApp {
                 }),
             )
         })
-        .anchored(menu.position, panel, cx)
+        .anchored(menu.position, panel, self.look(), cx)
         .focus_trap("folder-tab-menu-focus", &self.frame.menu.focus)
     }
 

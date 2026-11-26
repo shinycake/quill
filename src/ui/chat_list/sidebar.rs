@@ -74,7 +74,7 @@ impl QuillApp {
     #[inline(never)]
     fn sidebar_column(&self, mode: PaneMode, cx: &mut Context<Self>) -> Stateful<Div> {
         let m = self.density();
-        let chrome = self.chrome(cx);
+        let chrome = self.chrome();
         div()
             .id("sidebar")
             .when(mode != PaneMode::Ready, |this| this.overflow_y_scroll())

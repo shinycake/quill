@@ -114,7 +114,7 @@ impl QuillApp {
                     .bg(gpui_kit::transparent_black()),
             )
             .child(probe);
-        let chrome = self.chrome(cx);
+        let chrome = self.chrome();
         div()
             .id("sidebar-glass")
             .relative()

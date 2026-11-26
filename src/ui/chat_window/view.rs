@@ -230,7 +230,7 @@ impl Render for ChatWindowView {
         let (body, autoscroll, capture_blocked, (strip, backdrop)) = app.update(cx, |app, cx| {
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
-            app.note_window_width(window.viewport_size().width, cx);
+            app.note_window_width(window, cx);
             app.seed_history_width(f32::from(window.viewport_size().width));
             // The window's half of the frame upkeep, with its state in
             // place (a window whose view is gone runs none of it). Its

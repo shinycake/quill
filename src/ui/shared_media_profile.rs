@@ -492,7 +492,7 @@ impl QuillApp {
             .map(|this| {
                 crate::ui::chrome::frames::panel_frame(
                     this,
-                    &self.chrome(cx),
+                    &self.chrome(),
                     cx.theme(),
                     self.card_glass(cx).as_ref(),
                 )

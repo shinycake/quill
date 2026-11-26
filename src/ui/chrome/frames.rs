@@ -49,48 +49,6 @@ pub(in crate::ui) fn panel_frame<E: Styled + FluentBuilder>(
     }
 }
 
-/// The chat header's frame: Classic's line under it, or nothing of its
-/// own: it is the first row of the bars' card (`bars::stack_card`).
-pub(in crate::ui) fn header_frame<E: Styled + FluentBuilder>(
-    this: E,
-    chrome: &Chrome,
-    theme: &Theme,
-) -> E {
-    match chrome.metrics.look {
-        Look::Lines => this.border_b_1().border_color(theme.border),
-        Look::Cards => this,
-    }
-}
-
-/// The composer's frame: Classic's line over it, or nothing of its own: it
-/// is a row of the composer's card (`bars::stack_card`).
-pub(in crate::ui) fn composer_frame<E: Styled + FluentBuilder>(
-    this: E,
-    chrome: &Chrome,
-    theme: &Theme,
-) -> E {
-    match chrome.metrics.look {
-        Look::Lines => this.border_t_1().border_color(theme.border),
-        Look::Cards => this,
-    }
-}
-
-/// A chat's left tab column: Classic's lined column, or a card.
-pub(in crate::ui) fn tab_column_frame<E: Styled + FluentBuilder>(
-    this: E,
-    chrome: &Chrome,
-    theme: &Theme,
-    glass: Option<&LensStyle>,
-) -> E {
-    match chrome.metrics.look {
-        Look::Lines => this
-            .bg(theme.background)
-            .border_r_1()
-            .border_color(theme.border),
-        Look::Cards => card(surface(this, chrome, theme, glass), chrome, theme, glass),
-    }
-}
-
 /// The column resize handle: Classic's lights its line on hover; between
 /// cards there is no line to light.
 pub(in crate::ui) fn resize_handle<E: InteractiveElement>(
@@ -161,7 +119,7 @@ pub(super) fn pill<E: Styled + FluentBuilder>(
 
 /// A card's fill and edge, rounded. Over glass it draws neither: the lens
 /// is the fill, the rim and the shadow (docs/decisions/glass-effects.md).
-fn surface<E: Styled + FluentBuilder>(
+pub(super) fn surface<E: Styled + FluentBuilder>(
     this: E,
     chrome: &Chrome,
     theme: &Theme,
@@ -181,7 +139,7 @@ fn surface<E: Styled + FluentBuilder>(
 }
 
 /// The edge of a dark card over the wallpaper.
-const DARK_CARD_EDGE: Hsla = Hsla {
+pub(super) const DARK_CARD_EDGE: Hsla = Hsla {
     h: 0.,
     s: 0.,
     l: 1.,

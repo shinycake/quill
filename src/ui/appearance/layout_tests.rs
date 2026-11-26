@@ -11,7 +11,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::layout_style::{Chrome, FLOATING, LayoutStyle};
+use quill::layout_style::{CLASSIC, Chrome, FLOATING, LayoutStyle};
 use quill::settings_catalog::Page;
 
 /// A tile is a radio's content, found by its debug selector.
@@ -49,7 +49,7 @@ fn frames(vcx: &mut VisualTestContext) {
 }
 
 fn chrome(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Chrome {
-    app.read_with(vcx, |app, cx| app.chrome(cx))
+    app.read_with(vcx, |app, _| app.chrome())
 }
 
 #[gpui_kit::test]
@@ -84,12 +84,15 @@ fn a_window_of_600_or_under_draws_classic_with_floating_chosen(cx: &mut TestAppC
     assert_eq!(chrome(&app, vcx), Chrome::CLASSIC);
 
     // Each window answers from its own width: the cell the render wrote.
+    let metrics = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, _| app.chrome_metrics())
+    };
     app.update(vcx, |app, _| app.slices.window.width.set(px(1200.)));
-    assert_eq!(chrome(&app, vcx).metrics, &FLOATING);
+    assert_eq!(metrics(&app, vcx), &FLOATING);
     app.update(vcx, |app, _| app.slices.window.width.set(px(601.)));
-    assert_eq!(chrome(&app, vcx).metrics, &FLOATING);
+    assert_eq!(metrics(&app, vcx), &FLOATING);
     app.update(vcx, |app, _| app.slices.window.width.set(px(600.)));
-    assert_eq!(chrome(&app, vcx), Chrome::CLASSIC);
+    assert_eq!(metrics(&app, vcx), &CLASSIC);
     // Rows follow the window too: Quill's at 600, Web K's from 601.
     let rows = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.update(vcx, |app, _| app.row_density().row_base)
@@ -177,11 +180,17 @@ fn battery_saving_flattens_floating(cx: &mut TestAppContext) {
     assert_eq!(roomy.metrics, &FLOATING);
     assert!(roomy.elevation != Elevation::Flat, "shadowed at rest");
 
+    // The watcher refreshes the windows on a change; the next frame
+    // resolves the chrome again.
     quill::battery_saving::set_state(Some(true));
+    vcx.update(|_, cx| cx.refresh_windows());
+    frames(vcx);
     let saving = chrome(&app, vcx);
     assert_eq!(saving.metrics, &FLOATING);
     assert_eq!(saving.elevation, Elevation::Flat);
 
     quill::battery_saving::set_state(Some(false));
+    vcx.update(|_, cx| cx.refresh_windows());
+    frames(vcx);
     assert_eq!(chrome(&app, vcx), roomy);
 }

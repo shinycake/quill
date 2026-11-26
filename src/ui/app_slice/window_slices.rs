@@ -51,6 +51,9 @@ pub(in crate::ui) struct WindowSlices {
     /// `QuillApp::chrome` reads for this window (a measurement cache, as
     /// `composer_height` is).
     pub(in crate::ui) width: Cell<Pixels>,
+    /// The chrome the window's frame resolved (`note_window_width`); every
+    /// part of the frame reads this one.
+    pub(in crate::ui) chrome: Cell<quill::layout_style::Chrome>,
     /// What the window's last render did with the conversation.
     conversation_frame: Cell<ConversationFrame>,
     /// The composer height the rows are drawn against (`composer_glide`);

@@ -88,6 +88,7 @@ impl DismissLayer {
         mut self,
         position: Point<Pixels>,
         content: impl IntoElement,
+        look: quill::layout_style::Look,
         cx: &App,
     ) -> Self {
         let content = div().occlude().child(content).into_any_element();
@@ -95,7 +96,9 @@ impl DismissLayer {
             anchored()
                 .position(position)
                 .snap_to_window_with_margin(px(8.))
-                .child(super::chrome::menu_pop::menu_pop(content, position, cx))
+                .child(super::chrome::menu_pop::menu_pop(
+                    content, position, look, cx,
+                ))
                 .into_any_element(),
         );
         self
@@ -197,7 +200,12 @@ mod tests {
                         }),
                     );
                     let layer = if anchored {
-                        layer.anchored(point(px(100.), px(100.)), panel, cx)
+                        layer.anchored(
+                            point(px(100.), px(100.)),
+                            panel,
+                            quill::layout_style::CLASSIC.look,
+                            cx,
+                        )
                     } else {
                         layer
                             .layer(|layer| layer.flex().items_center().justify_center())

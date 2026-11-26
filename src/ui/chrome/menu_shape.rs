@@ -9,24 +9,31 @@
 //! takes a fill a step lighter than the cards, a faint light edge and a
 //! deeper shadow.
 //!
-//! Menus are built while their window draws, and every window notes its
-//! width (`QuillApp::note_window_width`) before it builds anything else, so
-//! the window being drawn writes its metrics here first and its menus read
-//! them: their shape here, their entrance in `menu_pop`.
+//! Every window notes its look (`QuillApp::note_window_width`) before it
+//! builds anything else, and a menu reads the look of the window it is in:
+//! its shape here, its entrance in `menu_pop`.
 
 use gpui_kit::component::popover_shape::{MenuEnter, PopoverShape, PopoverShapeHook};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::*;
 use quill::layout_style::Look;
+use std::collections::HashMap;
 
 /// Web K's menu corner radius.
 pub(in crate::ui) const MENU_RADIUS: f32 = 16.;
 
-/// The look of the window being drawn.
-#[derive(Clone, Copy)]
-struct DrawnWindow(Look);
+/// Each open window's look, as its last frame noted it.
+#[derive(Default)]
+struct WindowLooks(HashMap<WindowId, Look>);
 
-impl Global for DrawnWindow {}
+impl Global for WindowLooks {}
+
+/// The look of `window`: Classic's until it has drawn.
+fn look_of(window: &Window, cx: &App) -> Look {
+    cx.try_global::<WindowLooks>()
+        .and_then(|looks| looks.0.get(&window.window_handle().window_id()).copied())
+        .unwrap_or(Look::Lines)
+}
 
 /// Web K's menu shadow; deeper in dark, where its 15% black would not show.
 pub(in crate::ui) fn menu_shadow(dark: bool) -> Vec<BoxShadow> {
@@ -63,42 +70,57 @@ fn dark_surface(cx: &App) -> (Option<Hsla>, Option<Hsla>) {
     }
 }
 
-/// The shape menus in the window being drawn take: `Some` in Floating.
-pub(in crate::ui) fn menu_shape(cx: &App) -> Option<PopoverShape> {
-    let drawn = cx.try_global::<DrawnWindow>()?;
-    if drawn.0 != Look::Cards {
-        return None;
-    }
-    let (fill, edge) = dark_surface(cx);
-    Some(PopoverShape {
-        radius: px(MENU_RADIUS),
-        shadow: menu_shadow(edge.is_some()),
-        fill,
-        edge,
-        enter: MenuEnter::Pop,
-    })
+/// The shape menus in `window` take: `Some` in Floating.
+pub(in crate::ui) fn menu_shape(window: &Window, cx: &App) -> Option<PopoverShape> {
+    menu_shape_in(look_of(window, cx), cx)
 }
 
-/// How menus in the window being drawn enter: Classic's when no window
-/// has drawn.
-pub(in crate::ui) fn menu_entrance(cx: &App) -> MenuEnter {
-    match cx.try_global::<DrawnWindow>() {
-        Some(DrawnWindow(Look::Cards)) => MenuEnter::Pop,
-        Some(DrawnWindow(Look::Lines)) | None => MenuEnter::FadeSlide,
+/// The shape menus take in a window with this look.
+pub(in crate::ui) fn menu_shape_in(look: Look, cx: &App) -> Option<PopoverShape> {
+    match look {
+        Look::Lines => None,
+        Look::Cards => {
+            let (fill, edge) = dark_surface(cx);
+            Some(PopoverShape {
+                radius: px(MENU_RADIUS),
+                shadow: menu_shadow(edge.is_some()),
+                fill,
+                edge,
+                enter: MenuEnter::Pop,
+            })
+        }
     }
 }
 
-/// The window about to draw has this look; the kit's popovers ask
-/// through the same answer.
-pub(in crate::ui) fn note_drawn_window(look: Look, cx: &mut App) {
+/// How menus in a window with this look enter.
+pub(in crate::ui) fn menu_entrance(look: Look) -> MenuEnter {
+    match look {
+        Look::Cards => MenuEnter::Pop,
+        Look::Lines => MenuEnter::FadeSlide,
+    }
+}
+
+/// `window` is about to draw with this look; the kit's popovers ask
+/// through the same answer. A window seen for the first time drops the
+/// looks of windows that have closed.
+pub(in crate::ui) fn note_drawn_window(window: WindowId, look: Look, cx: &mut App) {
     if !cx.has_global::<PopoverShapeHook>() {
         cx.set_global(PopoverShapeHook(menu_shape));
     }
-    let same = cx
-        .try_global::<DrawnWindow>()
-        .is_some_and(|drawn| drawn.0 == look);
-    if !same {
-        cx.set_global(DrawnWindow(look));
+    let known = cx
+        .try_global::<WindowLooks>()
+        .and_then(|looks| looks.0.get(&window).copied());
+    match known {
+        Some(known) if known == look => {}
+        Some(_) => {
+            cx.default_global::<WindowLooks>().0.insert(window, look);
+        }
+        None => {
+            let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
+            let looks = &mut cx.default_global::<WindowLooks>().0;
+            looks.retain(|id, _| open.contains(id));
+            looks.insert(window, look);
+        }
     }
 }
 

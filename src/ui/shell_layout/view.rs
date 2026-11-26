@@ -141,7 +141,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.frame.main_width = window.viewport_size().width;
-        self.note_window_width(self.frame.main_width, cx);
+        self.note_window_width(window, cx);
         self.keep_shared_media_search_field(window, cx);
         let layout = self.shell_layout();
         self.settle_sidebar(&layout, window, cx);
@@ -251,7 +251,7 @@ impl QuillApp {
         gutter: f32,
         cx: &App,
     ) -> Stateful<Div> {
-        let chrome = self.chrome(cx);
+        let chrome = self.chrome();
         div()
             .id("side-panels-card")
             .flex_none()
@@ -270,7 +270,7 @@ impl QuillApp {
     /// A panel with no room beside a full conversation column: a card
     /// over the chat's right part, sliding in from the window's edge.
     fn panel_over(&self, row: Stateful<Div>, width: f32, gutter: f32, cx: &App) -> AnyElement {
-        let chrome = self.chrome(cx);
+        let chrome = self.chrome();
         let shown = self.frame.panels.shown(self.frame.panels.now());
         let leaving = self
             .frame

@@ -18,33 +18,15 @@ use crate::ui::glass;
 use gpui_kit::component::popover_shape::MenuEnter;
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::*;
-use quill::layout_style::Curve;
+use quill::layout_style::{Curve, Look};
 use std::time::Duration;
 
 /// Web K's menu transition.
 pub(in crate::ui) const POP_MS: u64 = 200;
 /// The scale a menu pops from.
 pub(in crate::ui) const POP_FROM: f32 = 0.8;
-/// How far a shadow reaches past its box: a Gaussian blur is gone by
-/// three times its radius, plus the shadow's offset and spread.
-pub(in crate::ui) fn shadow_reach(shadows: &[BoxShadow]) -> Pixels {
-    shadows
-        .iter()
-        .map(|shadow| {
-            let (x, y) = (shadow.offset.x.abs(), shadow.offset.y.abs());
-            let offset = if x > y { x } else { y };
-            let spread = if shadow.spread_radius > px(0.) {
-                shadow.spread_radius
-            } else {
-                px(0.)
-            };
-            shadow.blur_radius * 3. + offset + spread
-        })
-        .fold(
-            px(0.),
-            |reach, next| if next > reach { next } else { reach },
-        )
-}
+/// How far a shadow reaches past its box (the kit's measure).
+pub(in crate::ui) use gpui_kit::component::popover_shape::shadow_reach;
 
 /// The corner of `bounds` nearest to `anchor`: the point the menu grows
 /// from. A menu opened at the pointer has its anchor at a corner unless it
@@ -80,8 +62,13 @@ pub(in crate::ui) fn pop_draw(
 
 /// `menu` opened at `anchor`, popping in when the window being drawn is
 /// Floating; as it is otherwise.
-pub(in crate::ui) fn menu_pop(menu: AnyElement, anchor: Point<Pixels>, cx: &App) -> AnyElement {
-    if menu_entrance(cx) != MenuEnter::Pop || glass::look(cx).is_glass() {
+pub(in crate::ui) fn menu_pop(
+    menu: AnyElement,
+    anchor: Point<Pixels>,
+    look: Look,
+    cx: &App,
+) -> AnyElement {
+    if menu_entrance(look) != MenuEnter::Pop || glass::look(cx).is_glass() {
         return menu;
     }
     menu.with_snapshot_animation(

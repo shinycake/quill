@@ -246,6 +246,12 @@ pub struct Chrome {
     pub elevation: Elevation,
 }
 
+impl Default for Chrome {
+    fn default() -> Self {
+        Self::CLASSIC
+    }
+}
+
 impl Chrome {
     pub const CLASSIC: Chrome = Chrome {
         metrics: &CLASSIC,

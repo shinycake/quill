@@ -4,11 +4,12 @@
 //! as a stuck focus ring.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ui::chrome::menu_shape::menu_shape;
+use crate::ui::chrome::menu_shape::menu_shape_in;
 use crate::ui::glass::{GlassRole, GlassSurface as _};
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
+use quill::layout_style::Look;
 
 pub(crate) trait MenuSurface: Styled + Sized {
     /// Rounded popover surface with the theme's border and a shadow, or
@@ -18,9 +19,9 @@ pub(crate) trait MenuSurface: Styled + Sized {
     ///
     /// In Floating it takes Web K's shape instead (`chrome::menu_shape`):
     /// the corner radius and shadow, rows clipped to the corners.
-    fn menu_surface(self, cx: &App) -> Self {
+    fn menu_surface(self, look: Look, cx: &App) -> Self {
         let theme = cx.theme();
-        let shape = menu_shape(cx);
+        let shape = menu_shape_in(look, cx);
         let this = match &shape {
             Some(shape) => self.rounded(shape.radius).clip_rounded(),
             None => self.rounded_md(),
@@ -63,6 +64,7 @@ pub(crate) fn submenu_panel(
     rows: Vec<AnyElement>,
     on_bounds: impl FnOnce(Bounds<Pixels>) + 'static,
     on_pointer: impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static,
+    look: Look,
     cx: &App,
 ) -> AnyElement {
     // The parent menu's outer left and right edges, relative to the row,
@@ -86,7 +88,7 @@ pub(crate) fn submenu_panel(
                 .flex_col()
                 .w(px(MENU_WIDTH))
                 .p_1()
-                .menu_surface(cx)
+                .menu_surface(look, cx)
                 .on_mouse_move(on_pointer)
                 .children(rows)
                 .on_prepaint(move |bounds, _, _| on_bounds(bounds)),

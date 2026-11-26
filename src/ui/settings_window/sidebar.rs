@@ -61,7 +61,7 @@ impl QuillApp {
                         let _ = owner.update(cx, |this, cx| this.show_settings_page(page, cx));
                     })
             });
-        let chrome = self.chrome(cx);
+        let chrome = self.chrome();
         let fill = self.list_row_fill(cx);
         Sidebar::new("settings-sidebar")
             .collapsible(false)

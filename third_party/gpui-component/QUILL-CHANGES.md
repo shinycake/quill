@@ -171,6 +171,15 @@ it keeps the fade and slide. Re-apply when re-vendoring.
 The shape may also carry a `fill` (in place of the theme's popover colour)
 and an `edge` (a 1px border colour); the app sets both for dark menus,
 which would otherwise merge with near-black cards.
+The hook takes the window the popover is in (`fn(&Window, &App)`), so each
+window answers with its own layout: `popover_style`, `dropdown_popup` and
+`searchable_list::menu_popup` take a `&Window` for it, and the callers that
+build those (`combobox`, `select`, `date_picker`, `input::list_popup`,
+`input::popovers`, `plot::tooltip`, `touch_selection::edit_menu`,
+`popup_menu`) pass theirs. `popover_style_shaped` draws a given shape for a
+caller that already knows it. The pop's capture margin is the shape's
+shadow reach (`popover_shape::shadow_reach`: three blurs plus the offset
+and spread), so the shadow is never clipped during the pop.
 
 ## Rounded content masks
 

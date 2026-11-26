@@ -28,7 +28,7 @@ pub(in crate::ui) fn miniature(metrics: &ChromeMetrics, size: Size<Pixels>, them
     let wallpaper = wallpaper(theme);
     // Dark cards keep a faint light edge over the wallpaper, as the real
     // ones do (`frames::surface`).
-    let edge = (floating && theme.is_dark()).then(|| hsla(0., 0., 1., 0.14));
+    let edge = (floating && theme.is_dark()).then_some(super::frames::DARK_CARD_EDGE);
     let card = theme.sidebar;
     let pane = theme.background;
     let bar = theme.background;

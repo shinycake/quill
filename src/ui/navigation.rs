@@ -323,7 +323,7 @@ impl QuillApp {
                     .w(px(6.))
                     .cursor_col_resize()
                     .map(|this| {
-                        crate::ui::chrome::frames::resize_handle(this, &self.chrome(cx), cx.theme())
+                        crate::ui::chrome::frames::resize_handle(this, &self.chrome(), cx.theme())
                     })
                     .on_drag(SidebarResize, |_, _, _, cx| cx.new(|_| SidebarResize))
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {

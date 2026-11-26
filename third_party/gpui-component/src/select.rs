@@ -660,7 +660,7 @@ where
                                     Length::Auto => this.w(bounds.size.width),
                                     Length::Definite(w) => this.w(w),
                                 })
-                                .popover_style(cx)
+                                .popover_style(window, cx)
                                 .child(
                                     List::new(&self.state.list)
                                         .when_some(
@@ -680,6 +680,7 @@ where
                                 .on_mouse_down_out(cx.listener(|this, _, window, cx| {
                                     this.escape(&Cancel, window, cx);
                                 })),
+                            window,
                             cx,
                         ))
                         .with_priority(gpui_base::POPUP_PRIORITY),

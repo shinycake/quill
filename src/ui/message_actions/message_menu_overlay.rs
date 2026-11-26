@@ -76,7 +76,7 @@ impl QuillApp {
             .min_w(px(180.))
             .px_1()
             .py_1()
-            .menu_surface(cx);
+            .menu_surface(self.look(), cx);
         // Reactions lead the menu (Telegram Desktop): the chat's quick
         // strip in its own pill above the menu, expandable to every
         // reaction it allows.
@@ -934,12 +934,13 @@ impl QuillApp {
                         div()
                             .id("message-menu-reactions")
                             .occlude()
-                            .menu_surface(cx)
+                            .menu_surface(self.look(), cx)
                             .rounded_xl()
                             .child(strip),
                     )
                 })
                 .child(panel),
+            self.look(),
             cx,
         )
         .focus_trap("message-menu-focus", &self.frame.menu.focus)

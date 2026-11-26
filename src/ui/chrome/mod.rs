@@ -121,14 +121,22 @@ impl QuillApp {
         self.look() == Look::Cards
     }
 
-    /// The chat header's frame in this window (`frames::header_frame`).
-    pub(in crate::ui) fn header_frame<E: Styled + FluentBuilder>(&self, this: E, cx: &App) -> E {
-        frames::header_frame(this, &self.chrome(cx), cx.theme())
+    /// The chat header's frame: Classic's line under it, or nothing of its
+    /// own: it is the first row of the bars' card (`stack_card`).
+    pub(in crate::ui) fn header_frame<E: Styled>(&self, this: E, cx: &App) -> E {
+        match self.look() {
+            Look::Lines => this.border_b_1().border_color(cx.theme().border),
+            Look::Cards => this,
+        }
     }
 
-    /// The composer's frame in this window (`frames::composer_frame`).
-    pub(in crate::ui) fn composer_frame<E: Styled + FluentBuilder>(&self, this: E, cx: &App) -> E {
-        frames::composer_frame(this, &self.chrome(cx), cx.theme())
+    /// The composer's frame: Classic's line over it, or nothing of its own:
+    /// it is a row of the composer's card (`stack_card`).
+    pub(in crate::ui) fn composer_frame<E: Styled>(&self, this: E, cx: &App) -> E {
+        match self.look() {
+            Look::Lines => this.border_t_1().border_color(cx.theme().border),
+            Look::Cards => this,
+        }
     }
 
     /// How far the history's rows keep clear of the pills over them: none
@@ -179,18 +187,29 @@ impl QuillApp {
         }
     }
 
-    /// A chat's left tab column's frame (`frames::tab_column_frame`).
+    /// A chat's left tab column: Classic's lined column, or a card.
     pub(in crate::ui) fn tab_column_frame<E: Styled + FluentBuilder>(
         &self,
         this: E,
         cx: &App,
     ) -> E {
-        frames::tab_column_frame(
-            this,
-            &self.chrome(cx),
-            cx.theme(),
-            self.card_glass(cx).as_ref(),
-        )
+        let theme = cx.theme();
+        match self.look() {
+            Look::Lines => this
+                .bg(theme.background)
+                .border_r_1()
+                .border_color(theme.border),
+            Look::Cards => {
+                let chrome = self.chrome();
+                let glass = self.card_glass(cx);
+                frames::card(
+                    frames::surface(this, &chrome, theme, glass.as_ref()),
+                    &chrome,
+                    theme,
+                    glass.as_ref(),
+                )
+            }
+        }
     }
 
     /// The glass the Floating cards draw while Glass effects is on and
@@ -273,9 +292,10 @@ impl QuillApp {
         self.look() == Look::Cards
     }
 
-    /// What the window whose state is in place draws this frame.
-    pub(in crate::ui) fn chrome(&self, cx: &App) -> Chrome {
-        resolve(self.look(), || self.chrome_readings(cx))
+    /// What the window whose state is in place draws this frame, as its
+    /// frame resolved it (`note_window_width`).
+    pub(in crate::ui) fn chrome(&self) -> Chrome {
+        self.slices.window.chrome.get()
     }
 
     fn chrome_readings(&self, cx: &App) -> Readings {
@@ -311,14 +331,16 @@ impl QuillApp {
         self.chat_look(chat, cx).wallpaper
     }
 
-    /// A window's render measured its width: store it, and when the chrome
-    /// changed with it (a resize across 600 px), render the cached slices
+    /// A window's frame begins: store its width and resolve its chrome
+    /// once for the frame. When the chrome changed (a resize across 600
+    /// px, a wallpaper with another contrast), render the cached slices
     /// again, as their own bounds may not have changed.
-    pub(in crate::ui) fn note_window_width(&self, width: Pixels, cx: &mut Context<Self>) {
-        let before = self.look();
-        self.slices.window.width.set(width);
-        menu_shape::note_drawn_window(self.look(), cx);
-        if self.look() != before {
+    pub(in crate::ui) fn note_window_width(&self, window: &Window, cx: &mut Context<Self>) {
+        self.slices.window.width.set(window.viewport_size().width);
+        let look = self.look();
+        let chrome = resolve(look, || self.chrome_readings(cx));
+        menu_shape::note_drawn_window(window.window_handle().window_id(), look, cx);
+        if self.slices.window.chrome.replace(chrome) != chrome {
             self.notify_slices(cx);
         }
     }

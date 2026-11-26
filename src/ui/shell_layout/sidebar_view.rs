@@ -257,7 +257,7 @@ impl QuillApp {
         }
         // Kit's sheet surface sliding from the left edge, or the list card
         // with its own gutter and shadow (`chrome::frames`).
-        let chrome = self.chrome(cx);
+        let chrome = self.chrome();
         let surface = crate::ui::chrome::frames::peek_surface(
             div()
                 .id("sidebar-peek")

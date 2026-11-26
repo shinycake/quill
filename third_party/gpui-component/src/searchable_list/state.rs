@@ -30,10 +30,11 @@ pub(crate) fn menu_popup(
     id: impl Into<ElementId>,
     bounds: Bounds<Pixels>,
     surface: impl IntoElement + Styled + 'static,
+    window: &Window,
     cx: &App,
 ) -> Positioner {
     let side = menu_side.0.clone();
-    crate::popover::dropdown_popup(id, bounds, surface, cx)
+    crate::popover::dropdown_popup(id, bounds, surface, window, cx)
         .when_some(side.get(), |popup, placement| popup.placement(placement))
         .on_position(move |position| {
             if side.get().is_none() {

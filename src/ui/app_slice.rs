@@ -589,7 +589,7 @@ impl QuillApp {
     /// Floating: the column owns its gutter on the left, top and bottom,
     /// and the list sits in a card inside it.
     pub(super) fn sidebar_slot(&self, cx: &App) -> AnyElement {
-        let chrome = self.chrome(cx);
+        let chrome = self.chrome();
         let gutter = px(chrome.metrics.gutter);
         let column = div()
             .id("sidebar-slot")
