@@ -431,8 +431,13 @@ impl QuillApp {
                         .justify_between()
                         .px_3()
                         .py_2()
-                        .border_b_1()
-                        .border_color(cx.theme().border)
+                        .map(|this| {
+                            crate::ui::chrome::frames::panel_header_rule(
+                                this,
+                                &self.chrome(),
+                                cx.theme(),
+                            )
+                        })
                         .child(div().font_semibold().child(title))
                         .child(
                             Button::new("info-panel-close")

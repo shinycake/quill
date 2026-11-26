@@ -102,8 +102,13 @@ impl QuillApp {
                     .justify_between()
                     .px_3()
                     .py_2()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
+                    .map(|this| {
+                        crate::ui::chrome::frames::panel_header_rule(
+                            this,
+                            &self.chrome(),
+                            cx.theme(),
+                        )
+                    })
                     .child(div().font_semibold().child(title))
                     .child(div().flex_1())
                     .children(
@@ -149,7 +154,8 @@ impl QuillApp {
                     .iter()
                     .position(|tab| *tab == active_tab)
                     .unwrap_or(0);
-                bar.selected_index(selected)
+                let bar = bar
+                    .selected_index(selected)
                     .on_click(move |ix, _window, cx| {
                         if let Some(tab) = visible_tabs.get(*ix).copied() {
                             let _ = weak.update(cx, |this, cx| {
@@ -157,6 +163,8 @@ impl QuillApp {
                             });
                         }
                     })
+                    .into_any_element();
+                crate::ui::chrome::frames::panel_strip(bar, &self.chrome())
             })
             .children(self.shared_media_search_row(active_tab, cx));
 

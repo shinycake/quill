@@ -124,6 +124,39 @@ where
     }
 }
 
+/// How far a side panel's rows sit in from its card's edge (the header's
+/// `px_3`): its header line and tab strip start there.
+const PANEL_INSET: f32 = 12.;
+
+/// The line under a side panel's header: Classic's full-width border, or
+/// over cards a hairline inset as the header card's are
+/// ([`super::bars::card_divider`]).
+pub(in crate::ui) fn panel_header_rule<E: Styled + ParentElement>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+) -> E {
+    match chrome.metrics.look {
+        Look::Lines => this.border_b_1().border_color(theme.border),
+        Look::Cards => this.relative().child(
+            super::bars::card_divider(px(PANEL_INSET), theme)
+                .absolute()
+                .bottom_0()
+                .left_0()
+                .right_0(),
+        ),
+    }
+}
+
+/// A side panel's tab strip: as it is in Classic; over cards inset from
+/// the card's edge, so its first tab and its underline do not touch it.
+pub(in crate::ui) fn panel_strip(strip: AnyElement, chrome: &Chrome) -> AnyElement {
+    match chrome.metrics.look {
+        Look::Lines => strip,
+        Look::Cards => div().px(px(PANEL_INSET)).child(strip).into_any_element(),
+    }
+}
+
 /// The edge a card draws, as [`surface`] does: the hairline, the faint
 /// light edge of a dark card, or none.
 fn card_edge(chrome: &Chrome, theme: &Theme) -> Option<Hsla> {
