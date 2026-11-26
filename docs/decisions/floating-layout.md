@@ -457,3 +457,38 @@ that no line takes its last point. The chat window capture shows no line. The sy
 cannot be drawn on macOS (`window_frame::supported`), so
 `window_frame_tests` checks the style both frames end with: Classic keeps
 1px, Floating ends at 0.
+
+## Edges (step 12)
+
+Checked on macOS (Metal) with the photo wallpaper behind every Floating
+capture unless the case is the plain backdrop:
+
+- **Bands.** 600, 601, 925 and 926 wide. Floating at 600 is pixel
+  identical to Classic at 600 with the same wallpaper. 601 to 925 is the
+  drawer band, 926 docks the list.
+- **High contrast.** Every card and pill gets the 1pt theme hairline
+  (measured: the list card's edge is two device pixels of the border
+  colour) and no shadow. The demos could not show this before:
+  `QUILL_DEMO_THEME=high-contrast` only re-rooted the chat palette, so
+  `demo_look` now also picks the High Contrast theme for any demo.
+- **Battery saving.** `battery_saving_flattens_floating`: with the system
+  forcing power saving the cards are flat, and the shadow returns after.
+  Motion snapping waits for step 11.
+- **Plain backdrop.** Light and dark with no wallpaper at 1440: the cards
+  sit on the theme background.
+- **Glass on.** `ready-glass` and `ready-chats` with a chat menu open:
+  glass cards, glass menu with Web K's radius over them.
+- **Snapshots off.** `QUILL_SNAPSHOTS=off` showcase captures, light and
+  dark: nothing in steps 3 to 10 uses snapshots yet.
+- **RTL.** `ready-rtl-text` at 1440 and in the drawer band (800), light
+  and dark: Hebrew and Arabic bubbles, header and composer pills read
+  correctly.
+- **Interface zoom 150%.** The bands move with zoom: at 900 px the window
+  is 600 interface px and Classic (one column); at 901 it is Floating; at
+  1386 (924 interface px) the list is a drawer; at 1390 it docks.
+
+Not checked: chat windows at exactly 700 and 560 wide (the demo opens a
+chat window at its default size, which is Floating; under 601 a chat
+window answers Classic from its own width through the same
+`chrome_metrics`, covered by `a_window_of_600_or_under_draws_classic`).
+Windows and Linux GPUs, and the system frame, were not run.

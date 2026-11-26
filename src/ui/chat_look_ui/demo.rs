@@ -158,8 +158,20 @@ fn demo_background(kind: &str) -> Option<String> {
 }
 
 impl QuillApp {
+    /// The look any demo can ask for: the account's wallpaper
+    /// (`QUILL_DEMO_BACKDROP`) and the high-contrast theme
+    /// (`QUILL_DEMO_THEME=high-contrast`, which alone only re-roots the
+    /// chat palette).
+    pub(in crate::ui) fn demo_look(&mut self, cx: &mut Context<Self>) {
+        if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("high-contrast") {
+            self.appearance.theme = quill::settings::ThemeChoice::HighContrast;
+            self.apply_appearance(cx);
+        }
+        self.demo_backdrop(cx);
+    }
+
     /// `QUILL_DEMO_BACKDROP=<kind>`: the account's wallpaper, for any demo.
-    pub(in crate::ui) fn demo_backdrop(&mut self, cx: &mut Context<Self>) {
+    fn demo_backdrop(&mut self, cx: &mut Context<Self>) {
         let Ok(kind) = std::env::var("QUILL_DEMO_BACKDROP") else {
             return;
         };
