@@ -11,6 +11,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Instant;
 
 /// The header slice's height before its first measure: one bar.
 const FIRST_TOP_HEIGHT: f32 = 48.;
@@ -52,6 +53,9 @@ pub(in crate::ui) struct WindowSlices {
     pub(in crate::ui) width: Cell<Pixels>,
     /// What the window's last render did with the conversation.
     conversation_frame: Cell<ConversationFrame>,
+    /// The composer height the rows are drawn against (`composer_glide`);
+    /// `None` until the column first follows it.
+    composer_glide: Cell<Option<super::composer_glide::ComposerGlide>>,
     /// Floating's chat switch (`chat_switch`).
     pub(super) chat_switch: super::super::page_cross::PageStage<ChatId>,
     /// A screen reader (or another accessibility client) reads this window:
@@ -130,6 +134,28 @@ impl WindowSlices {
     /// The header's and the composer's heights as last laid out.
     pub(in crate::ui) fn pill_heights(&self) -> (Pixels, Pixels) {
         (self.top_height.get(), self.composer_height.get())
+    }
+
+    /// The rows follow the composer's measured height at `now`, gliding
+    /// over `ms` (0: at once): how far below their laid-out place they
+    /// are drawn, and whether they are still on their way.
+    pub(in crate::ui) fn follow_composer(&self, ms: u16, now: Instant) -> (Pixels, bool) {
+        let measured = f32::from(self.composer_height.get());
+        let mut glide = self
+            .composer_glide
+            .get()
+            .unwrap_or_else(|| super::composer_glide::ComposerGlide::new(measured, now));
+        let shown = glide.follow(measured, ms, now);
+        self.composer_glide.set(Some(glide));
+        (px(measured - shown), glide.moving(now))
+    }
+
+    /// A bar over the composer moved at `now`: its height follows at once.
+    pub(in crate::ui) fn composer_bar_moved(&self, now: Instant) {
+        if let Some(mut glide) = self.composer_glide.get() {
+            glide.bar_moved(now);
+            self.composer_glide.set(Some(glide));
+        }
     }
 
     /// The slices that show the conversation.

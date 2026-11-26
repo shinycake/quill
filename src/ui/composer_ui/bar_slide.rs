@@ -42,6 +42,9 @@ impl QuillApp {
         let moving = presence.moving(now);
         drop(presence);
         if moving {
+            self.slices
+                .window
+                .composer_bar_moved(cx.background_executor().now());
             self.request_animation_tick(60, cx);
         }
         drawn

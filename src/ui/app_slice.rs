@@ -46,6 +46,7 @@ use std::rc::Rc;
 mod slice_elements;
 use slice_elements::{MeasureHeight, SliceScope};
 mod chat_switch;
+mod composer_glide;
 mod floating_column;
 mod window_slices;
 pub(super) use window_slices::WindowSlices;

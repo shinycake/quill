@@ -62,9 +62,16 @@ impl QuillApp {
                 .bottom(gutter)
                 .child(pill_box().h(slices.composer_height.get()).child(hint))
         });
+        // The rows lie out against the composer's height at once and are
+        // drawn where its glide has got to, as Web K moves its bubbles.
+        let ms = metrics.motion.composer_ms;
+        let (shift, moving) = slices.follow_composer(ms, cx.background_executor().now());
+        if moving {
+            self.request_app_tick(60, cx);
+        }
         column
             .relative()
-            .child(history.absolute().top_0().left_0().size_full())
+            .child(history.absolute().top(shift).left_0().size_full())
             .child(
                 lane("conversation-top")
                     .role(gpui_kit::Role::Group)

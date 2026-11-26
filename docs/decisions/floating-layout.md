@@ -507,6 +507,30 @@ Deviations:
 - Empty folder pages (the empty state, the loading skeleton) are drawn
   outside the stage and appear at once.
 
+## Composer height (step 11d)
+
+When the draft gains or loses a line, the rows under the composer pill
+follow its new height over 250 ms on the standard curve (Web K's W12)
+instead of jumping. The rows are laid out against the new height at
+once, so the list keeps its place at the bottom, and drawn lower by what
+the glide has left, as Web K moves its bubbles with `translateY`:
+`WindowSlices::composer_glide` (`ComposerGlide`, a `Glide` in a `Cell`)
+follows the measured height where the floating column draws, and the
+history's box takes the offset; the history's cached slice replays, so a
+glide frame costs no history render. A bar sliding open over the composer
+(reply, edit, forward) already moves the measured height frame by frame,
+so for 50 ms after a bar moved the rows follow at once; the first measure
+and Interface animations off snap too. Classic's `composer_ms` is 0.
+
+Deviations:
+
+- The pill follows its content at once; only the rows glide. The pill's
+  fill is drawn by the composer slice around its content, so gliding its
+  box would change nothing on screen.
+- A first version glided the rows' bottom padding instead. The list then
+  lost its place at the bottom: each frame's small padding change moved
+  the content under a list that no longer followed its tail.
+
 ## Title strip (step 10)
 
 `frames::title_strip` takes the strip's lower line away in Floating and
