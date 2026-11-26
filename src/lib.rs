@@ -111,6 +111,7 @@ pub mod gift_market;
 pub mod gift_recipients;
 pub mod giveaway;
 pub mod glass;
+pub mod glass_tuning;
 pub mod go_to_message;
 pub mod group_info_edit;
 pub mod group_manage;

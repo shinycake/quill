@@ -125,6 +125,34 @@ When glass can't be drawn (a lens inside a paint layer, past the last band,
 or an unreadable frame) the lens draws its fallback quad in the glass
 colour.
 
+## Tuning
+
+Settings › Appearance › Glass effects shows a tuning panel under the
+switch while glass is drawn (2026-11-26, Idan: sliders on the current
+look, not the edge look of the closed PR 1509). Each of its 14 sliders is
+one knob of the recipes above, named by its value on a menu: Bend (80 px),
+Bend depth (1.70), Bend curve (4.00), Frost (56%), Backdrop blur (2.0 px),
+Saturation (1.30), Sheen (1.80), Rim light (1.00), Inner shade (0.25),
+Edge line (24%), Shadow (100%), and for buttons Button refraction (64),
+Button magnify (0.18) and Color split (0.25).
+
+- **One dial moves every role.** A role multiplies its own shipped value by
+  the dial's share of its default (`GlassTuning::scale`), so moving Bend
+  from 80 to 160 px doubles the menu's pull and the bar's 30 px together,
+  and the defaults are exactly the shipped look (a 1.0 factor). Captures of
+  a glass menu at the default dials match main within the noise between two
+  runs of main.
+- **Media glass keeps its frost** whatever the Frost dial says: a video
+  frame can be flat white. The contrast test holds the limits for the
+  default dials only; past them the person sees what they chose.
+- The dials are whole stored steps in `AppearancePrefs::glass_tuning`
+  (`quill::glass_tuning`), clamped to their ranges when read, so a
+  hand-edited file can't push the shader past the sliders. A drag redraws
+  every window at each step and saves on release; Reset puts every dial
+  back. A live preview (a menu and two buttons over colour bars) sits above
+  the sliders. Demo: `ready-settings-glass-tuning`, with
+  `QUILL_DEMO_GLASS_DIALS=bend=150,frost=15` to move dials.
+
 ## Not done, and why
 
 - **PR 4 of the plan** (the history under a floating top bar and composer,

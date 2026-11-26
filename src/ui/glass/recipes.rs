@@ -5,8 +5,11 @@
 //! The look is clear glass after the source kit's frosted card: one even,
 //! lightly blurred tint edge to edge, a thin band at the rim that bends
 //! the backdrop in, the kit's rim light and top sheen, and a fine line on
-//! dark glass. The contrast test beside it holds the limits
-//! (docs/decisions/glass-effects.md, "Recipes").
+//! dark glass. The constants below are the shipped look; the person's
+//! tuning dials (`quill::glass_tuning`) scale them, each by its share of
+//! its default, so the default dials draw exactly this. The contrast test
+//! beside it holds the limits for the default dials
+//! (docs/decisions/glass-effects.md, "Recipes" and "Tuning").
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::component::theme::ThemeColor;
@@ -14,6 +17,7 @@ use gpui_kit::{
     Hsla, LENS_DESIGN_HEIGHT, LensBend, LensBorder, LensDetail, LensMaterial, LensStyle, LensTune,
     Rgba, point, px,
 };
+use quill::glass_tuning::{GlassDial, GlassTuning};
 
 /// What a surface is, which decides its look. The list is closed: a new
 /// glass surface needs a reason and a place in the budget.
@@ -104,27 +108,33 @@ fn is_media(role: GlassRole) -> bool {
     matches!(role, GlassRole::MediaIcon | GlassRole::MediaText)
 }
 
-/// The middle's frost for `role` in a theme.
-fn middle_frost(role: GlassRole, dark: bool) -> f32 {
+/// The middle's frost for `role` in a theme: `light` or `dark` of the
+/// floor, scaled by the frost dial. Media glass keeps the whole floor
+/// whatever the dial: a video frame can be flat white.
+fn frost_of(role: GlassRole, dark: bool, (light, dark_share): (f32, f32), t: &GlassTuning) -> f32 {
     let share = match (is_media(role), dark) {
-        (true, _) => 1.0,
-        (false, false) => MIDDLE_LIGHT,
-        (false, true) => MIDDLE_DARK,
+        (true, _) => return floor(role, dark),
+        (false, false) => light,
+        (false, true) => dark_share,
     };
-    floor(role, dark) * share
+    (floor(role, dark) * share * t.scale(GlassDial::Frost)).clamp(0.0, 1.0)
 }
 
-/// The look of `role` in a theme.
-pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
+/// The look of `role` in a theme, with the person's dials.
+pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor, t: &GlassTuning) -> LensStyle {
     let dark = is_dark(colors);
-    let frost = middle_frost(role, dark);
+    let frost = frost_of(role, dark, (MIDDLE_LIGHT, MIDDLE_DARK), t);
+    let bend = |amount: f32| amount * t.scale(GlassDial::Bend);
+    let blur = |amount: f32| px(amount * t.scale(GlassDial::Blur));
+    let rim = |amount: f32| amount * t.scale(GlassDial::RimLight);
+    let shadow = |amount: f32| amount * t.scale(GlassDial::Shadow);
     // Dark glass and glass over media take a light hairline (the lit
     // edge); light glass takes the theme's border, or it melts into a
     // light window.
     let hairline = LensBorder {
         color: if dark || is_media(role) {
             Hsla {
-                a: HAIRLINE,
+                a: (HAIRLINE * t.scale(GlassDial::Hairline)).clamp(0.0, 1.0),
                 ..gpui_kit::white()
             }
         } else {
@@ -140,31 +150,45 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
     // with a faint inner shade (stronger, it greys light glass and creases
     // a tall slab's corners), and an even frost edge to edge: a clear
     // ring around a frosted middle reads as a thick border.
+    let base = LensTune::default();
     let tune = LensTune {
-        inner: 0.25,
-        ..LensTune::default()
+        rim: rim(base.rim),
+        fresnel: rim(base.fresnel),
+        inner: 0.25 * t.scale(GlassDial::InnerShade),
+        ..base
     };
     let slab_tune = LensTune {
-        bend_curve: BEND_CURVE,
-        bend_depth: BEND_DEPTH,
-        saturation: SATURATION,
-        reflection: SHEEN,
+        bend_curve: BEND_CURVE * t.scale(GlassDial::BendCurve),
+        bend_depth: BEND_DEPTH * t.scale(GlassDial::BendDepth),
+        saturation: SATURATION * t.scale(GlassDial::Saturation),
+        reflection: SHEEN * t.scale(GlassDial::Sheen),
         ..tune
     };
-    let slab = |tint: Hsla, shadow: f32, bend: f32| LensStyle {
+    // The bar's and the cards' pull, gathered at the rim.
+    let rim_tune = LensTune {
+        rim: rim(0.35),
+        fresnel: rim(0.35),
+        bend_curve: BAR_BEND_CURVE * t.scale(GlassDial::BendCurve),
+        bend_depth: BAR_BEND_DEPTH * t.scale(GlassDial::BendDepth),
+        ..slab_tune
+    };
+    let bar_frost = frost_of(role, dark, (BAR_MIDDLE_LIGHT, BAR_MIDDLE_DARK), t);
+    let slab = |tint: Hsla, shadow_alpha: f32, amount: f32| LensStyle {
         unit: 1.0,
         bevel: BEVEL,
         band: None,
-        shadow,
+        shadow: shadow(shadow_alpha),
         shadow_softness: 10.0,
         shadow_offset: 4.0,
         strength: 1.0,
         color: opaque(tint),
         surface: opaque(tint),
         material: LensMaterial::Clear {
-            bend: LensBend::Radial { amount: px(bend) },
+            bend: LensBend::Radial {
+                amount: px(bend(amount)),
+            },
             frost,
-            blur: px(BLUR),
+            blur: blur(BLUR),
             blur_mix: 1.0,
         },
         border: Some(hairline),
@@ -181,7 +205,7 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
         unit: 0.0,
         bevel: LENS_DESIGN_HEIGHT * 0.42,
         band: None,
-        shadow: 0.10,
+        shadow: shadow(0.10),
         shadow_softness: 14.0,
         shadow_offset: 5.0,
         strength: 1.0,
@@ -189,14 +213,14 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
         surface: opaque(tint),
         material: LensMaterial::Clear {
             bend: LensBend::Edge {
-                refract: 64.0,
-                magnify: 0.18,
-                dispersion: 0.25,
+                refract: 64.0 * t.scale(GlassDial::ButtonRefraction),
+                magnify: 0.18 * t.scale(GlassDial::ButtonMagnify),
+                dispersion: 0.25 * t.scale(GlassDial::ColorSplit),
                 blur_center: 0.0,
                 blur_edge: 1.0,
             },
             frost,
-            blur: px(DOME_BLUR),
+            blur: blur(DOME_BLUR),
             blur_mix: 1.0,
         },
         border: None,
@@ -211,23 +235,16 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
         GlassRole::Menu | GlassRole::Panel => slab(colors.popover, 0.12, BEND),
         GlassRole::Card => LensStyle {
             tune: LensTune {
-                rim: CARD_RIM,
-                fresnel: CARD_RIM,
-                bend_curve: BAR_BEND_CURVE,
-                bend_depth: BAR_BEND_DEPTH,
-                ..slab_tune
+                rim: rim(CARD_RIM),
+                fresnel: rim(CARD_RIM),
+                ..rim_tune
             },
             material: LensMaterial::Clear {
                 bend: LensBend::Radial {
-                    amount: px(CARD_BEND),
+                    amount: px(bend(CARD_BEND)),
                 },
-                frost: floor(role, dark)
-                    * if dark {
-                        BAR_MIDDLE_DARK
-                    } else {
-                        BAR_MIDDLE_LIGHT
-                    },
-                blur: px(BAR_BLUR),
+                frost: bar_frost,
+                blur: blur(BAR_BLUR),
                 blur_mix: 1.0,
             },
             ..slab(colors.sidebar, 0.08, CARD_BEND)
@@ -236,24 +253,13 @@ pub(crate) fn recipe(role: GlassRole, colors: &ThemeColor) -> LensStyle {
         // reads as a neon line across the list.
         GlassRole::Bar => LensStyle {
             border: None,
-            tune: LensTune {
-                rim: 0.35,
-                fresnel: 0.35,
-                bend_curve: BAR_BEND_CURVE,
-                bend_depth: BAR_BEND_DEPTH,
-                ..slab_tune
-            },
+            tune: rim_tune,
             material: LensMaterial::Clear {
                 bend: LensBend::Radial {
-                    amount: px(BAR_BEND),
+                    amount: px(bend(BAR_BEND)),
                 },
-                frost: floor(role, dark)
-                    * if dark {
-                        BAR_MIDDLE_DARK
-                    } else {
-                        BAR_MIDDLE_LIGHT
-                    },
-                blur: px(BAR_BLUR),
+                frost: bar_frost,
+                blur: blur(BAR_BLUR),
                 blur_mix: 1.0,
             },
             ..slab(colors.sidebar, 0.0, BAR_BEND)

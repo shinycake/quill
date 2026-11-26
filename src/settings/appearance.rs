@@ -240,6 +240,9 @@ pub struct AppearancePrefs {
     /// glass (`crate::glass`). Solid by default.
     #[serde(default)]
     pub material: crate::glass::Material,
+    /// Appearance → Glass effects → the tuning dials (`crate::glass_tuning`).
+    #[serde(default)]
+    pub glass_tuning: crate::glass_tuning::GlassTuning,
     /// Message text size in px.
     #[serde(default = "default_font_size")]
     pub font_size_px: u8,
@@ -344,6 +347,7 @@ impl Default for AppearancePrefs {
             density: crate::density::Density::Standard,
             layout: crate::layout_style::LayoutStyle::Classic,
             material: crate::glass::Material::Solid,
+            glass_tuning: Default::default(),
             font_size_px: FONT_SIZE_DEFAULT,
             bubbles: true,
             preview_lines: crate::chatlist_style::PREVIEW_LINES_DEFAULT,
@@ -564,6 +568,8 @@ mod tests {
             density: crate::density::Density::Compact,
             layout: crate::layout_style::LayoutStyle::Floating,
             material: crate::glass::Material::Glass,
+            glass_tuning: crate::glass_tuning::GlassTuning::default()
+                .with(crate::glass_tuning::GlassDial::Bend, 120.0),
             font_size_px: 17,
             bubbles: false,
             preview_lines: 3,
