@@ -340,6 +340,15 @@ impl QuillApp {
     /// The window's backdrop under the shell's cards: the viewed chat's
     /// wallpaper across the window when the layout puts it there, else
     /// `this` unchanged (the history paints its own).
+    /// Floating's wallpaper as a layer under the whole window, title strip
+    /// included; `None` in Classic, where the history draws its own.
+    pub(super) fn window_backdrop_layer(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        self.window_backdrop(cx).then(|| {
+            self.paint_window_backdrop(div().absolute().top_0().left_0().size_full(), cx)
+                .into_any_element()
+        })
+    }
+
     pub(super) fn paint_window_backdrop<T: Styled + ParentElement>(
         &self,
         this: T,

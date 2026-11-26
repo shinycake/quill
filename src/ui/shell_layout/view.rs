@@ -213,8 +213,6 @@ impl QuillApp {
             .flex()
             .flex_1()
             .min_h_0()
-            // Floating: the wallpaper under the cards.
-            .map(|this| self.paint_window_backdrop(this, cx))
             // Outside the peeking column (it blocks the mouse).
             .on_mouse_move(cx.listener(|this, _: &MouseMoveEvent, _, cx| {
                 this.sidebar_pointer_moved_away(cx);

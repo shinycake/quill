@@ -157,6 +157,8 @@ impl Render for QuillApp {
             .size_full()
             .relative()
             .bg(cx.theme().background)
+            // Floating: the wallpaper under the strip and the cards.
+            .children(self.window_backdrop_layer(cx))
             // Window-wide text selection: message text can be selected and
             // copied within a message (Telegram Desktop).
             .child(gpui_kit::base::TextSelectionLayer)

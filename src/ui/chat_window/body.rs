@@ -115,7 +115,6 @@ impl QuillApp {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .map(|this| self.paint_window_backdrop(this, cx))
             .children(column)
             .children(conversation)
             // MED1: fullscreen media viewer over the window's content.

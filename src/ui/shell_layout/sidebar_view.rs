@@ -287,6 +287,14 @@ impl QuillApp {
                         this.close_sidebar_drawer(window, cx);
                     }),
                 )
+                // Floating's drawer dims the chat behind it as it slides
+                // in, so its edge never cuts through the bubbles and pills.
+                .layer(
+                    |layer| match crate::ui::chrome::frames::drawer_scrim(&chrome, shown) {
+                        Some(scrim) => layer.bg(scrim),
+                        None => layer,
+                    },
+                )
                 .content(surface)
                 .into_any_element(),
             );

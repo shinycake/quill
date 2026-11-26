@@ -91,6 +91,41 @@ pub(in crate::ui) fn tab_column_frame<E: Styled + FluentBuilder>(
     }
 }
 
+/// The settings window: Classic's page fill; in Floating no fill of its
+/// own, so the window's wallpaper shows in the gutter around its two cards.
+pub(in crate::ui) fn settings_frame<E: Styled>(this: E, chrome: &Chrome, theme: &Theme) -> E {
+    match chrome.metrics.clip {
+        Clip::Square => this.bg(theme.background),
+        Clip::Rounded => {
+            let gutter = px(chrome.metrics.gutter);
+            this.p(gutter).gap(gutter)
+        }
+    }
+}
+
+/// The settings list inside its card: no line at its edge, and clear on a
+/// glass card. Classic keeps the kit sidebar as it is.
+pub(in crate::ui) fn settings_list<E: Styled>(this: E, chrome: &Chrome, fill: Hsla) -> E {
+    match chrome.metrics.clip {
+        Clip::Square => this,
+        Clip::Rounded => this.border_r_0().border_l_0().bg(fill),
+    }
+}
+
+/// A settings page: as it is in Classic; a card (fill, edge, shadow and
+/// clip) in Floating.
+pub(in crate::ui) fn page_card<E: Styled + FluentBuilder>(
+    this: E,
+    chrome: &Chrome,
+    theme: &Theme,
+    glass: Option<&LensStyle>,
+) -> E {
+    match chrome.metrics.clip {
+        Clip::Square => this,
+        Clip::Rounded => card(surface(this, chrome, theme, glass), chrome, theme, glass),
+    }
+}
+
 /// A pill over the history: a card's fill, edge and shadow, or its glass.
 /// It does not clip, as the composer's popups hang outside it.
 pub(super) fn pill<E: Styled + FluentBuilder>(
@@ -119,13 +154,23 @@ fn surface<E: Styled + FluentBuilder>(
     let this = this.rounded(card_in(chrome.metrics, theme));
     match glass {
         Some(_) => this,
-        None => this
-            .bg(theme.sidebar)
-            .when(chrome.edge == Edge::Hairline, |this| {
-                this.border_1().border_color(theme.border)
-            }),
+        None => this.bg(theme.sidebar).map(|this| match chrome.edge {
+            Edge::Hairline => this.border_1().border_color(theme.border),
+            // A near-black card on a dark wallpaper has no outline of its
+            // own and its shadow does not show: a faint light edge keeps it.
+            Edge::None if theme.is_dark() => this.border_1().border_color(DARK_CARD_EDGE),
+            Edge::None => this,
+        }),
     }
 }
+
+/// The edge of a dark card over the wallpaper.
+const DARK_CARD_EDGE: Hsla = Hsla {
+    h: 0.,
+    s: 0.,
+    l: 1.,
+    a: 0.12,
+};
 
 /// The glass of a card, rounded as the card.
 fn lens_on<E: Styled>(this: E, chrome: &Chrome, theme: &Theme, lens: &LensStyle) -> E {
@@ -184,25 +229,64 @@ pub(in crate::ui) fn card_shadow(theme: &Theme) -> Vec<BoxShadow> {
 }
 
 /// The surface the hidden column peeks in on: kit's sheet surface (the
-/// sidebar fill with the overlay shadow), or nothing of its own where the
-/// slot inside draws the list card.
-pub(in crate::ui) fn peek_surface<E: Styled + FluentBuilder>(
+/// sidebar fill with the overlay shadow), or, where the slot inside draws
+/// the list card, a deeper shadow behind that card: the drawer stands over
+/// the chat, not beside it (Web K's sliding left column).
+pub(in crate::ui) fn peek_surface<E: Styled + ParentElement + FluentBuilder>(
     this: E,
     chrome: &Chrome,
     theme: &Theme,
 ) -> E {
     match chrome.metrics.clip {
         Clip::Square => this.bg(theme.sidebar).shadow_xl(),
-        Clip::Rounded => this,
+        Clip::Rounded => {
+            let gutter = px(chrome.metrics.gutter);
+            this.child(
+                div()
+                    .absolute()
+                    .top(gutter)
+                    .bottom(gutter)
+                    .left(gutter)
+                    .right_0()
+                    .rounded(card_in(chrome.metrics, theme))
+                    .shadow(drawer_shadow(theme)),
+            )
+        }
     }
 }
 
-/// The title strip's lower edge: the frame's line in Classic, none in
-/// Floating, where the cards sit under the strip on the wallpaper. Applied
-/// after the line, so it only ever takes it away; the strip keeps its fill.
+/// The held drawer's shadow: wider and darker than a card's.
+fn drawer_shadow(theme: &Theme) -> Vec<BoxShadow> {
+    let ink = if theme.is_dark() { 0.6 } else { 0.28 };
+    vec![BoxShadow {
+        color: hsla(0., 0., 0., ink),
+        offset: point(px(4.), px(8.)),
+        blur_radius: px(32.),
+        spread_radius: px(0.),
+        inset: false,
+    }]
+}
+
+/// The scrim over the chat behind the held drawer at `shown` of its
+/// slide: Floating's (Web K's dimmed chat behind the left column), none in
+/// Classic, whose sheet keeps its own shadow.
+pub(in crate::ui) fn drawer_scrim(chrome: &Chrome, shown: f32) -> Option<Hsla> {
+    match chrome.metrics.clip {
+        Clip::Square => None,
+        Clip::Rounded => Some(black().opacity(DRAWER_SCRIM * shown.clamp(0., 1.))),
+    }
+}
+
+/// How dark the drawer's scrim gets once the drawer is in.
+const DRAWER_SCRIM: f32 = 0.32;
+
+/// The title strip's fill and lower edge: the frame's in Classic; in
+/// Floating neither, so the window's wallpaper runs under the strip as it
+/// does under the cards. Applied after the frame's own, so it only ever
+/// takes them away.
 pub(in crate::ui) fn title_strip<E: Styled>(this: E, strip: TitleStrip) -> E {
     match strip {
         TitleStrip::Lined => this,
-        TitleStrip::Bare => this.border_b_0(),
+        TitleStrip::Bare => this.border_b_0().bg(transparent_black()),
     }
 }
