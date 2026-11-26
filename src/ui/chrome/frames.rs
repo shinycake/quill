@@ -372,6 +372,16 @@ pub(in crate::ui) fn drawer_scrim(chrome: &Chrome, shown: f32) -> Option<Hsla> {
 /// How dark the drawer's scrim gets once the drawer is in.
 const DRAWER_SCRIM: f32 = 0.32;
 
+/// The main window's "Quill" caption: Classic's label; in Floating none,
+/// as Web K's window has no name over the wallpaper. An empty element
+/// keeps its place, so the strip's buttons stay at its far end.
+pub(in crate::ui) fn app_caption(label: AnyElement, strip: Look) -> AnyElement {
+    match strip {
+        Look::Lines => label,
+        Look::Cards => div().into_any_element(),
+    }
+}
+
 /// The title strip's fill and lower edge: the frame's in Classic; in
 /// Floating neither, so the window's wallpaper runs under the strip as it
 /// does under the cards. Applied after the frame's own, so it only ever
