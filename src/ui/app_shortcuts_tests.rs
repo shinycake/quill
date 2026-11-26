@@ -18,6 +18,13 @@ use gpui_kit::{
 };
 use quill::layout_style::LayoutStyle;
 
+/// ⌘, on macOS, Ctrl+, elsewhere.
+const SETTINGS_CHORD: &str = if cfg!(target_os = "macos") {
+    "cmd-,"
+} else {
+    "ctrl-,"
+};
+
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
     for _ in 0..3 {
@@ -105,7 +112,7 @@ fn settings_closed_after_a_click(
     let before = reachable(vcx, &actions);
     assert!(before.contains(&"quill_ui::OpenSettings"), "{before:?}");
 
-    vcx.simulate_keystrokes("cmd-,");
+    vcx.simulate_keystrokes(SETTINGS_CHORD);
     frames(vcx);
     assert!(settings_open(&app, vcx));
     let page = vcx.debug_bounds("settings-window").expect("settings drawn");
@@ -118,7 +125,7 @@ fn settings_closed_after_a_click(
     frames(vcx);
 
     assert_eq!(reachable(vcx, &actions), before);
-    vcx.simulate_keystrokes("cmd-,");
+    vcx.simulate_keystrokes(SETTINGS_CHORD);
     frames(vcx);
     assert!(settings_open(&app, vcx), "⌘, after Settings closed");
     before
