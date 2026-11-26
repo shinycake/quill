@@ -78,8 +78,19 @@ impl QuillApp {
                             .child(tr(caption(look))),
                     ),
             )
-            .child(div().flex_none().child(control))
+            .child(div().flex_none().child(control));
+        // The dials show while glass does: a paused look has its caption.
+        let tuner = look
+            .is_glass()
+            .then(|| self.glass_tuner_panel(cx))
+            .flatten();
+        let section = div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(row)
+            .children(tuner)
             .into_any_element();
-        self.setting_spot(&["appearance.glass_effects"], row, cx)
+        self.setting_spot(&["appearance.glass_effects"], section, cx)
     }
 }

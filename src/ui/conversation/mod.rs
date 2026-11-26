@@ -440,7 +440,7 @@ pub(super) fn date_pill_button(label: &str, cx: &mut Context<QuillApp>) -> State
 
 /// The day pill itself, shared by the inline separators and the floating
 /// date shown while scrolling.
-pub(super) fn pill_label(label: &str, cx: &App) -> Stateful<Div> {
+pub(in crate::ui) fn pill_label(label: &str, cx: &App) -> Stateful<Div> {
     div()
         .id(SharedString::from(format!("day-{label}")))
         .px_3()

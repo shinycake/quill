@@ -96,6 +96,7 @@ impl QuillApp {
                 )),
             Page::Appearance => {
                 self.download_wallpaper_files();
+                self.sync_glass_tuner(cx);
                 if self.preferences.system_accent.is_unread() {
                     self.refresh_system_accent(cx);
                 }

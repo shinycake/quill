@@ -424,6 +424,26 @@ crate::ui::screenshot_demo::register_demos![
     ),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-appearance")
         .setup(|app, _, cx| app.demo_settings(Page::Appearance, cx)),
+    // Glass effects on, landed on its tuning panel. QUILL_DEMO_GLASS_DIALS
+    // ("bend=120,frost=20", stored steps) moves dials off the shipped look.
+    crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-glass-tuning").setup(
+        |app, _, cx| {
+            let tuning = crate::ui::glass::tuner::demo_dials(
+                std::env::var("QUILL_DEMO_GLASS_DIALS")
+                    .as_deref()
+                    .unwrap_or(""),
+            );
+            app.set_appearance(cx, |a| {
+                a.material = quill::glass::Material::Glass;
+                a.glass_tuning = tuning;
+            });
+            app.demo_settings(Page::Appearance, cx);
+            app.settings.arrival = Some(Arrival::new(
+                "appearance.glass_effects",
+                cx.background_executor().now(),
+            ));
+        }
+    ),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-system")
         .setup(|app, _, cx| app.demo_settings(Page::System, cx)),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-power")

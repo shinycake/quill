@@ -251,6 +251,9 @@ pub(crate) struct PreferencesUi {
     pub(super) emoji_style: super::emoji_style_ui::EmojiStyleUi,
     /// Settings → General → the Send To menu switch (`ui/appearance/send_to_menu_section.rs`).
     pub(super) send_to: super::appearance::SendToMenu,
+    /// Settings → Appearance → Glass effects: the tuning panel's sliders
+    /// (`ui/glass/tuner.rs`).
+    pub(super) glass_tuner: super::glass::tuner::GlassTuner,
 }
 
 impl PreferencesUi {
@@ -282,6 +285,7 @@ impl PreferencesUi {
             advanced: super::advanced_state::AdvancedUi::new(cx, demo.is_none()),
             emoji_style: Default::default(),
             send_to: Default::default(),
+            glass_tuner: Default::default(),
         }
     }
 }
