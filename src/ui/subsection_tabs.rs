@@ -186,9 +186,11 @@ impl QuillApp {
     /// How much of the pane's left the tab column takes when it is a card
     /// (Floating): the pills centre in the rest.
     pub(super) fn left_tabs_reserved(&self) -> f32 {
-        let gutter = self.chrome_metrics().gutter;
+        let Some(gutter) = self.card_gutter() else {
+            return 0.;
+        };
         self.subsection_tabs_snapshot()
-            .filter(|t| t.mode == SubsectionTabsMode::Left && gutter > 0.)
+            .filter(|t| t.mode == SubsectionTabsMode::Left)
             .map_or(0., |_| COLUMN_WIDTH + gutter)
     }
 

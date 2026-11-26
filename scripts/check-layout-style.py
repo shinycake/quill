@@ -35,6 +35,13 @@ USE = re.compile(r"\b(" + "|".join(NAMES) + r")::")
 # are common, so they count only in a file that reaches `layout_style`.
 ONLY_CHOICE = re.compile(r"\b(LayoutStyle)::")
 
+# A layout number compared with zero stands in for "is Floating": a
+# gutter, divider, radius or gap that is 0 only in Classic. Read the
+# number, or ask a chrome helper for a value.
+SENTINEL = re.compile(
+    r"(\b(?:gutter|divider|bar_gap)\b|metrics(?:\(\))?\.radius)\s*[<>]=?\s*0"
+)
+
 # Files and folders that decide the look (paths relative to the repo root).
 ALLOW = [
     "src/layout_style.rs",
@@ -42,15 +49,9 @@ ALLOW = [
     "src/density.rs",
     "src/ui/chrome/",
     "src/ui/shell_layout/",
-    "src/ui/app_slice.rs",
     "src/ui/app_slice/",
-    "src/ui/conversation/conversation_part1.rs",
-    "src/ui/conversation/top_bars.rs",
     "src/ui/chat_row/row_ink.rs",
     "src/ui/appearance/",
-    "src/ui/wallpaper.rs",
-    "src/ui/sidebar_reveal.rs",
-    "src/ui/panel_reveal.rs",
     "src/ui/chat_list/folder_slide.rs",
 ]
 
@@ -83,6 +84,9 @@ def main():
             m = pattern.search(code)
             if m:
                 hits.append(f"{rel}:{n}: names {m.group(1)}::")
+            m = SENTINEL.search(code)
+            if m:
+                hits.append(f"{rel}:{n}: compares {m.group(1)} with 0")
     if hits:
         print("Feature code asks which layout is on. Use chrome().metrics or a")
         print("frame helper in src/ui/chrome/ instead (docs/decisions/floating-layout.md):")

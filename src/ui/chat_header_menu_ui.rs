@@ -123,11 +123,11 @@ impl QuillApp {
                 })
             })
             .unwrap_or_default();
-        let floating = self.menus_in_cards();
-        let anchor = match floating {
-            true => Anchor::TopRight,
-            false => Anchor::TopLeft,
-        };
+        let anchor = self.header_menu_anchor();
+        let icons = entries
+            .iter()
+            .map(|entry| self.header_menu_icon(entry_icon(*entry, muted, archived)))
+            .collect::<Vec<_>>();
         Button::new("chat-more-menu")
             .icon(gpui_kit::assets::IconName::EllipsisVertical)
             .ghost()
@@ -140,19 +140,16 @@ impl QuillApp {
                     );
                 }
             })
-            // Floating: it opens under the button towards the card's
-            // inside, so it never reaches past the header card's right end,
-            // and its rows carry icons as the other menus' do.
             .dropdown_menu_with_anchor(anchor, move |mut menu, _, _| {
-                for entry in &entries {
+                for (entry, icon) in entries.iter().zip(icons.iter().copied()) {
                     let (label, action) =
                         entry_label(*entry, muted, archived, view_toggle, is_secret);
                     let owner = owner.clone();
                     let entry = *entry;
                     let item = PopupMenuItem::new(label);
-                    let item = match floating {
-                        true => item.icon(entry_icon(entry, muted, archived)),
-                        false => item,
+                    let item = match icon {
+                        Some(icon) => item.icon(icon),
+                        None => item,
                     };
                     menu = menu.item(item.on_click(move |_, window, cx| {
                         let _ = owner.update(cx, |this, cx| {

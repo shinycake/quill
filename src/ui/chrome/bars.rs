@@ -42,6 +42,9 @@ pub(in crate::ui) fn bar<E: Styled>(
     }
 }
 
+/// Extra room under the pinned bar at the foot of Floating's header card.
+const PINNED_CARD_FOOT: f32 = 4.;
+
 /// How far a tinted bar sits in from its card's edge.
 const TINT_INSET: f32 = 6.;
 
@@ -145,6 +148,19 @@ impl QuillApp {
     ) -> E {
         let inset = px(self.density().header_inset_x);
         strip(this, at, inset, self.chrome_metrics(), cx.theme())
+    }
+
+    /// The pinned bar, the header card's last row: in Floating its stripe
+    /// starts where the card's hairline does, and it keeps clear of the
+    /// card's round lower corners. As it is in Classic.
+    pub(in crate::ui) fn pinned_bar_frame<E: Styled>(&self, this: E) -> E {
+        let m = self.density();
+        match self.look() {
+            Look::Lines => this,
+            Look::Cards => this
+                .pl(px(m.header_inset_x))
+                .pb(px(m.pinned_inset_y + PINNED_CARD_FOOT)),
+        }
     }
 
     /// [`stack_card`] in this window.

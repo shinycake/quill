@@ -3,8 +3,9 @@
 //! back button for one-column windows.
 
 use super::{
-    DOWNLOADS_PANEL_WIDTH, ForumPane, INFO_PANEL_WIDTH, PanelPane, SHARED_MEDIA_PANEL_WIDTH,
-    ShellInput, ShellLayout, chat_pane_width, max_list_width, shell_layout,
+    Columns, DOWNLOADS_PANEL_WIDTH, ForumPane, INFO_PANEL_WIDTH, PanelPane,
+    SHARED_MEDIA_PANEL_WIDTH, ShellInput, ShellLayout, chat_pane_width, max_list_width,
+    shell_layout,
 };
 use crate::ui::app::{PaneMode, QuillApp};
 use crate::ui::navigation::SidebarResize;
@@ -54,9 +55,7 @@ impl QuillApp {
                 1.
             },
             panels_shown: self.frame.panels.shown(self.frame.panels.now()),
-            gutter: metrics.gutter,
-            chat_column: metrics.chat_column,
-            drawer_to: metrics.drawer_to,
+            columns: Columns::of(metrics),
         }
     }
 
@@ -86,7 +85,7 @@ impl QuillApp {
             input.width,
             input.rail,
             forum_beside,
-            input.gutter,
+            input.columns.gutter(),
         ))
     }
 
@@ -183,10 +182,10 @@ impl QuillApp {
             .flex()
             .h_full()
             .children(panels);
-        let gutter = layout.gutter;
+        let gutter = layout.gutter();
         let panels = match layout.panels {
             PanelPane::Hidden => None,
-            PanelPane::Column(width) if gutter > 0. => {
+            PanelPane::Column(width) if matches!(layout.columns, Columns::Cards { .. }) => {
                 let column = self.panel_card_column(row, width, gutter, cx);
                 Some(if layout.panel_column() >= width + gutter {
                     column.into_any_element()

@@ -181,7 +181,7 @@ impl QuillApp {
     /// (the list keeps its width and slides out to the left), or gone.
     pub(super) fn docked_sidebar(&self, layout: &ShellLayout, cx: &App) -> Option<AnyElement> {
         let rail = self.folder_rail_width();
-        let full = layout.gutter + layout.list? + rail;
+        let full = layout.gutter() + layout.list? + rail;
         let visible = layout.list_column(rail);
         if visible <= 0. {
             return None;
@@ -220,7 +220,7 @@ impl QuillApp {
         if !self.sidebar_hideable(layout) || !layout.list_column_hidden() {
             return None;
         }
-        let full = layout.gutter + layout.list? + self.folder_rail_width();
+        let full = layout.gutter() + layout.list? + self.folder_rail_width();
         // A drawer with no chat open is shown: there is nothing else to see.
         let empty_drawer =
             layout.drawer() && self.session().is_none_or(|s| s.open_chat_id().is_none());

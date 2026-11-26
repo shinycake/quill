@@ -8,8 +8,6 @@ use crate::ui::surface_reveal::{self, PinnedShown};
 use quill::ids::AccountChat;
 use quill::lang::{keys, tr, tr_with, trn};
 
-/// Extra room under the pinned bar at the foot of Floating's header card.
-const PINNED_CARD_FOOT: f32 = 4.;
 /// `st::msgReplyBarSkip`: how far the swapped text slides.
 const PINNED_SWAP_SHIFT: f32 = 10.;
 
@@ -273,13 +271,7 @@ impl QuillApp {
                 .py(px(m.pinned_inset_y))
                 .bg(bg_canvas())
                 .map(|this| self.bar_frame(this, BarLine::Under, cx))
-                // In Floating's header card the stripe starts where the
-                // card's hairline does, and the last row keeps clear of
-                // the card's round lower corners.
-                .when(self.bars_in_card(), |this| {
-                    this.pl(px(m.header_inset_x))
-                        .pb(px(m.pinned_inset_y + PINNED_CARD_FOOT))
-                })
+                .map(|this| self.pinned_bar_frame(this))
                 .child(
                     div()
                         .id("pinned-message-jump")

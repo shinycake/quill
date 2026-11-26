@@ -43,6 +43,9 @@ pub(in crate::ui) enum PageSwitch {
     Cross,
 }
 
+/// How strongly the message under an open menu is tinted.
+const MENU_TARGET_TINT: f32 = 0.35;
+
 /// Web K's composer height glide.
 const COMPOSER_GLIDE_MS: u16 = 250;
 
@@ -92,12 +95,24 @@ impl QuillApp {
         metrics_of(self.look())
     }
 
-    /// The window is in the drawer band (Floating, 601 to 925 wide).
-    pub(in crate::ui) fn in_drawer_band(&self) -> bool {
+    /// The room around this window's cards; `None` where its columns are
+    /// lined and nothing stands apart.
+    pub(in crate::ui) fn card_gutter(&self) -> Option<f32> {
+        match crate::ui::shell_layout::Columns::of(self.chrome_metrics()) {
+            crate::ui::shell_layout::Columns::Lined => None,
+            crate::ui::shell_layout::Columns::Cards { gutter, .. } => Some(gutter),
+        }
+    }
+
+    /// Where this window's width puts the chat list: a drawer in
+    /// Floating's band of 601 to 925, beside the chat otherwise. It needs
+    /// no other column's width, so the folder rail can ask it.
+    pub(in crate::ui) fn list_dock_by_width(&self) -> crate::ui::shell_layout::ListDock {
         let width = f32::from(self.slices.window.width.get());
-        self.chrome_metrics()
-            .drawer_to
-            .is_some_and(|to| width <= to)
+        match crate::ui::shell_layout::Columns::of(self.chrome_metrics()).drawer_at(width) {
+            true => crate::ui::shell_layout::ListDock::Drawer,
+            false => crate::ui::shell_layout::ListDock::Beside,
+        }
     }
 
     /// The wallpaper is the window's, under the cards (Floating), not the
@@ -207,35 +222,50 @@ impl QuillApp {
             .menu
             .row()
             .is_some_and(|menu| menu.chat_id == chat);
-        match target && self.look() == Look::Cards {
-            true => fill.blend(crate::ui::pressable::hover_fill(cx.theme())),
-            false => fill,
+        match (self.look(), target) {
+            (Look::Cards, true) => fill.blend(crate::ui::pressable::hover_fill(cx.theme())),
+            (Look::Cards, false) | (Look::Lines, _) => fill,
         }
     }
 
-    /// The bars sit in a card over the history (Floating's header card).
-    pub(in crate::ui) fn bars_in_card(&self) -> bool {
-        self.look() == Look::Cards
+    /// Where the chat header's ⋮ menu opens from its button: towards the
+    /// card's inside in Floating, so it stays in the header card.
+    pub(in crate::ui) fn header_menu_anchor(&self) -> gpui_kit::Anchor {
+        match self.look() {
+            Look::Lines => gpui_kit::Anchor::TopLeft,
+            Look::Cards => gpui_kit::Anchor::TopRight,
+        }
     }
 
-    /// Menus open over cards (Floating): the header's ⋮ menu opens from
-    /// its button's right edge, inside the card, and carries icons.
-    pub(in crate::ui) fn menus_in_cards(&self) -> bool {
-        self.look() == Look::Cards
+    /// The icon a header ⋮ menu entry shows: its own over cards, as the
+    /// row and message menus have; none in Classic.
+    pub(in crate::ui) fn header_menu_icon(
+        &self,
+        icon: gpui_kit::assets::IconName,
+    ) -> Option<gpui_kit::assets::IconName> {
+        match self.look() {
+            Look::Lines => None,
+            Look::Cards => Some(icon),
+        }
     }
 
-    /// Whether Floating marks this message: its menu is open.
-    pub(in crate::ui) fn menu_on_row(
+    /// The tint Floating lays on the message its menu is open on (Web K
+    /// marks it, so the menu shows whose it is); none in Classic.
+    pub(in crate::ui) fn menu_target_tint(
         &self,
         chat: quill::ids::ChatId,
         message: quill::ids::MessageId,
-    ) -> bool {
-        self.look() == Look::Cards
-            && self
-                .message_ui
-                .menu
-                .open()
-                .is_some_and(|open| open.at.chat_id == chat && open.at.message_id == message)
+        cx: &App,
+    ) -> Option<Hsla> {
+        let target = self
+            .message_ui
+            .menu
+            .open()
+            .is_some_and(|open| open.at.chat_id == chat && open.at.message_id == message);
+        match (self.look(), target) {
+            (Look::Cards, true) => Some(cx.theme().selection.opacity(MENU_TARGET_TINT)),
+            (Look::Cards, false) | (Look::Lines, _) => None,
+        }
     }
 
     /// The header and the bars float over the history in their own slice.

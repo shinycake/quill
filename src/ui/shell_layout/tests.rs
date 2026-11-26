@@ -11,9 +11,7 @@ fn input(width: f32) -> ShellInput {
         panels: None,
         docked: 1.,
         panels_shown: 1.,
-        gutter: 0.,
-        chat_column: None,
-        drawer_to: None,
+        columns: Columns::Lined,
     }
 }
 
@@ -409,11 +407,8 @@ fn a_panel_filling_the_chat_place_does_not_slide() {
 // column's room, the drawer band.
 
 fn floating(width: f32) -> ShellInput {
-    let metrics = quill::layout_style::FLOATING;
     ShellInput {
-        gutter: metrics.gutter,
-        chat_column: metrics.chat_column,
-        drawer_to: metrics.drawer_to,
+        columns: Columns::of(&quill::layout_style::FLOATING),
         ..input(width)
     }
 }

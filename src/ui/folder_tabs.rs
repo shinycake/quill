@@ -287,7 +287,7 @@ impl QuillApp {
         self.appearance.folder_tabs_view == FolderTabsView::Left
             && self.pane_mode() == super::app::PaneMode::Ready
             // Web K hides its folder column while the list is a drawer.
-            && !self.in_drawer_band()
+            && self.list_dock_by_width() == super::shell_layout::ListDock::Beside
     }
 
     /// Width the column takes from the chat-list column (0 when the tabs
