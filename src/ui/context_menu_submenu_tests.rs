@@ -422,3 +422,43 @@ fn the_first_submenu_row_is_the_first_live_one(cx: &mut TestAppContext) {
         assert_eq!(items.first_submenu_key(row_key(45)), None, "other parent");
     });
 }
+
+/// In Floating the chat menu clips its rows to its rounded corners; the
+/// submenu beside it is still drawn and takes the pointer: clicking "Mute
+/// forever" in it mutes the chat.
+#[gpui_kit::test]
+fn a_floating_menus_submenu_is_drawn_and_clickable(cx: &mut TestAppContext) {
+    let _prefs = crate::ui::appearance::own_appearance_prefs("quill-floating-submenu");
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.set_appearance(cx, |appearance| {
+            appearance.layout = quill::layout_style::LayoutStyle::Floating;
+        });
+    });
+    settle(vcx);
+    focus_mute_row(&app, vcx);
+    vcx.simulate_keystrokes("right");
+    settle(vcx);
+    assert_eq!(submenu(&app, vcx), Some(ChatMenuSubmenu::Mute));
+    let forever = tr(keys::MUTE_MENU_DURATION_FOREVER).to_string();
+    let center = vcx.update(|window, _| {
+        gpui_base::test_support::snapshots(window)
+            .into_iter()
+            .find(|row| {
+                row.role() == Some(gpui_kit::Role::MenuItem)
+                    && row.visible()
+                    && row.label() == Some(forever.as_str())
+            })
+            .map(|row| row.bounds().center())
+    });
+    let center = center.expect("the submenu draws Mute forever");
+    vcx.simulate_click(center, gpui_kit::Modifiers::none());
+    settle(vcx);
+    let muted = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|session| session.chats.get(&11))
+            .is_some_and(|chat| chat.is_muted())
+    });
+    assert!(muted, "the click reached the submenu row");
+}

@@ -329,6 +329,9 @@
 "qll_prefs_glass_color_split" = "Color split";
 "qll_prefs_glass_sample_in" = "See everyone at 6. Bring snacks!";
 "qll_prefs_glass_sample_out" = "Perfect, packing the crampons just in case.";
+"qll_prefs_glass_scene_line_1" = "The quick brown fox jumps over the lazy dog 0123456789";
+"qll_prefs_glass_scene_line_2" = "Sphinx of black quartz, judge my vow. Pack my box";
+"qll_prefs_glass_scene_line_3" = "with five dozen liquor jugs. How vexingly quick!";
 "qll_prefs_composer" = "Composer";
 "qll_prefs_confirm_before_calling" = "Confirm before calling";
 "qll_prefs_confirm_new_passcode" = "Confirm new passcode";

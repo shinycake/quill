@@ -421,15 +421,26 @@ impl TabVariant {
         }
     }
 
-    pub(super) fn inner_radius(&self, size: Size, cx: &App) -> Pixels {
+    /// QUILL: how far inside a segmented bar's edge its selected pill sits,
+    /// on every side: the bar's horizontal padding, and half of what the
+    /// pill's height leaves of the bar's.
+    pub(super) fn segment_inset(size: Size) -> Pixels {
+        match size {
+            Size::XSmall => px(2.),
+            Size::Small => px(3.),
+            _ => px(4.),
+        }
+    }
+
+    /// The radius of a segmented bar's pill (its selection and hover),
+    /// concentric with the bar's `bar_radius`: that radius less the inset
+    /// the pill sits at (`concentric_radius`). Other variants draw none.
+    pub(super) fn inner_radius(&self, size: Size, bar_radius: Pixels) -> Pixels {
         match self {
-            // The inset the active pill sits at, taken off the bar's own radius
-            // so the two curves stay concentric. Floored at zero: a square bar
-            // has nothing to inset from.
-            TabVariant::Segmented => match size {
-                Size::Large => (self.tab_bar_radius(size, cx) - px(3.)).max(px(0.)),
-                _ => (self.tab_bar_radius(size, cx) - px(2.)).max(px(0.)),
-            },
+            TabVariant::Segmented => crate::popover_shape::concentric_radius(
+                bar_radius,
+                Self::segment_inset(size),
+            ),
             _ => px(0.),
         }
     }
@@ -558,6 +569,10 @@ pub struct Tab {
     /// QUILL (glass effects): the bar draws its sliding selection as glass,
     /// so the selected label keeps the theme's text colour.
     pub(super) glass_selection: bool,
+    /// QUILL: the corner radius of the [`super::TabBar`] holding this tab,
+    /// when the bar was given its own (`TabBar::bar_radius`); the segmented
+    /// pill keeps concentric with it.
+    pub(super) bar_radius: Option<Pixels>,
     /// Whether a [`TabVariant::Folder`] tab draws the divider after it.
     pub(super) separator: bool,
     /// Whether the [`super::TabBar`] reports the pointer over this tab. Kept
@@ -613,6 +628,7 @@ impl Default for Tab {
             indicator_ready: true,
             indicator_epoch: 0,
             glass_selection: false,
+            bar_radius: None,
             separator: false,
             hovered: false,
             prefix: None,
@@ -814,7 +830,10 @@ impl RenderOnce for Tab {
             &normal_style
         };
         let radius = self.variant.radius(self.size, cx);
-        let inner_radius = self.variant.inner_radius(self.size, cx);
+        let bar_radius = self
+            .bar_radius
+            .unwrap_or_else(|| self.variant.tab_bar_radius(self.size, cx));
+        let inner_radius = self.variant.inner_radius(self.size, bar_radius);
         let inner_paddings = self.variant.inner_paddings(self.size);
         // QUILL (Pill with a prefix or suffix): the pill pads its whole
         // content, so an icon or a counter sits inside the capsule with the

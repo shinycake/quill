@@ -63,6 +63,8 @@ pub struct TabBar {
     on_click: Option<Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>>,
     /// QUILL (glass effects): whether the segmented selection may be glass.
     glass_selection: bool,
+    /// QUILL: the bar's own corner radius, in place of the theme's.
+    bar_radius: Option<Pixels>,
 }
 
 impl TabBar {
@@ -81,6 +83,7 @@ impl TabBar {
             size: Size::default(),
             last_empty_space: div().w_3().into_any_element(),
             glass_selection: false,
+            bar_radius: None,
             selected_index: None,
             on_click: None,
             menu: false,
@@ -117,6 +120,19 @@ impl TabBar {
     pub fn glass_selection(mut self) -> Self {
         self.glass_selection = true;
         self
+    }
+
+    /// QUILL: round a segmented bar with `radius` instead of the theme's;
+    /// its selected pill follows, concentric with it.
+    pub fn bar_radius(mut self, radius: Pixels) -> Self {
+        self.bar_radius = Some(radius);
+        self
+    }
+
+    /// The bar's corner radius: its own, or the variant's for its size.
+    fn corner_radius(&self, cx: &App) -> Pixels {
+        self.bar_radius
+            .unwrap_or_else(|| self.variant.tab_bar_radius(self.size, cx))
     }
 
     /// Set the Tab variant to Underline, all children will inherit the variant.
@@ -275,7 +291,7 @@ impl TabBar {
         let variant = self.variant;
         let size = self.size;
         let inner_height = variant.inner_height(size);
-        let inner_radius = variant.inner_radius(size, cx);
+        let inner_radius = variant.inner_radius(size, self.corner_radius(cx));
 
         // QUILL (glass effects): the segmented selection can be glass that
         // clears while it slides (`popover_glass`).
@@ -421,6 +437,7 @@ impl Sizable for TabBar {
 
 impl RenderOnce for TabBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let corner_radius = self.corner_radius(cx);
         let default_gap = match self.size {
             Size::Small | Size::XSmall => px(8.),
             Size::Large => px(16.),
@@ -440,11 +457,7 @@ impl RenderOnce for TabBar {
                 (cx.theme().transparent.into(), padding, px(4.))
             }
             TabVariant::Segmented => {
-                let padding_x = match self.size {
-                    Size::XSmall => px(2.),
-                    Size::Small => px(3.),
-                    _ => px(4.),
-                };
+                let padding_x = TabVariant::segment_inset(self.size);
                 let padding = Edges {
                     left: padding_x,
                     right: padding_x,
@@ -579,6 +592,7 @@ impl RenderOnce for TabBar {
             tab.indicator_ready = indicator_ready;
             tab.indicator_epoch = indicator_epoch;
             tab.glass_selection = glass_selection;
+            tab.bar_radius = self.bar_radius;
             tab.hovered = hovered_ix == Some(ix);
             tab.separator = self.variant == TabVariant::Folder
                 && ix + 1 < num_tabs
@@ -732,7 +746,7 @@ impl RenderOnce for TabBar {
                     )
                 },
             )
-            .rounded(self.variant.tab_bar_radius(self.size, cx))
+            .rounded(corner_radius)
             .paddings(paddings)
             .refine_style(&self.style)
             .when_some(self.prefix, |this, prefix| this.child(prefix))

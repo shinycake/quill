@@ -498,6 +498,15 @@ chat window under 601 wide draws Classic menus while the main window
 draws Floating ones. Glass menus take the radius and the clip; the lens
 keeps its own rim and shadow.
 
+The clip cut off submenus (2026-11-27): Quill's hand-built menus (the chat
+row's, the collapsed community row's, the search's top person) draw their
+submenu as a child of its parent row, beside the menu, so the menu's
+rounded clip hid all of it and its hit test with it. `submenu_panel`
+(`src/ui/menu_surface.rs`) now draws the panel deferred, as the kit's
+`PopupMenu` draws its submenus: a deferred draw inherits no content mask.
+`a_floating_menus_submenu_is_drawn_and_clickable` opens the Mute submenu
+in Floating and clicks a row in it.
+
 ## Menus pop (step 11a)
 
 Floating menus open as `.btn-menu` does: from 0.8 scale and clear to the

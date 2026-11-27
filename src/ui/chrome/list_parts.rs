@@ -4,6 +4,7 @@
 
 use gpui_kit::Styled;
 use gpui_kit::component::tab::TabBar;
+use gpui_kit::component::theme::Theme;
 use quill::layout_style::{ChromeMetrics, Look};
 
 /// The search field: Classic's field, or a pill.
@@ -20,6 +21,16 @@ pub(in crate::ui) fn folder_tabs(bar: TabBar, metrics: &ChromeMetrics) -> TabBar
     match folder_tabs_pill(metrics) {
         false => bar.underline(),
         true => bar.pill().glass_selection(),
+    }
+}
+
+/// The Chats / Contacts / Calls bar (a segmented `TabBar`): Classic's
+/// rounded rectangle, or a capsule like Floating's search field and folder
+/// pills. The kit keeps its selected pill concentric with either.
+pub(in crate::ui) fn segmented_tabs(bar: TabBar, metrics: &ChromeMetrics, theme: &Theme) -> TabBar {
+    match metrics.look {
+        Look::Lines => bar,
+        Look::Cards => bar.bar_radius(theme.radius_full()),
     }
 }
 
