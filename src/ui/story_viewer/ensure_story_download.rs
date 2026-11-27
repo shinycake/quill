@@ -13,8 +13,14 @@ impl QuillApp {
             return;
         };
         let roots = self.media_display_roots();
+        // A photo story always wants its largest size: a smaller one being
+        // local (the story list's preview) would leave the viewer on it.
+        let wanted: &[FileId] = match item.kind {
+            StoryViewerKind::Photo => std::slice::from_ref(&item.download_file_id),
+            _ => &item.display_file_ids,
+        };
         let local = self.session().is_some_and(|session| {
-            item.display_file_ids.iter().any(|id| {
+            wanted.iter().any(|id| {
                 session
                     .media
                     .files

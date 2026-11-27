@@ -616,14 +616,23 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
     let _ = std::fs::remove_dir_all(&demo_root);
     quill::settings::use_isolated_app_root(demo_root.clone());
     // `QUILL_DEMO_THEME=dark` captures any fixture in the dark theme (the
-    // default follows the system appearance).
+    // default follows the system appearance); `QUILL_DEMO_DENSITY=compact`
+    // in Compact mode.
+    let mut prefs = serde_json::Map::new();
     if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("dark") {
+        prefs.insert("theme".into(), "dark".into());
+        prefs.insert("auto_night".into(), "off".into());
+    }
+    if std::env::var("QUILL_DEMO_DENSITY").as_deref() == Ok("compact") {
+        prefs.insert("density".into(), "compact".into());
+    }
+    if !prefs.is_empty() {
         let paths =
             quill::settings::AccountPaths::for_root(&demo_root, &quill::ids::AccountKey::primary());
         let _ = std::fs::create_dir_all(&paths.root);
         let _ = std::fs::write(
             paths.root.join("appearance_prefs.json"),
-            br#"{"theme":"dark","auto_night":"off"}"#,
+            serde_json::Value::Object(prefs).to_string(),
         );
     }
     let marker = out_dir.join(format!(".quill-ready-{}", kind.kind()));

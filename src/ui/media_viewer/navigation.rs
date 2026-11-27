@@ -510,8 +510,14 @@ impl QuillApp {
             return;
         }
         let roots = self.media_display_roots();
+        // A photo always wants its largest size: the chat bubble already
+        // downloaded a smaller one, and the viewer would stay on it.
+        let wanted: &[FileId] = match item.kind {
+            MediaViewerKind::Photo => std::slice::from_ref(&item.download_file_id),
+            _ => &item.display_file_ids,
+        };
         let local = self.session().is_some_and(|session| {
-            item.display_file_ids.iter().any(|id| {
+            wanted.iter().any(|id| {
                 session
                     .media
                     .files
@@ -595,3 +601,8 @@ pub(super) mod wheel_ui_tests;
 #[cfg(feature = "demo-capture")]
 #[path = "zoom_ui_tests.rs"]
 mod zoom_ui_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "viewer_download_tests.rs"]
+mod viewer_download_tests;
