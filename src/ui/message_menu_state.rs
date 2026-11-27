@@ -39,6 +39,18 @@ pub(super) struct MenuSelection {
     pub(super) nth: usize,
 }
 
+/// What Forward, Select and Delete act on when the message is part of an
+/// album (tdesktop's `asGroup`, false over a `GroupPart`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum MenuScope {
+    /// The menu opened anywhere but on one of the album's tiles: the
+    /// whole album.
+    #[default]
+    WholeAlbum,
+    /// The menu opened on one tile: that message alone.
+    OneItem,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct OpenMenu {
     pub(super) at: MessageMenuState,
@@ -56,6 +68,7 @@ pub(super) struct OpenMenu {
     /// (`drain_wanted_reactor_tab`), and goes with the menu if that never
     /// happens.
     pub(super) first_tab: Option<ReactionType>,
+    pub(super) scope: MenuScope,
 }
 
 impl ChatOverlay {
@@ -94,6 +107,7 @@ impl ChatOverlay {
             page: MessageMenuPage::Main,
             reactions_expanded: false,
             first_tab: None,
+            scope: MenuScope::WholeAlbum,
         });
     }
 

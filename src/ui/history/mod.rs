@@ -191,6 +191,7 @@ pub(super) fn album_history_row(
     // Revealed spoilers: tiles keep their cover until clicked.
     revealed: &crate::ui::message_text::revealed::Revealed,
     corner: CornerActions,
+    select: &AlbumSelect,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let Some(first) = messages.first() else {
@@ -304,6 +305,7 @@ pub(super) fn album_history_row(
                 super::spoiler_fx::media_key(message.chat_id, message.id),
                 revealed,
             ),
+            Some(select.tile(message.id)),
             cx,
         );
         mosaic = mosaic.child(tile);
@@ -581,7 +583,7 @@ pub(in crate::ui) mod text_measure;
 use reaction_chip_row::album_reactions_owner;
 pub(in crate::ui) use reaction_chip_row::{ChipPlace, message_reactions_row};
 mod album_tile;
-pub(in crate::ui) use album_tile::album_tile;
+pub(in crate::ui) use album_tile::{AlbumSelect, album_tile};
 mod community_rows;
 mod fast_share;
 mod file_album;

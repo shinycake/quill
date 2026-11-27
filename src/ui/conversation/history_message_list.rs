@@ -398,6 +398,7 @@ impl QuillApp {
         let top_probe = self.history.scroll_top_probe.clone();
         let view_probe = self.history.scroll_view_probe.clone();
         let hit_rows = self.history.hit_rows.clone();
+        let tile_hits = self.history.tile_hits.clone();
         let row_hover = self.history.row_hover.clone();
         let painted_ids = self.history.painted_ids.clone();
         let seen = self.history.seen.clone();
@@ -618,6 +619,7 @@ impl QuillApp {
                         let mut rows = std::mem::take(&mut *slot);
                         drop(slot);
                         reveal_probe.note(&rows, count, bounds.top());
+                        tile_hits.frame_painted();
                         if let Ok(mut hits) = hit_rows.try_borrow_mut() {
                             *hits = rows.iter().map(|(ix, row, _)| (*ix, *row)).collect();
                         }
