@@ -24,7 +24,8 @@ use crate::{
     MouseButton, MouseClickEvent, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
     MousePressureEvent, MouseUpEvent, OngoingScroll, Overflow, ParentElement, PinchEvent, Pixels,
     Point, Render, ScrollEvent, SharedString, Size, Style, StyleRefinement, Styled, Task,
-    TooltipId, TouchPhase, Visibility, Window, WindowControlArea, point, px, size,
+    TooltipId, TouchPhase, Visibility, WheelGlider, Window, WindowControlArea, point, px, size,
+    wheel_notch_glides,
 };
 use collections::HashMap;
 use gpui_util::ResultExt;
@@ -2281,6 +2282,8 @@ pub struct Interactivity {
     pub(crate) scroll_anchor: Option<ScrollAnchor>,
     pub(crate) scroll_offset: Option<Rc<RefCell<Point<Pixels>>>>,
     pub(crate) ongoing_scroll: Option<Rc<RefCell<OngoingScroll>>>,
+    /// Quill: the wheel glide of the scroll offset above.
+    pub(crate) wheel_glider: Option<WheelGlider>,
     pub(crate) group: Option<SharedString>,
     /// The base style of the element, before any modifications are applied
     /// by focus, active, etc.
@@ -2408,6 +2411,7 @@ impl Interactivity {
                     let scroll_handle_state = scroll_handle.0.borrow();
                     self.scroll_offset = Some(scroll_handle_state.offset.clone());
                     self.ongoing_scroll = Some(scroll_handle_state.ongoing_scroll.clone());
+                    self.wheel_glider = Some(scroll_handle_state.wheel_glider.clone());
                 } else if (self.base_style.overflow.x == Some(Overflow::Scroll)
                     || self.base_style.overflow.y == Some(Overflow::Scroll))
                     && let Some(element_state) = element_state.as_mut()
@@ -2422,6 +2426,12 @@ impl Interactivity {
                         element_state
                             .ongoing_scroll
                             .get_or_insert_with(|| Rc::new(RefCell::new(OngoingScroll::default())))
+                            .clone(),
+                    );
+                    self.wheel_glider = Some(
+                        element_state
+                            .wheel_glider
+                            .get_or_insert_with(WheelGlider::default)
                             .clone(),
                     );
                 }
@@ -2630,12 +2640,20 @@ impl Interactivity {
             // Clamp scroll offset in case scroll max is smaller now (e.g., if children
             // were removed or the bounds became larger).
             let mut scroll_offset = scroll_offset.borrow_mut();
+            let unclamped = *scroll_offset;
 
             scroll_offset.x = scroll_offset.x.clamp(-scroll_max.x, px(0.));
             if scroll_to_bottom {
                 scroll_offset.y = -scroll_max.y;
             } else {
                 scroll_offset.y = scroll_offset.y.clamp(-scroll_max.y, px(0.));
+            }
+            // Quill: a wheel glide that ran past an edge (or whose content
+            // shrank under it) has nothing left to move.
+            if *scroll_offset != unclamped
+                && let Some(glider) = &self.wheel_glider
+            {
+                glider.stop();
             }
 
             if let Some(mut scroll_handle_state) = tracked_scroll_handle {
@@ -3510,8 +3528,9 @@ impl Interactivity {
         window: &mut Window,
         _cx: &mut App,
     ) {
-        if let Some(scroll_offset) = self.scroll_offset.clone() {
+        if let Some(offset_cell) = self.scroll_offset.clone() {
             let ongoing_scroll = self.ongoing_scroll.clone();
+            let wheel_glider = self.wheel_glider.clone();
             let overflow = style.overflow;
             let allow_concurrent_scroll = style.allow_concurrent_scroll;
             let restrict_scroll_to_axis = style.restrict_scroll_to_axis;
@@ -3520,7 +3539,7 @@ impl Interactivity {
             let current_view = window.current_view();
             window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
                 if phase == DispatchPhase::Bubble && hitbox.should_handle_scroll(window) {
-                    let mut scroll_offset = scroll_offset.borrow_mut();
+                    let mut scroll_offset = offset_cell.borrow_mut();
                     let old_scroll_offset = *scroll_offset;
                     let mut delta = event.delta.pixel_delta(line_height);
 
@@ -3557,6 +3576,32 @@ impl Interactivity {
                         } else {
                             delta_x = Pixels::ZERO;
                         }
+                    }
+                    // Quill: a wheel notch glides over the next frames
+                    // (`wheel_glide.rs`); anything else stops a glide.
+                    if let Some(glider) = &wheel_glider {
+                        if wheel_notch_glides(event, cx) {
+                            drop(scroll_offset);
+                            if delta_x.is_zero() && delta_y.is_zero() {
+                                return;
+                            }
+                            let scroll_offset = Rc::downgrade(&offset_cell);
+                            glider.push(point(delta_x, delta_y), window, cx, move |step, _, cx| {
+                                let Some(offset) = scroll_offset.upgrade() else {
+                                    return false;
+                                };
+                                let Ok(mut offset) = offset.try_borrow_mut() else {
+                                    return false;
+                                };
+                                offset.x += step.x;
+                                offset.y += step.y;
+                                drop(offset);
+                                cx.notify(current_view);
+                                true
+                            });
+                            return;
+                        }
+                        glider.stop();
                     }
                     scroll_offset.y += delta_y;
                     scroll_offset.x += delta_x;
@@ -3804,6 +3849,7 @@ pub struct InteractiveElementState {
     pub(crate) pending_keyboard_down: Option<Rc<RefCell<Option<u64>>>>,
     pub(crate) scroll_offset: Option<Rc<RefCell<Point<Pixels>>>>,
     ongoing_scroll: Option<Rc<RefCell<OngoingScroll>>>,
+    wheel_glider: Option<WheelGlider>,
     pub(crate) active_tooltip: Option<Rc<RefCell<Option<ActiveTooltip>>>>,
     long_press_tooltip_active: Option<Rc<Cell<bool>>>,
 }
@@ -4396,6 +4442,8 @@ impl ScrollAnchor {
 struct ScrollHandleState {
     offset: Rc<RefCell<Point<Pixels>>>,
     ongoing_scroll: Rc<RefCell<OngoingScroll>>,
+    /// Quill: the wheel glide of `offset`; setting the offset from code stops it.
+    wheel_glider: WheelGlider,
     bounds: Bounds<Pixels>,
     max_offset: Point<Pixels>,
     child_bounds: Vec<Bounds<Pixels>>,
@@ -4496,6 +4544,7 @@ impl ScrollHandle {
     /// Update [ScrollHandleState]'s active item for scrolling to in prepaint
     pub fn scroll_to_item(&self, ix: usize) {
         let mut state = self.0.borrow_mut();
+        state.wheel_glider.stop();
         state.active_item = Some(ScrollActiveItem {
             index: ix,
             strategy: ScrollStrategy::default(),
@@ -4506,6 +4555,7 @@ impl ScrollHandle {
     /// This scrolls the minimal amount to ensure that the child is the first visible element
     pub fn scroll_to_top_of_item(&self, ix: usize) {
         let mut state = self.0.borrow_mut();
+        state.wheel_glider.stop();
         state.active_item = Some(ScrollActiveItem {
             index: ix,
             strategy: ScrollStrategy::Top,
@@ -4566,13 +4616,31 @@ impl ScrollHandle {
     /// Scrolls to the bottom.
     pub fn scroll_to_bottom(&self) {
         let mut state = self.0.borrow_mut();
+        state.wheel_glider.stop();
         state.scroll_to_bottom = true;
     }
 
     /// Set the offset explicitly. The offset is the distance from the top left of the
     /// parent container to the top left of the first child.
     /// As you scroll further down the offset becomes more negative.
+    ///
+    /// Quill: this stops a wheel glide; a glide's own steps use
+    /// [`Self::set_glide_offset`].
     pub fn set_offset(&self, position: Point<Pixels>) {
+        let state = self.0.borrow();
+        state.wheel_glider.stop();
+        *state.offset.borrow_mut() = position;
+    }
+
+    /// Quill: the wheel glide of this handle's area, for wrappers that take
+    /// the wheel from it (`ScrollBounce`).
+    pub fn wheel_glider(&self) -> WheelGlider {
+        self.0.borrow().wheel_glider.clone()
+    }
+
+    /// Quill: set the offset for one step of the wheel glide, which, unlike
+    /// [`Self::set_offset`], keeps the glide going.
+    pub fn set_glide_offset(&self, position: Point<Pixels>) {
         let state = self.0.borrow();
         *state.offset.borrow_mut() = position;
     }

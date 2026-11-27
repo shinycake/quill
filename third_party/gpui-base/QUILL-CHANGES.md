@@ -280,3 +280,22 @@ Changed by the Quill project in 2026
 (`docs/decisions/rounded-content-masks.md`): gpui-pre's `ContentMask` gained
 a rounded part, so the masks built here are made with `ContentMask::rect`
 instead of a struct literal. Nothing else changes.
+
+## Mouse wheel notches glide
+
+Added in 2026 with gpui-pre's `WheelGlider` (`docs/decisions/smooth-wheel-scroll.md`).
+
+- `src/scrollbar.rs`: `ScrollbarHandle::wheel_glider` (default `None`) and
+  `set_glide_offset` (default `set_offset`), implemented for `ScrollHandle`,
+  `UniformListScrollHandle` and `ListState`; `src/virtual_list.rs` for
+  `VirtualListScrollHandle`.
+- `src/scroll_bounce.rs`: the wheel-owning listener hands a gliding notch
+  (`gpui::wheel_notch_glides`) to the handle's glider instead of moving by
+  the whole notch. Each frame step clamps to the range, writes with
+  `set_glide_offset`, notifies and runs `on_scroll`, so the history and the
+  chat list see every step as they saw the one jump. The overscroll is still
+  reset at once, and pixel input still bounces and stops a glide through
+  `set_offset`. Tests that assumed the jump step the glide's frames:
+  `ordinary_mouse_wheel_keeps_the_shared_viewport_undisplaced`,
+  `wheel_scrolling_interrupts_the_shared_return`, and the `wheel` helper of
+  the `scrollable_mask` tests.

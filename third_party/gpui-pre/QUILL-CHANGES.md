@@ -835,3 +835,38 @@ every GPUI update:
 - `src/scene/snapshot_pool.rs` (new): `SnapshotPool<T>`, the snapshot
   textures every backend keeps (sizes, spares, limit), and
   `SnapshotLosses`, what a renderer lost per slot or with its device.
+
+## Mouse wheel notches glide
+
+Added in 2026 (`docs/decisions/smooth-wheel-scroll.md`). A wheel notch
+(`ScrollDelta::Lines` from a pointer) moved a scroll area by the whole
+notch at once; on Windows and Linux, where every mouse reports lines, that
+read as a jump.
+
+- `src/wheel_glide.rs` (new): `WheelGlide` (`Resting` / `Gliding`), the
+  eased 150 ms leg a notch covers (`WHEEL_GLIDE_DURATION`); a notch mid-glide
+  adds to what is left and one the other way drops it. `WheelGlider`, the
+  glide shared by an area's wheel listener, its handle and the frame steps
+  (`Window::on_next_frame`) that move the area until the notch is covered or
+  the area stops moving. `wheel_notch_glides` says which events glide: line
+  deltas from a pointer while `App::reduce_motion` is off. `src/gpui.rs`
+  exports it.
+- `src/elements/div.rs`: `ScrollHandleState` and an untracked scroll div's
+  element state hold a `WheelGlider`. The scroll listener hands a gliding
+  notch to it and stops it on any other scroll; `clamp_scroll_position`
+  stops it when the clamp moved the offset (an edge). `ScrollHandle::
+  set_offset`, `scroll_to_item`, `scroll_to_top_of_item` and
+  `scroll_to_bottom` stop it; `wheel_glider` and `set_glide_offset` (an
+  offset write that keeps the glide) are for `ScrollBounce`.
+- `src/elements/uniform_list.rs`: a deferred scroll to an item stops the
+  glide.
+- `src/elements/list.rs`: `StateInner` holds a `WheelGlider`; the list's
+  scroll listener glides notches through `StateInner::scroll`, which now
+  returns whether the view moved. `reset`, `scroll_by`, `scroll_to_end`,
+  `scroll_to`, `scroll_to_reveal_item`, `scrollbar_drag_started` and
+  `set_offset_from_scrollbar` stop it; `wheel_glider` and
+  `set_glide_offset` as above. `keep_scroll_top` is `scroll_to` without the
+  stop, for putting the same content back after rows changed around it.
+
+The crate's own tests do not build in Quill's tree; `src/ui/wheel_glide_tests.rs`
+holds them.

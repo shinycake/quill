@@ -74,6 +74,14 @@ impl crate::ScrollbarHandle for VirtualListScrollHandle {
     fn content_size(&self) -> Size<Pixels> {
         self.base_handle.content_size()
     }
+
+    fn wheel_glider(&self) -> Option<gpui::WheelGlider> {
+        Some(self.base_handle.wheel_glider())
+    }
+
+    fn set_glide_offset(&self, offset: Point<Pixels>) {
+        self.base_handle.set_glide_offset(offset);
+    }
 }
 
 impl Deref for VirtualListScrollHandle {

@@ -226,6 +226,14 @@ impl Sim {
         self.frames();
     }
 
+    /// The scroller's top row and how far into it the view is.
+    fn scroll_top(&mut self) -> (usize, Pixels) {
+        self.app.update(&mut self.vcx, |app, cx| {
+            let top = app.history.scroller.read(cx).logical_scroll_top();
+            (top.item_ix, top.offset_in_item)
+        })
+    }
+
     fn following(&mut self) -> bool {
         self.app.update(&mut self.vcx, |app, cx| {
             app.history.scroller.read(cx).is_following_tail()
@@ -248,7 +256,18 @@ impl Sim {
     /// the next channel.
     fn wheel(&mut self, dy: f32) {
         self.wheel_event(dy);
+        self.finish_wheel_glide();
         self.frames();
+    }
+
+    /// Let a wheel notch's glide (`gpui::WheelGlider`) run to its end.
+    fn finish_wheel_glide(&mut self) {
+        self.vcx
+            .executor()
+            .advance_clock(gpui_kit::WHEEL_GLIDE_DURATION);
+        self.vcx.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
     }
 
     /// `wheel` without painting after it.
@@ -436,6 +455,7 @@ fn scrolling_while_the_bar_waits_ends_the_landing(cx: &mut TestAppContext) {
     // Checked before a paint could spend the landing's corrections.
     sim.wheel_event(300.);
     assert!(!sim.landing(), "the reader's scroll ended the landing");
+    sim.finish_wheel_glide();
     sim.frames();
     let watched = 1_090;
     let before = sim.row(watched).expect("on screen");
@@ -556,4 +576,84 @@ fn the_jump_button_goes_to_the_bar_then_the_latest(cx: &mut TestAppContext) {
     sim.press_jump_down();
     assert!(sim.following());
     assert!(sim.shows_the_end());
+}
+
+/// A mouse wheel notch glides the history (`gpui::WheelGlider`): each frame
+/// moves the rows on by less than the one before, and they land one notch
+/// away. A jump made mid-glide (the jump-down button) is where the history
+/// stays.
+#[gpui_kit::test]
+fn a_wheel_notch_glides_the_history(cx: &mut TestAppContext) {
+    let mut sim = Sim::landed(cx);
+    sim.frames();
+    let watched = 1_105;
+    let start = sim.row(watched).expect("on screen").top();
+    // `wheel_event` sends `dy / 20` lines; the bounce counts a line as the
+    // window's line height.
+    let line = sim.vcx.update(|window, _| window.line_height());
+    let notch = line * 6.;
+    sim.wheel_event(120.);
+    let mut moved = vec![px(0.)];
+    for _ in 0..6 {
+        sim.vcx
+            .executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        sim.vcx.update(|window, cx| {
+            window.simulate_next_frame(cx);
+            window.render_frame(cx);
+        });
+        moved.push(sim.row(watched).expect("on screen").top() - start);
+    }
+    let steps: Vec<Pixels> = moved.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    assert!(
+        steps
+            .windows(2)
+            .all(|pair| pair[0] > px(0.) && pair[1] < pair[0]),
+        "eased steps: {moved:?}"
+    );
+    assert!(moved.last().is_some_and(|last| *last < notch), "{moved:?}");
+    sim.finish_wheel_glide();
+    sim.frames();
+    let landed = sim.row(watched).expect("on screen").top() - start;
+    assert!((landed - notch).abs() < px(1.), "landed {landed:?} away");
+
+    sim.wheel_event(600.);
+    sim.vcx
+        .executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    sim.vcx.update(|window, cx| {
+        window.simulate_next_frame(cx);
+        window.render_frame(cx);
+    });
+    sim.press_jump_down();
+    let jumped = sim.scroll_top();
+    sim.finish_wheel_glide();
+    sim.frames();
+    assert_eq!(sim.scroll_top(), jumped, "the rest of the glide is dropped");
+}
+
+/// A page that lands mid-glide is not a jump: the view hold puts the
+/// reader's place back and the notch carries on to its full distance.
+#[gpui_kit::test]
+fn a_page_landing_mid_glide_keeps_the_glide(cx: &mut TestAppContext) {
+    let mut sim = Sim::landed(cx);
+    sim.frames();
+    let watched = 1_105;
+    let start = sim.row(watched).expect("on screen").top();
+    let line = sim.vcx.update(|window, _| window.line_height());
+    let notch = line * 6.;
+    sim.wheel_event(120.);
+    sim.vcx
+        .executor()
+        .advance_clock(std::time::Duration::from_millis(16));
+    sim.vcx.update(|window, cx| {
+        window.simulate_next_frame(cx);
+        window.render_frame(cx);
+    });
+    let older = sim.ask_older();
+    sim.answer(older, 1_027..=1_075);
+    sim.finish_wheel_glide();
+    sim.frames();
+    let landed = sim.row(watched).expect("on screen").top() - start;
+    assert!((landed - notch).abs() < px(1.), "landed {landed:?} away");
 }
