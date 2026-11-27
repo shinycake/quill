@@ -24,6 +24,12 @@ impl QuillApp {
         let Some(message) = message else {
             return div().into_any_element();
         };
+        // Forward, Select and Delete act on the whole album unless the menu
+        // opened on one of its tiles (tdesktop `asGroup`).
+        let album = match self.message_ui.menu.open().map(|open| open.scope) {
+            Some(crate::ui::message_menu_state::MenuScope::OneItem) => vec![message_id],
+            _ => self.album_of(chat_id, message_id),
+        };
         let failed = message.failed();
         let pending = message.pending();
         let copyable = Self::message_copyable_text(effective_content(
@@ -389,6 +395,7 @@ impl QuillApp {
         )
         .is_some();
         if !is_secret && !protected && allows(true, |a| a.can_be_forwarded) && selectable {
+            let album = album.clone();
             item!(
                 50,
                 gpui_kit::assets::IconName::Forward,
@@ -398,7 +405,11 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.begin_forward_one(chat_id, message_id, pending, window, cx);
+                    if album.len() > 1 {
+                        this.begin_forward_group(chat_id, album.clone(), window, cx);
+                    } else {
+                        this.begin_forward_one(chat_id, message_id, pending, window, cx);
+                    }
                     this.close_message_menu();
                     cx.notify();
                 }
@@ -407,6 +418,7 @@ impl QuillApp {
         // Nothing leaves a secret chat, but a selection still copies and
         // deletes there.
         if selectable && (is_secret || (!protected && allows(true, |a| a.can_be_forwarded))) {
+            let album = album.clone();
             item!(
                 70,
                 gpui_kit::assets::IconName::CircleCheck,
@@ -416,7 +428,11 @@ impl QuillApp {
                 _window,
                 cx,
                 {
-                    this.toggle_forward_select(chat_id, message_id, pending, cx);
+                    if album.len() > 1 {
+                        this.select_group(chat_id, album.clone(), cx);
+                    } else {
+                        this.toggle_forward_select(chat_id, message_id, pending, cx);
+                    }
                     this.close_message_menu();
                     cx.notify();
                 }
@@ -708,6 +724,7 @@ impl QuillApp {
         if let Some(confirm) =
             delete_confirm.filter(|_| allows(!is_channel_post, |a| a.can_be_deleted()))
         {
+            let album = album.clone();
             item!(
                 60,
                 gpui_kit::assets::IconName::Trash,
@@ -717,7 +734,24 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.open_delete_dialog_with(confirm.clone(), moderation.clone(), window, cx);
+                    if album.len() > 1 {
+                        // The whole album goes, in one box
+                        // (`deleteAsGroup`).
+                        this.confirm_delete_ids(
+                            chat_id,
+                            album.clone(),
+                            confirm.can_revoke,
+                            window,
+                            cx,
+                        );
+                    } else {
+                        this.open_delete_dialog_with(
+                            confirm.clone(),
+                            moderation.clone(),
+                            window,
+                            cx,
+                        );
+                    }
                     this.close_message_menu();
                     cx.notify();
                 }

@@ -96,6 +96,7 @@ mod widget_runtime;
 mod widgets_state;
 mod widgets_ui;
 pub use wake_wait::{PassEnd, run_chrome_loop};
+mod album_select;
 mod dismiss_layer;
 mod drag_start_tests;
 #[cfg(feature = "frame-profiler")]

@@ -185,6 +185,9 @@ pub(crate) struct HistoryUi {
     /// Rows painted in the last frame with their window bounds, kept until
     /// the next paint: drag selection hit-tests the pointer against them.
     pub(super) hit_rows: std::rc::Rc<std::cell::RefCell<Vec<(usize, Bounds<Pixels>)>>>,
+    /// Album tiles painted in the last frame: a press on one picks that
+    /// message, elsewhere on the row the whole album (`album_select`).
+    pub(super) tile_hits: super::album_select::TileHits,
     pub(super) row_hover: super::history::RowHover,
     /// The list's window bounds at the last paint, whole and less what
     /// floats over it (drag selection autoscrolls when the pointer leaves
@@ -314,6 +317,7 @@ impl HistoryUi {
             bar_probe: Default::default(),
             bar_offsets: Default::default(),
             hit_rows: Default::default(),
+            tile_hits: Default::default(),
             row_hover: Default::default(),
             viewport: Default::default(),
             insets_laid: std::cell::Cell::new(super::chrome::frame::HistoryInsets::ZERO),

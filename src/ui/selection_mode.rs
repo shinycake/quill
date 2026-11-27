@@ -90,18 +90,23 @@ impl QuillApp {
     /// circle (an overlay that also takes the row's clicks while the mode
     /// is on), the selection tint, and how far an outgoing bubble slides
     /// aside (`Message::draw`, `history_view_message.cpp:2313`).
+    /// An album row passes all its messages: its check and tint show when
+    /// every one of them is selected (`isSelectedAsGroup`).
     pub(super) fn selection_row(
         &self,
         chat_id: ChatId,
-        message_id: MessageId,
+        ids: &[MessageId],
         // The wide layout's check position from the history's left edge
         // (`chat_wide::selection_right`); `None` puts it at the right edge.
         wide_right: Option<f32>,
         cx: &mut Context<Self>,
     ) -> SelectionRow {
+        let Some(&message_id) = ids.first() else {
+            return SelectionRow::default();
+        };
         let (mode, _) = self.selection_motion(chat_id, cx);
         // The row's state, or the drag's while it covers the row.
-        let selected = self.selection_shown(chat_id, message_id);
+        let selected = ids.iter().all(|id| self.selection_shown(chat_id, *id));
         if mode <= 0. && !selected {
             return SelectionRow::default();
         }
@@ -119,9 +124,16 @@ impl QuillApp {
             },
         );
         let interactive = self.selecting_in(chat_id);
-        let focused = interactive && self.chat_ui.focus.row() == Some(message_id);
+        let focused = interactive
+            && self
+                .chat_ui
+                .focus
+                .row()
+                .is_some_and(|row| ids.contains(&row));
         let ring_color = cx.theme().ring;
-        let forward = self.selection_forward_drag(chat_id, message_id);
+        let forward = ids
+            .iter()
+            .find_map(|id| self.selection_forward_drag(chat_id, *id));
         let overlay = (mode > 0.).then(|| {
             let ring = cx.theme().background;
             let (fill, tick) = motion::check_frame(checked);
@@ -278,6 +290,8 @@ impl QuillApp {
             message_id,
             quill::selection_pin::room_for(draft.count()),
         );
+        // Albums on the way join whole (`changeSelectionAsGroup`).
+        let span = self.with_whole_albums(chat_id, span);
         self.add_to_selection(chat_id, span);
         self.set_selection_anchor(message_id);
         self.chat_ui.focus = A11yFocus::Row(message_id);

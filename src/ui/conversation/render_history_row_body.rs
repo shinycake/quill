@@ -75,12 +75,31 @@ impl QuillApp {
                 let kind = refs
                     .first()
                     .and_then(|first| quill::album::album_kind(&first.content));
-                if kind != Some(quill::album::AlbumKind::Media) {
+                let ids: Vec<quill::ids::MessageId> = refs.iter().map(|m| m.id).collect();
+                let select = crate::ui::history::AlbumSelect {
+                    hits: self.history.tile_hits.clone(),
+                    selected: refs
+                        .iter()
+                        .filter(|m| self.selection_shown(m.chat_id, m.id))
+                        .map(|m| m.id)
+                        .collect(),
+                };
+                let frame = refs
+                    .first()
+                    .map(|first| super::album_row_frame::AlbumFrame {
+                        chat: first.chat_id,
+                        ids: ids.clone(),
+                        right: quill::chat_wide::has_right_layout(first.is_outgoing, look.wide),
+                        wide_right: look
+                            .wide
+                            .then(|| self.selection_check_right(first, &look, cx)),
+                    });
+                let row = if kind != Some(quill::album::AlbumKind::Media) {
                     let seek_bars = refs
                         .iter()
                         .map(|message| self.history_row_seek_bar(message))
                         .collect();
-                    return crate::ui::history::file_album_history_row(
+                    crate::ui::history::file_album_history_row(
                         crate::ui::history::FileAlbum {
                             album_id: *album_id,
                             messages: &refs,
@@ -91,6 +110,7 @@ impl QuillApp {
                             sender_avatar: avatar,
                             header,
                             look,
+                            select,
                         },
                         files,
                         downloading,
@@ -99,26 +119,32 @@ impl QuillApp {
                         &self.message_ui.revealed,
                         corner,
                         cx,
-                    );
+                    )
+                } else {
+                    album_history_row(
+                        *album_id,
+                        &refs,
+                        files,
+                        downloading,
+                        &shared.media_roots,
+                        chrome.sender.clone(),
+                        sender_status,
+                        chrome.receipt,
+                        avatar,
+                        header,
+                        // Settings → Appearance: font size + bubble/plain style.
+                        look,
+                        session,
+                        &self.message_ui.revealed,
+                        corner,
+                        &select,
+                        cx,
+                    )
+                };
+                match frame {
+                    Some(frame) => self.album_row_frame(frame, row, cx),
+                    None => row,
                 }
-                album_history_row(
-                    *album_id,
-                    &refs,
-                    files,
-                    downloading,
-                    &shared.media_roots,
-                    chrome.sender.clone(),
-                    sender_status,
-                    chrome.receipt,
-                    avatar,
-                    header,
-                    // Settings → Appearance: font size + bubble/plain style.
-                    look,
-                    session,
-                    &self.message_ui.revealed,
-                    corner,
-                    cx,
-                )
             }
             HistoryRow::Single(inputs) => {
                 let message = &inputs.message;
@@ -225,22 +251,10 @@ impl QuillApp {
                 // M1: `cx.listener` closures must be `'static`, so the
                 // row's ids are copied out of the message first.
                 let (row_chat, row_msg) = (message.chat_id, message.id);
-                let wide_right = look.wide.then(|| {
-                    let limit = crate::ui::history::bubble_width::message_width_limit(
-                        cx,
-                        &message.content,
-                        look.font,
-                        look.plain,
-                    )
-                    .map_or(quill::bubble_layout::MSG_MAX_WIDTH as f32, f32::from);
-                    let width = self
-                        .history
-                        .viewport
-                        .get()
-                        .map_or(f32::MAX, |view| f32::from(view.full.size.width));
-                    quill::chat_wide::selection_right(limit, width)
-                });
-                let selection = self.selection_row(row_chat, row_msg, wide_right, cx);
+                let wide_right = look
+                    .wide
+                    .then(|| self.selection_check_right(message, &look, cx));
+                let selection = self.selection_row(row_chat, &[row_msg], wide_right, cx);
                 let (selection_overlay, selection_tint, selection_slide) =
                     (selection.overlay, selection.tint, selection.slide);
                 // The side the bubble sits on (`hasRightLayout`): the wide

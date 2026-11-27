@@ -373,7 +373,8 @@ impl QuillApp {
             return false;
         };
         self.chat_ui.focus = A11yFocus::Row(focus);
-        self.toggle_forward_select(chat_id, focus, false, cx);
+        // An album's row toggles the album as one (`changeSelectionAsGroup`).
+        self.toggle_select_group(chat_id, self.album_of(chat_id, focus), cx);
         self.set_selection_anchor(focus);
         if self.selecting_in(chat_id) {
             // The keyboard stays on the rows: Space keeps toggling, Up and

@@ -138,6 +138,12 @@ impl QuillApp {
                 page,
                 reactions_expanded: false,
                 first_tab: None,
+                // Over one album tile the menu is that message's alone.
+                scope: if self.history.tile_hits.at(menu.position).is_some() {
+                    super::message_menu_state::MenuScope::OneItem
+                } else {
+                    super::message_menu_state::MenuScope::WholeAlbum
+                },
             });
         if let Some(live) = self.live.as_mut() {
             let _ = live

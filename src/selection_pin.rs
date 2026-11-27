@@ -210,11 +210,33 @@ pub fn range_delta(
     (select, deselect)
 }
 
+/// A click on an album outside its tiles, or "Select" over the whole
+/// album (`changeSelectionAsGroup`): when every id of `group` is selected
+/// they all leave the selection; otherwise they all join it, unless that
+/// would pass [`MAX_SELECTED`], when they all leave. Returns the new
+/// selection, ascending.
+pub fn toggle_group(selected: &[MessageId], group: &[MessageId]) -> Vec<MessageId> {
+    let all_in = !group.is_empty() && group.iter().all(|id| selected.contains(id));
+    let missing = group.iter().filter(|id| !selected.contains(id)).count();
+    let join = !all_in && missing <= room_for(selected.len());
+    let mut next: Vec<MessageId> = selected
+        .iter()
+        .copied()
+        .filter(|id| !group.contains(id))
+        .collect();
+    if join {
+        next.extend(group.iter().copied());
+    }
+    next.sort_by_key(|id| id.0);
+    next.dedup();
+    next
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         MAX_SELECTED, PinChoice, pin_choice, pin_question, range_between, range_delta, room_for,
-        step_focus, unpin_question, up_to,
+        step_focus, toggle_group, unpin_question, up_to,
     };
     use crate::ids::{MessageId, UserId};
     use crate::telegram::envelope::ChatKind;
@@ -384,5 +406,20 @@ mod tests {
         let (add, drop) = range_delta(&ids, MessageId(30), MessageId(40), MessageId(20));
         assert_eq!(add, vec![MessageId(20)]);
         assert_eq!(drop, vec![MessageId(40)]);
+    }
+
+    #[test]
+    fn a_group_joins_whole_and_leaves_whole() {
+        let ids = |v: &[i64]| v.iter().map(|i| MessageId(*i)).collect::<Vec<_>>();
+        let album = ids(&[10, 11, 12]);
+        // Nothing or part of it selected: the whole album joins.
+        assert_eq!(toggle_group(&ids(&[3]), &album), ids(&[3, 10, 11, 12]));
+        assert_eq!(toggle_group(&ids(&[11]), &album), ids(&[10, 11, 12]));
+        // All of it selected: it all leaves, the rest stays.
+        assert_eq!(toggle_group(&ids(&[3, 10, 11, 12]), &album), ids(&[3]));
+        // No room for the whole album: none of it stays selected.
+        let full: Vec<MessageId> = (100..199).map(MessageId).collect();
+        let after = toggle_group(&[full.clone(), ids(&[11])].concat(), &album);
+        assert_eq!(after, full);
     }
 }

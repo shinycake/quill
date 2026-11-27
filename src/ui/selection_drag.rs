@@ -77,6 +77,9 @@ pub(crate) struct DragSelect {
     /// The row pressed. Whether it is still being sent (not selectable) is
     /// read when the button is released, not when it went down.
     press: MessageId,
+    /// What a click toggles: the tile pressed alone, or the row's whole
+    /// album (`album_select`); just `press` outside albums.
+    pick: Vec<MessageId>,
     mode: Press,
 }
 
@@ -149,6 +152,7 @@ impl QuillApp {
             {
                 let ids = self.loaded_selectable_ids(chat);
                 let range = quill::selection_pin::range_between(&ids, anchor, message_id);
+                let range = self.with_whole_albums(chat, range);
                 self.add_to_selection(chat, range);
                 self.message_ui.selection_drag.clear();
                 cx.notify();
@@ -159,15 +163,14 @@ impl QuillApp {
             // layer does that) and is not the start of a message drag.
             return;
         }
+        let pick = self.press_pick(chat, message_id, event.position);
         // A press on a selected row never selects a range (`PrepareDrag`); when
         // the selection cannot be forwarded the drag simply does nothing.
         let forward = click_toggles
             && self.selection_forwardable(chat)
-            && self
-                .share
-                .forward
-                .draft()
-                .is_some_and(|draft| draft.from_chat_id == chat && draft.contains(message_id));
+            && self.share.forward.draft().is_some_and(|draft| {
+                draft.from_chat_id == chat && pick.iter().all(|id| draft.contains(*id))
+            });
         let origin = event.position;
         let mode = if forward {
             Press::PickUp { origin }
@@ -181,6 +184,7 @@ impl QuillApp {
         let drag = DragSelect {
             chat,
             press: message_id,
+            pick,
             mode,
         };
         let pump = self.selection_drag_loop(window, cx);
@@ -213,6 +217,7 @@ impl QuillApp {
             return None;
         };
         let (chat, press) = (drag.chat, drag.press);
+        let pick = drag.pick.clone();
         let mut range = match started {
             RangePress::Pressed => None,
             RangePress::Dragging(range) => Some(range),
@@ -258,15 +263,30 @@ impl QuillApp {
                 if to == press && beyond == 0 {
                     return None;
                 }
-                let selected = self
-                    .forward_draft()
-                    .is_some_and(|draft| draft.from_chat_id == chat && draft.contains(press));
+                let selected = self.forward_draft().is_some_and(|draft| {
+                    draft.from_chat_id == chat && pick.iter().all(|id| draft.contains(*id))
+                });
+                // The press row's far end from the pointer, so a pressed
+                // album joins the range whole.
+                let anchor = self
+                    .history
+                    .rows
+                    .iter()
+                    .find(|row| row.contains(press))
+                    .and_then(|row| {
+                        if to.0 > press.0 {
+                            row.first_id()
+                        } else {
+                            row.last_id()
+                        }
+                    })
+                    .unwrap_or(press);
                 // Drag-selecting gives the history the keyboard
                 // (`updateDragSelection` → `setFocus`).
                 window.focus(&self.message_ui.history_focus, cx);
                 self.chat_ui.focus = A11yFocus::Row(press);
                 range = Some(DragRange {
-                    anchor: press,
+                    anchor,
                     to,
                     selecting: !selected,
                 });
@@ -338,8 +358,7 @@ impl QuillApp {
                 self.chat_ui.focus = A11yFocus::Row(range.to);
             }
             None if drag.click_toggles() => {
-                let pending = self.message_still_sending(drag.chat, drag.press);
-                self.toggle_forward_select(drag.chat, drag.press, pending, cx);
+                self.toggle_select_group(drag.chat, drag.pick.clone(), cx);
                 self.set_selection_anchor(drag.press);
                 self.chat_ui.focus = A11yFocus::Row(drag.press);
             }

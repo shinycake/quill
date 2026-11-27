@@ -100,6 +100,39 @@ impl QuillApp {
         self.open_forward_picker(window, cx);
     }
 
+    /// "Forward" over a whole album (`forwardAsGroup`): its messages in
+    /// one forward, which TDLib sends on as one album.
+    pub(super) fn begin_forward_group(
+        &mut self,
+        chat_id: ChatId,
+        ids: Vec<MessageId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let [one] = ids[..] {
+            let pending = self.message_still_sending(chat_id, one);
+            self.begin_forward_one(chat_id, one, pending, window, cx);
+            return;
+        }
+        let topic = self.open_topic_id(chat_id);
+        let draft = ids.first().and_then(|&first| {
+            let mut draft = ForwardDraft::from_message(chat_id, topic, first, false)?;
+            draft.message_ids = ids.clone();
+            Some(draft)
+        });
+        let Some(draft) = draft else {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MISC_CANNOT_FORWARD_THIS_MESSAGE,
+            )));
+            cx.notify();
+            return;
+        };
+        self.drop_deleted_selection();
+        // A new forward: no bar it was not picked for comes along.
+        self.share.forward = ForwardStage::Selecting(draft);
+        self.open_forward_picker(window, cx);
+    }
+
     pub(super) fn toggle_forward_select(
         &mut self,
         chat_id: ChatId,

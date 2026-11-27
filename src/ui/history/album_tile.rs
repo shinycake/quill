@@ -34,6 +34,9 @@ pub(in crate::ui) fn album_tile(
     drag: Option<quill::forward_drag::ForwardDrag>,
     // The tile's spoiler cover, while it shows (`spoiler_fx::media_cover`).
     cover: Option<MediaCover>,
+    // A history album's tile: where presses find it, and whether it is
+    // selected on its own (`album_select`).
+    select: Option<TileSelect>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row_id = (message.id.0 as u64)
@@ -113,6 +116,8 @@ pub(in crate::ui) fn album_tile(
     };
     // A press on a tile that moves picks up that one message (`GroupPart`),
     // not the album; the tile's own click stays on `frame`, inside.
+    let selected = select.as_ref().is_some_and(|select| select.selected);
+    let tint = cx.theme().selection;
     let spot = div()
         .id(("album-drag", row_id))
         .absolute()
@@ -120,8 +125,44 @@ pub(in crate::ui) fn album_tile(
         .top(px(part.y as f32))
         .w(size.0)
         .h(size.1)
-        .child(tile);
+        .child(tile)
+        // A selected item is washed in the selection colour, as
+        // tdesktop's `Photo::drawGrouped` overlays a selected part.
+        .when(selected, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .map(|this| corners.round(this))
+                    .bg(tint.opacity(0.6))
+                    .debug_selector(move || format!("album-tile-selected-{}", message_id.0)),
+            )
+        })
+        .children(select.map(|select| select.hits.probe(message_id)));
     super::forward_drag_source::draggable(spot, drag).into_any_element()
+}
+
+/// What a history album row needs from the selection: where its tiles
+/// note themselves, and which of its messages are selected (or are about
+/// to be, under a drag).
+pub(in crate::ui) struct AlbumSelect {
+    pub(in crate::ui) hits: crate::ui::album_select::TileHits,
+    pub(in crate::ui) selected: Vec<MessageId>,
+}
+
+impl AlbumSelect {
+    pub(in crate::ui) fn tile(&self, id: MessageId) -> TileSelect {
+        TileSelect {
+            hits: self.hits.clone(),
+            selected: self.selected.contains(&id),
+        }
+    }
+}
+
+/// What a history album tile needs from the selection.
+pub(in crate::ui) struct TileSelect {
+    pub(in crate::ui) hits: crate::ui::album_select::TileHits,
+    pub(in crate::ui) selected: bool,
 }
 
 /// The tile's picture and marks with no spoiler over them.

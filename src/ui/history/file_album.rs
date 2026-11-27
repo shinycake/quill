@@ -17,6 +17,8 @@ pub(in crate::ui) struct FileAlbum<'a> {
     /// "via @bot", "Forwarded from" and the reply quote (`row_header`).
     pub(in crate::ui) header: Option<AnyElement>,
     pub(in crate::ui) look: BubbleLook,
+    /// Each file is a tile of its own for selection (`album_select`).
+    pub(in crate::ui) select: AlbumSelect,
 }
 
 pub(in crate::ui) fn file_album_history_row(
@@ -39,6 +41,7 @@ pub(in crate::ui) fn file_album_history_row(
         sender_avatar,
         header,
         look,
+        select,
     } = album;
     let Some(first) = messages.first() else {
         return div().into_any_element();
@@ -104,9 +107,17 @@ pub(in crate::ui) fn file_album_history_row(
             )
         });
         let id = message.id.0;
+        let tile = select.tile(message.id);
+        let tint = cx.theme().selection;
         stack = stack.child(
             div()
                 .debug_selector(move || format!("file-album-item-{id}"))
+                .relative()
+                .rounded_md()
+                // A file selected on its own is washed in the selection
+                // colour (tdesktop's grouped document `fillSelected`).
+                .when(tile.selected, |this| this.bg(tint.opacity(0.6)))
+                .child(tile.hits.probe(message.id))
                 .flex()
                 .flex_col()
                 .gap_1()
