@@ -375,7 +375,12 @@ impl Element for UniformList {
                 item: padded_bounds.size,
                 contents: content_size,
             });
-            handle.deferred_scroll_to_item.take()
+            let deferred = handle.deferred_scroll_to_item.take();
+            // Quill: a jump to an item ends a wheel glide.
+            if deferred.is_some() {
+                handle.base_handle.wheel_glider().stop();
+            }
+            deferred
         });
 
         self.interactivity.prepaint(

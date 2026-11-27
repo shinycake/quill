@@ -19,7 +19,7 @@ impl QuillApp {
             .map(|tab| {
                 div()
                     .flex_none()
-                    .child(Self::filter_chip(
+                    .child(self.filter_chip(
                         ("search-tab", tab as u64),
                         tab.label(),
                         tab == active,
@@ -45,7 +45,12 @@ impl QuillApp {
             cx.defer(move |cx| entity.update(cx, |_, cx| cx.notify()));
             chips.len() >= 6
         };
-        let bg = cx.theme().background;
+        // The fades are the list's own fill; on a glass card there is no
+        // fill to fade into, and the clipped edge is the cue.
+        let bg = self.list_row_fill(cx);
+        let fades = !bg.is_transparent();
+        let fade_left = fade_left && fades;
+        let fade_right = fade_right && fades;
         let fade = |id: &'static str, toward_right: bool| {
             let (from, to) = if toward_right {
                 (bg.opacity(0.), bg)

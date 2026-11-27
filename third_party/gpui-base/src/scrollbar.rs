@@ -12,7 +12,8 @@ use gpui::{
     ElementId, EntityId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IsZero,
     LayoutId, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
     Pixels, Point, Position, ScrollEvent, ScrollHandle, Size, Style, TouchDragEvent, TouchPhase,
-    UniformListScrollHandle, Window, fill, point, prelude::FluentBuilder, px, relative, size,
+    UniformListScrollHandle, WheelGlider, Window, fill, point, prelude::FluentBuilder, px,
+    relative, size,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,17 @@ pub trait ScrollbarHandle: 'static {
     fn start_drag(&self) {}
     /// Called when end dragging the scrollbar thumb.
     fn end_drag(&self) {}
+    /// Quill: the wheel glide of the handle's area. A [`crate::ScrollBounce`]
+    /// over a handle that has one glides line-wheel notches through it
+    /// instead of jumping. `set_offset` must stop it.
+    fn wheel_glider(&self) -> Option<WheelGlider> {
+        None
+    }
+    /// Quill: set the offset for one step of the wheel glide, keeping the
+    /// glide going.
+    fn set_glide_offset(&self, offset: Point<Pixels>) {
+        self.set_offset(offset);
+    }
 }
 
 impl ScrollbarHandle for ScrollHandle {
@@ -95,6 +107,14 @@ impl ScrollbarHandle for ScrollHandle {
 
     fn content_size(&self) -> Size<Pixels> {
         (self.max_offset() + self.bounds().size.into()).into()
+    }
+
+    fn wheel_glider(&self) -> Option<WheelGlider> {
+        Some(ScrollHandle::wheel_glider(self))
+    }
+
+    fn set_glide_offset(&self, offset: Point<Pixels>) {
+        ScrollHandle::set_glide_offset(self, offset);
     }
 }
 
@@ -114,6 +134,14 @@ impl ScrollbarHandle for UniformListScrollHandle {
     fn content_size(&self) -> Size<Pixels> {
         let base_handle = &self.0.borrow().base_handle;
         (base_handle.max_offset() + base_handle.bounds().size.into()).into()
+    }
+
+    fn wheel_glider(&self) -> Option<WheelGlider> {
+        Some(self.0.borrow().base_handle.wheel_glider())
+    }
+
+    fn set_glide_offset(&self, offset: Point<Pixels>) {
+        self.0.borrow().base_handle.set_glide_offset(offset);
     }
 }
 
@@ -140,6 +168,14 @@ impl ScrollbarHandle for ListState {
 
     fn end_drag(&self) {
         self.scrollbar_drag_ended();
+    }
+
+    fn wheel_glider(&self) -> Option<WheelGlider> {
+        Some(ListState::wheel_glider(self))
+    }
+
+    fn set_glide_offset(&self, offset: Point<Pixels>) {
+        ListState::set_glide_offset(self, offset);
     }
 }
 

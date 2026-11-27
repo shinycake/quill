@@ -75,6 +75,7 @@ order after the window is ready):
 | `k:key` | one key press, GPUI key names (`escape`, `enter`, `space`, `cmd-f`) |
 | `t:text` | type text into the focused field, one character at a time (spaces kept) |
 | `w:x,y,dx,dy,s\|m\|e[,cmd]` | one phased trackpad scroll event (`cmd` holds Cmd, Ctrl off macOS) |
+| `n:x,y,lines` | one mouse wheel notch (a line delta, positive scrolls up); no pause after it, so `n:…;p:60` captures mid-glide |
 | `z:x,y,delta` | one trackpad pinch centred on the point (positive `delta` zooms in) |
 | `p:ms` | pause |
 

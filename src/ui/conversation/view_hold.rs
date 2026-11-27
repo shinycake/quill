@@ -65,8 +65,9 @@ impl QuillApp {
                 .map(|ix| (ix, 0.)),
         };
         self.history.scroller.update(cx, |state, cx| match target {
+            // A hold, not a jump: a wheel glide goes on from here.
             Some((ix, offset)) => {
-                state.scroll_to_offset(
+                state.hold_offset(
                     gpui_kit::ListOffset {
                         item_ix: ix,
                         offset_in_item: px(offset.max(0.)),

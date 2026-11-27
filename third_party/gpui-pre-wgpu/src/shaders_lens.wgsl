@@ -304,17 +304,22 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
     // Drop shadow: tight + ambient, faded before the footprint's edge.
     let v_fade = lens_step(-0.1, 0.9, local.y / s.half_size.y) * 0.92 + 0.08;
     let outside = lens_step(-4.0, 14.0, dist);
-    let soft = lens.shadow_softness;
-    let off = lens.shadow_offset;
-    let near = 1.0 - lens_step(-6.0, soft, lens_sdf(s, local - vec2<f32>(0.0, off)));
-    let far = 1.0 - lens_step(-10.0, soft * 1.5, lens_sdf(s, local - vec2<f32>(0.0, off * 1.6)));
     let aa = max(s.device_px * 1.2, 1e-4);
     let mask = 1.0 - lens_step(-aa, aa, dist);
-    let in_footprint = input.position.xy - lens.bounds.origin;
-    let border = min(min(in_footprint.x, in_footprint.y),
-                     min(lens.bounds.size.x - in_footprint.x, lens.bounds.size.y - in_footprint.y));
-    let sh = clamp((near + far) * lens.shadow * strength * v_fade * outside, 0.0, 0.85)
-        * lens_step(0.0, 14.0, border);
+    // QUILL: deeper than 4 units inside the rim `outside` is 0, and so is the
+    // shadow: its two distance fields are skipped there (the same pixels).
+    var sh = 0.0;
+    if (outside > 0.0) {
+        let soft = lens.shadow_softness;
+        let off = lens.shadow_offset;
+        let near = 1.0 - lens_step(-6.0, soft, lens_sdf(s, local - vec2<f32>(0.0, off)));
+        let far = 1.0 - lens_step(-10.0, soft * 1.5, lens_sdf(s, local - vec2<f32>(0.0, off * 1.6)));
+        let in_footprint = input.position.xy - lens.bounds.origin;
+        let border = min(min(in_footprint.x, in_footprint.y),
+                         min(lens.bounds.size.x - in_footprint.x, lens.bounds.size.y - in_footprint.y));
+        sh = clamp((near + far) * lens.shadow * strength * v_fade * outside, 0.0, 0.85)
+            * lens_step(0.0, 14.0, border);
+    }
     let shadow_alpha = 1.0 - lens_dim(1.0 - sh);
     if (mask <= 0.0) {
         if (shadow_alpha <= 0.0) {
@@ -339,18 +344,24 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
     let color = hsla_to_rgba(lens.color);
     let surface = hsla_to_rgba(lens.surface);
     let frost_sigma = select(0.0, max(lens.blur, 0.0) * lens.scale_factor, clear);
-    var glass: vec3<f32>;
+    // QUILL: a frost mixed in whole (every slab's) replaces the sharp bent
+    // backdrop, so its three taps are skipped (the same pixels, to the
+    // rounding of `mix(bent, frost, 1.0)`).
+    let frosted_through = frost_sigma > 0.0 && lens.blur_mix == 1.0;
+    var glass = vec3<f32>(0.0);
     if (!clear) {
         glass = mix(surface.rgb, color.rgb, 1.0 - edge * lens.edge_clear);
     } else if (lens.bend == 1u) {
         let amount = lens.radial_amount / max(lens.unit, 1e-3);
         let bend = lens_radial_bend(s, lens, local, amount);
-        glass = lens_bent(s, slot, atlas_size, local, bend, 0.0, max(s.blur_shift, 0.0));
+        if (!frosted_through) {
+            glass = lens_bent(s, slot, atlas_size, local, bend, 0.0, max(s.blur_shift, 0.0));
+        }
         if (frost_sigma > 0.0) {
             let ratio = clamp(1.0 - abs(dist) / (min(s.half_size.x, s.half_size.y) * s.edge_band / 0.35), 0.0, 1.0);
             let sigma = frost_sigma * mix(1.0, s.frost_edge, pow(ratio, 1.3));
             let frost = lens_frosted(s, slot, atlas_size, local + bend, max(sigma, 0.5));
-            glass = mix(glass, frost, lens.blur_mix);
+            glass = select(mix(glass, frost, lens.blur_mix), frost, frosted_through);
         }
         glass = lens_saturate(glass, lens.tune_saturation);
     } else {
@@ -372,11 +383,13 @@ fn fs_lens(input: LensVarying) -> @location(0) vec4<f32> {
         // magnified middle reads its backdrop that much finer.
         let lod = max(mix(lens.blur_center, lens.blur_edge, pow(bend_edge, 1.3)) + s.blur_shift, 0.0)
             - log2(mag);
-        glass = lens_bent(s, slot, atlas_size, at, bend, split, lod);
+        if (!frosted_through) {
+            glass = lens_bent(s, slot, atlas_size, at, bend, split, lod);
+        }
         if (frost_sigma > 0.0) {
             let sigma = frost_sigma * mix(1.0, s.frost_edge, pow(bend_edge, 1.3));
             let frost = lens_frosted(s, slot, atlas_size, at + bend, max(sigma, 0.5));
-            glass = mix(glass, frost, lens.blur_mix);
+            glass = select(mix(glass, frost, lens.blur_mix), frost, frosted_through);
         }
         glass = lens_saturate(glass, lens.tune_saturation);
     }

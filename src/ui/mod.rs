@@ -681,6 +681,7 @@ mod wallpaper_rotation;
 mod wallpaper_source;
 mod web_app_tab;
 mod web_app_ui;
+mod wheel_glide_tests;
 mod window_actions;
 mod window_chrome;
 pub(crate) mod window_control;

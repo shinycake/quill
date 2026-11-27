@@ -391,6 +391,31 @@ pub(in crate::ui) fn app_caption(label: AnyElement, strip: Look) -> AnyElement {
     }
 }
 
+/// How the title strip's own buttons (Search, the update pill) sit over
+/// the window: bare on Classic's strip; in Floating, where the wallpaper
+/// runs under the strip, on a pill of the cards' fill or glass, so they
+/// read over any wallpaper.
+#[derive(Clone, Copy)]
+pub(in crate::ui) struct StripActions {
+    chrome: Chrome,
+    glass: Option<LensStyle>,
+}
+
+impl StripActions {
+    pub(in crate::ui) fn new(chrome: Chrome, glass: Option<LensStyle>) -> Self {
+        Self { chrome, glass }
+    }
+
+    pub(in crate::ui) fn frame<E: Styled + FluentBuilder>(self, this: E, theme: &Theme) -> E {
+        match self.chrome.metrics.look {
+            Look::Lines => this,
+            Look::Cards => pill(this, &self.chrome, theme, self.glass.as_ref())
+                .rounded_full()
+                .mr_2(),
+        }
+    }
+}
+
 /// The title strip's fill and lower edge: the frame's in Classic; in
 /// Floating neither, so the window's wallpaper runs under the strip as it
 /// does under the cards. Applied after the frame's own, so it only ever

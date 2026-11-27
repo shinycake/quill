@@ -150,6 +150,13 @@ impl Sim {
             touch_phase: TouchPhase::Moved,
             source: gpui_kit::ScrollSource::Pointer,
         });
+        // Let the notch's glide (`gpui::WheelGlider`) run to its end.
+        self.vcx
+            .executor()
+            .advance_clock(gpui_kit::WHEEL_GLIDE_DURATION);
+        self.vcx.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
         self.frames();
     }
 

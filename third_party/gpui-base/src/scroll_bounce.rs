@@ -9,6 +9,7 @@ use gpui::{
     AnyElement, App, Bounds, ContentMask, DispatchPhase, Element, ElementId, Global,
     GlobalElementId, Hitbox, HitboxBehavior, HitboxId, InspectorElementId, IntoElement, LayoutId,
     OngoingScroll, Pixels, ScrollDelta, ScrollEvent, TouchPhase, Window, point, px,
+    wheel_notch_glides,
 };
 #[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
@@ -627,6 +628,45 @@ impl Element for ScrollBounce {
                     return;
                 }
                 let before = handle.offset();
+                // Quill: a wheel notch glides over the next frames
+                // (`gpui::WheelGlider`) on a handle that can.
+                if wheel_notch_glides(event, cx)
+                    && let Some(glider) = handle.wheel_glider()
+                {
+                    let displaced = state.overscroll.offset() != 0.;
+                    state.overscroll.reset();
+                    drop(state);
+                    cx.stop_propagation();
+                    if displaced {
+                        cx.notify(view);
+                    }
+                    if delta.y == px(0.) {
+                        return;
+                    }
+                    let handle = handle.clone();
+                    let on_scroll = on_scroll.clone();
+                    glider.push(
+                        point(px(0.), delta.y),
+                        window,
+                        cx,
+                        move |step, window, cx| {
+                            let max = max_scroll_extent(handle.as_ref());
+                            let before = handle.offset();
+                            let mut offset = before;
+                            offset.y = (before.y + step.y).clamp(-max, px(0.));
+                            if offset == before {
+                                return false;
+                            }
+                            handle.set_glide_offset(offset);
+                            cx.notify(view);
+                            if let Some(handler) = &on_scroll {
+                                handler(window, cx);
+                            }
+                            true
+                        },
+                    );
+                    return;
+                }
                 let changed = if !bounces || matches!(event.delta, ScrollDelta::Lines(_)) {
                     let displaced = state.overscroll.offset() != 0.;
                     state.overscroll.reset();
@@ -948,10 +988,24 @@ mod tests {
             ..Default::default()
         });
         draw(cx);
+        // The notch glides (`gpui::WheelGlider`): partway after a frame,
+        // at the end once its time is up, and never displaced.
         cx.executor().advance_clock(Duration::from_millis(16));
+        next_frame(cx);
+        draw(cx);
+        assert!(handle.offset().y < px(0.));
+        assert_eq!(handle.bounds().origin, origin);
+        cx.executor().advance_clock(gpui::WHEEL_GLIDE_DURATION);
+        next_frame(cx);
         draw(cx);
         assert_eq!(handle.offset().y, -handle.max_offset().y);
         assert_eq!(handle.bounds().origin, origin);
+    }
+
+    fn next_frame(cx: &mut VisualTestContext) {
+        cx.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
     }
 
     #[gpui::test]
@@ -977,9 +1031,11 @@ mod tests {
         draw(cx);
         let end = handle.offset().y;
         wheel(cx, 2.);
+        cx.executor().advance_clock(Duration::from_millis(16));
+        next_frame(cx);
         assert!(
             handle.offset().y > end,
-            "the new wheel input scrolls before the next frame"
+            "the new wheel input scrolls on the next frame"
         );
         draw(cx);
     }

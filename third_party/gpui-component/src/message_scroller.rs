@@ -193,6 +193,19 @@ impl MessageScrollerState {
         true
     }
 
+    /// QUILL: [`Self::scroll_to_offset`] for keeping the reader's place
+    /// after rows changed around it: a mouse wheel glide in progress goes
+    /// on from there instead of stopping.
+    pub fn hold_offset(&mut self, offset: ListOffset, cx: &mut Context<Self>) -> bool {
+        if offset.item_ix >= self.list_state.item_count() {
+            return false;
+        }
+
+        self.list_state.keep_scroll_top(offset);
+        cx.notify();
+        true
+    }
+
     /// The row at the top of the viewport and how many pixels of it are
     /// scrolled above the viewport. `None` while the list follows its
     /// tail, so callers keep a position only for a reader who moved away.

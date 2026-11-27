@@ -1796,21 +1796,27 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
   // Drop shadow: tight + ambient, faded before the footprint's edge.
   float v_fade = lens_step(-0.1, 0.9, local.y / s.half_size.y) * 0.92 + 0.08;
   float outside = lens_step(-4.0, 14.0, dist);
-  float soft = lens.shadow_softness;
-  float off = lens.shadow_offset;
-  float near = 1.0 - lens_step(-6.0, soft, lens_sdf(s, local - float2(0.0, off)));
-  float far = 1.0 - lens_step(-10.0, soft * 1.5,
-                              lens_sdf(s, local - float2(0.0, off * 1.6)));
   float aa = max(s.device_px * 1.2, 1e-4);
   float mask = 1.0 - lens_step(-aa, aa, dist);
-  float2 in_footprint =
-      input.position.xy - float2(lens.bounds.origin.x, lens.bounds.origin.y);
-  float border = min(min(in_footprint.x, in_footprint.y),
-                     min(lens.bounds.size.width - in_footprint.x,
-                         lens.bounds.size.height - in_footprint.y));
-  float sh = clamp((near + far) * lens.shadow * strength * v_fade * outside,
-                   0.0, 0.85) *
-             lens_step(0.0, 14.0, border);
+  // QUILL: deeper than 4 units inside the rim `outside` is 0, and so is the
+  // shadow: its two distance fields are skipped there (the same pixels).
+  float sh = 0.0;
+  if (outside > 0.0) {
+    float soft = lens.shadow_softness;
+    float off = lens.shadow_offset;
+    float near =
+        1.0 - lens_step(-6.0, soft, lens_sdf(s, local - float2(0.0, off)));
+    float far = 1.0 - lens_step(-10.0, soft * 1.5,
+                                lens_sdf(s, local - float2(0.0, off * 1.6)));
+    float2 in_footprint =
+        input.position.xy - float2(lens.bounds.origin.x, lens.bounds.origin.y);
+    float border = min(min(in_footprint.x, in_footprint.y),
+                       min(lens.bounds.size.width - in_footprint.x,
+                           lens.bounds.size.height - in_footprint.y));
+    sh = clamp((near + far) * lens.shadow * strength * v_fade * outside, 0.0,
+               0.85) *
+         lens_step(0.0, 14.0, border);
+  }
   float shadow_alpha = 1.0 - lens_dim(1.0 - sh);
   if (mask <= 0.0) {
     if (shadow_alpha <= 0.0) {
@@ -1835,14 +1841,20 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
   float4 color = hsla_to_rgba(lens.color);
   float4 surface = hsla_to_rgba(lens.surface);
   float frost_sigma = clear ? max(lens.blur, 0.0) * lens.scale_factor : 0.0;
-  float3 glass;
+  // QUILL: a frost mixed in whole (every slab's) replaces the sharp bent
+  // backdrop, so its three taps are skipped (the same pixels, to the
+  // rounding of `mix(bent, frost, 1.0)`).
+  bool frosted_through = frost_sigma > 0.0 && lens.blur_mix == 1.0;
+  float3 glass = float3(0.0);
   if (!clear) {
     glass = mix(surface.rgb, color.rgb, 1.0 - edge * lens.edge_clear);
   } else if (lens.bend == 1) {
     float amount = lens.radial_amount / max(lens.unit, 1e-3);
     float2 bend = lens_radial_bend(s, lens, local, amount);
-    glass = lens_bent(s, slot, atlas, atlas_size, local, bend, 0.0,
-                      max(s.blur_shift, 0.0));
+    if (!frosted_through) {
+      glass = lens_bent(s, slot, atlas, atlas_size, local, bend, 0.0,
+                        max(s.blur_shift, 0.0));
+    }
     if (frost_sigma > 0.0) {
       float ratio = clamp(1.0 - abs(dist) / (min(s.half_size.x, s.half_size.y) *
                                              s.edge_band / 0.35),
@@ -1850,7 +1862,7 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
       float sigma = frost_sigma * mix(1.0, s.frost_edge, pow(ratio, 1.3));
       float3 frost = lens_frosted(s, slot, atlas, atlas_size, local + bend,
                                   max(sigma, 0.5));
-      glass = mix(glass, frost, lens.blur_mix);
+      glass = frosted_through ? frost : mix(glass, frost, lens.blur_mix);
     }
     glass = lens_saturate(glass, lens.tune_saturation);
   } else {
@@ -1875,13 +1887,15 @@ fragment float4 lens_fragment(LensFragmentInput input [[stage_in]],
                         s.blur_shift,
                     0.0) -
                 log2(mag);
-    glass = lens_bent(s, slot, atlas, atlas_size, at, bend, split, lod);
+    if (!frosted_through) {
+      glass = lens_bent(s, slot, atlas, atlas_size, at, bend, split, lod);
+    }
     if (frost_sigma > 0.0) {
       float sigma =
           frost_sigma * mix(1.0, s.frost_edge, pow(bend_edge, 1.3));
       float3 frost = lens_frosted(s, slot, atlas, atlas_size, at + bend,
                                   max(sigma, 0.5));
-      glass = mix(glass, frost, lens.blur_mix);
+      glass = frosted_through ? frost : mix(glass, frost, lens.blur_mix);
     }
     glass = lens_saturate(glass, lens.tune_saturation);
   }

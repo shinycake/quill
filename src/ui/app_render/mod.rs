@@ -358,6 +358,7 @@ impl Render for QuillApp {
                 // `setup_app_menus`).
                 cfg!(not(target_os = "macos")).then(|| self.menu_bar.clone()),
                 self.look(),
+                crate::ui::chrome::frames::StripActions::new(self.chrome(), self.card_glass(cx)),
                 cx,
             ))
             .children(self.frozen_banner(cx))

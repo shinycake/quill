@@ -939,7 +939,9 @@ impl QuillApp {
     }
 
     /// Small quiet toggle used by the search filter rows.
+    /// A search filter chip: the kit's ghost button, a pill in Floating.
     fn filter_chip(
+        &self,
         id: impl Into<ElementId>,
         label: &str,
         selected: bool,
@@ -950,6 +952,9 @@ impl QuillApp {
             .label(label.to_string())
             .ghost()
             .xsmall()
+            .rounded(crate::ui::chrome::bars::action_rounding(
+                self.chrome_metrics(),
+            ))
             .selected(selected)
             .toggled(selected)
             .on_click(cx.listener(move |this, _, window, cx| on_click(this, window, cx)))
