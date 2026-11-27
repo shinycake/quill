@@ -102,6 +102,8 @@ pub(crate) const PANEL_PADDING: f32 = 4.;
 /// From a menu panel's outer edge to its rows: the hairline border and the
 /// padding.
 const PANEL_INSET: f32 = PANEL_PADDING + 1.;
+/// A submenu draws over its parent menu, which is not deferred.
+const SUBMENU_PRIORITY: usize = 1;
 
 /// A submenu beside its parent row (a child of that row), its top rows
 /// level with it. As tdesktop's `PopupMenu::prepareGeometryFor` does, it
@@ -111,6 +113,11 @@ const PANEL_INSET: f32 = PANEL_PADDING + 1.;
 ///
 /// `on_bounds` gets the panel's bounds as it prepaints and `on_pointer` each
 /// pointer move over it (the parent menu's aim, `menu_aim`).
+///
+/// The panel is drawn deferred, as the kit's `PopupMenu` draws its
+/// submenus: a deferred draw takes no content mask from its ancestors, so
+/// the parent menu's rounded clip in Floating (`menu_surface`) cannot cut
+/// the submenu away, nor its hit test.
 pub(crate) fn submenu_panel(
     id: &'static str,
     rows: Vec<AnyElement>,
@@ -151,6 +158,6 @@ pub(crate) fn submenu_panel(
         .absolute()
         .top_0()
         .left_0()
-        .child(panel)
+        .child(deferred(panel).with_priority(SUBMENU_PRIORITY))
         .into_any_element()
 }

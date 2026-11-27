@@ -115,10 +115,11 @@ impl QuillApp {
                 Tab::new().flex_grow(1.).label(label)
             }
         };
-        TabBar::new("list-tabs")
+        let bar = TabBar::new("list-tabs")
             .w_full()
             .segmented()
-            .glass_selection()
+            .glass_selection();
+        crate::ui::chrome::list_parts::segmented_tabs(bar, self.chrome_metrics(), cx.theme())
             .with_size(self.control_size())
             .selected_index(selected)
             .child(tab(IconName::MessageCircle, tr(keys::RECENT_CHATS)))

@@ -70,6 +70,18 @@ icon takes the label's colour and the counter inverts (white with accent
 text). Over glass the strip drops its edge fades, which were opaque blocks
 of the list colour.
 
+## Segmented bars (2026-11-27)
+
+The kit's segmented `TabBar` took its pill's radius as the bar's less 2 or
+3 px, but the pill sits 2, 3 or 4 px inside the bar (`segment_inset`: the
+bar's side padding and half of what the pill leaves of its height). It now
+takes `concentric_radius(bar radius, segment_inset)`, so every segmented
+bar's selection and hover follow the bar's corners (Classic: 8 and 4 at the
+default size). `TabBar::bar_radius` rounds a bar with its own radius and
+its tabs follow; Floating gives the Chats / Contacts / Calls bar (and the
+glass tuner preview's copy of it) a capsule, like its search field and
+folder pills (`chrome::list_parts::segmented_tabs`).
+
 ## Not covered
 
 Main menu tiles do not touch the popover's corners (the search field and

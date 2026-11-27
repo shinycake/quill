@@ -213,3 +213,14 @@ colour over the glass (`Tab::glass_selection`). A Pill tab with a prefix or
 suffix pads its whole content (`tab.rs`, `pill_parts`), so the icon and the
 counter sit inside the capsule with the label instead of on its rounded
 ends. Re-apply when re-vendoring.
+
+## Concentric segmented bars
+
+Changed by the Quill project in 2026 (`docs/decisions/concentric-highlights.md`,
+"Segmented bars"). `TabVariant::segment_inset` is how far a segmented bar's
+pill sits inside it on every side (it also sets the bar's side padding);
+`inner_radius(size, bar_radius)` is `concentric_radius(bar_radius, inset)`
+instead of the bar radius less a fixed 2 or 3 px. `TabBar::bar_radius`
+rounds the bar with the app's radius instead of the theme's and hands it to
+its tabs (`Tab::bar_radius`), so the sliding selection and the hover follow.
+Re-apply when re-vendoring.

@@ -118,15 +118,19 @@ impl QuillApp {
             .left(px(12.))
             .w(px(240.))
             .child(
-                TabBar::new("glass-preview-tabs")
-                    .w_full()
-                    .segmented()
-                    .glass_selection()
-                    .small()
-                    .selected_index(0)
-                    .child(Tab::new().flex_grow(1.).label(tr(keys::RECENT_CHATS)))
-                    .child(Tab::new().flex_grow(1.).label(tr(keys::MENU_CONTACTS)))
-                    .child(Tab::new().flex_grow(1.).label(tr(keys::MENU_CALLS))),
+                crate::ui::chrome::list_parts::segmented_tabs(
+                    TabBar::new("glass-preview-tabs")
+                        .w_full()
+                        .segmented()
+                        .glass_selection(),
+                    self.chrome_metrics(),
+                    cx.theme(),
+                )
+                .small()
+                .selected_index(0)
+                .child(Tab::new().flex_grow(1.).label(tr(keys::RECENT_CHATS)))
+                .child(Tab::new().flex_grow(1.).label(tr(keys::MENU_CONTACTS)))
+                .child(Tab::new().flex_grow(1.).label(tr(keys::MENU_CALLS))),
             );
         let date =
             crate::ui::conversation::pill_label(tr(keys::Q_CHATLIST_TODAY), cx).map(|pill| {
