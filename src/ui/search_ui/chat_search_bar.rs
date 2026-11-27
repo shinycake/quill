@@ -95,7 +95,7 @@ impl QuillApp {
         if let Some(tag) = tag_query(&query).filter(|_| !picker_open) {
             let tag = tag.to_string();
             tag_chips.push(
-                Self::filter_chip(
+                self.filter_chip(
                     "chat-search-scope-chat",
                     tr(keys::SEARCH_TAB_THIS_CHAT),
                     true,
@@ -107,7 +107,7 @@ impl QuillApp {
             for scope in SearchScope::ALL {
                 let tag = tag.clone();
                 tag_chips.push(
-                    Self::filter_chip(
+                    self.filter_chip(
                         ("chat-search-scope", scope as u64),
                         scope.label(),
                         false,
@@ -121,7 +121,7 @@ impl QuillApp {
         let mut media_chips = Vec::new();
         for kind in SearchMediaKind::ALL {
             media_chips.push(
-                Self::filter_chip(
+                self.filter_chip(
                     ("chat-search-media", kind as u64),
                     kind.label(),
                     media == kind,
@@ -238,7 +238,7 @@ impl QuillApp {
                             || tr(keys::Q_CHAT_FROM).to_string(),
                             |name| tr_with(keys::DLG_SEARCH_FROM, &[("user", &name.to_string())]),
                         );
-                        this.child(Self::filter_chip(
+                        this.child(self.filter_chip(
                             "chat-search-from",
                             &label,
                             sender_label.is_some() || picker_open,
@@ -644,7 +644,7 @@ impl QuillApp {
         if has_chat {
             let query = query.clone();
             scopes.push(
-                Self::filter_chip(
+                self.filter_chip(
                     "search-scope-this-chat",
                     tr(keys::SEARCH_TAB_THIS_CHAT),
                     false,

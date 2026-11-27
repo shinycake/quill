@@ -8,7 +8,7 @@ use super::window_frame::FrameTitleBar;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::AppMenuBar;
-use gpui_kit::component::{Sizable, Size, StyledExt};
+use gpui_kit::component::{ActiveTheme, Sizable, Size, StyledExt};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
@@ -24,6 +24,7 @@ pub(super) fn main_title_bar(
     update: Option<AnyElement>,
     menu_bar: Option<Entity<AppMenuBar>>,
     strip: Look,
+    actions: super::chrome::frames::StripActions,
     cx: &mut Context<QuillApp>,
 ) -> impl IntoElement {
     let title = "Quill";
@@ -51,6 +52,10 @@ pub(super) fn main_title_bar(
                 .gap_2()
                 .items_center()
                 .flex_none()
+                .when(
+                    update.is_some() || mode == PaneMode::Ready || show_cycle,
+                    |row| actions.frame(row, cx.theme()),
+                )
                 .children(update)
                 .when(mode == PaneMode::Ready, |this| {
                     let label = if search_open {

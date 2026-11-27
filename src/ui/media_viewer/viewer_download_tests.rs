@@ -22,9 +22,7 @@ fn size(type_name: &str, width: i32, file_id: i32) -> PhotoSizeView {
 }
 
 #[gpui_kit::test]
-fn a_photo_with_only_its_small_size_local_downloads_the_largest(
-    cx: &mut gpui_kit::TestAppContext,
-) {
+fn a_photo_with_only_its_small_size_local_downloads_the_largest(cx: &mut gpui_kit::TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let small_path = demo_media_allowlist().join("demo-gif-still-photo.jpg");

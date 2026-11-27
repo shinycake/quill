@@ -265,7 +265,7 @@ impl QuillApp {
             .row()
             .is_some_and(|menu| menu.chat_id == chat);
         match (self.look(), target) {
-            (Look::Cards, true) => fill.blend(crate::ui::pressable::hover_fill(cx.theme())),
+            (Look::Cards, true) => over_fill(fill, crate::ui::pressable::hover_fill(cx.theme())),
             (Look::Cards, false) | (Look::Lines, _) => fill,
         }
     }
@@ -373,3 +373,14 @@ mod tests;
 #[cfg(feature = "demo-capture")]
 #[path = "cards_tests.rs"]
 mod cards_tests;
+
+/// `tint` laid over a row's `fill`. `Hsla::blend` keeps the fill's alpha,
+/// so over a glass card's clear row it would draw nothing: there the tint
+/// is the fill.
+fn over_fill(fill: Hsla, tint: Hsla) -> Hsla {
+    if fill.is_transparent() {
+        tint
+    } else {
+        fill.blend(tint)
+    }
+}

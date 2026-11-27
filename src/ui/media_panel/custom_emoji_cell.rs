@@ -386,6 +386,7 @@ impl QuillApp {
     pub(in crate::ui) fn media_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
         self.sync_media_panel_rows(cx);
         let tab = self.pickers.media_panel.tab;
+        let metrics = self.chrome_metrics();
         // A live story comment takes emoji only (tdesktop's video stream
         // field has no sticker or GIF tabs).
         // The send box's caption too (tdesktop `SendFilesBox`).
@@ -405,6 +406,7 @@ impl QuillApp {
                     .label(label)
                     .ghost()
                     .small()
+                    .rounded(crate::ui::chrome::bars::action_rounding(metrics))
                     .selected(tab == value)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.set_media_panel_tab(value, false, cx);
@@ -451,25 +453,29 @@ impl QuillApp {
             let weak = cx.weak_entity();
             let sections = self.pickers.media_panel.sections.clone();
             let active = self.pickers.media_panel.active_section;
-            let search = div().px_2().pt_2().child(
-                Textarea::new(if self.pickers.media_panel.status().is_some() {
-                    &self.pickers.status_search_input
-                } else if self.pickers.media_panel.reaction().is_some() {
-                    &self.pickers.reaction_search_input
-                } else if tab == PanelTab::Emoji {
-                    &self.pickers.emoji_search_input
-                } else {
-                    &self.pickers.sticker_search_input
-                })
-                .aria_label(if self.pickers.media_panel.status().is_some() {
-                    tr(keys::Q_EMOJI_STATUS_SEARCH)
-                } else if tab == PanelTab::Emoji {
-                    tr(keys::Q_MEDIA_SEARCH_EMOJI)
-                } else {
-                    tr(keys::Q_MEDIA_SEARCH_STICKERS)
-                })
-                .h(px(34.)),
-            );
+            let search = div()
+                .px_2()
+                .pt_2()
+                .child(crate::ui::chrome::list_parts::search_field(
+                    Textarea::new(if self.pickers.media_panel.status().is_some() {
+                        &self.pickers.status_search_input
+                    } else if self.pickers.media_panel.reaction().is_some() {
+                        &self.pickers.reaction_search_input
+                    } else if tab == PanelTab::Emoji {
+                        &self.pickers.emoji_search_input
+                    } else {
+                        &self.pickers.sticker_search_input
+                    })
+                    .aria_label(if self.pickers.media_panel.status().is_some() {
+                        tr(keys::Q_EMOJI_STATUS_SEARCH)
+                    } else if tab == PanelTab::Emoji {
+                        tr(keys::Q_MEDIA_SEARCH_EMOJI)
+                    } else {
+                        tr(keys::Q_MEDIA_SEARCH_STICKERS)
+                    })
+                    .h(px(34.)),
+                    metrics,
+                ));
             // Footer pack icons are each set's first sticker: load the sets
             // and icon files they need, after the visible rows (two defers
             // put these behind the rows' requests; loads are capped).
@@ -561,6 +567,7 @@ impl QuillApp {
                         }),
                         cx,
                     )
+                    .map(|chip| crate::ui::chrome::dropdown::footer_chip(chip, metrics))
                 }));
             div()
                 .flex_1()
@@ -593,7 +600,6 @@ impl QuillApp {
         // so it carries the tag itself: the UI driver treats it as part of
         // the chat it opens over (the surface check already allowed that
         // chat; sticker and GIF sends are refused while an agent drives).
-        let metrics = self.chrome_metrics();
         div()
             .id("media-panel")
             .occlude()

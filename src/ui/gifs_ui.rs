@@ -741,6 +741,7 @@ impl QuillApp {
     /// The footer: saved GIFs, trending and the search provider's emoji,
     /// like the sticker and emoji tabs' section strip.
     fn gif_sections(&self, panel: &GifPanel, cx: &mut Context<Self>) -> AnyElement {
+        let metrics = self.chrome_metrics();
         let shown = GifSection::of(self.pickers.gif_tab.wanted(), panel);
         let glyph = |icon| Icon::new(icon).size(px(18.)).into_any_element();
         let mut sections = vec![
@@ -794,6 +795,7 @@ impl QuillApp {
                             }),
                             cx,
                         )
+                        .map(|chip| crate::ui::chrome::dropdown::footer_chip(chip, metrics))
                     }),
             )
             .into_any_element()
