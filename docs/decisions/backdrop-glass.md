@@ -288,6 +288,86 @@ use it.
     light and dark. The runner's screen is 1028 px wide, so the sharp loupe
     at x = 1030 falls outside the window there.
 
+## Glass cost on Windows and Linux (2026-11-27)
+
+A Windows user of the Floating layout found the glass "pretty laggy"
+(issue 1507, DirectX 11). Nothing here ran on Windows or Linux hardware;
+this is an audit of the code against the Metal path, and the changes it
+led to.
+
+What the audit found on DirectX 11 (`backdrop_glass.rs`,
+`directx_renderer.rs`) and wgpu (`wgpu_renderer/lens.rs`): the same
+passes as Metal and nothing that stalls. Each lens copies only its padded
+footprint (`CopySubresourceRegion` / `copy_texture_to_texture`), only when
+its backdrop changed (the shared `LensReuse` plan); the atlas, its level
+views, the samplers and the pipelines are pooled, not made per frame; the
+blur fills four levels at half, quarter, eighth and sixteenth size; there
+is no MSAA, no `Map` for reading, `GetData` or `Flush` in a frame; the
+uploads use `WRITE_DISCARD` (one map per batch). Glass asks for no extra
+frames: a still window with glass parks like one without
+(`frame_idle.rs`), and nothing in the glass UI requests frames on its own.
+
+So a Windows or Linux GPU pays what Metal pays, per pixel, over the
+cards: the Floating list card and the two conversation cards are large
+lenses, and `lens_fragment` is a long shader (five distance fields, a
+normal, eleven atlas taps, the lighting). On Apple GPUs the measured cost
+is raster and blending, and shader work hardly shows (Floating, "Glass
+cost (2026-11-26)"); on the integrated GPUs of most Windows laptops the
+shader work is what is slow, so the changes cut shader work that does not
+change a pixel:
+
+- The shadow's two distance fields are skipped deeper than 4 units
+  inside the rim, where `outside` is 0 and the shadow is 0 whatever they
+  say. Most of a card's area.
+- The three sharp bent taps are skipped when the frost is mixed in whole
+  (`blur_mix == 1`, every slab recipe: menus, panels, cards, bars), where
+  `mix(bent, frost, 1)` is the frost up to one float rounding. A slab
+  pixel now takes eight atlas taps instead of eleven.
+- DirectX writes the lenses' fallback quads into the quad buffer after
+  the scene's quads in the same mapping, instead of copying every quad of
+  the frame into a new vector first (CPU, every frame with glass).
+
+All three shaders (Metal, WGSL, HLSL) change the same way, so they stay
+line-by-line ports.
+
+Verification, 2026-11-27 (Metal, debug `demo-capture` build, M-series
+Mac):
+
+- `ready-showcase` in Floating with the photo wallpaper and `ready-glass`,
+  light and dark, captured before and after: every differing pixel is a
+  message or row time (the demo's clock moved between runs); the glass
+  itself is identical.
+- GPU time per frame (`QUILL_GPU_PROBE=1`, `ready-unread-landing` in
+  Floating with the photo wallpaper, scrolled up and down, first 30 frames
+  skipped, ABBA): p50 4.29 to 4.31 ms before, 4.05 to 4.24 ms after; glass
+  off 1.57 ms. As expected on an Apple GPU, which this does not limit;
+  relative numbers for this note only.
+- The WGSL validates with naga; `gpui-pre-windows` passes clippy for
+  `x86_64-pc-windows-msvc` (stub resource compiler). The HLSL compiles
+  only on Windows (CI).
+
+Not verified: the speed-up on a real Windows or Linux GPU (expected:
+fewer taps and distance fields per glass pixel; the size is unmeasured),
+and the HLSL under fxc until CI runs it.
+
+Left as they are, for a measured change on real hardware:
+
+- Frames with glass skip the opaque depth pre-pass on every backend (a
+  lens batch copies what is drawn, and quads drawn ahead of their turn
+  would show in it). Apple GPUs remove hidden pixels without it; desktop
+  GPUs shade the wallpaper under every opaque bubble again. Keeping the
+  pre-pass for the quads below the first lens band would win that back,
+  but it changes the shared quad shader's culling and needs a Windows run.
+- DirectX presents with sync interval 0 into a three-buffer flip swap
+  chain at the default frame latency (upstream GPUI, every frame, glass or
+  not). A frame slower than the display queues up to three frames of input
+  delay, which reads as lag. A frame latency of 1 or 2 (or a waitable swap
+  chain) would cut it, at the cost of CPU and GPU overlap; it is not a
+  glass change and needs measuring on Windows.
+- Per-lens constants (`lens_shape`, three colour conversions, the atlas
+  size query in HLSL) are worked out per pixel; moving them to the vertex
+  stage would save more, but touches all three shaders' structure.
+
 ## Not done here
 
 - Inked labels and the sharp magnifier on wgpu and DirectX (they fall back

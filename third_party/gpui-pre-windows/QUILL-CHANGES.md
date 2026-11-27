@@ -635,6 +635,18 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
   read-back and `to_output` are unchanged. `src/directx_atlas.rs`:
   `DirectXAtlas::removals`. Inked labels draw in their own colour here and
   re-rendered backdrops copy the frame like any lens.
+- Glass cost (2026-11-27): `src/shaders_lens.hlsl`'s `lens_fragment` skips work
+  whose result cannot show, as the Metal shader does: the shadow's two
+  distance fields deeper than 4 units inside the rim (where `outside` is 0,
+  so the shadow is 0 either way), and the three sharp bent taps when the
+  frost is mixed in whole (`blur_mix == 1`, every slab), where
+  `mix(bent, frost, 1)` gives the frost to its rounding. Same pixels, less
+  work per pixel (`docs/decisions/backdrop-glass.md`, "Glass cost on
+  Windows and Linux").
+  `src/directx_renderer.rs`: a frame with glass writes the lenses'
+  fallback quads into the quad buffer after the scene's quads in the same
+  mapping (`StructuredBuffer::write_followed_by`), instead of copying every
+  quad into a new vector first.
 
 ## Rounded content masks
 

@@ -274,6 +274,13 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`):
   `src/metal_atlas.rs`: `MetalAtlas::removals`. `build.rs` and
   `vendor/gpui/src/scene.rs`: the new fields and `LensInkInstance` for the
   shader header.
+- Glass cost (2026-11-27): `src/shaders.metal`'s `lens_fragment` skips work
+  whose result cannot show, as the WGSL and HLSL ports do: the shadow's two
+  distance fields deeper than 4 units inside the rim (where `outside` is 0,
+  so the shadow is 0 either way), and the three sharp bent taps when the
+  frost is mixed in whole (`blur_mix == 1`, every slab), where
+  `mix(bent, frost, 1)` gives the frost to its rounding. Same pixels
+  (`docs/decisions/backdrop-glass.md`, "Glass cost on Windows and Linux").
 
 ## GPU time probe for glass budgets
 

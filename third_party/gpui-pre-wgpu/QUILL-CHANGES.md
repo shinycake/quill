@@ -255,6 +255,14 @@ Changed by the Quill project in 2026 (`docs/decisions/backdrop-glass.md`).
   `src/wgpu_atlas.rs`: `WgpuAtlas::removals`. Inked labels draw in their
   own colour here (the sprite shader ignores the ink) and re-rendered
   backdrops copy the frame like any lens.
+- Glass cost (2026-11-27): `src/shaders_lens.wgsl`'s `fs_lens` skips work
+  whose result cannot show, as the Metal shader does: the shadow's two
+  distance fields deeper than 4 units inside the rim (where `outside` is 0,
+  so the shadow is 0 either way), and the three sharp bent taps when the
+  frost is mixed in whole (`blur_mix == 1`, every slab), where
+  `mix(bent, frost, 1)` gives the frost to its rounding. Same pixels, less
+  work per pixel (`docs/decisions/backdrop-glass.md`, "Glass cost on
+  Windows and Linux").
 
 ## Rounded content masks
 
