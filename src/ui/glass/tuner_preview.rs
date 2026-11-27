@@ -180,10 +180,10 @@ impl QuillApp {
                         theme,
                     )
                     .small()
-                        .selected_index(0)
-                        .child(Tab::new().flex_grow(1.).label(tr(keys::RECENT_CHATS)))
-                        .child(Tab::new().flex_grow(1.).label(tr(keys::MENU_CONTACTS)))
-                        .child(Tab::new().flex_grow(1.).label(tr(keys::MENU_CALLS))),
+                    .selected_index(0)
+                    .child(Tab::new().flex_grow(1.).label(tr(keys::RECENT_CHATS)))
+                    .child(Tab::new().flex_grow(1.).label(tr(keys::MENU_CONTACTS)))
+                    .child(Tab::new().flex_grow(1.).label(tr(keys::MENU_CALLS))),
                 )
                 .into_any_element(),
             PreviewPiece::Date => {
