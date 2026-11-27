@@ -448,7 +448,7 @@ fn a_floating_menus_submenu_is_drawn_and_clickable(cx: &mut TestAppContext) {
             .find(|row| {
                 row.role() == Some(gpui_kit::Role::MenuItem)
                     && row.visible()
-                    && row.label().as_deref() == Some(forever.as_str())
+                    && row.label() == Some(forever.as_str())
             })
             .map(|row| row.bounds().center())
     });
