@@ -18,6 +18,8 @@ use quill::lang::{Key, keys, tr};
 #[derive(Default)]
 pub(crate) struct GlassTuner {
     sliders: Option<TunerSliders>,
+    /// Where the preview's pieces were dragged to.
+    pub(super) preview: super::preview_drag::PreviewLayout,
 }
 
 /// One slider per dial, and the dials they were built from.

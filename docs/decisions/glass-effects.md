@@ -149,9 +149,25 @@ Button magnify (0.18) and Color split (0.25).
   (`quill::glass_tuning`), clamped to their ranges when read, so a
   hand-edited file can't push the shader past the sliders. A drag redraws
   every window at each step and saves on release; Reset puts every dial
-  back. A live preview (a menu and two buttons over colour bars) sits above
-  the sliders. Demo: `ready-settings-glass-tuning`, with
+  back. A live preview sits above the sliders: the app's real tabs, date
+  pill, menu, emoji bar, jump button and one plain slab. Demo:
+  `ready-settings-glass-tuning`, with
   `QUILL_DEMO_GLASS_DIALS=bend=150,frost=15` to move dials.
+- **The preview's backdrop is loud on purpose** (2026-11-27, Idan: the dark
+  gradient with one photo hid what the dials do). `glass/preview_scene.rs`
+  draws saturated colour fields, a fine grid, hard black-split stripes, a
+  checkerboard, concentric rings, large and small type and a photo, placed
+  by fraction of the preview so it fills any width, deeper in dark themes.
+  Bend shows on the grid and rings, blur and frost on the type, colour
+  split on the stripes.
+- **Each piece can be dragged** over it (`glass/preview_drag.rs`). The
+  layout is one value with the panel (`GlassTuner::preview`): each piece's
+  offset, the paint order (the piece pressed last draws on top) and
+  `PreviewDrag::{Resting, Dragging}`. A drag ends on the release, inside
+  the preview or outside it, or on the first move that finds the button
+  up; the grab point stays inside the preview. Positions are not saved.
+  Demo drag: `QUILL_DEMO_CLICK=p:3500;dn:780,160;dm:900,240` in a 1200 by
+  900 window moves the menu.
 
 ## Not done, and why
 

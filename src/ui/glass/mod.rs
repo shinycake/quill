@@ -11,6 +11,8 @@
 //! pipeline is built.
 #![deny(clippy::indexing_slicing)]
 
+mod preview_drag;
+mod preview_scene;
 pub(crate) mod probe;
 pub(crate) mod recipes;
 mod settings_row;
