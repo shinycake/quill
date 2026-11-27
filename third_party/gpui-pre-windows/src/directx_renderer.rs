@@ -803,13 +803,12 @@ impl DirectXRenderer {
                 )?;
             }
         } else {
-            let mut quads = Vec::with_capacity(scene.quads.len() + scene.lenses.len());
-            quads.extend_from_slice(&scene.quads);
-            quads.extend(scene.lenses.iter().map(BackdropLens::fallback_quad));
-            self.pipelines.quad_pipeline.update_buffer(
+            // Straight into the mapped buffer: no copy of every quad first.
+            self.pipelines.quad_pipeline.instances.write_followed_by(
                 &devices.device,
                 &devices.device_context,
-                &quads,
+                &scene.quads,
+                scene.lenses.iter().map(BackdropLens::fallback_quad),
             )?;
         }
 
@@ -1359,6 +1358,39 @@ impl<T> StructuredBuffer<T> {
     ) -> Result<()> {
         self.ensure_capacity(device, data.len())?;
         update_buffer(device_context, &self.buffer, data)
+    }
+
+    /// QUILL: writes `data` and then `rest` in one upload, as `write` would
+    /// write the two joined, without joining them first.
+    fn write_followed_by(
+        &mut self,
+        device: &ID3D11Device,
+        device_context: &ID3D11DeviceContext,
+        data: &[T],
+        rest: impl ExactSizeIterator<Item = T>,
+    ) -> Result<()> {
+        let extra = rest.len();
+        let len = data
+            .len()
+            .checked_add(extra)
+            .context("instance count overflows")?;
+        self.ensure_capacity(device, len)?;
+        // SAFETY: the buffer holds at least `len` elements of `T`
+        // (`ensure_capacity`), the mapping is written only inside them
+        // (`take(extra)` caps a miscounting iterator) and unmapped
+        // before the buffer is used again.
+        unsafe {
+            let mut dest = std::mem::zeroed();
+            device_context.Map(&self.buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut dest))?;
+            let base = dest.pData.cast::<T>();
+            std::ptr::copy_nonoverlapping(data.as_ptr(), base, data.len());
+            let tail = base.add(data.len());
+            for (offset, item) in rest.take(extra).enumerate() {
+                tail.add(offset).write(item);
+            }
+            device_context.Unmap(&self.buffer, 0);
+        }
+        Ok(())
     }
 
     fn ensure_capacity(&mut self, device: &ID3D11Device, len: usize) -> Result<()> {
