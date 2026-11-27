@@ -224,3 +224,9 @@ instead of the bar radius less a fixed 2 or 3 px. `TabBar::bar_radius`
 rounds the bar with the app's radius instead of the theme's and hands it to
 its tabs (`Tab::bar_radius`), so the sliding selection and the hover follow.
 Re-apply when re-vendoring.
+
+`src/message_scroller.rs`: `MessageScrollerState::hold_offset`, `scroll_to_offset`
+through gpui-pre's `ListState::keep_scroll_top`, so Quill's view hold (rows
+changing around the reader) keeps a mouse wheel glide going instead of
+stopping it (`docs/decisions/smooth-wheel-scroll.md`). Re-apply when
+re-vendoring.

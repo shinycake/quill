@@ -1410,13 +1410,18 @@ mod tests {
         (cx, strip, page)
     }
 
+    /// A wheel event, with any wheel glide it starts carried to its end.
     fn wheel(cx: &mut VisualTestContext, delta: ScrollDelta) {
         cx.simulate_event(ScrollEvent {
             position: point(px(10.), px(10.)),
             delta,
             ..Default::default()
         });
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.executor().advance_clock(gpui::WHEEL_GLIDE_DURATION);
+        cx.update(|window, cx| {
+            window.simulate_next_frame(cx);
+            window.draw(cx).clear(cx);
+        });
     }
 
     #[gpui::test]

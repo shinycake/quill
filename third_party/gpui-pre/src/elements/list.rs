@@ -13,7 +13,7 @@ use crate::{
     Along as _, AnyElement, App, AvailableSpace, Axis, Bounds, ContentMask, DispatchPhase, Edges,
     Element, EntityId, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
     Overflow, Pixels, Point, ScrollDelta, ScrollEvent, Size, Style, StyleRefinement, Styled,
-    Window, point, px, size,
+    WheelGlider, Window, point, px, size, wheel_notch_glides,
 };
 use collections::VecDeque;
 use refineable::Refineable as _;
@@ -74,6 +74,8 @@ struct StateInner {
     measuring_behavior: ListMeasuringBehavior,
     item_measurement_ready: Option<Box<dyn Fn(usize, &App) -> bool>>,
     follow_state: FollowState,
+    /// Quill: the wheel glide; positioning the list from code stops it.
+    wheel_glider: WheelGlider,
 }
 
 #[derive(Clone, Copy)]
@@ -326,6 +328,7 @@ impl ListState {
             measuring_behavior: ListMeasuringBehavior::default(),
             item_measurement_ready: None,
             follow_state: FollowState::default(),
+            wheel_glider: WheelGlider::default(),
         })));
         state.splice(0..0, item_count);
         state
@@ -356,6 +359,7 @@ impl ListState {
     pub fn reset(&self, element_count: usize) {
         let old_count = {
             let state = &mut *self.0.borrow_mut();
+            state.wheel_glider.stop();
             state.reset = true;
             state.measuring_behavior.reset();
             state.set_scroll_anchor(None);
@@ -560,6 +564,7 @@ impl ListState {
 
         let current_offset = self.logical_scroll_top();
         let state = &mut *self.0.borrow_mut();
+        state.wheel_glider.stop();
 
         if distance < px(0.) {
             state.follow_state.stop_following();
@@ -592,6 +597,7 @@ impl ListState {
     /// growing (e.g. during streaming).
     pub fn scroll_to_end(&self) {
         let state = &mut *self.0.borrow_mut();
+        state.wheel_glider.stop();
         let item_count = state.items.summary().count;
         state.set_scroll_anchor(Some(ListOffset {
             item_ix: item_count,
@@ -662,7 +668,14 @@ impl ListState {
     }
 
     /// Scroll the list to the given offset
-    pub fn scroll_to(&self, mut scroll_top: ListOffset) {
+    pub fn scroll_to(&self, scroll_top: ListOffset) {
+        self.0.borrow_mut().wheel_glider.stop();
+        self.keep_scroll_top(scroll_top);
+    }
+
+    /// Quill: [`Self::scroll_to`] for putting the same content back at the
+    /// top after rows changed around it, which keeps a wheel glide going.
+    pub fn keep_scroll_top(&self, mut scroll_top: ListOffset) {
         let state = &mut *self.0.borrow_mut();
         let item_count = state.items.summary().count;
         if scroll_top.item_ix >= item_count {
@@ -680,6 +693,7 @@ impl ListState {
     /// Scroll the list to the given item, such that the item is fully visible.
     pub fn scroll_to_reveal_item(&self, ix: usize) {
         let state = &mut *self.0.borrow_mut();
+        state.wheel_glider.stop();
 
         let mut scroll_top = state.logical_scroll_top();
         let height = state
@@ -746,6 +760,7 @@ impl ListState {
     /// as items in the overdraw get measured, and help offset scroll position changes accordingly.
     pub fn scrollbar_drag_started(&self) {
         let mut state = self.0.borrow_mut();
+        state.wheel_glider.stop();
         state.scrollbar_drag_start_height = Some(state.items.summary().height);
     }
 
@@ -767,7 +782,24 @@ impl ListState {
     }
 
     /// Set the offset from the scrollbar
+    ///
+    /// Quill: this stops a wheel glide; a glide's own steps use
+    /// [`Self::set_glide_offset`].
     pub fn set_offset_from_scrollbar(&self, point: Point<Pixels>) {
+        let state = &mut *self.0.borrow_mut();
+        state.wheel_glider.stop();
+        state.set_offset_from_scrollbar(point);
+    }
+
+    /// Quill: the wheel glide of this list, for wrappers that take the wheel
+    /// from it (`ScrollBounce`).
+    pub fn wheel_glider(&self) -> WheelGlider {
+        self.0.borrow().wheel_glider.clone()
+    }
+
+    /// Quill: [`Self::set_offset_from_scrollbar`] for one step of the wheel
+    /// glide, which keeps the glide going.
+    pub fn set_glide_offset(&self, point: Point<Pixels>) {
         self.0.borrow_mut().set_offset_from_scrollbar(point);
     }
 
@@ -921,11 +953,11 @@ impl StateInner {
         current_view: EntityId,
         window: &mut Window,
         cx: &mut App,
-    ) {
+    ) -> bool {
         // Drop scroll events after a reset, since we can't calculate
         // the new logical scroll top without the item heights
         if self.reset || delta.y == px(0.) {
-            return;
+            return false;
         }
 
         let view_before = self.scroll_view();
@@ -973,9 +1005,11 @@ impl StateInner {
         // A list pushed against its end has nothing new to draw. Items past a
         // measured edge still come in: the frame that reached the edge moved,
         // and its layout measured the overdraw beyond it.
-        if self.scroll_view() != view_before {
+        let moved = self.scroll_view() != view_before;
+        if moved {
             cx.notify(current_view);
         }
+        moved
     }
 
     /// What a frame draws differently when a scroll changes it.
@@ -1693,6 +1727,32 @@ impl Element for List {
         let mut accumulated_scroll_delta = ScrollDelta::default();
         window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
             if phase == DispatchPhase::Bubble && hitbox_id.should_handle_scroll(window) {
+                let Ok(state) = list_state.0.try_borrow() else {
+                    return;
+                };
+                let glider = state.wheel_glider.clone();
+                drop(state);
+                // Quill: a wheel notch glides over the next frames
+                // (`wheel_glide.rs`); anything else stops a glide.
+                if wheel_notch_glides(event, cx) {
+                    let delta = event.delta.pixel_delta(px(20.));
+                    if delta.y == px(0.) {
+                        return;
+                    }
+                    let inner = Rc::downgrade(&list_state.0);
+                    glider.push(delta, window, cx, move |step, window, cx| {
+                        let Some(inner) = inner.upgrade() else {
+                            return false;
+                        };
+                        let Ok(mut state) = inner.try_borrow_mut() else {
+                            return false;
+                        };
+                        let top = state.logical_scroll_top();
+                        state.scroll(&top, height, step, current_view, window, cx)
+                    });
+                    return;
+                }
+                glider.stop();
                 accumulated_scroll_delta = accumulated_scroll_delta.coalesce(event.delta);
                 let pixel_delta = accumulated_scroll_delta.pixel_delta(px(20.));
                 list_state.0.borrow_mut().scroll(
@@ -1702,7 +1762,7 @@ impl Element for List {
                     current_view,
                     window,
                     cx,
-                )
+                );
             }
         });
 

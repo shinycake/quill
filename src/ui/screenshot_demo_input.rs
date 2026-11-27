@@ -223,6 +223,14 @@ async fn run_step(step: &str, demo_window: AnyWindowHandle, cx: &mut AsyncApp) {
         pause(cx, 40).await;
         return;
     }
+    // `n:` sends one mouse wheel notch ([`notch_step`]), with no pause
+    // after it, so a `p:ms` that follows times a capture mid-glide.
+    if let Some(notch) = step.strip_prefix("n:") {
+        if let Some(event) = notch_step(notch) {
+            dispatch(demo_window, cx, [PlatformInput::Scroll(event)], false);
+        }
+        return;
+    }
     // `z:` sends one trackpad pinch ([`pinch_step`]).
     if let Some(pinch) = step.strip_prefix("z:") {
         if let Some(event) = pinch_step(pinch) {
@@ -372,6 +380,27 @@ pub(crate) fn wheel_step(step: &str) -> Option<ScrollEvent> {
         source: gpui_kit::ScrollSource::Pointer,
     })
 }
+/// The `n:` step `x,y,lines`: one mouse wheel notch over the point, a line
+/// delta the way Windows, Linux and a macOS mouse report it (positive
+/// `lines` scroll up). `None` when the step does not parse.
+pub(crate) fn notch_step(step: &str) -> Option<ScrollEvent> {
+    let parts: Vec<&str> = step.split(',').map(str::trim).collect();
+    let [x, y, lines] = parts.as_slice() else {
+        return None;
+    };
+    let lines: f32 = lines.parse().ok()?;
+    if !lines.is_finite() {
+        return None;
+    }
+    Some(ScrollEvent {
+        position: point(px(x.parse().ok()?), px(y.parse().ok()?)),
+        delta: ScrollDelta::Lines(point(0., lines)),
+        modifiers: Modifiers::default(),
+        touch_phase: TouchPhase::Moved,
+        source: gpui_kit::ScrollSource::Pointer,
+    })
+}
+
 /// The `z:` step `x,y,delta`: one trackpad pinch centred on the point,
 /// `delta` as the platform reports it (0.1 is a tenth more magnification,
 /// negative pinches out). `None` when the step does not parse.
@@ -411,6 +440,19 @@ mod tests {
         assert_eq!(zoom.modifiers, crate::ui::host_os::secondary_key());
         assert!(wheel_step("10,20,0").is_none());
         assert!(wheel_step("10,20,x,40,e").is_none());
+    }
+
+    #[test]
+    fn a_notch_step_is_a_line_delta_from_a_pointer() {
+        let notch = notch_step("400, 300, -3").expect("a step");
+        assert_eq!(notch.position, point(px(400.), px(300.)));
+        assert!(matches!(
+            notch.delta,
+            ScrollDelta::Lines(lines) if lines == point(0., -3.)
+        ));
+        assert_eq!(notch.source, gpui_kit::ScrollSource::Pointer);
+        assert!(notch_step("400,300").is_none());
+        assert!(notch_step("400,300,nan").is_none());
     }
 
     #[test]
