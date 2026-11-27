@@ -6,6 +6,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use std::cell::RefCell;
@@ -73,6 +75,34 @@ impl TileHits {
             .find(|(_, tile)| *tile == id)
             .map(|(bounds, _)| bounds.center())
     }
+}
+
+/// The check an album item shows in its corner while selecting: an empty
+/// ring, or filled with a tick once the item is selected (the row check's
+/// look, `selection_mode::selection_row`).
+pub(crate) fn tile_check(selected: bool, cx: &App) -> AnyElement {
+    let size = super::motion::CHECK_SIZE;
+    div()
+        .size(px(size))
+        .rounded_full()
+        .border_2()
+        .border_color(gpui_kit::white())
+        .bg(if selected {
+            cx.theme().success
+        } else {
+            gpui_kit::black().opacity(0.3)
+        })
+        .flex()
+        .items_center()
+        .justify_center()
+        .when(selected, |this| {
+            this.child(
+                gpui_kit::component::Icon::new(gpui_kit::assets::IconName::Check)
+                    .size(px(12.))
+                    .text_color(gpui_kit::white()),
+            )
+        })
+        .into_any_element()
 }
 
 impl QuillApp {

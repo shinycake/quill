@@ -117,7 +117,8 @@ pub(in crate::ui) fn album_tile(
     // A press on a tile that moves picks up that one message (`GroupPart`),
     // not the album; the tile's own click stays on `frame`, inside.
     let selected = select.as_ref().is_some_and(|select| select.selected);
-    let tint = cx.theme().selection;
+    let selecting = select.as_ref().is_some_and(|select| select.selecting);
+    let tint = cx.theme().primary;
     let spot = div()
         .id(("album-drag", row_id))
         .absolute()
@@ -134,8 +135,19 @@ pub(in crate::ui) fn album_tile(
                     .absolute()
                     .inset_0()
                     .map(|this| corners.round(this))
-                    .bg(tint.opacity(0.6))
+                    .bg(tint.opacity(0.45))
                     .debug_selector(move || format!("album-tile-selected-{}", message_id.0)),
+            )
+        })
+        // Each item shows its own check while selecting, so which photos
+        // are picked reads at a glance.
+        .when(selecting, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .top(px(6.))
+                    .right(px(6.))
+                    .child(crate::ui::album_select::tile_check(selected, cx)),
             )
         })
         .children(select.map(|select| select.hits.probe(message_id)));
@@ -148,6 +160,8 @@ pub(in crate::ui) fn album_tile(
 pub(in crate::ui) struct AlbumSelect {
     pub(in crate::ui) hits: crate::ui::album_select::TileHits,
     pub(in crate::ui) selected: Vec<MessageId>,
+    /// Selection mode shows: every tile carries its own check.
+    pub(in crate::ui) selecting: bool,
 }
 
 impl AlbumSelect {
@@ -155,6 +169,7 @@ impl AlbumSelect {
         TileSelect {
             hits: self.hits.clone(),
             selected: self.selected.contains(&id),
+            selecting: self.selecting,
         }
     }
 }
@@ -163,6 +178,7 @@ impl AlbumSelect {
 pub(in crate::ui) struct TileSelect {
     pub(in crate::ui) hits: crate::ui::album_select::TileHits,
     pub(in crate::ui) selected: bool,
+    pub(in crate::ui) selecting: bool,
 }
 
 /// The tile's picture and marks with no spoiler over them.

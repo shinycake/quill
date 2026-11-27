@@ -136,6 +136,7 @@ impl QuillApp {
             .find_map(|id| self.selection_forward_drag(chat_id, *id));
         let overlay = (mode > 0.).then(|| {
             let ring = cx.theme().background;
+            let muted = cx.theme().muted_foreground;
             let (fill, tick) = motion::check_frame(checked);
             let size = motion::CHECK_SIZE;
             // The circle slides in from the right edge while it fades.
@@ -189,7 +190,10 @@ impl QuillApp {
                         .opacity(mode)
                         .rounded_full()
                         .border_2()
-                        .border_color(ring)
+                        // An empty ring reads on any wallpaper, dark ones
+                        // included; a filled one is set off by the
+                        // background colour.
+                        .border_color(if checked > 0. { ring } else { muted })
                         .bg(gpui_kit::black().opacity(0.3))
                         .flex()
                         .items_center()

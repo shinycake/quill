@@ -83,6 +83,9 @@ impl QuillApp {
                         .filter(|m| self.selection_shown(m.chat_id, m.id))
                         .map(|m| m.id)
                         .collect(),
+                    selecting: refs
+                        .first()
+                        .is_some_and(|first| self.selection_visible_in(first.chat_id)),
                 };
                 let frame = refs
                     .first()
