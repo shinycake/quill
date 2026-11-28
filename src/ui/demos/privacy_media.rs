@@ -172,6 +172,52 @@ impl QuillApp {
                     };
                 }
             }
+            // `=select`: one photo of the received album and the whole own
+            // album selected.
+            Ok("select") => {
+                let own = self
+                    .shown_history(ChatId(11))
+                    .and_then(|shown| {
+                        shown
+                            .values()
+                            .find(|m| m.is_outgoing && m.media_album_id != 0)
+                            .map(|m| m.id)
+                    })
+                    .map(|id| self.album_of(ChatId(11), id))
+                    .unwrap_or_default();
+                let mut ids = vec![MessageId(801)];
+                ids.extend(own);
+                self.set_selection(ChatId(11), ids, cx);
+            }
+            // `=delete`: the moderator's delete box for the received album.
+            Ok("delete") => {
+                let album = self.album_of(ChatId(11), MessageId(801));
+                let confirm = quill::composer::DeleteConfirm {
+                    chat_id: ChatId(11),
+                    message_id: MessageId(801),
+                    revoke: false,
+                    can_revoke: false,
+                };
+                let offer = crate::ui::message_menu_ui::ModerationOffer {
+                    chat_id: ChatId(11),
+                    user_id: 11,
+                    user_name: "Ada".into(),
+                    options: quill::moderation::ModerateOptions {
+                        report_spam: true,
+                        delete_all: true,
+                        delete_reactions: false,
+                        ban_or_restrict: true,
+                    },
+                    can_restrict_instead: false,
+                };
+                // The box opens once the window's root is up.
+                let app = cx.entity().downgrade();
+                window.on_next_frame(move |window, cx| {
+                    let _ = app.update(cx, |this, cx| {
+                        this.open_delete_dialog_with(confirm, album, Some(offer), window, cx);
+                    });
+                });
+            }
             _ => {}
         }
         self.set_note(StatusNote::silent(
