@@ -11,7 +11,6 @@ use super::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::ForwardDraft;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -180,39 +179,6 @@ impl QuillApp {
             self.ask_shared_media_actions(message_id, AskFor::Tick);
         }
         cx.notify();
-    }
-
-    /// The round tick shown on rows and tiles while rows are ticked.
-    pub(super) fn shared_media_check(&self, selected: bool, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
-        div()
-            .absolute()
-            .top_1()
-            .right_1()
-            .size_5()
-            .rounded_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .border_1()
-            .border_color(if selected {
-                theme.primary
-            } else {
-                theme.border
-            })
-            .bg(if selected {
-                theme.primary
-            } else {
-                theme.background.opacity(0.6)
-            })
-            .when(selected, |this| {
-                this.child(
-                    Icon::new(IconName::Check)
-                        .size_3()
-                        .text_color(theme.primary_foreground),
-                )
-            })
-            .into_any_element()
     }
 
     fn clear_shared_media_selection(&mut self, cx: &mut Context<Self>) {

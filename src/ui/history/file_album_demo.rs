@@ -19,19 +19,27 @@ impl QuillApp {
         self.demo_ui
             .seq
             .store(session.last_seq, std::sync::atomic::Ordering::SeqCst);
+        // `QUILL_DEMO_FILE_ALBUM=select` picks the first file alone, so
+        // every file shows its own check; `=own-select` makes the album
+        // the account's own first.
+        let mode = std::env::var("QUILL_DEMO_FILE_ALBUM").unwrap_or_default();
+        let outgoing = mode.starts_with("own");
         for (id, name, caption) in [
             (9301, "Quarterly report.pdf", ""),
             (9302, "Budget.xlsx", "Both files for Monday"),
         ] {
             let file = demo_file_json(id, "", false);
             let json = format!(
-                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1790640000,"media_album_id":"9300","content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"{name}","mime_type":"application/pdf","minithumbnail":null,"thumbnail":null,"document":{file}}},"caption":{{"@type":"formattedText","text":"{caption}","entities":[]}}}}}}}}"#
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":{outgoing},"date":1790640000,"media_album_id":"9300","content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"{name}","mime_type":"application/pdf","minithumbnail":null,"thumbnail":null,"document":{file}}},"caption":{{"@type":"formattedText","text":"{caption}","entities":[]}}}}}}}}"#
             );
             if let Some(parsed) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
                 session.apply(parsed);
             }
         }
         session.open_chat(ChatId(11));
+        if mode.ends_with("select") {
+            self.set_selection(ChatId(11), vec![quill::ids::MessageId(9301)], cx);
+        }
         cx.notify();
     }
 }

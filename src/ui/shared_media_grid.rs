@@ -218,18 +218,14 @@ impl QuillApp {
             }))
             .when(is_message, |this| {
                 this.on_hover(self.shared_media_hover_listener(message_id, cx))
-                    .when(selected, |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .inset_0()
-                                .border_2()
-                                .border_color(cx.theme().primary)
-                                .bg(cx.theme().primary.opacity(0.18)),
-                        )
-                    })
                     .when(selecting, |this| {
-                        this.child(self.shared_media_check(selected, cx))
+                        let mark = crate::ui::select_check::Mark::settled(selected);
+                        this.children(crate::ui::select_check::picked_tile(
+                            mark,
+                            Corners::default(),
+                            cx,
+                        ))
+                        .children(crate::ui::select_check::tile_check(mark, cx))
                     })
             });
         if is_message {

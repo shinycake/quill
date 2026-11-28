@@ -124,6 +124,7 @@ impl QuillApp {
             // Selecting slides an outgoing album aside for the check.
             .child(if right && selection.slide > 0. {
                 div()
+                    .debug_selector(move || format!("row-slid-{}", first.0))
                     .relative()
                     .right(px(selection.slide))
                     .child(row)

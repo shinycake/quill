@@ -17,9 +17,9 @@
 //!   `toggleSelectedControls`: the selection buttons slide over
 //!   `st::slideWrapDuration` (150 ms, `lib_ui/ui/basic.style:100`) with
 //!   `anim::easeOutCirc`.
-//! - `ui/effects/round_checkbox.cpp:294` `RoundCheckbox::setChecked` and
-//!   `:195` `paintFrame`: a 160 ms linear check; the fill closes in over the
-//!   first 75 % (`bgDuration`) and the tick wipes in across the whole run.
+//! - `ui/effects/round_checkbox.cpp:294` `RoundCheckbox::setChecked`: a
+//!   160 ms linear check. How the check paints along that run is Quill's
+//!   own (`select_check::Frame`).
 #![deny(clippy::indexing_slicing)]
 
 use std::cell::{Cell, RefCell};
@@ -35,15 +35,12 @@ pub(crate) const SELECTION_MODE_DURATION: Duration = Duration::from_millis(120);
 pub(crate) const SELECTION_BAR_DURATION: Duration = Duration::from_millis(150);
 /// `st::msgSelectionCheck.duration` (`defaultRoundCheckbox`).
 pub(crate) const CHECK_DURATION: Duration = Duration::from_millis(160);
-/// `defaultRoundCheckbox.bgDuration`.
-pub(crate) const CHECK_BG_FRACTION: f32 = 0.75;
-/// `st::msgSelectionOffset`: how far an outgoing bubble slides left to make
-/// room for the check.
-pub(crate) const SELECTION_OFFSET: f32 = 30.;
-/// `st::msgSelectionCheck.size`.
-pub(crate) const CHECK_SIZE: f32 = 20.;
-/// `st::msgSelectionBottomSkip`.
-pub(crate) const CHECK_BOTTOM_SKIP: f32 = 5.;
+/// How far an outgoing bubble slides left to make room for the check
+/// (`st::msgSelectionOffset`, widened for Quill's check).
+pub(crate) const SELECTION_OFFSET: f32 = quill::chat_wide::MSG_SELECTION_OFFSET;
+/// The strip at the bottom of a row the check is centred in: a one-line
+/// bubble and the row's margins around it.
+pub(crate) const CHECK_LANE: f32 = 41.;
 /// Height guessed for a revealed row before its real height was painted.
 pub(crate) const REVEAL_HEIGHT_GUESS: f32 = 56.;
 
@@ -174,15 +171,6 @@ impl Glide {
     }
 }
 
-/// How the selection check circle paints at checked-progress `p`
-/// (`RoundCheckbox::paintFrame`): `(fill, tick)`, both `0..=1`. The fill is
-/// the share of the disc that has closed in; the tick is how much of it has
-/// wiped in from the left.
-pub(crate) fn check_frame(p: f32) -> (f32, f32) {
-    let p = p.clamp(0., 1.);
-    ((p / CHECK_BG_FRACTION).min(1.), p)
-}
-
 /// Horizontal room an outgoing bubble gives the check circle at selection
 /// progress `mode` (`AdditionalSpaceForSelectionCheckbox`, the
 /// narrow-column case).
@@ -206,6 +194,14 @@ struct CheckAnim {
     glide: Glide,
 }
 
+/// Whose check: a row's (an album row's is its first message's), or one
+/// album item's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum CheckOf {
+    Row(i64),
+    Tile(i64),
+}
+
 /// Selection mode motion: the checks fading in over every row, the top
 /// bar swapping to its buttons, and each check filling on selection.
 #[derive(Debug)]
@@ -213,9 +209,9 @@ pub(crate) struct SelectionFx {
     mode: Glide,
     bar: Glide,
     last_change: Instant,
-    /// By chat and message: message ids repeat across chats, and a fade
+    /// By chat and check: message ids repeat across chats, and a fade
     /// can outlast a switch of chat.
-    checks: HashMap<(i64, i64), CheckAnim>,
+    checks: HashMap<(i64, CheckOf), CheckAnim>,
     /// The count shown on the buttons while the bar slides away.
     pub(crate) last_count: usize,
 }
@@ -254,13 +250,13 @@ impl SelectionFx {
         self.bar.value(now)
     }
 
-    /// Checked-progress of message `id`, `0..=1`, starting a fill or an
-    /// un-fill when its state changed since the last frame. A row seen for
-    /// the first time animates only right after selection mode began.
+    /// Checked-progress of one check, `0..=1`, starting a fill or an
+    /// un-fill when its state changed since the last frame. A check seen
+    /// for the first time animates only right after selection mode began.
     pub(crate) fn check(
         &mut self,
         chat: i64,
-        id: i64,
+        id: CheckOf,
         selected: bool,
         animate: bool,
         now: Instant,
@@ -367,8 +363,8 @@ impl MotionState {
 #[cfg(test)]
 mod tests {
     use crate::ui::motion::{
-        Glide, MotionState, REVEAL_DURATION, SELECTION_MODE_DURATION, SelectionFx, bubble_slide,
-        check_frame, ease_out_circ, linear, progress, reveal_active, reveal_shift,
+        CheckOf, Glide, MotionState, REVEAL_DURATION, SELECTION_MODE_DURATION, SELECTION_OFFSET,
+        SelectionFx, bubble_slide, ease_out_circ, linear, progress, reveal_active, reveal_shift,
     };
     use std::time::{Duration, Instant};
 
@@ -439,14 +435,9 @@ mod tests {
     }
 
     #[test]
-    fn check_frame_fills_in_75_percent_and_wipes_tick() {
-        assert_eq!(check_frame(0.), (0., 0.));
-        let (fill, tick) = check_frame(0.375);
-        assert!((fill - 0.5).abs() < 1e-6 && (tick - 0.375).abs() < 1e-6);
-        assert_eq!(check_frame(0.75).0, 1.);
-        assert_eq!(check_frame(1.), (1., 1.));
+    fn bubble_slides_the_whole_gutter() {
         assert_eq!(bubble_slide(0.), 0.);
-        assert_eq!(bubble_slide(1.), 30.);
+        assert_eq!(bubble_slide(1.), SELECTION_OFFSET);
     }
 
     #[test]
@@ -463,22 +454,24 @@ mod tests {
         assert!(!fx.moving(t0 + ms(200)));
 
         // The first message selected right as the mode starts fills in.
-        let p = fx.check(1, 7, true, true, t0 + ms(1));
+        let p = fx.check(1, CheckOf::Row(7), true, true, t0 + ms(1));
         assert_eq!(p, 0.);
-        assert!((fx.check(1, 7, true, true, t0 + ms(81)) - 0.5).abs() < 1e-2);
-        assert_eq!(fx.check(1, 7, true, true, t0 + ms(300)), 1.);
+        assert!((fx.check(1, CheckOf::Row(7), true, true, t0 + ms(81)) - 0.5).abs() < 1e-2);
+        assert_eq!(fx.check(1, CheckOf::Row(7), true, true, t0 + ms(300)), 1.);
         // Unselecting runs the fill backwards.
-        let _ = fx.check(1, 7, false, true, t0 + ms(400));
-        assert!((fx.check(1, 7, false, true, t0 + ms(480)) - 0.5).abs() < 1e-2);
-        assert_eq!(fx.check(1, 7, false, true, t0 + ms(700)), 0.);
+        let _ = fx.check(1, CheckOf::Row(7), false, true, t0 + ms(400));
+        assert!((fx.check(1, CheckOf::Row(7), false, true, t0 + ms(480)) - 0.5).abs() < 1e-2);
+        assert_eq!(fx.check(1, CheckOf::Row(7), false, true, t0 + ms(700)), 0.);
         // A row first seen well after the mode began snaps to its state.
-        assert_eq!(fx.check(1, 9, true, true, t0 + ms(900)), 1.);
+        assert_eq!(fx.check(1, CheckOf::Row(9), true, true, t0 + ms(900)), 1.);
         // An inactive window snaps too.
-        assert_eq!(fx.check(1, 11, true, false, t0 + ms(901)), 1.);
+        assert_eq!(fx.check(1, CheckOf::Row(11), true, false, t0 + ms(901)), 1.);
 
         // The same message id in another chat has no state of its own yet.
-        assert_eq!(fx.check(2, 9, false, true, t0 + ms(950)), 0.);
-        assert_eq!(fx.check(1, 9, true, true, t0 + ms(950)), 1.);
+        assert_eq!(fx.check(2, CheckOf::Row(9), false, true, t0 + ms(950)), 0.);
+        assert_eq!(fx.check(1, CheckOf::Row(9), true, true, t0 + ms(950)), 1.);
+        // An album item's own check is not its row's.
+        assert_eq!(fx.check(1, CheckOf::Tile(9), false, true, t0 + ms(950)), 0.);
 
         // Leaving the mode fades back and forgets the rows once settled.
         fx.sync_mode(false, true, t0 + ms(1000));

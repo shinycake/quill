@@ -108,24 +108,23 @@ pub(in crate::ui) fn file_album_history_row(
         });
         let id = message.id.0;
         let tile = select.tile(message.id);
-        let tint = cx.theme().primary;
+        let ground = if message.is_outgoing && !look.plain {
+            crate::ui::select_check::Ground::Accent
+        } else {
+            crate::ui::select_check::Ground::Surface
+        };
         stack = stack.child(
             div()
                 .debug_selector(move || format!("file-album-item-{id}"))
                 .relative()
                 .rounded_md()
-                // A file selected on its own is washed in the selection
+                // A file picked on its own is washed in the selection
                 // colour (tdesktop's grouped document `fillSelected`).
-                .when(tile.selected, |this| this.bg(tint.opacity(0.25)))
-                .when(tile.selecting, |this| {
-                    this.child(
-                        div()
-                            .absolute()
-                            .top(px(4.))
-                            .right(px(4.))
-                            .child(crate::ui::album_select::tile_check(tile.selected, cx)),
-                    )
-                })
+                .children(crate::ui::select_check::picked_file(tile.mark, ground, cx))
+                .children(
+                    crate::ui::select_check::corner_check(tile.mark, ground, cx)
+                        .map(|check| div().absolute().top(px(4.)).right(px(4.)).child(check)),
+                )
                 .child(tile.hits.probe(message.id))
                 .flex()
                 .flex_col()

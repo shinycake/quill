@@ -15,11 +15,15 @@ use gpui_kit::{
 use quill::ids::{ChatId, MessageId};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    new_app_of_width(cx, 1100.)
+}
+
+fn new_app_of_width(cx: &mut TestAppContext, width: f32) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
-    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+    let handle = cx.open_window(size(px(width), px(800.)), move |window, cx| {
         let view = cx.new(|cx| {
             QuillApp::new_with_demo(
                 window,
@@ -191,4 +195,70 @@ fn right_click_on_a_tile_is_that_photo_alone(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("menu-select", cx));
     vcx.run_until_parked();
     assert_eq!(selected(&app, vcx), vec![album[1]]);
+}
+
+fn painted(vcx: &mut VisualTestContext, selector: String) -> Option<Bounds<Pixels>> {
+    // Selectors are looked up as `&'static str`.
+    let selector: &'static str = Box::leak(selector.into_boxed_str());
+    vcx.debug_bounds(selector)
+}
+
+#[gpui_kit::test]
+fn the_row_check_keeps_clear_of_the_outgoing_bubble(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let chat = chat(&app, vcx);
+    let (album, _) = own_album(&app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.select_group(chat, app.album_of(chat, album[0]), cx)
+    });
+    frames(vcx);
+    let (_, row) = own_album(&app, vcx);
+    let check = painted(vcx, format!("select-check-{}", album[0].0)).expect("the row's check");
+    let bubble = painted(vcx, format!("row-slid-{}", album[0].0)).expect("the slid bubble");
+    // The bubble slid out of the check's gutter, and the check is inside
+    // the row.
+    assert!(bubble.right() < check.left(), "{bubble:?} {check:?}");
+    assert!(check.right() < row.right() && check.bottom() <= row.bottom());
+    // Every picked photo is framed.
+    for id in &album {
+        assert!(painted(vcx, format!("album-tile-selected-{}", id.0)).is_some());
+    }
+}
+
+#[gpui_kit::test]
+fn only_a_picked_photo_is_framed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let chat = chat(&app, vcx);
+    let (album, _) = own_album(&app, vcx);
+    app.update_in(vcx, |app, _, cx| app.select_group(chat, vec![album[0]], cx));
+    frames(vcx);
+    assert!(painted(vcx, format!("album-tile-selected-{}", album[0].0)).is_some());
+    assert!(painted(vcx, format!("album-tile-selected-{}", album[1].0)).is_none());
+}
+
+#[gpui_kit::test]
+fn the_wide_layout_keeps_the_check_right_of_the_album(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app_of_width(cx, 1600.);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.appearance.adaptive_for_wide = true;
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.chat_wide()));
+    let chat = chat(&app, vcx);
+    let (album, _) = own_album(&app, vcx);
+    app.update_in(vcx, |app, _, cx| {
+        app.select_group(chat, app.album_of(chat, album[0]), cx)
+    });
+    frames(vcx);
+    let (_, row) = own_album(&app, vcx);
+    let check = painted(vcx, format!("select-check-{}", album[0].0)).expect("the row's check");
+    assert!(check.right() <= row.right() && check.bottom() <= row.bottom());
+    for id in &album {
+        let tile = painted(vcx, format!("album-tile-selected-{}", id.0)).expect("a picked tile");
+        assert!(tile.right() < check.left(), "{tile:?} {check:?}");
+    }
 }
