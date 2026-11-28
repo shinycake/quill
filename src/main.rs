@@ -617,7 +617,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
     quill::settings::use_isolated_app_root(demo_root.clone());
     // `QUILL_DEMO_THEME=dark` captures any fixture in the dark theme (the
     // default follows the system appearance); `QUILL_DEMO_DENSITY=compact`
-    // in Compact mode; `QUILL_DEMO_MATERIAL=glass` with glass effects on.
+    // in Compact mode.
     let mut prefs = serde_json::Map::new();
     if std::env::var("QUILL_DEMO_THEME").as_deref() == Ok("dark") {
         prefs.insert("theme".into(), "dark".into());
@@ -625,9 +625,6 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
     }
     if std::env::var("QUILL_DEMO_DENSITY").as_deref() == Ok("compact") {
         prefs.insert("density".into(), "compact".into());
-    }
-    if std::env::var("QUILL_DEMO_MATERIAL").as_deref() == Ok("glass") {
-        prefs.insert("material".into(), "glass".into());
     }
     if !prefs.is_empty() {
         let paths =
