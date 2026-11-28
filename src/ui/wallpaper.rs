@@ -3,9 +3,12 @@
 //! `window/section_widget.cpp`'s `PaintBackground`, `ui/chat/chat_theme.cpp`).
 //!
 //! Solid colors paint as a plain fill. Everything else (gradients,
-//! freeform gradients, patterns, photos with Blur or Tile) is rendered once
-//! per area size on the wallpaper thread (`wallpaper_cache`) and painted
-//! as one image.
+//! freeform gradients, patterns, photos with Blur or Tile) is rendered on
+//! the wallpaper thread (`wallpaper_cache`) once per size of what it is
+//! fitted to and painted as one image. A chat's wallpaper is fitted to the
+//! whole window, Classic's history showing its part of it, so switching
+//! chats or changing what stands around the history never moves it
+//! (`wallpaper_cache::Fit`).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
