@@ -140,6 +140,40 @@ impl QuillApp {
         self.composer.update(cx, |input, cx| {
             input.set_value("album caption", window, cx);
         });
+        // `QUILL_DEMO_ALBUM_FORWARD=box`: the received album in the forward
+        // box; `=bar`: in the forward bar over this chat's composer.
+        match std::env::var("QUILL_DEMO_ALBUM_FORWARD").as_deref() {
+            Ok("box") => {
+                let album = self.album_of(ChatId(11), MessageId(801));
+                self.begin_forward_group(ChatId(11), album, window, cx);
+            }
+            Ok("bar") => {
+                let album = self.album_of(ChatId(11), MessageId(801));
+                let mut draft = None::<quill::composer::ForwardDraft>;
+                for id in album {
+                    match draft.as_mut() {
+                        Some(draft) => {
+                            draft.toggle(ChatId(11), quill::ids::TopicId::None, id, false)
+                        }
+                        None => {
+                            draft = quill::composer::ForwardDraft::from_message(
+                                ChatId(11),
+                                quill::ids::TopicId::None,
+                                id,
+                                false,
+                            )
+                        }
+                    }
+                }
+                if let Some(draft) = draft {
+                    self.share.forward = crate::ui::forward_stage::ForwardStage::Bar {
+                        draft,
+                        dest: ChatId(11),
+                    };
+                }
+            }
+            _ => {}
+        }
         self.set_note(StatusNote::silent(
             "screenshot demo — received album · own album",
         ));
