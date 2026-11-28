@@ -2,11 +2,14 @@
 //! worker thread and painted as a single quad (tdesktop `ChatTheme::
 //! backgroundState` / `CacheBackground`).
 //!
-//! - A canvas asks for its wallpaper at its device-pixel size. A ready
-//!   image paints 1:1; otherwise the image that area showed last paints
-//!   stretched (tdesktop does the same while it re-caches after a resize)
-//!   and the frame clock is asked for another frame until the new one
-//!   arrives.
+//! - A canvas asks for its wallpaper at the device-pixel size of what the
+//!   wallpaper is fitted to ([`Fit`]): the whole window for a chat's
+//!   wallpaper, whatever part of it the canvas shows, so the bars, the
+//!   composer and the columns around a history never move or rescale it.
+//!   A ready image paints 1:1; otherwise the image that area showed last
+//!   paints stretched (tdesktop does the same while it re-caches after a
+//!   resize) and the frame clock is asked for another frame until the new
+//!   one arrives.
 //! - Each area is a *slot* (the history of one window, the preview, a
 //!   thumbnail). A new request for a slot replaces its queued one, and a
 //!   resize waits [`SETTLE`] for the size to stop changing, so a window
@@ -58,6 +61,54 @@ pub(super) enum Slot {
     Preview,
     /// A gallery thumbnail: fixed size, never replaced or delayed.
     Thumb,
+}
+
+impl Slot {
+    /// What this area's wallpaper is fitted to.
+    fn fit(self) -> Fit {
+        match self {
+            Slot::History(_) | Slot::Window(_) => Fit::Window,
+            Slot::Preview | Slot::Thumb => Fit::Area,
+        }
+    }
+}
+
+/// The rectangle a wallpaper is fitted to: a photo's cover crop, a
+/// pattern's tile size and a gradient's spread all follow its size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Fit {
+    /// The whole window. A chat's wallpaper stays put whatever its chat
+    /// puts around the history (a pinned bar, a taller composer, a join
+    /// button, a bot keyboard), whatever the columns beside it do (the
+    /// chat list's width, the info panel, the drawer), and in Classic and
+    /// Floating alike: only the window's own size changes it (tdesktop
+    /// fits it to the window's body, `SectionWidget::PaintBackground`).
+    Window,
+    /// The area itself: a preview or a thumbnail in a dialog.
+    Area,
+}
+
+impl Fit {
+    /// Where the wallpaper is laid out for an area at `area` in a window
+    /// whose content is `viewport` (window coordinates); the area shows
+    /// its part of it.
+    pub(super) fn stage(self, area: Bounds<Pixels>, viewport: Size<Pixels>) -> Bounds<Pixels> {
+        match self {
+            Fit::Window => Bounds::new(Point::default(), viewport),
+            Fit::Area => area,
+        }
+    }
+
+    /// What the budget may retire of a picture shown at this fit: a
+    /// window-wide one stays while shown, as two windows' pictures can
+    /// pass the budget together and would retire each other on every
+    /// paint.
+    fn keep(self) -> Keep {
+        match self {
+            Fit::Window => Keep::Shown,
+            Fit::Area => Keep::Budget,
+        }
+    }
 }
 
 /// The cache key of `wallpaper` at `width` x `height` pixels.
@@ -144,7 +195,7 @@ fn worker() {
 #[derive(Clone)]
 pub(super) struct Composite {
     image: Arc<RenderImage>,
-    /// The area it was made for and where the image sits in it, in
+    /// The stage it was made for and where the image sits on it, in
     /// device pixels.
     area: (u32, u32),
     at: (i32, i32),
@@ -152,15 +203,15 @@ pub(super) struct Composite {
 }
 
 impl Composite {
-    /// Where the image goes when the area is `bounds` (stretched when the
-    /// area has since changed size).
-    fn image_bounds(&self, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-        let sx = bounds.size.width / self.area.0.max(1) as f32;
-        let sy = bounds.size.height / self.area.1.max(1) as f32;
+    /// Where the image goes when the wallpaper is laid out over `stage`
+    /// (stretched when the stage has since changed size).
+    fn image_bounds(&self, stage: Bounds<Pixels>) -> Bounds<Pixels> {
+        let sx = stage.size.width / self.area.0.max(1) as f32;
+        let sy = stage.size.height / self.area.1.max(1) as f32;
         Bounds::new(
             point(
-                bounds.origin.x + sx * self.at.0 as f32,
-                bounds.origin.y + sy * self.at.1 as f32,
+                stage.origin.x + sx * self.at.0 as f32,
+                stage.origin.y + sy * self.at.1 as f32,
             ),
             size(sx * self.size.0 as f32, sy * self.size.1 as f32),
         )
@@ -215,9 +266,9 @@ struct Shown {
 /// What the budget may retire of a picture a slot shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Keep {
-    /// It goes in age order like any other (the history's, the preview's).
+    /// It goes in age order like any other (a preview's).
     Budget,
-    /// It stays while shown (a window's backdrop).
+    /// It stays while shown (a window-wide picture).
     Shown,
 }
 
@@ -472,9 +523,10 @@ pub(super) fn fade_layer(wallpaper: &Wallpaper) -> Option<AnyElement> {
                         let Some((_, from)) = from.iter().find(|(w, _)| *w == id) else {
                             return;
                         };
+                        let stage = Fit::Window.stage(bounds, window.viewport_size());
                         let _ = window.paint_image(
                             bounds,
-                            from.image_bounds(bounds),
+                            from.image_bounds(stage),
                             Corners::default(),
                             from.image.clone(),
                             0,
@@ -593,14 +645,15 @@ fn lookup(
         let stale = if thumb {
             None
         } else {
-            let last = cache.shown.get(&slot).map(|s| s.key);
-            last.and_then(|key| cache.peek(key, window))
+            let last = cache.shown.get(&slot).copied();
+            last.and_then(|last| Some((last.area, cache.peek(last.key, window)?)))
         };
-        let not_before = if stale.is_some() {
-            Instant::now() + SETTLE
-        } else {
-            Instant::now()
-        };
+        let not_before = render_after(
+            stale.as_ref().map(|(area, _)| *area),
+            shown.area,
+            Instant::now(),
+        );
+        let stale = stale.map(|(_, picture)| picture);
         board.request(
             Job {
                 key,
@@ -619,6 +672,17 @@ fn lookup(
             stage: LookStage::Coming,
         }
     })
+}
+
+/// When a slot's new picture may render, given the stage its stale
+/// picture was made for: a resize waits for the size to hold [`SETTLE`]
+/// (a window drag renders once, at the end); another wallpaper (the next
+/// chat's, the other theme's) or the same one turned renders now.
+fn render_after(stale: Option<(u32, u32)>, area: (u32, u32), now: Instant) -> Instant {
+    match stale {
+        Some(stale) if stale != area => now + SETTLE,
+        Some(_) | None => now,
+    }
 }
 
 /// When a picture that is not whole is made again: a fill shown without its
@@ -658,15 +722,17 @@ pub(super) fn wallpaper_layer(
     slot: Slot,
     on_area: Option<fn(Bounds<Pixels>, &Window)>,
 ) -> impl IntoElement {
+    let fit = slot.fit();
     canvas(
         move |bounds, window, cx| {
             if let Some(on_area) = on_area {
                 on_area(bounds, window);
             }
-            let scale = window.scale_factor();
-            let width = (f32::from(bounds.size.width) * scale).round().max(0.0) as u32;
-            let height = (f32::from(bounds.size.height) * scale).round().max(0.0) as u32;
-            if width == 0 || height == 0 {
+            let stage = fit.stage(bounds, window.viewport_size());
+            let (width, height) = device_size(stage, window.scale_factor());
+            // An area with nothing to show asks for no picture.
+            let (shown_width, shown_height) = device_size(bounds, window.scale_factor());
+            if width == 0 || height == 0 || shown_width == 0 || shown_height == 0 {
                 return None;
             }
             let mut hasher = std::hash::DefaultHasher::new();
@@ -680,33 +746,29 @@ pub(super) fn wallpaper_layer(
                     .as_u64()
                     .hash(&mut hasher);
             }
-            let keep = match slot {
-                Slot::Window(_) => Keep::Shown,
-                Slot::History(_) | Slot::Preview | Slot::Thumb => Keep::Budget,
-            };
             let found = lookup(
                 &wallpaper,
                 hasher.finish(),
                 slot == Slot::Thumb,
                 (width, height),
                 window.window_handle().window_id(),
-                keep,
+                fit.keep(),
             );
             if found.fade_started()
                 && let Slot::History(entity) | Slot::Window(entity) = slot
             {
                 cx.notify(entity);
             }
-            Some(found)
+            Some((stage, found))
         },
-        move |bounds, lookup, window, _| {
-            let Some(lookup) = lookup else {
+        move |bounds, prepaint, window, _| {
+            let Some((stage, lookup)) = prepaint else {
                 return;
             };
             if let Some(composite) = &lookup.composite {
                 let _ = window.paint_image(
                     bounds,
-                    composite.image_bounds(bounds),
+                    composite.image_bounds(stage),
                     Corners::default(),
                     composite.image.clone(),
                     0,
@@ -722,6 +784,12 @@ pub(super) fn wallpaper_layer(
     .top_0()
     .left_0()
     .size_full()
+}
+
+/// `bounds` in device pixels at `scale`.
+fn device_size(bounds: Bounds<Pixels>, scale: f32) -> (u32, u32) {
+    let side = |logical: Pixels| (f32::from(logical) * scale).round().max(0.0) as u32;
+    (side(bounds.size.width), side(bounds.size.height))
 }
 
 #[cfg(test)]
@@ -979,6 +1047,54 @@ mod tests {
             }
         });
         FADES.with(|f| f.borrow_mut().clear());
+    }
+
+    /// Chats whose bars leave their histories at other heights (a pinned
+    /// bar, a taller composer) and a chat list at another width lay their
+    /// wallpaper out over the same window-wide stage: one picture, and each
+    /// wallpaper pixel at the same window point.
+    #[test]
+    fn a_chats_wallpaper_is_laid_out_over_the_window_whatever_its_area() {
+        use super::{Fit, Slot, device_size};
+        use gpui_kit::{Bounds, point, px, size};
+        let viewport = size(px(1200.), px(800.));
+        let plain = Bounds::new(point(px(320.), px(56.)), size(px(880.), px(690.)));
+        let pinned = Bounds::new(point(px(360.), px(104.)), size(px(840.), px(600.)));
+        let fit = Slot::History(gpui_kit::EntityId::from(1u64)).fit();
+        let stage = fit.stage(plain, viewport);
+        assert_eq!(stage, fit.stage(pinned, viewport));
+        assert_eq!(device_size(stage, 2.0), (2400, 1600), "one picture");
+        let picture = Composite {
+            area: (2400, 1600),
+            size: (2400, 1600),
+            ..composite(1)
+        };
+        assert_eq!(
+            picture.image_bounds(stage),
+            Bounds::new(point(px(0.), px(0.)), viewport),
+            "the same place in the window"
+        );
+        assert_eq!(Slot::Thumb.fit(), Fit::Area);
+        assert_eq!(
+            Fit::Area.stage(plain, viewport),
+            plain,
+            "a preview fits its box"
+        );
+    }
+
+    /// Only a resize waits for its size to settle before the new picture
+    /// renders: a chat with another wallpaper, or the same one turned,
+    /// is drawn at once.
+    #[test]
+    fn only_a_resize_waits_to_render() {
+        use super::{SETTLE, render_after};
+        let now = Instant::now();
+        assert_eq!(
+            render_after(Some((800, 600)), (900, 600), now),
+            now + SETTLE
+        );
+        assert_eq!(render_after(Some((800, 600)), (800, 600), now), now);
+        assert_eq!(render_after(None, (800, 600), now), now);
     }
 
     #[test]
