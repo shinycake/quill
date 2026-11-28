@@ -89,9 +89,11 @@ pub fn shows_sender_photo(kind: &ChatKind, outgoing: bool, wide: bool) -> bool {
     group || matches!(kind, ChatKind::Private { .. } | ChatKind::Secret { .. })
 }
 
-/// `msgSelectionOffset` and the `msgSelectionCheck` size.
-pub const MSG_SELECTION_OFFSET: f32 = 30.;
-pub const MSG_SELECTION_CHECK_SIZE: f32 = 20.;
+/// The selection check's diameter, and the gutter it is centred in (an
+/// outgoing bubble slides this far aside): tdesktop's `msgSelectionCheck`
+/// size and `msgSelectionOffset`, both a little larger here.
+pub const MSG_SELECTION_CHECK_SIZE: f32 = 22.;
+pub const MSG_SELECTION_OFFSET: f32 = 34.;
 
 /// Where the wide layout puts the selection check's column, from the
 /// history's left edge (`Message::draw`): right of the message's widest
@@ -177,8 +179,8 @@ mod tests {
 
     #[test]
     fn selection_check_sits_right_of_the_column() {
-        // 430 + 40 + 30 + 11 + 20.
-        assert_eq!(selection_right(430., 1200.), 531.);
+        // 430 + 40 + 34 + 11 + 22.
+        assert_eq!(selection_right(430., 1200.), 537.);
         assert_eq!(selection_right(900., 1000.), 1000.);
     }
 

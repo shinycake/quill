@@ -159,6 +159,7 @@ mod screen_share_state;
 mod search_fields;
 mod search_state;
 mod secret_codes_ui;
+mod select_check;
 mod selectable_text;
 mod selection_bar;
 mod selection_drag;

@@ -10,8 +10,8 @@ Telegram Desktop's `HistoryInner` does.
 - In selection mode a click on one tile toggles that message alone
   (`PointState::GroupPart`); a click anywhere else on the row toggles the
   whole album (`changeSelectionAsGroup`). The row's check and tint show
-  only when every item is selected; a tile selected on its own is washed
-  in the selection colour.
+  only when every item is selected; every tile carries its own check, and
+  a picked one is framed in the accent (`docs/decisions/selection-check.md`).
 - Tiles note where they were painted (`album_select::TileHits`, read the
   frame after, like `hit_rows`), so a press or a right-click can tell a
   tile from the rest of the row while the selection overlay covers it.

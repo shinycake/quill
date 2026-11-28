@@ -143,7 +143,13 @@ impl QuillApp {
                 row.on_hover(self.shared_media_hover_listener(message_id, cx))
                     .when(selected, |this| this.bg(cx.theme().accent))
                     .when(selecting, |this| {
-                        this.child(self.shared_media_check(selected, cx))
+                        this.child(div().absolute().top_2().right_3().child(
+                            crate::ui::select_check::select_check(
+                                if selected { 1. } else { 0. },
+                                crate::ui::select_check::Ground::Surface,
+                                cx,
+                            ),
+                        ))
                     })
                     .context_menu(self.shared_media_context_menu(item, cx))
                     .into_any_element()

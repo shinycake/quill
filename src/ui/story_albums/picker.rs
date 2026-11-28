@@ -15,7 +15,6 @@ use std::path::PathBuf;
 
 const TILE_WIDTH: f32 = 118.0;
 const TILE_HEIGHT: f32 = 168.0;
-const CHECK_SIZE: f32 = 22.0;
 
 /// What a tile shows.
 struct Tile {
@@ -376,26 +375,7 @@ impl QuillApp {
             keys::Q_MEDIA_ALBUM_STORY_TILE,
             &[("story_id", &story_id.to_string())],
         );
-        let badge = div()
-            .absolute()
-            .top(px(6.))
-            .right(px(6.))
-            .size(px(CHECK_SIZE))
-            .rounded_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .border_2()
-            .border_color(gpui_kit::white())
-            .when(selected, |this| this.bg(cx.theme().primary))
-            .when(!selected, |this| this.bg(gpui_kit::black().opacity(0.25)))
-            .when(selected, |this| {
-                this.child(
-                    Icon::new(gpui_kit::assets::IconName::Check)
-                        .size_3()
-                        .text_color(cx.theme().primary_foreground),
-                )
-            });
+        let mark = crate::ui::select_check::Mark::settled(selected);
         div()
             .id(("story-album-picker-tile", story_id as u64))
             .relative()
@@ -405,12 +385,6 @@ impl QuillApp {
             .overflow_hidden()
             .bg(cx.theme().secondary)
             .cursor_pointer()
-            .border_2()
-            .border_color(if selected {
-                cx.theme().primary
-            } else {
-                gpui_kit::transparent_black()
-            })
             .aria_label(name.clone())
             .tooltip({
                 let tip = name.clone();
@@ -419,7 +393,13 @@ impl QuillApp {
             .when_some(tile.thumb, |this, path| {
                 this.child(img(path).size_full().object_fit(ObjectFit::Cover))
             })
-            .child(badge)
+            .children(crate::ui::select_check::picked_tile(
+                mark,
+                // The tile's own `rounded_md`.
+                Corners::all(px(6.)),
+                cx,
+            ))
+            .children(crate::ui::select_check::tile_check(mark, cx))
             .when_some(tile.duration_label, |this, label| {
                 this.child(
                     div()

@@ -78,14 +78,10 @@ impl QuillApp {
                 let ids: Vec<quill::ids::MessageId> = refs.iter().map(|m| m.id).collect();
                 let select = crate::ui::history::AlbumSelect {
                     hits: self.history.tile_hits.clone(),
-                    selected: refs
+                    marks: refs
                         .iter()
-                        .filter(|m| self.selection_shown(m.chat_id, m.id))
-                        .map(|m| m.id)
+                        .map(|m| (m.id, self.tile_mark(m.chat_id, m.id, cx)))
                         .collect(),
-                    selecting: refs
-                        .first()
-                        .is_some_and(|first| self.selection_visible_in(first.chat_id)),
                 };
                 let frame = refs
                     .first()
@@ -371,6 +367,7 @@ impl QuillApp {
                     // Selecting slides an outgoing bubble aside for the check.
                     .child(if right && selection_slide > 0. {
                         div()
+                            .debug_selector(move || format!("row-slid-{}", row_msg.0))
                             .relative()
                             .right(px(selection_slide))
                             .child(row)

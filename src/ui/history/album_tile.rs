@@ -116,9 +116,7 @@ pub(in crate::ui) fn album_tile(
     };
     // A press on a tile that moves picks up that one message (`GroupPart`),
     // not the album; the tile's own click stays on `frame`, inside.
-    let selected = select.as_ref().is_some_and(|select| select.selected);
-    let selecting = select.as_ref().is_some_and(|select| select.selecting);
-    let tint = cx.theme().primary;
+    let mark = select.as_ref().map(|select| select.mark);
     let spot = div()
         .id(("album-drag", row_id))
         .absolute()
@@ -127,49 +125,39 @@ pub(in crate::ui) fn album_tile(
         .w(size.0)
         .h(size.1)
         .child(tile)
-        // A selected item is washed in the selection colour, as
-        // tdesktop's `Photo::drawGrouped` overlays a selected part.
-        .when(selected, |this| {
-            this.child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .map(|this| corners.round(this))
-                    .bg(tint.opacity(0.45))
-                    .debug_selector(move || format!("album-tile-selected-{}", message_id.0)),
-            )
-        })
-        // Each item shows its own check while selecting, so which photos
-        // are picked reads at a glance.
-        .when(selecting, |this| {
-            this.child(
-                div()
-                    .absolute()
-                    .top(px(6.))
-                    .right(px(6.))
-                    .child(crate::ui::album_select::tile_check(selected, cx)),
-            )
-        })
+        .children(mark.and_then(|mark| {
+            let radii = Corners {
+                top_left: corners.tl,
+                top_right: corners.tr,
+                bottom_right: corners.br,
+                bottom_left: corners.bl,
+            };
+            crate::ui::select_check::picked_tile(mark, radii, cx).map(|ring| {
+                ring.debug_selector(move || format!("album-tile-selected-{}", message_id.0))
+            })
+        }))
+        .children(mark.and_then(|mark| crate::ui::select_check::tile_check(mark, cx)))
         .children(select.map(|select| select.hits.probe(message_id)));
     super::forward_drag_source::draggable(spot, drag).into_any_element()
 }
 
 /// What a history album row needs from the selection: where its tiles
-/// note themselves, and which of its messages are selected (or are about
-/// to be, under a drag).
+/// note themselves, and each message's own mark.
 pub(in crate::ui) struct AlbumSelect {
     pub(in crate::ui) hits: crate::ui::album_select::TileHits,
-    pub(in crate::ui) selected: Vec<MessageId>,
-    /// Selection mode shows: every tile carries its own check.
-    pub(in crate::ui) selecting: bool,
+    pub(in crate::ui) marks: Vec<(MessageId, crate::ui::select_check::Mark)>,
 }
 
 impl AlbumSelect {
     pub(in crate::ui) fn tile(&self, id: MessageId) -> TileSelect {
         TileSelect {
             hits: self.hits.clone(),
-            selected: self.selected.contains(&id),
-            selecting: self.selecting,
+            mark: self
+                .marks
+                .iter()
+                .find(|(tile, _)| *tile == id)
+                .map(|(_, mark)| *mark)
+                .unwrap_or_default(),
         }
     }
 }
@@ -177,8 +165,7 @@ impl AlbumSelect {
 /// What a history album tile needs from the selection.
 pub(in crate::ui) struct TileSelect {
     pub(in crate::ui) hits: crate::ui::album_select::TileHits,
-    pub(in crate::ui) selected: bool,
-    pub(in crate::ui) selecting: bool,
+    pub(in crate::ui) mark: crate::ui::select_check::Mark,
 }
 
 /// The tile's picture and marks with no spoiler over them.

@@ -7,7 +7,8 @@
 
 use super::app::QuillApp;
 use super::chat_ui_state::A11yFocus;
-use super::motion;
+use super::motion::{self, CheckOf};
+use super::select_check;
 use crate::ui::status_note::StatusNote;
 use crate::ui::vanish::Deletion;
 use gpui_kit::component::*;
@@ -86,6 +87,52 @@ impl QuillApp {
         (fx.mode(now), fx.bar(now))
     }
 
+    /// Picked-progress (`0..=1`) of one check, moving for a few frames
+    /// after `selected` flips.
+    fn check_progress(&self, chat_id: ChatId, check: CheckOf, selected: bool) -> f32 {
+        // A re-entrant frame shows the settled state.
+        self.frame.motion.selection.try_borrow_mut().map_or(
+            if selected { 1. } else { 0. },
+            |mut fx| {
+                fx.check(
+                    chat_id.0,
+                    check,
+                    selected,
+                    self.selection_animates(),
+                    std::time::Instant::now(),
+                )
+            },
+        )
+    }
+
+    /// What the rows of `chat_id` sit on: its wallpaper, else the theme's
+    /// own background.
+    fn history_ground(&self, chat_id: ChatId, cx: &App) -> select_check::Ground {
+        match self.chat_look(Some(chat_id.0), cx).wallpaper {
+            Some(_) => select_check::Ground::Scene,
+            None => select_check::Ground::Surface,
+        }
+    }
+
+    /// The mark of one album item (a photo, a video, a file): its own
+    /// check fading in with selection mode, filled once it is picked.
+    pub(super) fn tile_mark(
+        &self,
+        chat_id: ChatId,
+        id: MessageId,
+        cx: &mut Context<Self>,
+    ) -> select_check::Mark {
+        let (mode, _) = self.selection_motion(chat_id, cx);
+        let selected = self.selection_shown(chat_id, id);
+        if mode <= 0. && !selected {
+            return select_check::Mark::default();
+        }
+        select_check::Mark {
+            mode,
+            picked: self.check_progress(chat_id, CheckOf::Tile(id.0), selected),
+        }
+    }
+
     /// What a history row shows for selection mode: the fading check
     /// circle (an overlay that also takes the row's clicks while the mode
     /// is on), the selection tint, and how far an outgoing bubble slides
@@ -110,19 +157,7 @@ impl QuillApp {
         if mode <= 0. && !selected {
             return SelectionRow::default();
         }
-        let now = std::time::Instant::now();
-        let checked = self.frame.motion.selection.try_borrow_mut().map_or(
-            if selected { 1. } else { 0. },
-            |mut fx| {
-                fx.check(
-                    chat_id.0,
-                    message_id.0,
-                    selected,
-                    self.selection_animates(),
-                    now,
-                )
-            },
-        );
+        let checked = self.check_progress(chat_id, CheckOf::Row(message_id.0), selected);
         let interactive = self.selecting_in(chat_id);
         let focused = interactive
             && self
@@ -134,13 +169,12 @@ impl QuillApp {
         let forward = ids
             .iter()
             .find_map(|id| self.selection_forward_drag(chat_id, *id));
+        let ground = self.history_ground(chat_id, cx);
         let overlay = (mode > 0.).then(|| {
-            let ring = cx.theme().background;
-            let muted = cx.theme().muted_foreground;
-            let (fill, tick) = motion::check_frame(checked);
-            let size = motion::CHECK_SIZE;
-            // The circle slides in from the right edge while it fades.
-            let edge = 11.5 - 15. * (1. - mode);
+            // The check is centred in the gutter the bubble slides out
+            // of, and slides in from the right edge while it fades.
+            let pad = (motion::SELECTION_OFFSET - select_check::SIZE) / 2.;
+            let edge = pad - 15. * (1. - mode);
             div()
                 .id(("selection-overlay", message_id.0 as u64))
                 .absolute()
@@ -182,49 +216,22 @@ impl QuillApp {
                             Some(right) => this.left(px(right
                                 - 2. * super::chat_wide_ui::ROW_INSET
                                 - edge
-                                - size)),
+                                - select_check::SIZE)),
                             None => this.right(px(edge)),
                         })
-                        .bottom(px(motion::CHECK_BOTTOM_SKIP + 1.))
-                        .size(px(size))
-                        .opacity(mode)
-                        .rounded_full()
-                        .border_2()
-                        // An empty ring reads on any wallpaper, dark ones
-                        // included; a filled one is set off by the
-                        // background colour.
-                        .border_color(if checked > 0. { ring } else { muted })
-                        .bg(gpui_kit::black().opacity(0.3))
+                        // Level with a one-line bubble, and with the last
+                        // line of a taller one.
+                        .bottom_0()
+                        .h_full()
+                        .max_h(px(motion::CHECK_LANE))
                         .flex()
                         .items_center()
-                        .justify_center()
-                        .when(fill > 0., |this| {
-                            this.child(
-                                div()
-                                    .size(px((size - 4.) * fill))
-                                    .rounded_full()
-                                    .bg(cx.theme().success),
-                            )
-                        })
-                        .when(tick > 0., |this| {
-                            // The tick wipes in from the left.
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .left(px(2.))
-                                    .top(px(2.))
-                                    .w(px(12. * tick))
-                                    .h(px(12.))
-                                    .overflow_hidden()
-                                    .child(
-                                        div().flex_none().size(px(12.)).child(
-                                            Icon::new(gpui_kit::assets::IconName::Check)
-                                                .size(px(12.))
-                                                .text_color(gpui_kit::white()),
-                                        ),
-                                    ),
-                            )
-                        }),
+                        .opacity(mode)
+                        .child(
+                            div()
+                                .debug_selector(move || format!("select-check-{}", message_id.0))
+                                .child(select_check::select_check(checked, ground, cx)),
+                        ),
                 ))
                 .into_any_element()
         });
