@@ -212,6 +212,8 @@ impl QuillApp {
                 };
                 // The box opens once the window's root is up.
                 let app = cx.entity().downgrade();
+                // screen-scope: a one-account demo, opened the next frame.
+                // window-scope: the demo's only window, the one it was set up in.
                 window.on_next_frame(move |window, cx| {
                     let _ = app.update(cx, |this, cx| {
                         this.open_delete_dialog_with(confirm, album, Some(offer), window, cx);
