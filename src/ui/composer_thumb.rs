@@ -71,6 +71,20 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        self.message_thumb(chat_id, message_id, "bar-thumb", PREVIEW_SIZE, cx)
+    }
+
+    /// A `size` square of `(chat_id, message_id)`'s picture, cropped to
+    /// fill, when that message is media with a picture to show; `key`
+    /// names the element (with the message id).
+    pub(super) fn message_thumb(
+        &self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        key: &'static str,
+        size: f32,
+        cx: &App,
+    ) -> Option<AnyElement> {
         let session = self.session()?;
         let message = session
             .histories
@@ -95,7 +109,7 @@ impl QuillApp {
             })
         });
         let frame = |this: Div| {
-            this.size(px(PREVIEW_SIZE))
+            this.size(px(size))
                 .flex_none()
                 .rounded(px(4.))
                 .overflow_hidden()
@@ -114,7 +128,7 @@ impl QuillApp {
         };
         Some(
             frame(div())
-                .id(("bar-thumb", message_id.0 as u64))
+                .id((key, message_id.0 as u64))
                 .child(picture)
                 .into_any_element(),
         )

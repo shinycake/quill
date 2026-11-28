@@ -147,6 +147,26 @@ fn right_click_beside_the_tiles_selects_and_forwards_the_album(cx: &mut TestAppC
     // The whole album waits for a chat, in one forward.
     assert_eq!(selected(&app, vcx), album);
     assert!(app.read_with(vcx, |app, _| app.share.forward.picker_open()));
+    // The box shows what goes: the album's pictures and its lines.
+    frames(vcx);
+    assert!(vcx.debug_bounds("forward-box-preview").is_some());
+    let thumbs = album
+        .iter()
+        .filter(|id| {
+            // Selectors are looked up as `&'static str`.
+            let selector: &'static str =
+                Box::leak(format!("forward-box-thumb-{}", id.0).into_boxed_str());
+            vcx.debug_bounds(selector).is_some()
+        })
+        .count();
+    assert_eq!(thumbs, album.len());
+}
+
+fn frames(vcx: &mut VisualTestContext) {
+    vcx.run_until_parked();
+    for _ in 0..2 {
+        vcx.update(|window, cx| window.render_frame(cx));
+    }
 }
 
 #[gpui_kit::test]

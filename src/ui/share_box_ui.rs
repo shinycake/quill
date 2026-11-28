@@ -18,7 +18,7 @@ use gpui_kit::*;
 use quill::composer::ComposerSnapshot;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::share_box::{ChatSend, ShareSend, forward_bar_lines, share_done_label};
+use quill::share_box::{ChatSend, ShareSend, share_done_label};
 use quill::telegram::envelope::ChatKind;
 
 use super::forward_stage::ForwardStage;
@@ -399,21 +399,8 @@ impl QuillApp {
     /// The bar above the composer after one destination was chosen:
     /// who the messages are from, a preview, and the forward options.
     pub(super) fn forward_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let draft = self.forward_draft();
-        let count = draft.as_ref().map(|d| d.count()).unwrap_or(0);
-        let hide_sender = draft.as_ref().is_some_and(|d| d.send_copy);
-        let (senders, preview) = match (&draft, self.session()) {
-            (Some(draft), Some(session)) => (
-                session.forward_bar_senders(draft.from_chat_id, &draft.message_ids),
-                draft
-                    .message_ids
-                    .first()
-                    .map(|id| session.forward_bar_preview(draft.from_chat_id, *id))
-                    .unwrap_or_default(),
-            ),
-            _ => (Vec::new(), String::new()),
-        };
-        let (from, text) = forward_bar_lines(&senders, count, hide_sender, &preview);
+        let (from, text) = self.forward_lines();
+        let thumbs = self.forward_bar_thumbs(cx);
         div()
             .id("forward-bar")
             .flex()
@@ -434,29 +421,37 @@ impl QuillApp {
                     .child(
                         div()
                             .flex()
-                            .flex_col()
+                            .items_center()
+                            .gap_2()
                             .min_w_0()
+                            .children(thumbs)
                             .child(
                                 div()
-                                    .text_xs()
-                                    .font_semibold()
-                                    .text_color(accent())
-                                    .child(tr(keys::Q_OPS_FORWARD)),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_sm()
-                                    .font_medium()
-                                    .text_color(text_primary())
-                                    .child(super::bidi_line::name_line(from)),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(super::bidi_line::one_line_plain(text)),
+                                    .flex()
+                                    .flex_col()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_semibold()
+                                            .text_color(accent())
+                                            .child(tr(keys::Q_OPS_FORWARD)),
+                                    )
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .text_sm()
+                                            .font_medium()
+                                            .text_color(text_primary())
+                                            .child(super::bidi_line::name_line(from)),
+                                    )
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .text_sm()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(super::bidi_line::one_line_plain(text)),
+                                    ),
                             ),
                     )
                     .child(

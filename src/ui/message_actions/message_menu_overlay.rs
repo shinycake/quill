@@ -734,24 +734,15 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    if album.len() > 1 {
-                        // The whole album goes, in one box
-                        // (`deleteAsGroup`).
-                        this.confirm_delete_ids(
-                            chat_id,
-                            album.clone(),
-                            confirm.can_revoke,
-                            window,
-                            cx,
-                        );
-                    } else {
-                        this.open_delete_dialog_with(
-                            confirm.clone(),
-                            moderation.clone(),
-                            window,
-                            cx,
-                        );
-                    }
+                    // An album goes whole, in one box (`deleteAsGroup`),
+                    // with the admin checkboxes acting on all of it.
+                    this.open_delete_dialog_with(
+                        confirm.clone(),
+                        album.clone(),
+                        moderation.clone(),
+                        window,
+                        cx,
+                    );
                     this.close_message_menu();
                     cx.notify();
                 }

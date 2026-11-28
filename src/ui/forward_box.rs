@@ -42,7 +42,7 @@ const VISIBLE_ROWS: f32 = 7.;
 /// The fewest rows the list keeps in a short window.
 const MIN_ROWS: f32 = 3.;
 /// Room the title, search, comment and footer take around the list.
-const CHROME_HEIGHT: f32 = 330.;
+const CHROME_HEIGHT: f32 = 400.;
 const CHECK_POP: Duration = Duration::from_millis(160);
 
 /// One chat a chooser offers, already resolved for drawing.
@@ -305,6 +305,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
+            .children(self.forward_box_preview(cx))
             .child(search)
             .child(list)
             .when(self.share.tick_count() > 0, |this| {

@@ -22,6 +22,31 @@ Telegram Desktop's `HistoryInner` does.
 - Drag ranges, Shift+click, "Select up to this message" and Space on the
   focused row take albums whole.
 
-Not done: the forward box has no preview of what is forwarded, and the
-album Delete box offers no moderation checkboxes (the single-message box
-keeps them).
+- The album's Delete box is the single message's box for all of it
+  (`selection_mode/delete_dialog.rs`): "Delete N messages?", delete for
+  everyone, and a moderator's Report Spam, Delete all from the user and
+  Ban, which act on every message of the album (tdesktop `deleteAsGroup`
+  opens `CreateModerateMessagesBox` for the group's items).
+
+## Forward preview
+
+tdesktop's forward bar (`ForwardPanel`) names who the messages are from and
+shows the first message's text, or "N messages", with a small picture when
+one message is forwarded. Its forward box shows nothing of the messages.
+
+Quill draws the same lines and the pictures of the forwarded media
+(`forward_preview.rs`) in two places:
+
+- the forward bar, up to three 32 px pictures left of the lines, then
+  "+N" for the rest (tdesktop: a picture only for a single message; an album
+  is several messages and still deserves to be seen);
+- the forward box, a card above the search with up to four 44 px pictures
+  and the lines, so chats are chosen with the album in view.
+
+Spoiler and secret media show no picture, as in the reply bar.
+
+Demo: `ready-albums` with `QUILL_DEMO_ALBUM_FORWARD=box` or `=bar`.
+
+Not done: the selection box's Delete has no moderation checkboxes yet
+(tdesktop offers them when every selected message allows them); the
+message properties they need are fetched per message when its menu opens.
